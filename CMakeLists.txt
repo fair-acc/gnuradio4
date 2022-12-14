@@ -12,7 +12,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(fmt)
 
-add_executable(main ./main.cpp)
+add_subdirectory(src)
 target_include_directories(main PUBLIC ./include)
 target_link_libraries(main PUBLIC fmt::fmt)
 set_project_warnings(main)
