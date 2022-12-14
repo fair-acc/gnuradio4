@@ -120,4 +120,4 @@ jobs:
       if: matrix.configurations.name != env.REFERENCE_CONFIG || matrix.cmake-build-type != 'Debug'
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      run: ./main
+      run: ../build/src/main

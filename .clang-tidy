@@ -1,0 +1,9 @@
+---
+Checks:          '*,-fuchsia-*,-google-*,-zircon-*,-abseil-*,-modernize-use-trailing-return-type,-llvm*,-cert-dcl21-cpp'
+WarningsAsErrors: '*'
+HeaderFilterRegex: ''
+FormatStyle:     none
+cppcoreguidelines-non-private-member-variables-in-classes: IgnorePublicMemberVariables # N.B. public member variables are part of opencmw domain-object declarations
+altera-unroll-loops: false
+
+
