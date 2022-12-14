@@ -49,5 +49,5 @@ int main() {
         r += z;
     }
 
-    return r;
+    return r == 20 ? 0 : 1;
 }
