@@ -56,9 +56,9 @@ struct concat_impl<A, B, C> {
 
 template<typename A, typename B, typename C, typename D, typename... More>
 struct concat_impl<A, B, C, D, More...> {
-    using type = typename concat_impl<typename concat_impl<A, B>::type,
-            typename concat_impl<C, D>::type,
-            typename concat_impl<More...>::type>::type;
+    using type =
+            typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type,
+                                 typename concat_impl<More...>::type>::type;
 };
 } // namespace detail
 
@@ -105,23 +105,23 @@ struct splitter<4> {
 template<>
 struct splitter<8> {
     template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
-            typename T6, typename T7, typename...>
+             typename T6, typename T7, typename...>
     using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7>;
+
     template<typename, typename, typename, typename, typename, typename, typename, typename,
-            typename... Ts>
+             typename... Ts>
     using second = typelist<Ts...>;
 };
 
 template<>
 struct splitter<16> {
     template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
-            typename T6, typename T7, typename T8, typename T9, typename T10, typename T11,
-            typename T12, typename T13, typename T14, typename T15, typename...>
-    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14,
-            T15>;
-    template<typename, typename, typename, typename, typename, typename, typename, typename,
-            typename, typename, typename, typename, typename, typename, typename, typename,
-            typename... Ts>
+             typename T6, typename T7, typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15, typename...>
+    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
+
+    template<typename, typename, typename, typename, typename, typename, typename, typename, typename,
+             typename, typename, typename, typename, typename, typename, typename, typename... Ts>
     using second = typelist<Ts...>;
 };
 
@@ -133,7 +133,7 @@ struct splitter {
 
     template<typename... Ts>
     using first = concat<typename A::template first<Ts...>,
-            typename B::template first<typename A::template second<Ts...>>>;
+                         typename B::template first<typename A::template second<Ts...>>>;
 
     template<typename... Ts>
     using second = typename B::template second<typename A::template second<Ts...>>;
@@ -162,8 +162,7 @@ using remove_at = concat<left_of<Idx, List>, right_of<Idx, List>>;
 // first_type ////////////
 namespace detail {
 template<typename List>
-struct first_type_impl {
-};
+struct first_type_impl {};
 
 template<typename T0, typename... Ts>
 struct first_type_impl<typelist<T0, Ts...>> {
