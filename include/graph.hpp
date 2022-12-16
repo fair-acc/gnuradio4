@@ -70,11 +70,14 @@ protected:
 
 namespace detail {
 template<typename Node>
+constexpr auto lambda_wrapper(Node &n) {
+    return [&n](auto&&... ins) { n.process_one(ins...); };
+}
+template<typename Node>
 concept any_node = requires(Node &n, typename Node::input_ports::tuple_type const &inputs) {
     { n.in } -> std::same_as<typename Node::input_ports const &>;
     { n.out } -> std::same_as<typename Node::output_ports const &>;
-    // doesn't compile:
-    // std::apply([&n](auto&&... ins) { n.process_one(ins...); }, inputs);
+    { std::apply(lambda_wrapper(n), inputs) };
 };
 } // namespace detail
 
