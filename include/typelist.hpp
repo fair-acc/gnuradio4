@@ -3,6 +3,7 @@
 
 #include <bit>
 #include <concepts>
+#include <tuple>
 #include <type_traits>
 
 namespace fair::meta {
@@ -173,6 +174,49 @@ struct first_type_impl<typelist<T0, Ts...>> {
 template<typename List>
 using first_type = typename detail::first_type_impl<List>::type;
 
+// transform_types ////////////
+namespace detail {
+template<template<typename> class Template, typename List>
+struct transform_types_impl;
+
+template<template<typename> class Template, typename... Ts>
+struct transform_types_impl<Template, typelist<Ts...>> {
+    using type = typelist<Template<Ts>...>;
+};
+} // namespace detail
+
+template<template<typename> class Template, typename List>
+using transform_types = typename detail::transform_types_impl<Template, List>::type;
+
+// transform_value_type
+template<typename T>
+using transform_value_type = typename T::value_type;
+
+// reduce ////////////////
+namespace detail {
+template<template<typename, typename> class Method, typename List>
+struct reduce_impl;
+
+template<template<typename, typename> class Method, typename T0>
+struct reduce_impl<Method, typelist<T0>> {
+    using type = T0;
+};
+
+template<template<typename, typename> class Method, typename T0, typename T1, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, Ts...>>
+    : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
+
+template<template<typename, typename> class Method, typename T0, typename T1, typename T2,
+         typename T3, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>>
+    : public reduce_impl<
+              Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {
+};
+} // namespace detail
+
+template<template<typename, typename> class Method, typename List>
+using reduce = typename detail::reduce_impl<Method, List>::type;
+
 // typelist /////////////////
 template<typename... Ts>
 struct typelist {
@@ -189,8 +233,18 @@ struct typelist {
 
     template<typename... Other>
     static constexpr inline bool each_convertible_from = (std::convertible_to<Other, Ts> && ...);
-};
 
+    template<typename F, typename Tup>
+    requires(sizeof...(Ts)
+             == std::tuple_size_v<
+                     std::remove_cvref_t<Tup>>) static constexpr auto construct(Tup &&args_tuple) {
+        return std::apply(
+                []<typename... Args>(Args &&...args) {
+                    return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...);
+                },
+                std::forward<Tup>(args_tuple));
+    }
+};
 } // namespace fair::meta
 
 #endif // GRAPH_PROTOTYPE_TYPELIST_HPP
