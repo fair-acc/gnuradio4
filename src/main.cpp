@@ -60,8 +60,9 @@ template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>()
 class adder : public fair::graph::node<adder<T>, fair::graph::make_input_ports<T, T>,
                                        fair::graph::make_output_ports<R>> {
 public:
-    [[nodiscard]] constexpr R
-    process_one(T a, T b) const noexcept {
+    template<fair::graph::detail::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a, V b) const noexcept {
         return a + b;
     }
 };
@@ -70,8 +71,9 @@ template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::dec
 class scale : public fair::graph::node<scale<T, Scale, R>, fair::graph::make_input_ports<T>,
                                        fair::graph::make_output_ports<R>> {
 public:
-    [[nodiscard]] constexpr R
-    process_one(T a) const noexcept {
+    template<fair::graph::detail::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a) const noexcept {
         return a * Scale;
     }
 };

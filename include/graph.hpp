@@ -5,9 +5,66 @@
 #include "typelist.hpp"
 #endif
 
+#include <experimental/simd>
+#include <iostream>
+#include <ranges>
+#include <source_location>
 #include <tuple>
 
 namespace fair::graph {
+using std::size_t;
+
+namespace stdx = std::experimental;
+
+namespace detail {
+[[gnu::always_inline]] inline void
+precondition(bool cond, const std::source_location loc = std::source_location::current()) {
+    struct handle {
+        [[noreturn]] static void
+        failure(std::source_location const &loc) {
+            std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':'
+                      << loc.column() << ": `" << loc.function_name() << "`\n";
+            __builtin_trap();
+        }
+    };
+    if (not cond) [[unlikely]]
+        handle::failure(loc);
+}
+
+template<typename V, typename T = void>
+concept any_simd = stdx::is_simd_v<V> &&(
+        std::same_as<T, void> || std::same_as<T, typename V::value_type>);
+
+template<typename V, typename T>
+concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
+
+template<typename T>
+concept vectorizable = std::constructible_from<stdx::simd<T>>;
+
+template<typename A, typename B>
+struct larger_native_simd_size
+    : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
+
+template<typename A>
+struct larger_native_simd_size<A, A> {
+    using type = A;
+};
+
+template<typename V>
+struct rebind_simd_helper {
+    template<typename T>
+    using rebind = stdx::rebind_simd_t<T, V>;
+};
+
+struct simd_load_ctor {
+    template<detail::any_simd W>
+    static constexpr W
+    apply(typename W::value_type const *ptr) {
+        return W(ptr, stdx::element_aligned);
+    }
+};
+} // namespace detail
+
 enum class port_direction { in, out };
 
 template<port_direction D, int I, typename T>
@@ -55,14 +112,141 @@ using make_input_ports = portlist<port_direction::in, Types...>;
 template<typename... Types>
 using make_output_ports = portlist<port_direction::out, Types...>;
 
+// simple non-reentrant circular buffer
+template<typename T, size_t Size>
+class port_data {
+    static_assert(std::has_single_bit(Size), "Size must be a power-of-2 value");
+    alignas(64) std::array<T, Size> m_buffer      = {};
+    size_t                         m_read_offset  = 0;
+    size_t                         m_write_offset = 0;
+
+    static inline constexpr size_t s_bitmask      = Size - 1;
+
+public:
+    static inline constexpr std::integral_constant<size_t, Size> size = {};
+
+    size_t
+    can_read() const {
+        return m_write_offset >= m_read_offset ? m_write_offset - m_read_offset
+                                               : size - m_read_offset;
+    }
+
+    size_t
+    can_write() const {
+        return m_write_offset >= m_read_offset ? size - m_write_offset
+                                               : m_read_offset - m_write_offset;
+    }
+
+    std::span<const T>
+    request_read() {
+        return request_read(can_read());
+    }
+
+    std::span<const T>
+    request_read(size_t n) {
+        detail::precondition(can_read() >= n);
+        const auto begin = m_buffer.begin() + m_read_offset;
+        m_read_offset += n;
+        m_read_offset &= s_bitmask;
+        return std::span<const T>{ begin, n };
+    }
+
+    std::span<T>
+    request_write() {
+        return request_write(can_write());
+    }
+
+    std::span<T>
+    request_write(size_t n) {
+        detail::precondition(can_write() >= n);
+        const auto begin = m_buffer.begin() + m_write_offset;
+        m_write_offset += n;
+        m_write_offset &= s_bitmask;
+        return std::span<T>{ begin, n };
+    }
+};
+
 template<typename Derived, typename InputPorts, typename OutputPorts>
 class node {
 public:
     using input_ports                        = InputPorts;
     using output_ports                       = OutputPorts;
+    using return_type                        = typename output_ports::tuple_or_type;
 
     static inline constexpr input_ports  in  = {};
     static inline constexpr output_ports out = {};
+
+    template<std::size_t N>
+    [[gnu::always_inline]] constexpr bool
+    process_batch_simd_epilogue(size_t n, auto out_ptr, auto... in_ptr) {
+        if constexpr (N == 0) return true;
+        else if (N <= n) {
+            using In0 = meta::first_type<typename input_ports::typelist>;
+            using V   = stdx::resize_simd_t<N, stdx::native_simd<In0>>;
+            using Vs  = meta::transform_types<detail::rebind_simd_helper<V>::template rebind,
+                                             typename input_ports::typelist>;
+            const std::tuple input_simds = Vs::template construct<detail::simd_load_ctor>(
+                    std::tuple{ in_ptr... });
+            const stdx::simd result = std::apply(
+                    [this](auto... args) {
+                        return static_cast<Derived *>(this)->process_one(args...);
+                    },
+                    input_simds);
+            result.copy_to(out_ptr, stdx::element_aligned);
+            return process_batch_simd_epilogue<N / 2>(n, out_ptr + N, (in_ptr + N)...);
+        } else
+            return process_batch_simd_epilogue<N / 2>(n, out_ptr, in_ptr...);
+    }
+
+    template<std::ranges::forward_range... Ins>
+    requires(std::ranges::sized_range<Ins> &&...)
+            && input_ports::template are_equal<std::ranges::range_value_t<
+                    Ins>...> constexpr bool process_batch(port_data<return_type, 1024> &out,
+                                                          Ins &&...inputs) {
+        const auto  &in0 = std::get<0>(std::tie(inputs...));
+        const size_t n   = std::ranges::size(in0);
+        detail::precondition(((n == std::ranges::size(inputs)) && ...));
+        auto &&out_range = out.request_write(n);
+        // if SIMD makes sense (i.e. input and output ranges are contiguous and all types are
+        // vectorizable)
+        // TODO: test whether process_one can be called with stdx::simd arguments
+        if constexpr (
+                (std::ranges::contiguous_range<decltype(out_range)> && ... && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<
+                        return_type> && meta::transform_types<std::is_constructible, meta::transform_types<stdx::native_simd, typename input_ports::typelist>>::template apply<std::conjunction>::value) {
+            using V = stdx::native_simd<
+                    meta::reduce<detail::larger_native_simd_size, typename input_ports::typelist>>;
+            using Vs = meta::transform_types<detail::rebind_simd_helper<V>::template rebind,
+                                             typename input_ports::typelist>;
+            size_t i = 0;
+            for (i = 0; i + V::size() <= n; i += V::size()) {
+                const std::tuple input_simds = Vs::template construct<detail::simd_load_ctor>(
+                        std::tuple{ (std::ranges::data(inputs) + i)... });
+                const stdx::simd result = std::apply(
+                        [this](auto... args) {
+                            return static_cast<Derived *>(this)->process_one(args...);
+                        },
+                        input_simds);
+                result.copy_to(std::ranges::data(out_range) + i, stdx::element_aligned);
+            }
+
+            return process_batch_simd_epilogue<std::bit_ceil(V::size())
+                                               / 2>(n - i, std::ranges::data(out_range) + i,
+                                                    (std::ranges::data(inputs) + i)...);
+        } else { // no explicit SIMD
+            auto             out_it    = out_range.begin();
+            std::tuple       it_tuple  = { std::ranges::begin(inputs)... };
+            const std::tuple end_tuple = { std::ranges::end(inputs)... };
+            while (std::get<0>(it_tuple) != std::get<0>(end_tuple)) {
+                *out_it = std::apply(
+                        [this](auto &...its) {
+                            return static_cast<Derived *>(this)->process_one((*its++)...);
+                        },
+                        it_tuple);
+                ++out_it;
+            }
+            return true;
+        }
+    }
 
 protected:
     constexpr node() noexcept = default;
@@ -107,13 +291,13 @@ private:
 
     template<std::size_t... Is, std::size_t... Js>
     [[gnu::always_inline]] constexpr auto
-    apply_right(auto &&input_tuple, const typename Left::output_ports::tuple_or_type &tmp,
-                std::index_sequence<Is...>, std::index_sequence<Js...>) {
+    apply_right(auto &&input_tuple, auto &&tmp, std::index_sequence<Is...>,
+                std::index_sequence<Js...>) {
         constexpr int first_offset  = Left::input_ports::size;
         constexpr int second_offset = Left::input_ports::size + sizeof...(Is);
         static_assert(second_offset + sizeof...(Js)
                       == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-        return right.process_one(std::get<first_offset + Is>(input_tuple)..., tmp,
+        return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp),
                                  std::get<second_offset + Js>(input_tuple)...);
     }
 
@@ -121,9 +305,23 @@ public:
     using input_ports  = typename base::input_ports;
     using output_ports = typename base::output_ports;
     using return_type  = typename output_ports::tuple_or_type;
-  
+
     [[gnu::always_inline]] constexpr merged_node(Left l, Right r)
         : left(std::move(l)), right(std::move(r)) {}
+
+    template<detail::any_simd... Ts>
+    // TODO: require that Left::process_one and Right::process_one can be called with
+    // stdx::simd arguments
+    requires detail::vectorizable<return_type> && input_ports::template are_equal<
+            typename std::remove_cvref_t<Ts>::value_type...> constexpr stdx::
+            rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
+            process_one(Ts... inputs) {
+        return apply_right(std::tie(inputs...),
+                           apply_left(std::tie(inputs...),
+                                      std::make_index_sequence<Left::input_ports::size()>()),
+                           std::make_index_sequence<InId>(),
+                           std::make_index_sequence<Right::input_ports::size() - InId - 1>());
+    }
 
     template<typename... Ts>
     requires input_ports::template are_equal<std::remove_cvref_t<Ts>...> constexpr
