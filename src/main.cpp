@@ -25,6 +25,37 @@ public:
     }
 };
 
+namespace detail {
+template<typename T, auto>
+using just_t = T;
+
+template<typename T, std::size_t... Is>
+consteval fair::graph::make_output_ports<just_t<T, Is>...>
+make_multiple_output_ports(std::index_sequence<Is...>) {
+    return {};
+}
+} // namespace detail
+
+template<typename T, int Count = 2>
+class duplicate : public fair::graph::node<duplicate<T, Count>, fair::graph::make_input_ports<T>,
+                                           decltype(detail::make_multiple_output_ports<T>(
+                                                   std::make_index_sequence<Count>()))> {
+    using base = fair::graph::node<duplicate<T, Count>, fair::graph::make_input_ports<T>,
+                                   decltype(detail::make_multiple_output_ports<T>(
+                                           std::make_index_sequence<Count>()))>;
+
+public:
+    using return_type = typename base::return_type;
+
+    [[nodiscard]] constexpr return_type
+    process_one(T a) const noexcept {
+        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return std::make_tuple(((void) Is, a)...);
+        }
+        (std::make_index_sequence<Count>());
+    }
+};
+
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public fair::graph::node<adder<T>, fair::graph::make_input_ports<T, T>,
                                        fair::graph::make_output_ports<R>> {
@@ -57,8 +88,7 @@ main() {
 
     int                r = 0;
     for (int i = 0; i < 4; ++i) {
-        auto [neg, scale, z] = merged.process_one(a[i], b[i]);
-        r += z;
+        r += merged.process_one(a[i], b[i]);
     }
 
     return r == 20 ? 0 : 1;
