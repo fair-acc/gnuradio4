@@ -24,7 +24,7 @@ AlignOperands: AlignAfterOperator
 AlignTrailingComments: true
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowAllArgumentsOnNextLine: true
-#PackConstructorInitializers: PCIS_CurrentLine # starting with clang 14
+PackConstructorInitializers: CurrentLine
 AllowAllConstructorInitializersOnNextLine: true
 AllowShortLambdasOnASingleLine: All
 AllowShortCaseLabelsOnASingleLine: true
@@ -103,8 +103,8 @@ PenaltyExcessCharacter: 50
 PenaltyReturnTypeOnItsOwnLine: 300
 PointerAlignment: Right
 ReflowComments: true
-# (v15) RequiresClausePosition: OwnLine
-# (v14) SeparateDefinitionBlocks: Always
+RequiresClausePosition: OwnLine
+SeparateDefinitionBlocks: Always
 SortIncludes: CaseInsensitive
 SortUsingDeclarations: true
 SpaceAfterCStyleCast: true
