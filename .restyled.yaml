@@ -93,7 +93,7 @@ ignore_labels:
 # re-specify the default in your own config if you prefer to avoid update
 # surprises.
 #
-restylers_version: "20191031"
+restylers_version: "v0.222.0"
 
 # Restylers to run, and how
 #
@@ -180,28 +180,3 @@ restylers_version: "20191031"
 # for info see: https://github.com/restyled-io/restyler/issues/134
 # N.B. the docker image version can be controlled via PRs:
 # https://github.com/restyled-io/restylers/tree/main/clang-format
-restylers:
-  - name: clang-format
-    image: 'restyled/restyler-clang-format:13.0.1'
-    command:
-      - clang-format
-      - "-i"
-    arguments: []
-    include:
-      - "**/*.c"
-      - "**/*.cc"
-      - "**/*.cpp"
-      - "**/*.cxx"
-      - "**/*.c++"
-      - "**/*.C"
-      - "**/*.cs"
-      - "**/*.h"
-      - "**/*.hh"
-      - "**/*.hpp"
-      - "**/*.hxx"
-      - "**/*.h++"
-      - "**/*.H"
-      - "**/*.java"
-      - "**/*.js"
-      - "**/*.m"
-    interpreters: []
