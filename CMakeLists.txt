@@ -3,6 +3,10 @@ cmake_minimum_required(VERSION 3.19)
 project(graph-prototype CXX)
 set(CMAKE_CXX_STANDARD 20)
 
+if (EMSCRIPTEN)
+    set(CMAKE_EXECUTABLE_SUFFIX ".js")
+endif()
+
 include(cmake/CompilerWarnings.cmake)
 include(FetchContent)
 FetchContent_Declare(

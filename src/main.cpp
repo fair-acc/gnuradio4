@@ -91,5 +91,6 @@ main() {
         r += merged.process_one(a[i], b[i]);
     }
 
+    fmt::print("Result of graph execution: {}\n", r);
     return r == 20 ? 0 : 1;
 }

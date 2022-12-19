@@ -26,9 +26,9 @@ jobs:
           # - name: Ubuntu Latest clang16
           #   os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
           #   compiler: clang16
-          # - name: Ubuntu Latest emscripten
-          #   os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
-          #   compiler: emscripten
+          - name: Ubuntu Latest emscripten
+            os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
+            compiler: emscripten
         # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
         cmake-build-type: [ Release, Debug ]
 
@@ -101,7 +101,7 @@ jobs:
       shell: bash
       run: |
         source ~/emsdk/emsdk_env.sh
-        emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.configurations.name == env.REFERENCE_CONFIG &&  matrix.cmake-build-type == 'Debug'}}
+        emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF
 
     - name: Build
       if: matrix.configurations.compiler != 'emscripten'
@@ -117,7 +117,15 @@ jobs:
         emmake make
 
     - name: execute binary
-      if: matrix.configurations.name != env.REFERENCE_CONFIG || matrix.cmake-build-type != 'Debug'
+      if: matrix.configurations.compiler != 'emscripten'
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      run: ../build/src/main
+      run: ./src/main
+
+    - name: execute binary
+      if: matrix.configurations.compiler == 'emscripten'
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      run: |
+        source ~/emsdk/emsdk_env.sh
+        ${EMSDK_NODE} ./src/main.js
