@@ -49,5 +49,6 @@ int main() {
         r += z;
     }
 
+    fmt::print("Result of graph execution: {}\n", r);
     return r == 20 ? 0 : 1;
 }
