@@ -32,8 +32,8 @@ precondition(bool cond, const std::source_location loc = std::source_location::c
 }
 
 template<typename V, typename T = void>
-concept any_simd = stdx::is_simd_v<V> &&(
-        std::same_as<T, void> || std::same_as<T, typename V::value_type>);
+concept any_simd = stdx::is_simd_v<V>
+                && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
 
 template<typename V, typename T>
 concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
@@ -234,10 +234,9 @@ public:
     }
 
     template<std::ranges::forward_range... Ins>
-    requires(std::ranges::sized_range<Ins> &&...)
-            && input_ports::template are_equal<std::ranges::range_value_t<
-                    Ins>...> constexpr bool process_batch(port_data<return_type, 1024> &out,
-                                                          Ins &&...inputs) {
+        requires(std::ranges::sized_range<Ins> && ...) && input_ports::template
+    are_equal<std::ranges::range_value_t<Ins>...> constexpr bool
+    process_batch(port_data<return_type, 1024> &out, Ins &&...inputs) {
         const auto  &in0 = std::get<0>(std::tie(inputs...));
         const size_t n   = std::ranges::size(in0);
         detail::precondition(((n == std::ranges::size(inputs)) && ...));
@@ -349,9 +348,9 @@ public:
     }
 
     template<typename... Ts>
-    requires input_ports::template are_equal<std::remove_cvref_t<Ts>...> constexpr
-            typename output_ports::tuple_or_type
-            process_one(Ts &&...inputs) {
+        requires input_ports::template
+    are_equal<std::remove_cvref_t<Ts>...> constexpr typename output_ports::tuple_or_type
+    process_one(Ts &&...inputs) {
         if constexpr (Left::output_ports::size
                       == 1) { // only the result from the right node needs to be returned
             return apply_right(std::forward_as_tuple(std::forward<Ts>(inputs)...),
@@ -381,28 +380,27 @@ public:
                     return std::make_tuple(std::move(std::get<Is...>(left_out)),
                                            std::move(std::get<OutId + 1 + Js...>(left_out)),
                                            std::move(right_out));
-                }
-            (std::make_index_sequence<OutId>(),
-             std::make_index_sequence<Left::output_ports::size - OutId - 1>());
-            else return [&]<std::size_t... Is, std::size_t... Js,
-                            std::size_t... Ks>(std::index_sequence<Is...>,
-                                               std::index_sequence<Js...>,
-                                               std::index_sequence<Ks...>) {
-                return std::make_tuple(std::move(std::get<Is...>(left_out)),
-                                       std::move(std::get<OutId + 1 + Js...>(left_out)),
-                                       std::move(std::get<Ks...>(right_out)));
-            }
-            (std::make_index_sequence<OutId>(),
-             std::make_index_sequence<Left::output_ports::size - OutId - 1>(),
-             std::make_index_sequence<Right::output_ports::size>());
+                }(std::make_index_sequence<OutId>(),
+                       std::make_index_sequence<Left::output_ports::size - OutId - 1>());
+            else
+                return [&]<std::size_t... Is, std::size_t... Js,
+                           std::size_t... Ks>(std::index_sequence<Is...>,
+                                              std::index_sequence<Js...>,
+                                              std::index_sequence<Ks...>) {
+                    return std::make_tuple(std::move(std::get<Is...>(left_out)),
+                                           std::move(std::get<OutId + 1 + Js...>(left_out)),
+                                           std::move(std::get<Ks...>(right_out)));
+                }(std::make_index_sequence<OutId>(),
+                       std::make_index_sequence<Left::output_ports::size - OutId - 1>(),
+                       std::make_index_sequence<Right::output_ports::size>());
         }
     }
 };
 
 template<int OutId, int InId, detail::any_node A, detail::any_node B>
-requires std::same_as<typename std::remove_cvref_t<A>::output_ports::template at<OutId>::type,
-                      typename std::remove_cvref_t<B>::input_ports::template at<
-                              InId>::type> [[gnu::always_inline]] constexpr auto
+    requires std::same_as<typename std::remove_cvref_t<A>::output_ports::template at<OutId>::type,
+                          typename std::remove_cvref_t<B>::input_ports::template at<InId>::type>
+[[gnu::always_inline]] constexpr auto
 merge(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
     return { std::forward<A>(a), std::forward<B>(b) };
 }
