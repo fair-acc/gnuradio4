@@ -42,11 +42,11 @@ template<typename T>
 concept vectorizable = std::constructible_from<stdx::simd<T>>;
 
 template<typename A, typename B>
-struct larger_native_simd_size
+struct wider_native_simd_size
     : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
 
 template<typename A>
-struct larger_native_simd_size<A, A> {
+struct wider_native_simd_size<A, A> {
     using type = A;
 };
 
@@ -63,6 +63,41 @@ struct simd_load_ctor {
         return W(ptr, stdx::element_aligned);
     }
 };
+
+template<typename List>
+using reduce_to_widest_simd = stdx::native_simd<meta::reduce<wider_native_simd_size, List>>;
+
+template<typename V, typename List>
+using transform_by_rebind_simd = meta::transform_types<rebind_simd_helper<V>::template rebind, List>;
+
+template<typename List>
+using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
+
+template<typename Node>
+concept any_node = requires(Node &n, typename Node::input_ports::tuple_type const &inputs) {
+    { n.in } -> std::same_as<typename Node::input_ports const &>;
+    { n.out } -> std::same_as<typename Node::output_ports const &>;
+    {
+        []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
+                -> decltype(n.process_one(std::get<Is>(tup)...)) {
+            return {};
+        }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
+    } -> std::same_as<typename Node::return_type>;
+};
+
+template<typename Node>
+concept node_can_process_simd
+        = any_node<Node>
+       && requires(Node &n,
+                   typename transform_to_widest_simd<typename Node::input_ports::typelist>::
+                           template apply<std::tuple> const &inputs) {
+              {
+                  []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
+                          -> decltype(n.process_one(std::get<Is>(tup)...)) {
+                      return {};
+                  }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
+              } -> detail::any_simd<typename Node::return_type>;
+          };
 } // namespace detail
 
 enum class port_direction { in, out };
@@ -209,14 +244,15 @@ public:
         auto &&out_range = out.request_write(n);
         // if SIMD makes sense (i.e. input and output ranges are contiguous and all types are
         // vectorizable)
-        // TODO: test whether process_one can be called with stdx::simd arguments
-        if constexpr (
-                (std::ranges::contiguous_range<decltype(out_range)> && ... && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<
-                        return_type> && meta::transform_types<std::is_constructible, meta::transform_types<stdx::native_simd, typename input_ports::typelist>>::template apply<std::conjunction>::value) {
-            using V = stdx::native_simd<
-                    meta::reduce<detail::larger_native_simd_size, typename input_ports::typelist>>;
-            using Vs = meta::transform_types<detail::rebind_simd_helper<V>::template rebind,
-                                             typename input_ports::typelist>;
+        if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ...
+                       && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type>
+                      && detail::node_can_process_simd<Derived>
+                      && meta::transform_types<std::is_constructible,
+                                               meta::transform_types<stdx::native_simd,
+                                                                     typename input_ports::typelist>>::
+                              template apply<std::conjunction>::value) {
+            using V  = detail::reduce_to_widest_simd<typename input_ports::typelist>;
+            using Vs = detail::transform_by_rebind_simd<V, typename input_ports::typelist>;
             size_t i = 0;
             for (i = 0; i + V::size() <= n; i += V::size()) {
                 const std::tuple input_simds = Vs::template construct<detail::simd_load_ctor>(
@@ -251,16 +287,6 @@ public:
 protected:
     constexpr node() noexcept = default;
 };
-
-namespace detail {
-template<typename Node>
-concept any_node = requires(Node &n, typename Node::input_ports::tuple_type const &inputs) {
-    { n.in } -> std::same_as<typename Node::input_ports const &>;
-    { n.out } -> std::same_as<typename Node::output_ports const &>;
-    // doesn't compile:
-    // std::apply([&n](auto&&... ins) { n.process_one(ins...); }, inputs);
-};
-} // namespace detail
 
 template<detail::any_node Left, detail::any_node Right, int OutId, int InId>
 class merged_node
@@ -310,11 +336,10 @@ public:
         : left(std::move(l)), right(std::move(r)) {}
 
     template<detail::any_simd... Ts>
-    // TODO: require that Left::process_one and Right::process_one can be called with
-    // stdx::simd arguments
-    requires detail::vectorizable<return_type> && input_ports::template are_equal<
-            typename std::remove_cvref_t<Ts>::value_type...> constexpr stdx::
-            rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
+        requires detail::vectorizable<return_type> && input_ports::template
+    are_equal<typename std::remove_cvref_t<Ts>::value_type...> &&detail::node_can_process_simd<Left>
+            &&detail::node_can_process_simd<Right> constexpr stdx::rebind_simd_t<
+                    return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
             process_one(Ts... inputs) {
         return apply_right(std::tie(inputs...),
                            apply_left(std::tie(inputs...),
