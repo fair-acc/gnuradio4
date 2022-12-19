@@ -235,9 +235,9 @@ struct typelist {
     static constexpr inline bool each_convertible_from = (std::convertible_to<Other, Ts> && ...);
 
     template<typename F, typename Tup>
-    requires(sizeof...(Ts)
-             == std::tuple_size_v<
-                     std::remove_cvref_t<Tup>>) static constexpr auto construct(Tup &&args_tuple) {
+        requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
+    static constexpr auto
+    construct(Tup &&args_tuple) {
         return std::apply(
                 []<typename... Args>(Args &&...args) {
                     return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...);

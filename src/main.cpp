@@ -4,10 +4,9 @@
 #include "graph.hpp"
 
 template<typename T, int Depth>
-requires(Depth > 0)
-class delay
-    : public fair::graph::node<delay<T, Depth>, fair::graph::make_input_ports<T>,
-                               fair::graph::make_output_ports<T>> {
+    requires(Depth > 0)
+class delay : public fair::graph::node<delay<T, Depth>, fair::graph::make_input_ports<T>,
+                                       fair::graph::make_output_ports<T>> {
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
@@ -51,8 +50,7 @@ public:
     process_one(T a) const noexcept {
         return [&a]<std::size_t... Is>(std::index_sequence<Is...>) {
             return std::make_tuple(((void) Is, a)...);
-        }
-        (std::make_index_sequence<Count>());
+        }(std::make_index_sequence<Count>());
     }
 };
 
