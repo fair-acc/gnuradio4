@@ -5,7 +5,8 @@
 #include "typelist.hpp"
 #endif
 
-#include <experimental/simd>
+#include "vir/simd.h"
+
 #include <iostream>
 #include <ranges>
 #include <source_location>
@@ -14,7 +15,7 @@
 namespace fair::graph {
 using std::size_t;
 
-namespace stdx = std::experimental;
+namespace stdx = vir::stdx;
 
 namespace detail {
 [[gnu::always_inline]] inline void
