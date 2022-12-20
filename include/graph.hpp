@@ -9,8 +9,18 @@
 
 #include <iostream>
 #include <ranges>
-#include <source_location>
 #include <tuple>
+
+#if !__has_include(<source_location>)
+#define HAVE_SOURCE_LOCATION 0
+#else
+#include <source_location>
+#if defined __cpp_lib_source_location && __cpp_lib_source_location >= 201907L
+#define HAVE_SOURCE_LOCATION 1
+#else
+#define HAVE_SOURCE_LOCATION 0
+#endif
+#endif
 
 namespace fair::graph {
 using std::size_t;
@@ -18,6 +28,7 @@ using std::size_t;
 namespace stdx = vir::stdx;
 
 namespace detail {
+#if HAVE_SOURCE_LOCATION
 [[gnu::always_inline]] inline void
 precondition(bool cond, const std::source_location loc = std::source_location::current()) {
     struct handle {
@@ -28,9 +39,25 @@ precondition(bool cond, const std::source_location loc = std::source_location::c
             __builtin_trap();
         }
     };
+
     if (not cond) [[unlikely]]
         handle::failure(loc);
 }
+#else
+[[gnu::always_inline]] inline void
+precondition(bool cond) {
+    struct handle {
+        [[noreturn]] static void
+        failure() {
+            std::clog << "failed precondition\n";
+            __builtin_trap();
+        }
+    };
+
+    if (not cond) [[unlikely]]
+        handle::failure();
+}
+#endif
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V>
