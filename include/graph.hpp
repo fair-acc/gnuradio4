@@ -99,6 +99,14 @@ concept node_can_process_simd
                   }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
               } -> detail::any_simd<typename Node::return_type>;
           };
+
+// Workaround bug in Clang:
+// std::is_constructible should be a valid template argument for the template template parameter
+// `template <typename> class T`, but because std::is_constructible<T, Args...> has a parameter
+// pack, Clang considers the program ill-formed. As so often, another indirection solves the
+// problem. *Sigh*
+template <typename T>
+using is_constructible = std::is_constructible<T>;
 } // namespace detail
 
 enum class port_direction { in, out };
@@ -247,7 +255,7 @@ public:
         if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ...
                        && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type>
                       && detail::node_can_process_simd<Derived>
-                      && meta::transform_types<std::is_constructible,
+                      && meta::transform_types<detail::is_constructible,
                                                meta::transform_types<stdx::native_simd,
                                                                      typename input_ports::typelist>>::
                               template apply<std::conjunction>::value) {
