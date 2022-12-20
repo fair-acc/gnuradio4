@@ -102,29 +102,33 @@ template<typename List>
 using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
 
 template<typename Node>
-concept any_node = requires(Node &n, typename Node::input_ports::tuple_type const &inputs) {
-    { n.in } -> std::same_as<typename Node::input_ports const &>;
-    { n.out } -> std::same_as<typename Node::output_ports const &>;
-    {
-        []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
-                -> decltype(n.process_one(std::get<Is>(tup)...)) {
-            return {};
-        }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
-    } -> std::same_as<typename Node::return_type>;
-};
+concept any_node
+        = requires(Node                                                              &n,
+                   typename std::remove_cvref_t<Node>::input_ports::tuple_type const &inputs) {
+              { n.in } -> std::same_as<typename std::remove_cvref_t<Node>::input_ports const &>;
+              { n.out } -> std::same_as<typename std::remove_cvref_t<Node>::output_ports const &>;
+              {
+                  []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
+                          -> decltype(n.process_one(std::get<Is>(tup)...)) {
+                      return {};
+                  }(n, inputs,
+                          std::make_index_sequence<std::remove_cvref_t<Node>::input_ports::size>())
+              } -> std::same_as<typename std::remove_cvref_t<Node>::return_type>;
+          };
 
 template<typename Node>
 concept node_can_process_simd
         = any_node<Node>
        && requires(Node &n,
-                   typename transform_to_widest_simd<typename Node::input_ports::typelist>::
-                           template apply<std::tuple> const &inputs) {
+                   typename transform_to_widest_simd<typename std::remove_cvref_t<
+                           Node>::input_ports::typelist>::template apply<std::tuple> const &inputs) {
               {
                   []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
                           -> decltype(n.process_one(std::get<Is>(tup)...)) {
                       return {};
-                  }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
-              } -> detail::any_simd<typename Node::return_type>;
+                  }(n, inputs,
+                          std::make_index_sequence<std::remove_cvref_t<Node>::input_ports::size>())
+              } -> detail::any_simd<typename std::remove_cvref_t<Node>::return_type>;
           };
 
 // Workaround bug in Clang:
