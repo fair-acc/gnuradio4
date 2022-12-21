@@ -268,7 +268,7 @@ public:
                     },
                     input_simds);
             result.copy_to(out_ptr, stdx::element_aligned);
-            return process_batch_simd_epilogue<N / 2>(n, out_ptr + N, (in_ptr + N)...);
+            return process_batch_simd_epilogue<N / 2>(n - N, out_ptr + N, (in_ptr + N)...);
         } else
             return process_batch_simd_epilogue<N / 2>(n, out_ptr, in_ptr...);
     }
