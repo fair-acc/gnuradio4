@@ -47,17 +47,6 @@ static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
 static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
 static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
 
-constexpr bool isPower2(std::unsigned_integral auto value)
-{
-    return !(value == 0) && !(value & (value - 1));
-}
-template <std::unsigned_integral auto N>
-static constexpr bool is_power2_v = isPower2(N);
-
-static_assert(is_power2_v<1U>);
-static_assert(is_power2_v<2U>);
-static_assert(!is_power2_v<0U>);
-static_assert(!is_power2_v<3U>);
 } // namespace util
 
 // clang-format off
@@ -71,14 +60,14 @@ concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
 };
 
 template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable<Fn, std::span<T>&, std::int64_t, Args...>::value || std::is_invocable<Fn, std::span<T>&, Args...>::value;
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
 
 template<class T, typename ...Args>
 concept BufferWriter = requires(T t, const std::size_t n_items, Args ...args) {
-    { t.publish([](std::span<util::value_type_t<T>> &writable_data, Args ...) {}, n_items, args...) }                                -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &writable_data, std::int64_t /* writePos */, Args ...) {}, n_items, args...) }   -> std::same_as<void>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &writable_data, Args ...) {}, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &writable_data, std::int64_t /* writePos */, Args ...) {}, n_items, args...) }-> std::same_as<bool>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
     { t.available() }         -> std::same_as<std::size_t>;
 };
 
@@ -96,9 +85,9 @@ template <typename T>
 struct non_compliant_class {
 };
 template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) {});
+using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
 template <typename T, typename... Args>
-using NoSequenceParameter = decltype([](std::span<T>&, Args...) {});
+using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
 } // namespace test
 
 static_assert(!Buffer<test::non_compliant_class<int>>);

@@ -156,7 +156,7 @@ public:
         : _timeout(timeout) {}
 
     std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        auto timeSpan = std::chrono::microseconds(std::chrono::duration_cast<std::chrono::microseconds>(_timeout).count());
+        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
 
         if (cursor.value() < sequence) {
             std::unique_lock uniqueLock(_gate);
@@ -196,7 +196,7 @@ class YieldingWaitStrategy {
 public:
     std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _spinTries;
-        const auto waitMethod = [&]() {
+        const auto waitMethod = [&counter]() {
             // optional: barrier check alert
 
             if (counter == 0) {
@@ -204,12 +204,11 @@ public:
             } else {
                 --counter;
             }
-            return counter;
         };
 
         std::int64_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            counter = waitMethod();
+            waitMethod();
         }
 
         return availableSequence;

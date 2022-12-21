@@ -89,14 +89,10 @@ inline std::int64_t getMinimumSequence(
 #if not defined(_LIBCPP_VERSION)
     return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
 #else
-    std::vector<int64_t> v;
-    v.reserve(sequences.size());
-    for (auto &sequence : sequences) {
-        v.push_back(sequence->value());
-    }
-    // std::for_each(sequences.begin(), sequences.end(), [v](const auto &sequence) noexcept { v.push_back(8); });
+    std::vector<int64_t> v(sequences.size());
+    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
     auto min = std::min(v.begin(), v.end());
-    return (*min < minimum) ? *min : minimum;
+    return std::min(*min, minimum);
 #endif
 }
 
@@ -144,9 +140,9 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
     do {
         oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
 #if not defined(_LIBCPP_VERSION)
-        numToRemove = static_cast<std::uint32_t>(std::ranges::count_if(*oldSequences, [&sequence](const auto &value) { return value == sequence; })); // specifically uses identity
+        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
 #else
-        numToRemove = static_cast<std::uint32_t>(std::count_if((*oldSequences).begin(), (*oldSequences).end(), [&sequence](const auto &value) { return value == sequence; })); // specifically uses identity
+        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
 #endif
         if (numToRemove == 0) {
             break;

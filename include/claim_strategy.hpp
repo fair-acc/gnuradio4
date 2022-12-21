@@ -24,7 +24,7 @@ struct NoCapacityException : public std::runtime_error {
 // clang-format off
 
 template<typename T>
-inline constexpr bool isClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
         const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
     { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
     { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
@@ -35,13 +35,7 @@ inline constexpr bool isClaimStrategy = requires(T /*const*/ t, const std::vecto
     { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
 };
 
-template<typename T>
-concept ClaimStrategy = isClaimStrategy<T>;
-
 namespace claim_strategy::util {
-constexpr bool isPower2(std::unsigned_integral auto value) { return !(value == 0) && !(value & (value - 1)); }
-template<std::unsigned_integral auto N>
-static constexpr bool is_power2_v = isPower2(N);
 constexpr unsigned    floorlog2(unsigned x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
 constexpr unsigned    ceillog2(unsigned x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
 }

@@ -12,6 +12,7 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <memory_resource>
 #endif
 #include <algorithm>
+#include <bit>
 #include <cassert> // to assert if compiled for debugging
 #include <functional>
 #include <numeric>
@@ -21,7 +22,7 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <fmt/format.h>
 
 // header for creating/opening or POSIX shared memory objects
-#include <errno.h>
+#include <cerrno>
 #include <fcntl.h>
 #if defined __has_include && not __EMSCRIPTEN__
 #if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
@@ -82,10 +83,10 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
         static int _counter;
         const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
-        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> int {
+        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
             return syscall(__NR_memfd_create, name, flags);
         };
-        int shm_fd = memfd_create(0);
+        int shm_fd = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
             throw std::runtime_error(fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
         }
@@ -108,8 +109,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         }
 
         // map the first half into the now available hole where the
-        void* second_copy = mmap((char*)first_copy + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, (off_t)0);
-        if (second_copy == MAP_FAILED) {
+        if (const void* second_copy = mmap((char*)first_copy + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, (off_t)0); second_copy == MAP_FAILED) {
             close(shm_fd);
             throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
         }
@@ -133,14 +133,13 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
 
 public:
-    static inline double_mapped_memory_resource* defaultAllocator()
-    {
+    static inline double_mapped_memory_resource* defaultAllocator() {
         static double_mapped_memory_resource instance = double_mapped_memory_resource();
         return &instance;
     }
 
     template<typename T>
-    requires util::is_power2_v<sizeof(T)>
+    requires (std::has_single_bit(sizeof(T)))
     static inline std::pmr::polymorphic_allocator<T> allocator()
     {
         return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
@@ -180,7 +179,7 @@ public:
  * for more details see
  */
 template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-requires util::is_power2_v<sizeof(T)>
+requires (std::has_single_bit(sizeof(T)))
 class circular_buffer
 {
     using Allocator         = std::pmr::polymorphic_allocator<T>;
