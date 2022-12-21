@@ -9,6 +9,15 @@ algorithms, notably required node structures, scheduling interfaces, and partial
 The expressed goal is to guide the low-level API design and functionality for the upcoming 
 [GNU Radio 4.0](https://github.com/gnuradio/gnuradio/tree/dev-4.0) release.
 
+## Use on compilerexplorer
+
+A single header version is provided in the `dist/`subdirectory, which can be regenerated with the merge_headers.sh script.
+Add `libfmt:8.1.1` library and `-sdt=c++20` compiler option and you can include the library with:
+
+```c++
+#include "https://raw.githubusercontent.com/fair-acc/graph-prototype/main/dist/graph.hpp"
+```
+
 ## Copyright & License
 Copyright (C) 2018-2022 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
 Unless otherwise noted: [SPDX-License-Identifier: LGPL-3.0-or-later](https://spdx.org/licenses/LGPL-3.0-or-later.html)
