@@ -115,7 +115,7 @@ public:
 
     std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _retries;
-        const auto waitMethod = [&]() {
+        const auto waitMethod = [&counter]() {
             // optional: barrier check alert
 
             if (counter > 100) {
@@ -126,13 +126,11 @@ public:
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(0));
             }
-
-            return counter;
         };
 
         std::int64_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            counter = waitMethod();
+            waitMethod();
         }
 
         return availableSequence;
