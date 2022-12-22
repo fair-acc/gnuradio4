@@ -220,24 +220,42 @@ class circular_buffer
         using BufferType = std::shared_ptr<buffer_impl>;
 
         alignas(kCacheLine) BufferType                  _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) const bool                  _is_mmap_allocated;
+        alignas(kCacheLine) bool                        _is_mmap_allocated;
         alignas(kCacheLine) DependendsType&             _read_indices;
-        alignas(kCacheLine) const std::size_t           _size;
-        alignas(kCacheLine) std::vector<U, Allocator>&  _data;
-        alignas(kCacheLine) ClaimType&                  _claim_strategy;
+        alignas(kCacheLine) std::size_t                 _size;
+        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
+        alignas(kCacheLine) ClaimType*                  _claim_strategy;
 
     public:
         buffer_writer() = delete;
         buffer_writer(std::shared_ptr<buffer_impl> buffer) :
             _buffer(buffer), _is_mmap_allocated(_buffer->_is_mmap_allocated), _read_indices(buffer->_read_indices),
-            _size(buffer->_size), _data(buffer->_data), _claim_strategy(buffer->_claim_strategy) { };
+            _size(buffer->_size), _data(std::addressof(buffer->_data)), _claim_strategy(std::addressof(buffer->_claim_strategy)) { };
+        buffer_writer(buffer_writer&& other)
+            : _buffer(std::move(other._buffer))
+            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
+            , _read_indices(_buffer->_read_indices)
+            , _size(_buffer->_size)
+            , _data(std::addressof(_buffer->_data))
+            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer& operator=(buffer_writer tmp) {
+            std::swap(_buffer, tmp._buffer);
+            _is_mmap_allocated = _buffer->_is_mmap_allocated;
+            _size = _buffer->_size;
+            _data = std::addressof(_buffer->_data);
+            _read_indices = _buffer->_read_indices;
+            _claim_strategy = std::addressof(_buffer->_claim_strategy);
+
+            return *this;
+        }
+
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
             if (n_slots_to_claim <= 0 || _read_indices->empty()) {
                 return;
             }
-            const auto sequence = _claim_strategy.next(*_read_indices, n_slots_to_claim);
+            const auto sequence = _claim_strategy->next(*_read_indices, n_slots_to_claim);
             translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
         }; // blocks until elements are available
 
@@ -247,7 +265,7 @@ class circular_buffer
                 return true;
             }
             try {
-                const auto sequence = _claim_strategy.tryNext(*_read_indices, n_slots_to_claim);
+                const auto sequence = _claim_strategy->tryNext(*_read_indices, n_slots_to_claim);
                 translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
                 return true;
             } catch (const NoCapacityException &) {
@@ -256,15 +274,16 @@ class circular_buffer
         };
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _claim_strategy.getRemainingCapacity(*_read_indices);
+            return _claim_strategy->getRemainingCapacity(*_read_indices);
         }
 
         private:
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
             try {
+                auto& data = *_data;
                 const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
-                std::span<U> writable_data = { &_data[index], n_slots_to_claim };
+                std::span<U> writable_data(&data[index], n_slots_to_claim);
                 if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
                     std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
                 } else {
@@ -276,10 +295,10 @@ class circular_buffer
                     const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
                     const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
 
-                    std::copy(&_data[index], &_data[index + nFirstHalf], &_data[index+ _size]);
-                    std::copy(&_data[_size],  &_data[_size + nSecondHalf], &_data[0]);
+                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
                 }
-                _claim_strategy.publish(publishSequence); // points at first non-writable index
+                _claim_strategy->publish(publishSequence); // points at first non-writable index
             } catch (const std::exception& e) {
                 throw (e);
             } catch (...) {
@@ -294,30 +313,44 @@ class circular_buffer
         using BufferType = std::shared_ptr<buffer_impl>;
 
         alignas(kCacheLine) std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        alignas(kCacheLine) Sequence&                   _read_index_ref;
         alignas(kCacheLine) std::int64_t                _read_index_cached;
         alignas(kCacheLine) BufferType                  _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) const std::size_t           _size;
-        alignas(kCacheLine) std::vector<U, Allocator>&  _data;
-        alignas(kCacheLine) Sequence&                   _cursor_ref;
+        alignas(kCacheLine) std::size_t                 _size;
+        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
 
     public:
         buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) : _read_index_ref(*_read_index),
-            _buffer(buffer), _size(buffer->_size), _data(buffer->_data), _cursor_ref(buffer->_cursor) {
+        buffer_reader(std::shared_ptr<buffer_impl> buffer) :
+            _buffer(buffer), _size(buffer->_size), _data(std::addressof(buffer->_data)) {
             gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
             _read_index_cached = _read_index->value();
         }
+        buffer_reader(buffer_reader&& other)
+            : _read_index(std::move(other._read_index))
+            , _read_index_cached(std::exchange(other._read_index_cached, 0))
+            , _buffer(other._buffer)
+            , _size(_buffer->_size)
+            , _data(std::addressof(_buffer->_data)) {
+        }
+        buffer_reader& operator=(buffer_reader tmp) noexcept {
+            std::swap(_read_index, tmp._read_index);
+            std::swap(_read_index_cached, tmp._read_index_cached);
+            std::swap(_buffer, tmp._buffer);
+            _size = _buffer->_size;
+            _data = std::addressof(_buffer->_data);
+            return *this;
+        };
         ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
+            const auto& data = *_data;
             if constexpr (strict_check) {
                 const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &_data[_read_index_cached % _size], n };
+                return { &data[_read_index_cached % _size], n };
             }
             const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &_data[_read_index_cached % _size], n };
+            return { &data[_read_index_cached % _size], n };
         }
 
         template <bool strict_check = true>
@@ -330,14 +363,14 @@ class circular_buffer
                     return false;
                 }
             }
-            _read_index_cached = _read_index_ref.addAndGet(n_elements);
+            _read_index_cached = _read_index->addAndGet(n_elements);
             return true;
         }
 
         [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _cursor_ref.value() - _read_index_cached;
+            return _buffer->_cursor.value() - _read_index_cached;
         }
     };
 
