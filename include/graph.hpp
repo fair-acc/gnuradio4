@@ -101,30 +101,50 @@ using transform_by_rebind_simd = meta::transform_types<rebind_simd_helper<V>::te
 template<typename List>
 using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
 
-template<typename Node>
-concept any_node = requires(Node &n, typename Node::input_ports::tuple_type const &inputs) {
-    { n.in } -> std::same_as<typename Node::input_ports const &>;
-    { n.out } -> std::same_as<typename Node::output_ports const &>;
+// Constrain to the static description of a port.
+template<typename P>
+concept port_desc = true;
+
+// Constrain to any type usable as template argument to make_node
+template<typename Impl>
+concept node_impl = requires {
+    typename Impl::input_ports;
+    typename Impl::output_ports;
+} && requires(Impl &n, typename Impl::input_ports::tuple_type const &inputs) {
     {
-        []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
+        []<size_t... Is>(Impl &n, auto const &tup, std::index_sequence<Is...>)
                 -> decltype(n.process_one(std::get<Is>(tup)...)) {
             return {};
-        }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
-    } -> std::same_as<typename Node::return_type>;
+        }(n, inputs, std::make_index_sequence<Impl::input_ports::size>())
+    } -> std::same_as<typename Impl::output_ports::tuple_or_type>;
 };
 
 template<typename Node>
-concept node_can_process_simd
-        = any_node<Node>
-       && requires(Node &n,
-                   typename transform_to_widest_simd<typename Node::input_ports::typelist>::
-                           template apply<std::tuple> const &inputs) {
+concept any_node
+        = requires(Node                                                              &n,
+                   typename std::remove_cvref_t<Node>::input_ports::tuple_type const &inputs) {
+              { n.in } -> std::same_as<typename std::remove_cvref_t<Node>::input_ports const &>;
+              { n.out } -> std::same_as<typename std::remove_cvref_t<Node>::output_ports const &>;
               {
                   []<size_t... Is>(Node &n, auto const &tup, std::index_sequence<Is...>)
                           -> decltype(n.process_one(std::get<Is>(tup)...)) {
                       return {};
-                  }(n, inputs, std::make_index_sequence<Node::input_ports::size>())
-              } -> detail::any_simd<typename Node::return_type>;
+                  }(n, inputs,
+                          std::make_index_sequence<std::remove_cvref_t<Node>::input_ports::size>())
+              } -> std::same_as<typename std::remove_cvref_t<Node>::return_type>;
+          };
+
+template<typename Impl>
+concept impl_can_process_simd
+        = requires(Impl &n,
+                   typename transform_to_widest_simd<typename Impl::input_ports::typelist>::
+                           template apply<std::tuple> const &inputs) {
+              {
+                  []<size_t... Is>(Impl &n, auto const &tup, std::index_sequence<Is...>)
+                          -> decltype(n.process_one(std::get<Is>(tup)...)) {
+                      return {};
+                  }(n, inputs, std::make_index_sequence<Impl::input_ports::size>())
+              } -> detail::any_simd<typename Impl::output_ports::tuple_or_type>;
           };
 
 // Workaround bug in Clang:
@@ -237,15 +257,18 @@ public:
     }
 };
 
-template<typename Derived, typename InputPorts, typename OutputPorts>
-class node {
+namespace detail {
+template<node_impl Impl>
+class node : public Impl {
 public:
-    using input_ports                        = InputPorts;
-    using output_ports                       = OutputPorts;
+    using input_ports                        = typename Impl::input_ports;
+    using output_ports                       = typename Impl::output_ports;
     using return_type                        = typename output_ports::tuple_or_type;
 
     static inline constexpr input_ports  in  = {};
     static inline constexpr output_ports out = {};
+
+    using Impl::Impl;
 
     template<std::size_t N>
     [[gnu::always_inline]] constexpr bool
@@ -260,13 +283,25 @@ public:
                     std::tuple{ in_ptr... });
             const stdx::simd result = std::apply(
                     [this](auto... args) {
-                        return static_cast<Derived *>(this)->process_one(args...);
+                        return this->Impl::process_one(args...);
                     },
                     input_simds);
             result.copy_to(out_ptr, stdx::element_aligned);
-            return process_batch_simd_epilogue<N / 2>(n, out_ptr + N, (in_ptr + N)...);
+            return process_batch_simd_epilogue<N / 2>(n - N, out_ptr + N, (in_ptr + N)...);
         } else
             return process_batch_simd_epilogue<N / 2>(n, out_ptr, in_ptr...);
+    }
+
+    // If Impl::process_one is const-qualified, then this process_batch should also be
+    // const-qualified. Can't easily do that. This overload works around the issue.
+    // The two overloads can be simplified using 'deducing this' (C++23) together with a suitable
+    // requires clause.
+    template<std::ranges::forward_range... Ins>
+        requires node_impl<const Impl> && (std::ranges::sized_range<Ins> && ...)
+              && input_ports::template
+    are_equal<std::ranges::range_value_t<Ins>...> constexpr bool process_batch(
+            port_data<return_type, 1024> &out, Ins &&...inputs) const {
+        return const_cast<node *>(this)->process_batch(out, std::forward<Ins>(inputs)...);
     }
 
     template<std::ranges::forward_range... Ins>
@@ -281,7 +316,7 @@ public:
         // vectorizable)
         if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ...
                        && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type>
-                      && detail::node_can_process_simd<Derived>
+                      && detail::impl_can_process_simd<Impl>
                       && meta::transform_types<detail::is_constructible,
                                                meta::transform_types<stdx::native_simd,
                                                                      typename input_ports::typelist>>::
@@ -294,7 +329,7 @@ public:
                         std::tuple{ (std::ranges::data(inputs) + i)... });
                 const stdx::simd result = std::apply(
                         [this](auto... args) {
-                            return static_cast<Derived *>(this)->process_one(args...);
+                            return this->Impl::process_one(args...);
                         },
                         input_simds);
                 result.copy_to(std::ranges::data(out_range) + i, stdx::element_aligned);
@@ -310,7 +345,7 @@ public:
             while (std::get<0>(it_tuple) != std::get<0>(end_tuple)) {
                 *out_it = std::apply(
                         [this](auto &...its) {
-                            return static_cast<Derived *>(this)->process_one((*its++)...);
+                            return this->Impl::process_one((*its++)...);
                         },
                         it_tuple);
                 ++out_it;
@@ -318,62 +353,42 @@ public:
             return true;
         }
     }
-
-protected:
-    constexpr node() noexcept = default;
 };
 
-template<detail::any_node Left, detail::any_node Right, int OutId, int InId>
-class merged_node
-    : public node<merged_node<Left, Right, OutId, InId>,
-                  make_input_ports<
-                          meta::concat<typename Left::input_ports::typelist,
-                                       meta::remove_at<InId, typename Right::input_ports::typelist>>>,
-                  make_output_ports<
-                          meta::concat<meta::remove_at<OutId, typename Left::output_ports::typelist>,
-                                       typename Right::output_ports::typelist>>> {
-private:
-    using base = node<
-            merged_node,
-            make_input_ports<
-                    meta::concat<typename Left::input_ports::typelist,
-                                 meta::remove_at<InId, typename Right::input_ports::typelist>>>,
-            make_output_ports<meta::concat<meta::remove_at<OutId, typename Left::output_ports::typelist>,
-                                           typename Right::output_ports::typelist>>>;
+template<detail::node_impl Left, int OutId, detail::node_impl Right, int InId>
+class merged_node_impl {
+public:
+    using input_ports = make_input_ports<
+            meta::concat<typename Left::input_ports::typelist,
+                         meta::remove_at<InId, typename Right::input_ports::typelist>>>;
+    using output_ports = make_output_ports<
+            meta::concat<meta::remove_at<OutId, typename Left::output_ports::typelist>,
+                         typename Right::output_ports::typelist>>;
+    using return_type = typename output_ports::tuple_or_type;
 
     Left  left;
     Right right;
 
-    template<std::size_t... Is>
-    [[gnu::always_inline]] constexpr auto
-    apply_left(auto &&input_tuple, std::index_sequence<Is...>) {
-        return left.process_one(std::get<Is>(input_tuple)...);
-    }
+    constexpr merged_node_impl(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
-    template<std::size_t... Is, std::size_t... Js>
-    [[gnu::always_inline]] constexpr auto
-    apply_right(auto &&input_tuple, auto &&tmp, std::index_sequence<Is...>,
-                std::index_sequence<Js...>) {
-        constexpr int first_offset  = Left::input_ports::size;
-        constexpr int second_offset = Left::input_ports::size + sizeof...(Is);
-        static_assert(second_offset + sizeof...(Js)
-                      == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-        return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp),
-                                 std::get<second_offset + Js>(input_tuple)...);
-    }
+    constexpr merged_node_impl(Left l)
+        requires std::is_default_constructible_v<Right>
+        : left(std::move(l))
+        , right() {}
 
-public:
-    using input_ports  = typename base::input_ports;
-    using output_ports = typename base::output_ports;
-    using return_type  = typename output_ports::tuple_or_type;
+    constexpr merged_node_impl(Right r)
+        requires std::is_default_constructible_v<Left>
+        : left()
+        , right(std::move(r)) {}
 
-    [[gnu::always_inline]] constexpr merged_node(Left l, Right r)
-        : left(std::move(l)), right(std::move(r)) {}
+    constexpr merged_node_impl()
+        requires std::is_default_constructible_v<Left> && std::is_default_constructible_v<Right>
+    = default;
 
     template<detail::any_simd... Ts>
         requires detail::vectorizable<return_type> && input_ports::template
-    are_equal<typename std::remove_cvref_t<Ts>::value_type...> &&detail::node_can_process_simd<Left>
-            &&detail::node_can_process_simd<Right> constexpr stdx::rebind_simd_t<
+    are_equal<typename std::remove_cvref_t<Ts>::value_type...> &&detail::impl_can_process_simd<Left>
+            &&detail::impl_can_process_simd<Right> constexpr stdx::rebind_simd_t<
                     return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
             process_one(Ts... inputs) {
         return apply_right(std::tie(inputs...),
@@ -381,6 +396,13 @@ public:
                                       std::make_index_sequence<Left::input_ports::size()>()),
                            std::make_index_sequence<InId>(),
                            std::make_index_sequence<Right::input_ports::size() - InId - 1>());
+    }
+
+    template<typename... Ts>
+        requires node_impl<const Left> && node_impl<const Right> && input_ports::template
+    are_equal<std::remove_cvref_t<Ts>...> constexpr typename output_ports::tuple_or_type
+    process_one(Ts &&...inputs) const {
+        return const_cast<merged_node_impl *>(this)->process_one(std::forward<Ts>(inputs)...);
     }
 
     template<typename... Ts>
@@ -431,15 +453,47 @@ public:
                        std::make_index_sequence<Right::output_ports::size>());
         }
     }
+
+private:
+    template<std::size_t... Is>
+    [[gnu::always_inline]] constexpr auto
+    apply_left(auto &&input_tuple, std::index_sequence<Is...>) {
+        return left.process_one(std::get<Is>(input_tuple)...);
+    }
+
+    template<std::size_t... Is, std::size_t... Js>
+    [[gnu::always_inline]] constexpr auto
+    apply_right(auto &&input_tuple, auto &&tmp, std::index_sequence<Is...>,
+                std::index_sequence<Js...>) {
+        constexpr int first_offset  = Left::input_ports::size;
+        constexpr int second_offset = Left::input_ports::size + sizeof...(Is);
+        static_assert(second_offset + sizeof...(Js)
+                      == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
+        return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp),
+                                 std::get<second_offset + Js>(input_tuple)...);
+    }
 };
 
-template<int OutId, int InId, detail::any_node A, detail::any_node B>
-    requires std::same_as<typename std::remove_cvref_t<A>::output_ports::template at<OutId>::type,
-                          typename std::remove_cvref_t<B>::input_ports::template at<InId>::type>
-[[gnu::always_inline]] constexpr auto
-merge(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
-    return { std::forward<A>(a), std::forward<B>(b) };
-}
+template<any_node T>
+struct node_impl_of {};
+
+template<node_impl Impl>
+struct node_impl_of<node<Impl>> {
+    using type = Impl;
+};
+
+} // namespace detail
+
+template<detail::node_impl Impl>
+using make_node = detail::node<Impl>;
+
+template<detail::any_node Left, int OutId, detail::any_node Right, int InId>
+    requires std::same_as<typename Left::output_ports::template at<OutId>::type,
+                          typename Right::input_ports::template at<InId>::type>
+using merged_node
+        = make_node<detail::merged_node_impl<typename detail::node_impl_of<Left>::type, OutId,
+                                             typename detail::node_impl_of<Right>::type, InId>>;
+
 } // namespace fair::graph
 
 #endif // GRAPH_PROTOTYPE_GRAPH_HPP
