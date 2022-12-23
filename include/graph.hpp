@@ -127,13 +127,6 @@ concept node_can_process_simd
               } -> detail::any_simd<typename Node::return_type>;
           };
 
-// Workaround bug in Clang:
-// std::is_constructible should be a valid template argument for the template template parameter
-// `template <typename> class T`, but because std::is_constructible<T, Args...> has a parameter
-// pack, Clang considers the program ill-formed. As so often, another indirection solves the
-// problem. *Sigh*
-template <typename T>
-using is_constructible = std::is_constructible<T>;
 } // namespace detail
 
 enum class port_direction { in, out };
@@ -279,13 +272,12 @@ public:
         auto &&out_range = out.request_write(n);
         // if SIMD makes sense (i.e. input and output ranges are contiguous and all types are
         // vectorizable)
-        if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ...
-                       && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type>
+        if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ... && std::ranges::contiguous_range<Ins>)
+                      && detail::vectorizable<return_type>
                       && detail::node_can_process_simd<Derived>
-                      && meta::transform_types<detail::is_constructible,
-                                               meta::transform_types<stdx::native_simd,
-                                                                     typename input_ports::typelist>>::
-                              template apply<std::conjunction>::value) {
+                      && input_ports::typelist
+                         ::template transform<stdx::native_simd>
+                         ::template all_of<std::is_constructible>) {
             using V  = detail::reduce_to_widest_simd<typename input_ports::typelist>;
             using Vs = detail::transform_by_rebind_simd<V, typename input_ports::typelist>;
             size_t i = 0;
@@ -344,22 +336,25 @@ private:
     Left  left;
     Right right;
 
-    template<std::size_t... Is>
+    template<std::size_t I>
     [[gnu::always_inline]] constexpr auto
-    apply_left(auto &&input_tuple, std::index_sequence<Is...>) {
-        return left.process_one(std::get<Is>(input_tuple)...);
+    apply_left(auto &&input_tuple) {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return left.process_one(std::get<Is>(input_tuple)...);
+        } (std::make_index_sequence<I>());
     }
 
-    template<std::size_t... Is, std::size_t... Js>
+    template<std::size_t I, std::size_t J>
     [[gnu::always_inline]] constexpr auto
-    apply_right(auto &&input_tuple, auto &&tmp, std::index_sequence<Is...>,
-                std::index_sequence<Js...>) {
-        constexpr int first_offset  = Left::input_ports::size;
-        constexpr int second_offset = Left::input_ports::size + sizeof...(Is);
-        static_assert(second_offset + sizeof...(Js)
-                      == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-        return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp),
-                                 std::get<second_offset + Js>(input_tuple)...);
+    apply_right(auto &&input_tuple, auto &&tmp) {
+        return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
+            constexpr int first_offset  = Left::input_ports::size;
+            constexpr int second_offset = Left::input_ports::size + sizeof...(Is);
+            static_assert(second_offset + sizeof...(Js)
+                          == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
+            return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp),
+                                     std::get<second_offset + Js>(input_tuple)...);
+        } (std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
 public:
@@ -376,11 +371,8 @@ public:
             &&detail::node_can_process_simd<Right> constexpr stdx::rebind_simd_t<
                     return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
             process_one(Ts... inputs) {
-        return apply_right(std::tie(inputs...),
-                           apply_left(std::tie(inputs...),
-                                      std::make_index_sequence<Left::input_ports::size()>()),
-                           std::make_index_sequence<InId>(),
-                           std::make_index_sequence<Right::input_ports::size() - InId - 1>());
+        return apply_right<InId, Right::input_ports::size() - InId - 1>
+            (std::tie(inputs...), apply_left<Left::input_ports::size()>(std::tie(inputs...)));
     }
 
     template<typename... Ts>
@@ -389,46 +381,46 @@ public:
     process_one(Ts &&...inputs) {
         if constexpr (Left::output_ports::size
                       == 1) { // only the result from the right node needs to be returned
-            return apply_right(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                               apply_left(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                          std::make_index_sequence<Left::input_ports::size()>()),
-                               std::make_index_sequence<InId>(),
-                               std::make_index_sequence<Right::input_ports::size() - InId - 1>());
+            return apply_right<InId, Right::input_ports::size() - InId - 1>
+                (std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                               apply_left<Left::input_ports::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+
         } else {
             // left produces a tuple
-            auto left_out = apply_left(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                       std::make_index_sequence<Left::input_ports::size()>());
-            auto right_out
-                    = apply_right(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                  std::move(std::get<OutId>(left_out)),
-                                  std::make_index_sequence<InId>(),
-                                  std::make_index_sequence<Right::input_ports::size() - InId - 1>());
+            auto left_out = apply_left<Left::input_ports::size()>
+                            (std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, Right::input_ports::size() - InId - 1>
+                             (std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
-            if constexpr (Left::output_ports::size == 2 && Right::output_ports::size == 1)
+            if constexpr (Left::output_ports::size == 2 && Right::output_ports::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)),
                                        std::move(right_out));
-            else if constexpr (Left::output_ports::size == 2)
+
+            } else if constexpr (Left::output_ports::size == 2) {
                 return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))),
                                       std::move(right_out));
-            else if constexpr (Right::output_ports::size == 1)
+
+            } else if constexpr (Right::output_ports::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>,
                                                                  std::index_sequence<Js...>) {
-                    return std::make_tuple(std::move(std::get<Is...>(left_out)),
-                                           std::move(std::get<OutId + 1 + Js...>(left_out)),
+                    return std::make_tuple(std::move(std::get<Is>(left_out))...,
+                                           std::move(std::get<OutId + 1 + Js>(left_out))...,
                                            std::move(right_out));
                 }(std::make_index_sequence<OutId>(),
-                       std::make_index_sequence<Left::output_ports::size - OutId - 1>());
-            else
+                  std::make_index_sequence<Left::output_ports::size - OutId - 1>());
+
+            } else {
                 return [&]<std::size_t... Is, std::size_t... Js,
                            std::size_t... Ks>(std::index_sequence<Is...>,
                                               std::index_sequence<Js...>,
                                               std::index_sequence<Ks...>) {
-                    return std::make_tuple(std::move(std::get<Is...>(left_out)),
-                                           std::move(std::get<OutId + 1 + Js...>(left_out)),
-                                           std::move(std::get<Ks...>(right_out)));
+                    return std::make_tuple(std::move(std::get<Is>(left_out))...,
+                                           std::move(std::get<OutId + 1 + Js>(left_out))...,
+                                           std::move(std::get<Ks>(right_out)...));
                 }(std::make_index_sequence<OutId>(),
-                       std::make_index_sequence<Left::output_ports::size - OutId - 1>(),
-                       std::make_index_sequence<Right::output_ports::size>());
+                  std::make_index_sequence<Left::output_ports::size - OutId - 1>(),
+                  std::make_index_sequence<Right::output_ports::size>());
+            }
         }
     }
 };

@@ -220,6 +220,8 @@ using reduce = typename detail::reduce_impl<Method, List>::type;
 // typelist /////////////////
 template<typename... Ts>
 struct typelist {
+    using this_t = typelist<Ts...>;
+
     static inline constexpr std::integral_constant<int, sizeof...(Ts)> size = {};
 
     template<template<typename...> class Other>
@@ -229,10 +231,13 @@ struct typelist {
     using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
 
     template<typename... Other>
-    static constexpr inline bool each_convertible_to = (std::convertible_to<Ts, Other> && ...);
+    static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
 
     template<typename... Other>
-    static constexpr inline bool each_convertible_from = (std::convertible_to<Other, Ts> && ...);
+    static constexpr inline bool are_convertible_to = (std::convertible_to<Ts, Other> && ...);
+
+    template<typename... Other>
+    static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
 
     template<typename F, typename Tup>
         requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
@@ -244,6 +249,13 @@ struct typelist {
                 },
                 std::forward<Tup>(args_tuple));
     }
+
+    template <template <typename> typename Trafo>
+    using transform = meta::transform_types<Trafo, this_t>;
+
+    template <template <typename...> typename Pred>
+    constexpr static bool all_of = (Pred<Ts>::value && ...);
+
 };
 } // namespace fair::meta
 
