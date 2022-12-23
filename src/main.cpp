@@ -1,6 +1,8 @@
 #include <array>
 #include <fmt/core.h>
 
+#include <cassert>
+
 #include "graph.hpp"
 
 template<typename T, int Depth>
@@ -79,18 +81,54 @@ public:
 int
 main() {
     using fair::graph::merge;
-    // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
-    auto merged = merge<0, 0>(scale<int, -1>(), merge<0, 0>(scale<int, 2>(), adder<int>()));
 
-    // execute graph
-    std::array<int, 4> a = { 1, 2, 3, 4 };
-    std::array<int, 4> b = { 10, 10, 10, 10 };
+    {
+        // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
+        auto merged = merge<0, 0>(scale<int, -1>(), merge<0, 0>(scale<int, 2>(), adder<int>()));
 
-    int                r = 0;
-    for (int i = 0; i < 4; ++i) {
-        r += merged.process_one(a[i], b[i]);
+        // execute graph
+        std::array<int, 4> a = { 1, 2, 3, 4 };
+        std::array<int, 4> b = { 10, 10, 10, 10 };
+
+        int                r = 0;
+        for (int i = 0; i < 4; ++i) {
+            r += merged.process_one(a[i], b[i]);
+        }
+
+        fmt::print("Result of graph execution: {}\n", r);
+
+        assert(r == 20);
     }
 
-    fmt::print("Result of graph execution: {}\n", r);
-    return r == 20 ? 0 : 1;
+    {
+        // auto merged = merge<0, 0>(duplicate<int, 2>(), scale<int, 2>());
+        auto merged = merge<0, 0>(duplicate<int, 4>(), scale<int, 2>());
+
+        // execute graph
+        std::array<int, 4> a = { 1, 2, 3, 4 };
+        std::array<int, 4> b = { 10, 10, 10, 10 };
+
+        int                r = 0;
+        for (int i = 0; i < 4; ++i) {
+            auto tuple = merged.process_one(a[i]);
+            auto [r1, r2, r3, r4] = tuple;
+            fmt::print("{} {} {} {} \n", r1, r2, r3, r4);
+        }
+    }
+
+    {
+        auto merged = merge<1,0>(merge<0, 0>(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
+
+        // execute graph
+        std::array<int, 4> a = { 1, 2, 3, 4 };
+        std::array<int, 4> b = { 10, 10, 10, 10 };
+
+        int                r = 0;
+        for (int i = 0; i < 4; ++i) {
+            auto tuple = merged.process_one(a[i]);
+            auto [r1, r2, r3, r4] = tuple;
+            fmt::print("{} {} {} {} \n", r1, r2, r3, r4);
+        }
+    }
+
 }
