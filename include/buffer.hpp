@@ -57,6 +57,7 @@ concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
     { t.consume(n_items) } -> std::same_as<bool>;
     { t.position() }       -> std::same_as<std::int64_t>;
     { t.available() }      -> std::same_as<std::size_t>;
+    { t.buffer() };
 };
 
 template<class Fn, typename T, typename ...Args>
@@ -69,6 +70,7 @@ concept BufferWriter = requires(T t, const std::size_t n_items, Args ...args) {
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
     { t.available() }         -> std::same_as<std::size_t>;
+    { t.buffer() };
 };
 
 template<class T, typename ...Args>

@@ -36,6 +36,11 @@ const boost::ut::suite BasicConceptsTests = [] {
         BufferReader auto reader = buffer.new_reader(); // tests matching read concept
         BufferWriter auto writer = buffer.new_writer(); // tests matching write concept
 
+        static_assert(std::is_same_v<decltype(reader.buffer().new_reader()), decltype(reader)>);
+        static_assert(std::is_same_v<decltype(reader.buffer().new_writer()), decltype(writer)>);
+        static_assert(std::is_same_v<decltype(writer.buffer().new_writer()), decltype(writer)>);
+        static_assert(std::is_same_v<decltype(writer.buffer().new_reader()), decltype(reader)>);
+
         // runtime interface tests
         expect(eq(reader.available(), 0));
         expect(eq(reader.position(), -1));
@@ -237,7 +242,9 @@ const boost::ut::suite CircularBufferTests = [] {
         expect(ge(buffer.size(), 1024));
 
         BufferWriter auto writer = buffer.new_writer();
+        expect(nothrow([&writer] { expect(eq(writer.buffer().n_readers(), 0)); })); // no reader, just writer
         BufferReader auto reader = buffer.new_reader();
+        expect(nothrow([&reader] { expect(eq(reader.buffer().n_readers(), 1)); })); // created one reader
 
         int offset = 1;
         auto lambda = [&offset](auto w) {
