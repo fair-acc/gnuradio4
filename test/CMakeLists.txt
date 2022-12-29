@@ -6,4 +6,6 @@ target_link_libraries(qa_buffer PRIVATE fmt ut)
 
 add_executable(qa_port qa_port.cpp)
 target_include_directories(qa_port INTERFACE ../include)
+target_compile_options(qa_port PRIVATE -fsanitize=address -Wall)
+target_link_options(qa_port PRIVATE -fsanitize=address -Wall)
 target_link_libraries(qa_port PRIVATE fmt refl-cpp ut)
