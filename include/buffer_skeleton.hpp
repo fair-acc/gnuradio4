@@ -39,6 +39,8 @@ class buffer_skeleton
         friend buffer_skeleton<T>;
 
     public:
+        [[nodiscard]] buffer_skeleton buffer() const noexcept { return buffer_skeleton(_buffer); };
+
         template <bool strict_check = true>
         [[nodiscard]] std::span<const U> get(const std::size_t n_requested = 0) const
             noexcept(!strict_check)
@@ -67,6 +69,8 @@ class buffer_skeleton
         friend buffer_skeleton<T>;
 
     public:
+        [[nodiscard]] buffer_skeleton buffer() const noexcept { return buffer_skeleton(_buffer); };
+
         template <typename... Args, WriterCallback<U, Args...> Translator>
         void publish(Translator&& translator,
                      std::size_t /* n_slots_to_claim = 1 */,
@@ -89,6 +93,7 @@ class buffer_skeleton
     // shared pointer is needed to avoid dangling references to reader/writer
     // or generating buffer itself
     std::shared_ptr<buffer_impl> _shared_buffer_ptr;
+    buffer_skeleton(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
     buffer_skeleton() = delete;

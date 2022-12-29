@@ -217,11 +217,10 @@ class circular_buffer
 
     template <typename U = T>
     class buffer_writer {
-        using BufferType = std::shared_ptr<buffer_impl>;
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
-        alignas(kCacheLine) BufferType                  _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         alignas(kCacheLine) bool                        _is_mmap_allocated;
-        alignas(kCacheLine) DependendsType&             _read_indices;
         alignas(kCacheLine) std::size_t                 _size;
         alignas(kCacheLine) std::vector<U, Allocator>*  _data;
         alignas(kCacheLine) ClaimType*                  _claim_strategy;
@@ -229,12 +228,11 @@ class circular_buffer
     public:
         buffer_writer() = delete;
         buffer_writer(std::shared_ptr<buffer_impl> buffer) :
-            _buffer(buffer), _is_mmap_allocated(_buffer->_is_mmap_allocated), _read_indices(buffer->_read_indices),
-            _size(buffer->_size), _data(std::addressof(buffer->_data)), _claim_strategy(std::addressof(buffer->_claim_strategy)) { };
+            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
+            _size(_buffer->_size), _data(std::addressof(_buffer->_data)), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
         buffer_writer(buffer_writer&& other)
             : _buffer(std::move(other._buffer))
             , _is_mmap_allocated(_buffer->_is_mmap_allocated)
-            , _read_indices(_buffer->_read_indices)
             , _size(_buffer->_size)
             , _data(std::addressof(_buffer->_data))
             , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
@@ -243,29 +241,29 @@ class circular_buffer
             _is_mmap_allocated = _buffer->_is_mmap_allocated;
             _size = _buffer->_size;
             _data = std::addressof(_buffer->_data);
-            _read_indices = _buffer->_read_indices;
             _claim_strategy = std::addressof(_buffer->_claim_strategy);
 
             return *this;
         }
 
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _read_indices->empty()) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
                 return;
             }
-            const auto sequence = _claim_strategy->next(*_read_indices, n_slots_to_claim);
+            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
             translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
         }; // blocks until elements are available
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _read_indices->empty()) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
                 return true;
             }
             try {
-                const auto sequence = _claim_strategy->tryNext(*_read_indices, n_slots_to_claim);
+                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
                 translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
                 return true;
             } catch (const NoCapacityException &) {
@@ -274,7 +272,7 @@ class circular_buffer
         };
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _claim_strategy->getRemainingCapacity(*_read_indices);
+            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
         }
 
         private:
@@ -310,11 +308,11 @@ class circular_buffer
     template<typename U = T>
     class buffer_reader
     {
-        using BufferType = std::shared_ptr<buffer_impl>;
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
         alignas(kCacheLine) std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
         alignas(kCacheLine) std::int64_t                _read_index_cached;
-        alignas(kCacheLine) BufferType                  _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         alignas(kCacheLine) std::size_t                 _size;
         alignas(kCacheLine) std::vector<U, Allocator>*  _data;
 
@@ -327,7 +325,7 @@ class circular_buffer
         }
         buffer_reader(buffer_reader&& other)
             : _read_index(std::move(other._read_index))
-            , _read_index_cached(std::exchange(other._read_index_cached, 0))
+            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
             , _buffer(other._buffer)
             , _size(_buffer->_size)
             , _data(std::addressof(_buffer->_data)) {
@@ -341,6 +339,8 @@ class circular_buffer
             return *this;
         };
         ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
@@ -383,6 +383,7 @@ class circular_buffer
     }
 
     std::shared_ptr<buffer_impl> _shared_buffer_ptr;
+    circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
     circular_buffer() = delete;
