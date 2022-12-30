@@ -34,6 +34,8 @@ if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     enable_testing()
     message("Building Tests.")
     add_subdirectory(test)
+    message("Building Benchmarks.")
+    add_subdirectory(bench)
 endif ()
 
 add_subdirectory(include)
