@@ -16,6 +16,14 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 
+#if __has_include(<unistd.h>)  && __has_include(<sys/ioctl.h>)  && __has_include(<sys/syscall.h>) && __has_include(<linux/perf_event.h>)
+#define HAS_LINUX_PERFORMANCE_HEADER
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <linux/perf_event.h>
+#endif
+
 namespace benchmark {
 #if defined(__GNUC__) || defined(__clang__)
 #define BENCHMARK_ALWAYS_INLINE __attribute__((always_inline))
@@ -55,6 +63,162 @@ namespace benchmark {
     }
 #pragma optimize("", on)
 #endif
+
+#ifdef HAS_LINUX_PERFORMANCE_HEADER
+    /**
+     * A short and sweet performance counter (only works on Linux)
+     */
+    class PerformanceCounter {
+        static bool _has_required_rights;
+        int _fd_misses;
+        int _fd_accesses;
+        int _fd_branch_misses;
+        int _fd_branch;
+        int _fd_instructions;
+        constexpr static std::string_view _sys_error_message =
+R"(You may not have permission to collect perf stats data.
+Consider tweaking /proc/sys/kernel/perf_event_paranoid:
+ -1 - Not paranoid at all
+  0 - Disallow raw tracepoint access for unpriv
+  1 - Disallow cpu events for unpriv
+  2 - Disallow kernel profiling for unpriv
+quick_fix: sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid'
+for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
+        static void print_access_right_msg(std::string_view msg) noexcept {
+            fmt::print(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
+            _has_required_rights = false;
+            std::cerr << std::endl;
+            fmt::print(_sys_error_message);
+            std::cout << std::endl;
+        }
+
+    public:
+        PerformanceCounter() {
+            constexpr static int PROCESS = 0; // 0: calling process
+            constexpr static int ANY_CPU = -1;
+            constexpr static int FLAGS = PERF_FLAG_FD_CLOEXEC;
+            if (!_has_required_rights) {
+                return;
+            }
+
+
+            perf_event_attr attr{};
+            attr.type = PERF_TYPE_HARDWARE;
+            attr.disabled = 1;
+            attr.exclude_kernel = 1;
+            attr.exclude_hv = 1;
+
+            // cache prediction metric
+            attr.config = PERF_COUNT_HW_CACHE_MISSES;
+            _fd_misses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
+            if (_fd_misses == -1) {
+                print_access_right_msg("could not open SYS_perf_event_open -- misses");
+                return;
+            }
+
+            attr.config = PERF_COUNT_HW_CACHE_REFERENCES;
+            _fd_accesses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
+            if (_fd_accesses == -1) {
+                print_access_right_msg("could not open SYS_perf_event_open -- accesses");
+                return;
+            }
+
+            // branch prediction metric
+            attr.config = PERF_COUNT_HW_BRANCH_MISSES;
+            _fd_branch_misses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
+            if (_fd_branch_misses == -1) {
+                print_access_right_msg("could not open SYS_perf_event_open -- branch misses");
+                return;
+            }
+
+            attr.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
+            _fd_branch = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
+            if (_fd_branch == -1) {
+                print_access_right_msg("could not open SYS_perf_event_open -- branch accesses");
+                return;
+            }
+
+            // instruction count metric
+            attr.config = PERF_COUNT_HW_INSTRUCTIONS;
+            _fd_instructions = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses,
+                                                        FLAGS));
+            if (_fd_instructions == -1) {
+                print_access_right_msg("could not open SYS_perf_event_open -- instruction count");
+                return;
+            }
+
+
+            if (ioctl(_fd_misses, PERF_EVENT_IOC_ENABLE) == -1 ||
+                ioctl(_fd_accesses, PERF_EVENT_IOC_ENABLE) == -1 ||
+                ioctl(_fd_branch_misses, PERF_EVENT_IOC_ENABLE) == -1 ||
+                ioctl(_fd_branch, PERF_EVENT_IOC_ENABLE) == -1 ||
+                ioctl(_fd_instructions, PERF_EVENT_IOC_ENABLE) == -1) {
+                print_access_right_msg("could not PERF_EVENT_IOC_ENABLE");
+                return;
+            }
+        }
+
+        ~PerformanceCounter() {
+            if (_has_required_rights && (ioctl(_fd_misses, PERF_EVENT_IOC_DISABLE) == -1 ||
+                ioctl(_fd_accesses, PERF_EVENT_IOC_DISABLE) == -1 ||
+                ioctl(_fd_branch_misses, PERF_EVENT_IOC_DISABLE) == -1 ||
+                ioctl(_fd_branch, PERF_EVENT_IOC_DISABLE) == -1 ||
+                ioctl(_fd_instructions, PERF_EVENT_IOC_DISABLE) == -1)) {
+                print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
+            }
+            close(_fd_misses);
+            close(_fd_accesses);
+            close(_fd_branch_misses);
+            close(_fd_branch);
+            close(_fd_instructions);
+        }
+
+        [[nodiscard]] static bool available() noexcept {
+            return _has_required_rights;
+        }
+
+        /**
+         * @return Linux HW/CPU performance counter, best consumed as:
+         * @code auto [misses, accesses, branch_misses, branch_total, instructions] = execMetrics.results();
+         */
+        [[nodiscard]] auto results() const noexcept -> std::tuple<uint64_t, uint64_t, uint64_t, uint64_t, uint64_t> {
+            if (!_has_required_rights) {
+                return {0U, 0U, 0U, 0U, 0U};
+            }
+            uint64_t misses;
+            uint64_t accesses;
+            uint64_t branch_misses;
+            uint64_t branch_accesses;
+            uint64_t instructions;
+            if (read(_fd_misses, &misses, sizeof(misses)) != sizeof(misses) ||
+                read(_fd_accesses, &accesses, sizeof(accesses)) != sizeof(accesses) ||
+                read(_fd_branch_misses, &branch_misses, sizeof(branch_misses)) != sizeof(branch_misses) ||
+                read(_fd_branch, &branch_accesses, sizeof(branch_accesses)) != sizeof(branch_accesses) ||
+                read(_fd_instructions, &instructions, sizeof(instructions)) != sizeof(instructions)) {
+                return {0U, 0U, 0U, 0U, 0U};
+            }
+            return {misses, accesses, branch_misses, branch_accesses, instructions};
+        }
+    };
+    inline bool PerformanceCounter::_has_required_rights = true;
+#else
+
+    class PerformanceCounter {
+    public:
+        [[nodiscard]] constexpr static bool available() noexcept {
+            return false;
+        }
+
+        /**
+        * This OS is not supported
+        */
+        [[nodiscard]] auto results() const noexcept -> std::tuple<uint64_t, uint64_t, uint64_t, uint64_t, uint64_t> {
+            return {0U, 0U, 0U, 0U, 0U};
+        }
+    };
+
+#endif
+
 
     namespace ut = boost::ut;
 
@@ -183,7 +347,7 @@ namespace benchmark {
         }
 
         template<std::size_t SIGNIFICANT_DIGITS = 3>
-        static void print() noexcept {
+        static void print() {
             if (data.empty()) {
                 fmt::print("no benchmark tests executed\n");
             }
@@ -210,7 +374,7 @@ namespace benchmark {
                     } else if (std::holds_alternative<std::string>(value)) {
                         value_size = fmt::format("{}", std::get<std::string>(value)).size();
                     } else {
-                        throw std::invalid_argument("unhandled ResultMap type");
+                        throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
                     }
                     metric_keys.at(metric_key) = std::max(metric_keys.at(metric_key), value_size);
                 }
@@ -286,7 +450,7 @@ namespace benchmark {
         constexpr std::array<T, N> diff(const std::array<time_point, N> stop, time_point start) {
             std::array<T, N> ret;
             for (int i = 0; i < N; i++) {
-                ret[i] = static_cast<T>((stop[i] - start).count());
+                ret[i] = 1e-9 * static_cast<T>((stop[i] - start).count());
                 start = stop[i];
             }
             return ret;
@@ -296,7 +460,7 @@ namespace benchmark {
         constexpr std::array<T, N> diff(const std::array<time_point, N> &stop, const std::array<time_point, N> &start) {
             std::array<T, N> ret;
             for (int i = 0; i < N; i++) {
-                ret[i] = static_cast<T>((stop[i] - start[i]).count());
+                ret[i] = 1e-9 * static_cast<T>((stop[i] - start[i]).count());
             }
             return ret;
         }
@@ -338,13 +502,14 @@ namespace benchmark {
         concept Numeric = std::is_integral_v<T> || std::is_floating_point_v<T>;
 
         template<Numeric T>
-        std::string to_si_string(T value_n, std::string_view unit = "s", std::size_t significant_digits = 1) {
-            static constexpr std::array si_prefixes{'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P',
-                                                 'E', 'Z', 'Y'};
+        std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
+            static constexpr std::array si_prefixes{'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T',
+                                                    'P',
+                                                    'E', 'Z', 'Y'};
             static constexpr double base = 1000.0;
-            long double value = value_n;
+            long double value = value_base;
 
-            std::size_t exponent = 5;
+            std::size_t exponent = 8;
             while (value >= base && exponent < si_prefixes.size()) {
                 value /= base;
                 ++exponent;
@@ -354,7 +519,8 @@ namespace benchmark {
                 --exponent;
             }
 
-            return fmt::format("{:.{}f} {}{}", value, significant_digits, si_prefixes[exponent], unit);
+            return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ",
+                               si_prefixes[exponent], unit);
         }
 
 
@@ -453,7 +619,7 @@ namespace benchmark {
         //template<fixed_string ...meas_marker, Callback<meas_marker...> Test>
         constexpr benchmark &operator=(TestFunction &&_test) {
             static_cast<ut::detail::test &>(*this) = [&_test, this] {
-                using ::benchmark::utils::to_si_string;
+                using ::benchmark::utils::to_si_prefix;
                 auto &result_map = ResultType::add_result(name);
                 if constexpr (n_iterations != 1) {
                     result_map.try_emplace("n-iter", fmt::format("{}", n_iterations));
@@ -463,6 +629,8 @@ namespace benchmark {
 
                 std::array<time_point, n_iterations> stop_iter;
                 auto marker_iter = get_marker_array<TestFunction>();
+
+                PerformanceCounter execMetrics;
                 const auto start = time_point().now();
 
                 if constexpr (n_iterations == 1) {
@@ -484,23 +652,26 @@ namespace benchmark {
                 } else {
                     throw std::invalid_argument("benchmark n_iteration := 0 parameter not (yet) implemented");
                 }
+                // N.B. need to retrieve CPU performance count here no to spoil the result by further post-processing
+                auto [misses, accesses, branch_misses, branch_total, instructions] = execMetrics.results();
 
+                // not time-critical post-processing starts here
                 const auto time_differences_ns = utils::diff<long double>(stop_iter, start);
                 const auto ns = stop_iter[n_iterations - 1] - start;
-                const long double duration_ns = static_cast<long double>(ns.count()) / n_iterations;
+                const long double duration_s = 1e-9 * static_cast<long double>(ns.count()) / n_iterations;
 
-                const auto add_statistics = [&time_differences_ns]<typename T>(ResultMap &map, const T &time_diff) {
+                const auto add_statistics = []<typename T>(ResultMap &map, const T &time_diff) {
                     if constexpr (n_iterations != 1) {
                         const auto [min, mean, stddev, median, max] = utils::compute_statistics(time_diff);
-                        map.try_emplace("min", to_si_string(min));
-                        map.try_emplace("mean", to_si_string(mean));
+                        map.try_emplace("min", to_si_prefix(min));
+                        map.try_emplace("mean", to_si_prefix(mean));
                         if (stddev == 0) {
                             map.try_emplace("stddev", "");
                         } else {
-                            map.try_emplace("stddev", to_si_string(stddev));
+                            map.try_emplace("stddev", to_si_prefix(stddev));
                         }
-                        map.try_emplace("median", to_si_string(median));
-                        map.try_emplace("max", to_si_string(max));
+                        map.try_emplace("median", to_si_prefix(median));
+                        map.try_emplace("max", to_si_prefix(max));
                     } else {
                         map.try_emplace("min", "");
                         map.try_emplace("mean", "");
@@ -511,8 +682,24 @@ namespace benchmark {
                 };
                 add_statistics(result_map, time_differences_ns);
 
-                result_map.try_emplace("total time: ", to_si_string(duration_ns));
-                result_map.try_emplace("ops/s", to_si_string(1e18 / duration_ns, "", 2));
+
+                if (PerformanceCounter::available()) {
+                    const long double cache_ratio =
+                            100 * static_cast<long double>(misses) / static_cast<long double>(accesses);
+                    result_map.try_emplace("CPU cache misses",
+                                           fmt::format("({}, {}, {:4.1f} %)", to_si_prefix(misses, "", 0),
+                                                       to_si_prefix(accesses, "", 0), cache_ratio));
+                    const long double branch_ratio =
+                            100 * static_cast<long double>(branch_misses) / static_cast<long double>(branch_total);
+                    result_map.try_emplace("CPU branch misses",
+                                           fmt::format("({}, {}, {:4.1f} %)", to_si_prefix(branch_misses, "", 0),
+                                                       to_si_prefix(branch_total, "", 0), branch_ratio));
+                    result_map.try_emplace("CPU-I",
+                                           fmt::format("{}", to_si_prefix(instructions / n_iterations, "", 0)));
+                }
+
+                result_map.try_emplace("total time: ", to_si_prefix(duration_s));
+                result_map.try_emplace("ops/s", to_si_prefix(1.0 / duration_s, "", 2));
 
                 if constexpr (MARKER_SIZE > 0) {
                     auto transposed_map = utils::convert(marker_iter);
@@ -525,6 +712,12 @@ namespace benchmark {
                             marker_result_map.try_emplace("n-iter", "");
                             add_statistics(marker_result_map, utils::diff<long double>(transposed_map[keyID].second,
                                                                                        transposed_map[0].second));
+                            // add zero info to not duplicate the results from the superordinate benchmark
+                            if (PerformanceCounter::available()) {
+                                result_map.try_emplace("CPU cache misses", "");
+                                result_map.try_emplace("CPU branch misses", "");
+                                result_map.try_emplace("CPU-I", "");
+                            }
                             result_map.try_emplace("total time: ", "");
                             result_map.try_emplace("ops/s", "");
                         }
