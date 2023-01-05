@@ -272,8 +272,20 @@ static_assert(Port<OUT_MSG<float, "out_msg">>);
 static_assert(IN<float, "in">::static_name() == fixed_string("in"));
 static_assert(requires { IN<float>("in").name(); });
 
+/**
+ *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
+ *  initialisation/connections between blocks that are not in the same compilation unit.
+ *  Ownership is defined by if the strongly-typed port P is either passed
+ *  a) as an lvalue (i.e. P& -> keep reference), or
+ *  b) as an rvalue (P&& -> being moved into dyn_port).
+ *
+ *  N.B. the intended use is within the node/block interface where there is -- once initialised --
+ *  always a strong-reference between the strongly-typed port and it's dyn_port wrapper. I.e no ports
+ *  are added or removed after the initialisation and the port life-time is coupled to that of it's
+ *  parent block/node.
+ */
 class dyn_port {
-    struct model {
+    struct model { // intentionally class-private definition to limit interface exposure and enhance composition
         virtual ~model() = default;
 
         [[nodiscard]] virtual supported_type pmt_type() const noexcept = 0;
@@ -290,44 +302,40 @@ class dyn_port {
 
     std::unique_ptr<model> _accessor;
 
-    template<Port T>
+    template<Port T, bool owning>
     class wrapper final : public model {
         using PortType = std::decay_t<T>;
-        PortType _value; // N.B. only initialised when dyn_port is initialised with an rvalue
-        PortType& _value_ref;
+        std::conditional_t<owning, PortType, PortType&> _value;
 
-        [[nodiscard]] void* writer_handler_internal() noexcept { return _value_ref.writer_handler_internal(); };
+        [[nodiscard]] void* writer_handler_internal() noexcept { return _value.writer_handler_internal(); };
         [[nodiscard]] bool update_reader_internal(void* buffer_other) noexcept override {
-            return _value_ref.update_reader_internal(buffer_other);
+            return _value.update_reader_internal(buffer_other);
         }
 
     public:
-        template<Port P>
-        explicit constexpr wrapper(P &arg) noexcept : _value_ref{ arg } {
-            if constexpr (P::IS_INPUT) {
+        explicit constexpr wrapper(T &arg) noexcept : _value{ arg } {
+            if constexpr (T::IS_INPUT) {
                 static_assert(requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
             } else {
                 static_assert(requires { arg.update_reader_internal(std::declval<void*>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
             }
         }
-        template<Port P>
-        explicit constexpr wrapper(P &&arg) noexcept : _value{ std::forward<P>(arg)}, _value_ref{ _value } {
-            if constexpr (P::IS_INPUT) {
+        explicit constexpr wrapper(T &&arg) noexcept : _value{ std::move(arg)} {
+            if constexpr (T::IS_INPUT) {
                 static_assert(requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
             } else {
                 static_assert(requires { arg.update_reader_internal(std::declval<void*>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
             }
-            // N.B. we keep a reference if ports have been passed as rvalue
         }
         ~wrapper() override = default;
-        [[nodiscard]] constexpr supported_type pmt_type() const noexcept override { return _value_ref.pmt_type(); }
-        [[nodiscard]] constexpr port_type_t type() const noexcept override { return _value_ref.type(); }
-        [[nodiscard]] constexpr port_direction_t direction() const noexcept override { return _value_ref.direction(); }
-        [[nodiscard]] constexpr std::string_view name() const noexcept override {  return _value_ref.name(); }
-        [[nodiscard]] connection_result_t resize_buffer(std::size_t min_size) noexcept override {  return _value_ref.resize_buffer(min_size); }
-        [[nodiscard]] connection_result_t disconnect() noexcept override {  return _value_ref.disconnect(); }
+        [[nodiscard]] constexpr supported_type pmt_type() const noexcept override { return _value.pmt_type(); }
+        [[nodiscard]] constexpr port_type_t type() const noexcept override { return _value.type(); }
+        [[nodiscard]] constexpr port_direction_t direction() const noexcept override { return _value.direction(); }
+        [[nodiscard]] constexpr std::string_view name() const noexcept override {  return _value.name(); }
+        [[nodiscard]] connection_result_t resize_buffer(std::size_t min_size) noexcept override {  return _value.resize_buffer(min_size); }
+        [[nodiscard]] connection_result_t disconnect() noexcept override {  return _value.disconnect(); }
         [[nodiscard]] connection_result_t connect(dyn_port& dst_port) noexcept override {
-            auto src_buffer = _value_ref.writer_handler_internal();
+            auto src_buffer = _value.writer_handler_internal();
             return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS: connection_result_t::FAILED;
         }
     };
@@ -335,14 +343,14 @@ class dyn_port {
     bool update_reader_internal(void* buffer_other)  noexcept { return _accessor->update_reader_internal(buffer_other); }
 
 public:
-    using value_type = void;
+    using value_type = void; // a sterile port
     constexpr dyn_port() = delete;
     template<Port T>
     constexpr dyn_port(const T &arg) = delete;
     template<Port T>
-    explicit constexpr dyn_port(T &arg) noexcept : _accessor{ std::make_unique<wrapper<T>>(arg) } {}
+    explicit constexpr dyn_port(T &arg) noexcept : _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
     template<Port T>
-    explicit constexpr dyn_port(T &&arg) noexcept : _accessor{ std::make_unique<wrapper<T>>(std::forward<T>(arg)) } {}
+    explicit constexpr dyn_port(T &&arg) noexcept : _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
 
     [[nodiscard]] supported_type pmt_type() const noexcept { return _accessor->pmt_type(); }
     [[nodiscard]] port_type_t type() const noexcept { return _accessor->type(); }
