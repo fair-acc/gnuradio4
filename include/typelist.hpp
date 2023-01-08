@@ -7,6 +7,11 @@
 #include <type_traits>
 
 namespace fair::meta {
+
+template<typename... Ts>
+struct print_types;
+
+
 template<typename... Ts>
 struct typelist;
 
@@ -218,9 +223,13 @@ template<template<typename, typename> class Method, typename List>
 using reduce = typename detail::reduce_impl<Method, List>::type;
 
 // typelist /////////////////
+template<typename T>
+concept is_typelist_v = requires { typename T::typelist_tag; };
+
 template<typename... Ts>
 struct typelist {
     using this_t = typelist<Ts...>;
+    using typelist_tag = std::true_type;
 
     static inline constexpr std::integral_constant<int, sizeof...(Ts)> size = {};
 
@@ -250,11 +259,27 @@ struct typelist {
                 std::forward<Tup>(args_tuple));
     }
 
-    template <template <typename> typename Trafo>
+    template<template<typename> typename Trafo>
     using transform = meta::transform_types<Trafo, this_t>;
 
-    template <template <typename...> typename Pred>
+    template<template<typename...> typename Pred>
     constexpr static bool all_of = (Pred<Ts>::value && ...);
+
+    template<template<typename...> typename Pred>
+    constexpr static bool none_of = (!Pred<Ts>::value && ...);
+
+    template<template<typename...> typename Predicate>
+    using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
+
+    using tuple_type    = std::tuple<Ts...>;
+    using tuple_or_type = std::remove_pointer_t<decltype(
+            [] {
+                if constexpr (sizeof...(Ts) == 1) {
+                    return static_cast<at<0>*>(nullptr);
+                } else {
+                    return static_cast<tuple_type*>(nullptr);
+                }
+            }())>;
 
 };
 } // namespace fair::meta

@@ -5,10 +5,11 @@
 
 #include "graph.hpp"
 
+namespace fg = fair::graph;
+
 template<typename T, int Depth>
     requires(Depth > 0)
-class delay : public fair::graph::node<delay<T, Depth>, fair::graph::make_input_ports<T>,
-                                       fair::graph::make_output_ports<T>> {
+class delay : public fg::node<delay<T, Depth>, fg::in<"in", T>, fg::out<"out", T>> {
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
@@ -26,24 +27,16 @@ public:
     }
 };
 
-namespace detail {
-template<typename T, auto>
-using just_t = T;
-
-template<typename T, std::size_t... Is>
-consteval fair::graph::make_output_ports<just_t<T, Is>...>
-make_multiple_output_ports(std::index_sequence<Is...>) {
-    return {};
-}
-} // namespace detail
-
 template<typename T, int Count = 2>
-class duplicate : public fair::graph::node<duplicate<T, Count>, fair::graph::make_input_ports<T>,
-                                           decltype(detail::make_multiple_output_ports<T>(
-                                                   std::make_index_sequence<Count>()))> {
-    using base = fair::graph::node<duplicate<T, Count>, fair::graph::make_input_ports<T>,
-                                   decltype(detail::make_multiple_output_ports<T>(
-                                           std::make_index_sequence<Count>()))>;
+class duplicate : public fg::node<
+                             duplicate<T, Count>,
+                             fair::meta::typelist<fg::in<"in", T>>,
+                             fg::repeated_ports<Count, fg::port_direction::out, "out", T>> {
+
+    using base = fg::node<
+                     duplicate<T, Count>,
+                     fair::meta::typelist<fg::in<"in", T>>,
+                     fg::repeated_ports<Count, fg::port_direction::out, "out", T>>;
 
 public:
     using return_type = typename base::return_type;
@@ -57,10 +50,9 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fair::graph::node<adder<T>, fair::graph::make_input_ports<T, T>,
-                                       fair::graph::make_output_ports<R>> {
+class adder : public fg::node<adder<T>, fg::in<"addend0", T>, fg::in<"addend1", T>, fg::out<"sum", R>> {
 public:
-    template<fair::graph::detail::t_or_simd<T> V>
+    template<fg::detail::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
         return a + b;
@@ -68,10 +60,9 @@ public:
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fair::graph::node<scale<T, Scale, R>, fair::graph::make_input_ports<T>,
-                                       fair::graph::make_output_ports<R>> {
+class scale : public fg::node<scale<T, Scale, R>, fg::in<"original", T>, fg::out<"scaled", R>> {
 public:
-    template<fair::graph::detail::t_or_simd<T> V>
+    template<fg::detail::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
         return a * Scale;
@@ -80,11 +71,12 @@ public:
 
 int
 main() {
-    using fair::graph::merge;
+    using fg::merge_by_index;
+    using fg::merge;
 
     {
         // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
-        auto merged = merge<0, 0>(scale<int, -1>(), merge<0, 0>(scale<int, 2>(), adder<int>()));
+        auto merged = merge_by_index<0, 0>(scale<int, -1>(), merge_by_index<0, 0>(scale<int, 2>(), adder<int>()));
 
         // execute graph
         std::array<int, 4> a = { 1, 2, 3, 4 };
@@ -101,8 +93,39 @@ main() {
     }
 
     {
-        // auto merged = merge<0, 0>(duplicate<int, 2>(), scale<int, 2>());
-        auto merged = merge<0, 0>(duplicate<int, 4>(), scale<int, 2>());
+        auto merged = merge_by_index<0, 0>(duplicate<int, 2>(), scale<int, 2>());
+
+        // execute graph
+        std::array<int, 4> a = { 1, 2, 3, 4 };
+        std::array<int, 4> b = { 10, 10, 10, 10 };
+
+        int                r = 0;
+        for (int i = 0; i < 4; ++i) {
+            auto tuple = merged.process_one(a[i]);
+            auto [r1, r2] = tuple;
+            fmt::print("{} {} \n", r1, r2);
+        }
+    }
+
+    {
+        auto merged = merge<"scaled", "addend1">(scale<int, 2>(), adder<int>());
+
+        // execute graph
+        std::array<int, 4> a = { 1, 2, 3, 4 };
+        std::array<int, 4> b = { 10, 10, 10, 10 };
+
+        int                r = 0;
+        for (int i = 0; i < 4; ++i) {
+            r += merged.process_one(a[i], b[i]);
+        }
+
+        fmt::print("Result of graph execution: {}\n", r);
+
+        assert(r == 60);
+    }
+
+    {
+        auto merged = merge_by_index<1,0>(merge_by_index<0, 0>(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
 
         // execute graph
         std::array<int, 4> a = { 1, 2, 3, 4 };
@@ -117,18 +140,7 @@ main() {
     }
 
     {
-        auto merged = merge<1,0>(merge<0, 0>(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
-
-        // execute graph
-        std::array<int, 4> a = { 1, 2, 3, 4 };
-        std::array<int, 4> b = { 10, 10, 10, 10 };
-
-        int                r = 0;
-        for (int i = 0; i < 4; ++i) {
-            auto tuple = merged.process_one(a[i]);
-            auto [r1, r2, r3, r4] = tuple;
-            fmt::print("{} {} {} {} \n", r1, r2, r3, r4);
-        }
+        auto delayed = delay<int, 2>{};
     }
 
 }
