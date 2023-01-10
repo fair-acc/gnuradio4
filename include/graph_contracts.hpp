@@ -313,6 +313,10 @@ class dyn_port {
         }
 
     public:
+        wrapper() = delete;
+        wrapper(const T&) = delete;
+        auto& operator=(const T&) = delete;
+        auto& operator=(T&&) = delete;
         explicit constexpr wrapper(T &arg) noexcept : _value{ arg } {
             if constexpr (T::IS_INPUT) {
                 static_assert(requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
