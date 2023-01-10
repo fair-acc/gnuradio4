@@ -3,11 +3,6 @@
 
 #include <barrier>
 #include <thread>
-#include <fmt/ranges.h>
-
-#include "buffer.hpp"
-#include "graph_contracts.hpp"
-#include "refl.hpp"
 
 const boost::ut::suite global_benchmarks = [] {
     using namespace benchmark;
@@ -18,14 +13,12 @@ const boost::ut::suite global_benchmarks = [] {
     };
 
     "string creation3"_benchmark = [] {
-        std::string created_string;
-        created_string = "hello";
+        std::string created_string = "hello";
         do_not_optimize(created_string);
     };
 
     "string creation4"_benchmark.repeat<10'000>() = [] {
-        std::string created_string;
-        created_string = "hello";
+        std::string created_string = "hello";
         do_not_optimize(created_string);
     };
 
