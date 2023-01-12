@@ -79,7 +79,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
 #ifdef HAS_POSIX_MAP_INTERFACE
         const std::size_t size = 2 * required_size;
-        if (size % 2 != 0 || size % getpagesize() != 0) {
+        if (size % 2LU != 0LU || size % static_cast<std::size_t>(getpagesize()) != 0LU) {
             throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
         const std::size_t size_half = size/2;
@@ -106,13 +106,13 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         }
 
         // unmap the 2nd half
-        if (munmap((char*)first_copy + size_half, size_half) == -1) {
+        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
             close(shm_fd);
             throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
         // map the first half into the now available hole where the
-        if (const void* second_copy = mmap((char*)first_copy + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, (off_t)0); second_copy == MAP_FAILED) {
+        if (const void* second_copy = mmap(static_cast<char*> (first_copy) + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); second_copy == MAP_FAILED) {
             close(shm_fd);
             throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
         }
@@ -282,7 +282,7 @@ class circular_buffer
             }
             const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
             translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-        }; // blocks until elements are available
+        } // blocks until elements are available
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
@@ -296,7 +296,7 @@ class circular_buffer
             } catch (const NoCapacityException &) {
                 return false;
             }
-        };
+        }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
             return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
