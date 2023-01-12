@@ -1,2 +1,11 @@
-add_executable(bm_case1 bm_case1.cpp)
-target_link_libraries(bm_case1 PRIVATE core refl-cpp fmt ut)
+include_directories("../include")
+
+function(add_benchmark BM_NAME)
+    add_executable(${BM_NAME} ${BM_NAME}.cpp)
+    target_compile_options(${BM_NAME} PRIVATE -Wall -march=native)
+    target_link_options(${BM_NAME} PRIVATE -Wall -march=native)
+    target_link_libraries(${BM_NAME} PRIVATE core refl-cpp fmt ut)
+endfunction()
+
+add_benchmark(bm_case0)
+add_benchmark(bm_case1)

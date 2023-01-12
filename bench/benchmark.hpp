@@ -298,7 +298,7 @@ struct fixed_string {
 
     [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
 
-    [[nodiscard]]                    operator const char *() const noexcept { return _data; }
+    [[nodiscard]]          operator const char *() const noexcept { return _data; }
 
     [[nodiscard]] constexpr bool
     operator==(const fixed_string &other) const noexcept {
@@ -327,7 +327,7 @@ constexpr bool key_not_found = false;
  */
 template<typename Value, fixed_string... Keys>
 class const_key_map {
-    constexpr static std::size_t SIZE = sizeof...(Keys);
+    constexpr static std::size_t                              SIZE  = sizeof...(Keys);
     constexpr static std::array<const std::string_view, SIZE> _keys = { std::string_view(Keys)... };
     std::array<Value, SIZE>                                   _storage;
 
@@ -427,7 +427,7 @@ struct StatisticsType {
 };
 
 struct StringHash {
-    using is_transparent = void; // enables heterogenous lookup
+    using is_transparent = void; // enables heterogeneous lookup
 
     std::size_t
     operator()(std::string_view sv) const {
@@ -484,10 +484,11 @@ public:
 
 namespace utils {
 
-template<typename T, std::size_t N>
-constexpr std::array<T, N>
-diff(const std::array<time_point, N> stop, time_point start) {
-    std::array<T, N> ret;
+template<std::size_t N, typename T>
+requires (N > 0)
+constexpr std::vector<T>
+diff(const std::vector<time_point>& stop, time_point start) {
+    std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9 * static_cast<T>((stop[i] - start).count());
         start  = stop[i];
@@ -495,25 +496,27 @@ diff(const std::array<time_point, N> stop, time_point start) {
     return ret;
 }
 
-template<typename T, std::size_t N>
-constexpr std::array<T, N>
-diff(const std::array<time_point, N> &stop, const std::array<time_point, N> &start) {
-    std::array<T, N> ret;
+template<std::size_t N, typename T>
+requires (N > 0)
+constexpr std::vector<T>
+diff(const std::vector<time_point> &stop, const std::vector<time_point> &start) {
+    std::vector<T>    ret(N);
     for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9 * static_cast<T>((stop[i] - start[i]).count());
     }
     return ret;
 }
 
-template<typename MapType, std::size_t n_iterations>
+template<std::size_t n_iterations, typename MapType>
     requires(n_iterations > 0)
 constexpr auto
-convert(const std::array<MapType, n_iterations> &in) {
-    std::vector<std::pair<std::string, std::array<time_point, n_iterations>>> ret;
+convert(const std::vector<MapType> &in) {
+    std::vector<std::pair<std::string, std::vector<time_point>>> ret;
     ret.resize(in[0].size());
 
     for (auto keyID = 0LU; keyID < in[0].size(); keyID++) {
         ret[keyID].first = std::string(in[0].key(keyID));
+        ret[keyID].second.resize(n_iterations);
         for (auto i = 0LU; i < n_iterations; i++) {
             ret[keyID].second[i] = in[i].at(keyID);
         }
@@ -521,10 +524,13 @@ convert(const std::array<MapType, n_iterations> &in) {
     return ret;
 }
 
-template<typename T, std::size_t N>
+template<typename T>
 [[nodiscard]] StatisticsType<T>
-compute_statistics(const std::array<T, N> &values) {
-    static_assert(N > 0, "array size must not be zero");
+compute_statistics(const std::vector<T> &values) {
+    const std::size_t N = values.size();
+    if (N < 1) {
+        return {};
+    }
     const auto minmax = std::minmax_element(values.cbegin(), values.cend());
     const auto mean   = std::accumulate(values.begin(), values.end(), T{}) / static_cast<T>(N);
 
@@ -535,7 +541,7 @@ compute_statistics(const std::array<T, N> &values) {
     stddev = std::sqrt(stddev);
 
     // Compute the median value
-    std::array<T, N> sorted_values(values);
+    std::vector<T> sorted_values(values);
     std::sort(sorted_values.begin(), sorted_values.end());
     const auto median = sorted_values[N / 2];
     return { *minmax.first, mean, stddev, median, *minmax.second };
@@ -547,12 +553,12 @@ concept Numeric = std::integral<T> || std::floating_point<T>;
 template<Numeric T>
 std::string
 to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
-    static constexpr std::array si_prefixes{ 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ',
-                                             'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y' };
+    static constexpr std::array si_prefixes{ 'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ',
+                                             'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q' };
     static constexpr double     base     = 1000.0;
     long double                 value    = value_base;
 
-    std::size_t                 exponent = 8;
+    std::size_t                 exponent = 10;
     if (value == 0) {
         return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ",
                            si_prefixes[exponent], unit);
@@ -641,20 +647,20 @@ argument_size() noexcept {
 template<fixed_string... meas_marker_names>
 struct MarkerMap : const_key_map<time_point, meas_marker_names...> {};
 
+template<typename TestFunction, std::size_t N>
+[[nodiscard]] constexpr auto
+get_marker_array() {
+    if constexpr (std::invocable<TestFunction>) {
+        return std::vector<bool>(N);
+    } else {
+        using MarkerMapType = std::remove_cvref_t<detail::first_arg_of_t<TestFunction>>;
+        return std::vector<MarkerMapType>(N);
+    }
+}
+
 template<std::size_t n_iterations = 1LU, typename ResultType = results,
          fixed_string... meas_marker_names>
-class benchmark : ut::detail::test {
-    template<typename TestFunction>
-    [[nodiscard]] constexpr auto
-    get_marker_array() const {
-        if constexpr (std::invocable<TestFunction>) {
-            return std::array<bool, n_iterations>();
-        } else {
-            using MarkerMapType = std::remove_cvref_t<detail::first_arg_of_t<TestFunction>>;
-            return std::array<MarkerMapType, n_iterations>();
-        }
-    }
-
+class benchmark : public ut::detail::test {
 public:
     benchmark() = delete;
 
@@ -673,11 +679,11 @@ public:
                 result_map.try_emplace("n-iter", std::monostate{}, "");
             }
 
-            std::array<time_point, n_iterations> stop_iter;
-            auto                                 marker_iter = get_marker_array<TestFunction>();
+            std::vector<time_point> stop_iter(n_iterations);
+            auto                    marker_iter = get_marker_array<TestFunction, n_iterations>();
 
-            PerformanceCounter                   execMetrics;
-            const auto                           start = time_point().now();
+            PerformanceCounter      execMetrics;
+            const auto              start = time_point().now();
 
             if constexpr (n_iterations == 1) {
                 if constexpr (std::invocable<TestFunction>) {
@@ -709,9 +715,8 @@ public:
                 result_map.try_emplace("CPU-I", perf_data.instructions / n_iterations, "");
                 result_map.try_emplace("CTX-SW", perf_data.ctx_switches, "");
             }
-
             // not time-critical post-processing starts here
-            const auto        time_differences_ns = utils::diff<long double>(stop_iter, start);
+            const auto        time_differences_ns = utils::diff<n_iterations, long double>(stop_iter, start);
             const auto        ns                  = stop_iter[n_iterations - 1] - start;
             const long double duration_s          = 1e-9 * static_cast<long double>(ns.count());
 
@@ -743,7 +748,7 @@ public:
             result_map.try_emplace("ops/s", n_iterations / duration_s, "");
 
             if constexpr (MARKER_SIZE > 0) {
-                auto transposed_map = utils::convert(marker_iter);
+                auto transposed_map = utils::convert<n_iterations>(marker_iter);
                 for (auto keyID = 0LU; keyID < transposed_map.size(); keyID++) {
                     if (keyID > 0) {
                         const auto meas = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
@@ -751,20 +756,9 @@ public:
                                                       keyID, transposed_map[0].first,
                                                       transposed_map[keyID].first);
                         auto      &marker_result_map = ResultType::add_result(meas);
-
-                        marker_result_map.try_emplace("n-iter", std::monostate{}, "");
                         add_statistics(marker_result_map,
-                                       utils::diff<long double>(transposed_map[keyID].second,
+                                       utils::diff<n_iterations, long double>(transposed_map[keyID].second,
                                                                 transposed_map[0].second));
-                        // add zero info to not duplicate the results from the superordinate benchmark
-                        if (PerformanceCounter::available()) {
-                            result_map.try_emplace("CPU cache misses", std::monostate{}, "");
-                            result_map.try_emplace("CPU branch misses", std::monostate{}, "");
-                            result_map.try_emplace("CPU-I", std::monostate{}, "");
-                            result_map.try_emplace("CTX-SW", std::monostate{}, "");
-                        }
-                        result_map.try_emplace("total time", std::monostate{}, "");
-                        result_map.try_emplace("ops/s", std::monostate{}, "");
                     }
                 }
             }
@@ -808,16 +802,16 @@ public:
         return *this;
     }
 
-    void
-    on(const ut::events::test_begin &) {}
+    constexpr void
+    on(const ut::events::test_begin &) const noexcept { /* not needed */ }
 
     void
     on(const ut::events::test_run &test_run) {
         _printer << "\n \"" << test_run.name << "\"...";
     }
 
-    void
-    on(const ut::events::test_skip &) {}
+    constexpr void
+    on(const ut::events::test_skip &) const noexcept { /* not needed */ }
 
     void
     on(const ut::events::test_end &test_end) {
@@ -913,9 +907,8 @@ public:
                 return fmt::format("{:>4} / {:>4} = {:4.1f}%", //
                                    to_si_prefix(stat.misses, unit, 0),
                                    to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
-            } else {
-                throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
             }
+            throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
         };
 
         // compute minimum colum width for each benchmark case and metric
@@ -951,8 +944,8 @@ public:
 
             for (auto &[metric_key, max_width] : metric_keys) {
                 if (result_map.contains(metric_key)) {
-                    const auto &value = result_map.at(metric_key);
-                    fmt::print("│ {1:>{0}} ", max_width, format(value.first, value.second));
+                    const auto &[value, unit] = result_map.at(metric_key);
+                    fmt::print("│ {1:>{0}} ", max_width, format(value, unit));
                 } else {
                     fmt::print("│ {1:>{0}} ", max_width, "");
                 }
