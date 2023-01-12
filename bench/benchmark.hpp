@@ -296,7 +296,7 @@ struct fixed_string {
         return { _data, N };
     }
 
-    [[nodiscard]] constexpr explicit operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
 
     [[nodiscard]]                    operator const char *() const noexcept { return _data; }
 
@@ -488,7 +488,7 @@ template<typename T, std::size_t N>
 constexpr std::array<T, N>
 diff(const std::array<time_point, N> stop, time_point start) {
     std::array<T, N> ret;
-    for (int i = 0; i < N; i++) {
+    for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9 * static_cast<T>((stop[i] - start).count());
         start  = stop[i];
     }
@@ -499,7 +499,7 @@ template<typename T, std::size_t N>
 constexpr std::array<T, N>
 diff(const std::array<time_point, N> &stop, const std::array<time_point, N> &start) {
     std::array<T, N> ret;
-    for (int i = 0; i < N; i++) {
+    for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9 * static_cast<T>((stop[i] - start[i]).count());
     }
     return ret;
@@ -512,9 +512,9 @@ convert(const std::array<MapType, n_iterations> &in) {
     std::vector<std::pair<std::string, std::array<time_point, n_iterations>>> ret;
     ret.resize(in[0].size());
 
-    for (int keyID = 0; keyID < in[0].size(); keyID++) {
+    for (auto keyID = 0LU; keyID < in[0].size(); keyID++) {
         ret[keyID].first = std::string(in[0].key(keyID));
-        for (int i = 0; i < n_iterations; i++) {
+        for (auto i = 0LU; i < n_iterations; i++) {
             ret[keyID].second[i] = in[i].at(keyID);
         }
     }
@@ -687,7 +687,7 @@ public:
                 }
                 stop_iter[0].now();
             } else if constexpr (n_iterations >= 1) {
-                for (int i = 0; i < n_iterations; i++) {
+                for (auto i = 0LU; i < n_iterations; i++) {
                     if constexpr (std::invocable<TestFunction>) {
                         _test();
                     } else {
@@ -744,7 +744,7 @@ public:
 
             if constexpr (MARKER_SIZE > 0) {
                 auto transposed_map = utils::convert(marker_iter);
-                for (int keyID = 0; keyID < transposed_map.size(); keyID++) {
+                for (auto keyID = 0LU; keyID < transposed_map.size(); keyID++) {
                     if (keyID > 0) {
                         const auto meas = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
                                                       keyID < transposed_map.size() - 1 ? "├" : "└",
