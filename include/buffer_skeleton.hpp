@@ -25,31 +25,31 @@ class buffer_skeleton
         std::vector<T> _data;
 
         buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size) : _size(min_size), _data(_size){};
+        explicit buffer_impl(const std::size_t min_size) : _size(min_size), _data(_size){};
         ~buffer_impl() = default;
     };
 
 
     template <typename U>
-    struct buffer_reader {
+    class buffer_reader {
         std::shared_ptr<buffer_impl> _buffer;
 
         buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) : _buffer(buffer) {}
+        explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) : _buffer(buffer) {}
         friend buffer_skeleton<T>;
 
     public:
         [[nodiscard]] buffer_skeleton buffer() const noexcept { return buffer_skeleton(_buffer); };
 
         template <bool strict_check = true>
-        [[nodiscard]] std::span<const U> get(const std::size_t n_requested = 0) const
+        [[nodiscard]] std::span<const U> get(const std::size_t /* n_requested = 0*/) const
             noexcept(!strict_check)
         {
             return {};
         }
 
         template <bool strict_check = true>
-        [[nodiscard]] bool consume(const std::size_t n_items = 1) const
+        [[nodiscard]] bool consume(const std::size_t /* n_items = 1 */) const
             noexcept(!strict_check)
         {
             return true;
@@ -61,25 +61,31 @@ class buffer_skeleton
     };
 
     template <typename U>
-    struct buffer_writer {
+    class buffer_writer {
         std::shared_ptr<buffer_impl> _buffer;
 
         buffer_writer() = delete;
-        buffer_writer(std::shared_ptr<buffer_impl> buffer) : _buffer(buffer) {}
+        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) : _buffer(buffer) {}
         friend buffer_skeleton<T>;
 
     public:
         [[nodiscard]] buffer_skeleton buffer() const noexcept { return buffer_skeleton(_buffer); };
 
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        void publish(Translator&& translator,
-                     std::size_t /* n_slots_to_claim = 1 */,
-                     Args&&... /* args */){}; // blocks until elements are available
+        [[nodiscard]] constexpr auto get(std::size_t n) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
+                return { { &_buffer->_data[0], n }, { _buffer->_size -1, -1 }};
+        }
+
+        constexpr void publish(std::pair<std::size_t, std::int64_t>, std::size_t) const { /* empty */ }
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
-        [[nodiscard]] bool try_publish(Translator&& translator,
+        void publish(Translator&& /* translator */,
+                     std::size_t /* n_slots_to_claim = 1 */,
+                     Args&&... /* args */) const noexcept { /* empty */ }; // blocks until elements are available
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        [[nodiscard]] bool try_publish(Translator&& /* translator */,
                                        std::size_t n_slots_to_claim = 1,
-                                       Args&&... /* args */) noexcept
+                                       Args&&... /* args */) const noexcept
         {
             return n_slots_to_claim == 0;
         }; // returns false if cannot emplace data -> user may need to retry
@@ -93,11 +99,11 @@ class buffer_skeleton
     // shared pointer is needed to avoid dangling references to reader/writer
     // or generating buffer itself
     std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    buffer_skeleton(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    explicit buffer_skeleton(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
     buffer_skeleton() = delete;
-    buffer_skeleton(const std::size_t min_size)
+    explicit buffer_skeleton(const std::size_t min_size)
         : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size))
     {
     }
