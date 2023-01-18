@@ -8,7 +8,7 @@
 #include <span>
 
 namespace gr {
-namespace util { // TODO: move this meta-programming helpers to a common header file
+namespace util {
 template <typename T, typename...>
 struct first_template_arg_helper;
 
@@ -64,11 +64,13 @@ template<class Fn, typename T, typename ...Args>
 concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
 
 template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, Args ...args) {
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
     { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                -> std::same_as<void>;
     { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.get(n_items) } -> std::same_as<std::pair<std::span<util::value_type_t<T>>, std::pair<std::size_t, std::int64_t>>>;
+    { t.publish(token, n_items) } -> std::same_as<void>;
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
 };

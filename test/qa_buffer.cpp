@@ -54,6 +54,12 @@ const boost::ut::suite BasicConceptsTests = [] {
         expect(nothrow([&writer] {
             expect(writer.try_publish([](const std::span<int32_t> &, std::int64_t) { /* noop */ }, 0));
         }));
+
+        // alt expert write interface
+        auto [value, sequence] = writer.get(1);
+        expect(eq(1LU, value.size())) << "for " << typeName;
+        expect(eq(1023LU, sequence.first)) << "for " << typeName;
+        expect(eq(-1L, sequence.second)) << "for " << typeName;
     } | std::tuple<gr::test::buffer_skeleton<int32_t>,
             gr::circular_buffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>,
             gr::circular_buffer<int32_t, std::dynamic_extent, gr::ProducerType::Multi>>{2, 2, 2};
@@ -285,6 +291,36 @@ const boost::ut::suite CircularBufferTests = [] {
                 expect(reader.consume(blockSize));
             }
         }
+
+        // basic expert writer api
+        {
+            // case 0: write fully reserved data
+            auto [data, token] = writer.get(4);
+            for (std::size_t i = 0; i < data.size(); i++) {
+                data[i] = i + 1;
+            }
+            writer.publish(token, 4);
+            auto read_data = reader.get();
+            expect(eq(4, read_data.size()));
+            for (std::size_t i = 0; i < data.size(); i++) {
+                expect(eq(i + 1, read_data[i])) << "case 0: read index " << i;
+            }
+            expect(reader.consume(4));
+        }
+        {
+            // case 1: reserve more than actually written
+            auto [data, token] = writer.get(4);
+            for (std::size_t i = 0; i < data.size(); i++) {
+                data[i] = i + 1;
+            }
+            writer.publish(token, 2);
+            auto read_data = reader.get();
+            expect(eq(2, read_data.size()));
+            for (std::size_t i = 0; i < data.size(); i++) {
+                expect(eq(i + 1, read_data[i])) << "read 1: index " << i;
+            }
+            expect(reader.consume(2));
+        }
     } | std::vector{
 #ifndef __EMSCRIPTEN__
         Allocator(gr::double_mapped_memory_resource::allocator<int32_t>()),
@@ -402,4 +438,4 @@ const boost::ut::suite StreamTagConcept = [] {
     };
 };
 
-int main() {}
+int main() { /* not needed for UT */ }

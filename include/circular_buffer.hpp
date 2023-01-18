@@ -3,6 +3,7 @@
 
 #if defined(_LIBCPP_VERSION) and _LIBCPP_VERSION < 16000
 #include <experimental/memory_resource>
+
 namespace std::pmr {
 using memory_resource = std::experimental::pmr::memory_resource;
 template<typename T>
@@ -29,9 +30,11 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
 namespace gr {
 static constexpr bool has_posix_mmap_interface = true;
 }
+
 #define HAS_POSIX_MAP_INTERFACE
 #else
 namespace gr {
@@ -58,8 +61,8 @@ static constexpr bool has_posix_mmap_interface = false;
 namespace gr {
 
 namespace util {
-constexpr int round_up(int num_to_round, int multiple) noexcept
-{
+constexpr std::size_t
+round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
     if (multiple == 0) {
         return num_to_round;
     }
@@ -247,6 +250,30 @@ class circular_buffer
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+
+        [[nodiscard]] constexpr auto get(std::size_t n_slots_to_claim) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
+            try {
+                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
+                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
+                return {{ &(*_data)[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
+            } catch (const NoCapacityException &) {
+                return { { /* empty span */ }, { 0, 0 }};
+            }
+        }
+
+        constexpr void publish(std::pair<std::size_t, std::int64_t> token, std::size_t n_produced) {
+            if (!_is_mmap_allocated) {
+                // mirror samples below/above the buffer's wrap-around point
+                const std::size_t index = token.first;
+                const size_t nFirstHalf = std::min(_size - index, n_produced);
+                const size_t nSecondHalf = n_produced  - nFirstHalf;
+
+                auto& data = *_data;
+                std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+            }
+            _claim_strategy->publish(token.second + n_produced); // points at first non-writable index
+        }
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
