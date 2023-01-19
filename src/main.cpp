@@ -7,9 +7,76 @@
 
 namespace fg = fair::graph;
 
+template <typename T>
+class random_source : public fg::node<random_source<T>, fg::OUT<T, "random">> {
+public:
+    random_source() {}
+
+    constexpr T
+    process_one() {
+        return 42;
+    }
+
+};
+
+template <typename T>
+class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">> {
+public:
+    cout_sink() {}
+
+    void process_one(T value) {
+        std::cout << value << std::endl;
+    }
+
+};
+
+
+template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
+class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">> {
+public:
+    template<fg::detail::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a) const noexcept {
+        return a * Scale;
+    }
+};
+
+template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
+class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">> {
+public:
+    template<fg::detail::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a, V b) const noexcept {
+        return a + b;
+    }
+};
+
+template<typename T, int Count = 2>
+class duplicate : public fg::node<
+                             duplicate<T, Count>,
+                             fair::meta::typelist<fg::IN<T, "in">>,
+                             fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>> {
+
+    using base = fg::node<
+                     duplicate<T, Count>,
+                     fair::meta::typelist<fg::IN<T, "in">>,
+                     fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>
+                 >;
+
+public:
+    using return_type = typename base::return_type;
+
+    [[nodiscard]] constexpr return_type
+    process_one(T a) const noexcept {
+        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return std::make_tuple(((void) Is, a)...);
+        }(std::make_index_sequence<Count>());
+    }
+};
+
 template<typename T, int Depth>
     requires(Depth > 0)
-class delay : public fg::node<delay<T, Depth>, fg::in<"in", T>, fg::out<"out", T>> {
+class delay : public fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">> {
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
@@ -27,47 +94,7 @@ public:
     }
 };
 
-template<typename T, int Count = 2>
-class duplicate : public fg::node<
-                             duplicate<T, Count>,
-                             fair::meta::typelist<fg::in<"in", T>>,
-                             fg::repeated_ports<Count, fg::port_direction::out, "out", T>> {
 
-    using base = fg::node<
-                     duplicate<T, Count>,
-                     fair::meta::typelist<fg::in<"in", T>>,
-                     fg::repeated_ports<Count, fg::port_direction::out, "out", T>>;
-
-public:
-    using return_type = typename base::return_type;
-
-    [[nodiscard]] constexpr return_type
-    process_one(T a) const noexcept {
-        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return std::make_tuple(((void) Is, a)...);
-        }(std::make_index_sequence<Count>());
-    }
-};
-
-template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::in<"addend0", T>, fg::in<"addend1", T>, fg::out<"sum", R>> {
-public:
-    template<fg::detail::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    process_one(V a, V b) const noexcept {
-        return a + b;
-    }
-};
-
-template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::in<"original", T>, fg::out<"scaled", R>> {
-public:
-    template<fg::detail::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    process_one(V a) const noexcept {
-        return a * Scale;
-    }
-};
 
 int
 main() {
@@ -143,4 +170,18 @@ main() {
         auto delayed = delay<int, 2>{};
     }
 
+    {
+        auto random = random_source<int>{};
+
+        auto merged = merge_by_index<0, 0>(std::move(random), cout_sink<int>());
+        merged.process_one();
+    }
+
+    {
+        auto random = random_source<int>{};
+
+        auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
+        merged.process_one();
+    }
 }
+

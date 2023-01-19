@@ -1,21 +1,25 @@
-#include <boost/ut.hpp>
+
 
 #include <fmt/ranges.h>
 
 #include "buffer.hpp"
-#include "graph_contracts.hpp"
+#include "graph.hpp"
 #include "refl.hpp"
 
-struct test_block : fair::block {
-    test_block() : fair::block("test_block") {
+#include <boost/ut.hpp>
 
-    }
+namespace fg = fair::graph;
+
+class dynamic_node : public fg::node<dynamic_node> {
+public:
+    dynamic_node(std::string_view name) {}
 };
+
 
 const boost::ut::suite PortApiTests = [] {
     using namespace boost::ut;
     using namespace gr;
-    using namespace fair;
+    using namespace fair::graph;
 
     "PortApi"_test = [] {
         static_assert(Port<IN<float, "in">>);
@@ -54,7 +58,7 @@ const boost::ut::suite PortApiTests = [] {
         // declare in block
         OUT<float, "out"> out;
         IN<float, "in"> in;
-        std::vector<dyn_port> port_list;
+        std::vector<dynamic_port> port_list;
 
         port_list.emplace_back(out);
         port_list.emplace_back(in);
@@ -69,37 +73,37 @@ const boost::ut::suite PortApiTests = [] {
         BufferWriter auto& writer = output_port.writer();
         IN<float, "in0"> input_port;
 
-        auto source = std::make_shared<block>("source");
+        auto source = std::make_shared<dynamic_node>("source");
         source->add_port(output_port);
         source->add_port(OUT<float, "out1">());
-        expect(eq(source->output_ports().size(), 2U));
-        expect(eq(source->input_ports().size(), 0U));
+        expect(eq(source->dynamic_output_ports().size(), 2U));
+        expect(eq(source->dynamic_input_ports().size(), 0U));
 
-        auto sink = std::make_shared<block>("sink");
+        auto sink = std::make_shared<dynamic_node>("sink");
         expect(nothrow([&sink, &input_port] () { sink->add_port(input_port); } ));
         expect(nothrow([&sink] () { sink->add_port(IN<float, "in1">()); } ));
         expect(nothrow([&sink] () { sink->add_port(IN<float>("in2")); } ));
         expect(throws([&sink] () { sink->add_port(IN<float>("in1")); } ));
-        expect(eq(sink->output_ports().size(), 0U));
-        expect(eq(sink->input_ports().size(), 3U));
+        expect(eq(sink->dynamic_output_ports().size(), 0U));
+        expect(eq(sink->dynamic_input_ports().size(), 3U));
 
-        std::vector<edge> edges;
+        fg::graph graph;
 
-        expect(eq(edges.size(), 0U));
+        expect(eq(graph.edges_count(), 0U));
 
-        expect(eq(add_edge(edges, source, "out0", sink, "in0"), connection_result_t::SUCCESS));
+        expect(eq(graph.add_edge(source, "out0", sink, "in0"), connection_result_t::SUCCESS));
         // N.B. should discourage indexed-based access <-> error prone, we test this anyway
-        expect(eq(add_edge(edges, source, 0, sink, 1), connection_result_t::SUCCESS));
+        expect(eq(graph.add_edge(source, 0, sink, 1), connection_result_t::SUCCESS));
 
-        expect(eq(edges.size(), 2U));
+        expect(eq(graph.edges_count(), 2U));
 
-        auto mismatched_sink = std::make_shared<block>("mismatched_sink");
+        auto mismatched_sink = std::make_shared<dynamic_node>("mismatched_sink");
         IN<int32_t, "in0"> mismatched_typed_port;
         mismatched_sink->add_port(mismatched_typed_port);
 
-        expect(eq(add_edge(edges, source, 0, mismatched_sink, 0), connection_result_t::FAILED));
+        expect(eq(graph.add_edge(source, 0, mismatched_sink, 0), connection_result_t::FAILED));
 
-        expect(eq(edges.size(), 2U));
+        expect(eq(graph.edges_count(), 2U));
 
 
         // test runtime growing of src ports
