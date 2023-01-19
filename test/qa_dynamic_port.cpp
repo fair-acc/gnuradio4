@@ -80,6 +80,8 @@ public:
             data[0] = value;
             writer.publish(token, 1);
         }
+
+        return fair::graph::work_result::success;
     }
 
 };
@@ -103,14 +105,14 @@ const boost::ut::suite PortApiTests = [] {
     "PortBufferApi"_test = [] {
         OUT<float, "out0"> output_port;
         BufferWriter auto& writer = output_port.writer();
-        expect(ge(writer.available(), 32U));
+        expect(ge(writer.available(), std::size_t{32}));
 
         IN<float, "int0"> input_port;
         const BufferReader auto& reader = input_port.reader();
-        expect(eq(reader.available(), 0U));
+        expect(eq(reader.available(), std::size_t{0}));
         input_port.setBuffer(output_port.buffer());
 
-        expect(eq(output_port.buffer().n_readers(), 1U));
+        expect(eq(output_port.buffer().n_readers(), std::size_t{1}));
 
         int offset = 1;
         auto lambda = [&offset](auto& w) {
@@ -119,7 +121,7 @@ const boost::ut::suite PortApiTests = [] {
             offset += w.size();
         };
 
-        expect(writer.try_publish(lambda, 32));
+        expect(writer.try_publish(lambda, std::size_t{32}));
     };
 
     "RuntimePortApi"_test = [] {
@@ -131,7 +133,7 @@ const boost::ut::suite PortApiTests = [] {
         port_list.emplace_back(out);
         port_list.emplace_back(in);
 
-        expect(eq(port_list.size(), 2U));
+        expect(eq(port_list.size(), std::size_t{2}));
     };
 
     "ConnectionApi"_test = [] {

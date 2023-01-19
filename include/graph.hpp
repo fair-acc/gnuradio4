@@ -321,7 +321,7 @@ private:
     using WriterType = decltype(std::declval<BufferType>().new_writer());
     using IoType = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
 
-    std::string _name{PortName};
+    std::string _name = static_cast<std::string>(PortName);
     std::int16_t _priority = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t _n_history = N_HISTORY;
     std::size_t _min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
@@ -921,8 +921,8 @@ public:
 template<
     meta::source_node Left,
     meta::sink_node Right,
-    int OutId,
-    int InId
+    std::size_t OutId,
+    std::size_t InId
     >
 class merged_node
     : public node<
@@ -1040,7 +1040,7 @@ public:
     }
 };
 
-template<int OutId, int InId, meta::source_node A, meta::sink_node B>
+template<std::size_t OutId, std::size_t InId, meta::source_node A, meta::sink_node B>
 [[gnu::always_inline]] constexpr auto
 merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
     if constexpr(!std::is_same_v<typename std::remove_cvref_t<A>::output_port_types::template at<OutId>,
@@ -1062,8 +1062,8 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, meta::source_node A, meta::sink_node B>
 [[gnu::always_inline]] constexpr auto
 merge(A &&a, B &&b) {
-    constexpr int OutId = meta::indexForName<OutName, typename A::output_ports>();
-    constexpr int InId = meta::indexForName<InName, typename B::input_ports>();
+    constexpr std::size_t OutId = meta::indexForName<OutName, typename A::output_ports>();
+    constexpr std::size_t InId = meta::indexForName<InName, typename B::input_ports>();
     static_assert(OutId != -1);
     static_assert(InId != -1);
     static_assert(std::same_as<typename std::remove_cvref_t<A>::output_port_types::template at<OutId>,
@@ -1094,12 +1094,26 @@ private:
         }
 
     public:
+        reference_node_wrapper(const reference_node_wrapper& other) = delete;
+        reference_node_wrapper& operator=(const reference_node_wrapper& other) = delete;
+        reference_node_wrapper(reference_node_wrapper&& other)
+            : _node(std::exchange(other._node, nullptr))
+        {}
+        reference_node_wrapper& operator=(reference_node_wrapper&& other) {
+            auto tmp = std::move(other);
+            std::swap(_node, tmp._node);
+            return *this;
+        }
+
+        ~reference_node_wrapper() override = default;
+
         template<typename In>
         reference_node_wrapper(In&& node)
-            : _node(std::forward<In>(node)) {}
+            : _node(std::forward<In>(node)) {
+        }
 
         work_result work() override {
-            data().work();
+            return data().work();
         }
 
         std::string_view name() const override {
@@ -1170,7 +1184,7 @@ private:
         [[nodiscard]] constexpr std::string_view name() const noexcept { return _name; }
         [[nodiscard]] constexpr bool connected() const noexcept { return _connected; }
         [[nodiscard]] connection_result_t connect() noexcept { return connection_result_t::FAILED; }
-        [[nodiscard]] connection_result_t disconnect() noexcept { /* return _dst_node->port<INPUT>(_dst_port_index).value()->disconnect(); */ }
+        [[nodiscard]] connection_result_t disconnect() noexcept { /* return _dst_node->port<INPUT>(_dst_port_index).value()->disconnect(); */ return connection_result_t::FAILED; }
     };
 
     std::vector<edge> _edges;

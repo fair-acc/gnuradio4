@@ -158,13 +158,13 @@ template<typename List>
 using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
 
 template<typename Node>
-concept source_node = requires(Node &n, typename Node::input_port_types::tuple_type const &inputs) {
+concept source_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
                           {
                               [](Node &n, auto &inputs) {
                                   if constexpr (Node::input_port_types::size > 0) {
-                                      return []<std::size_t... Is>(Node & n, auto const &tup,
+                                      return []<std::size_t... Is>(Node &n_inside, auto const &tup,
                                                                    std::index_sequence<Is...>)
-                                              ->decltype(n.process_one(std::get<Is>(tup)...)) {
+                                              ->decltype(n_inside.process_one(std::get<Is>(tup)...)) {
                                           return {};
                                       }
                                       (n, inputs,
@@ -172,25 +172,24 @@ concept source_node = requires(Node &n, typename Node::input_port_types::tuple_t
                                   } else {
                                       return n.process_one();
                                   }
-                              }(n, inputs)
+                              }(node, inputs)
                               } -> std::same_as<typename Node::return_type>;
                       };
 
 template<typename Node>
-concept sink_node = requires(Node &n, typename Node::input_port_types::tuple_type const &inputs) {
+concept sink_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
                         {
                             [](Node &n, auto &inputs) {
-                                []<std::size_t... Is>(Node & n, auto const &tup,
+                                []<std::size_t... Is>(Node &n_inside, auto const &tup,
                                                       std::index_sequence<Is...>) {
                                     if constexpr (Node::output_port_types::size > 0) {
-                                        auto a = n.process_one(std::get<Is>(tup)...);
+                                        auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
                                     } else {
-                                        n.process_one(std::get<Is>(tup)...);
+                                        n_inside.process_one(std::get<Is>(tup)...);
                                     }
                                 }
-                                (n, inputs,
-                                 std::make_index_sequence<Node::input_port_types::size>());
-                            }(n, inputs)
+                                (n, inputs, std::make_index_sequence<Node::input_port_types::size>());
+                            }(node, inputs)
                         };
                     };
 

@@ -36,21 +36,17 @@ public:
             _counter++;
             auto& writer = base::template port<fair::graph::port_direction_t::OUTPUT, "out">().writer();
             auto [data, token] = writer.get(1);
+            if (token.second == -1) {
+                _counter = count;
+                return fair::graph::work_result::error;
+            }
             data[0] = process_one();
             writer.publish(token, 1);
         }
+
+        return fair::graph::work_result::success;
     }
-
 };
-
-// template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-// class test_src : public fg::node<test_src<T, N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
-// public:
-//     [[nodiscard]] constexpr T
-//     process_one() const noexcept {
-//         return T{};
-//     }
-// };
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
 class test_sink : public fg::node<test_sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>> {
@@ -426,7 +422,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>() = [&]() {
             src.work();
-            for (auto i = 0; i < add1.size(); i++) {
+            for (std::size_t i = 0; i < add1.size(); i++) {
                 mult1[i].work();
                 mult2[i].work();
                 add1[i].work();

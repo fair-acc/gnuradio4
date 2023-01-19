@@ -30,7 +30,7 @@ const boost::ut::suite BasicConceptsTests = [] {
         auto typeName = reflection::type_name<T>();
         // N.B. GE because some buffers need to intrinsically
         // allocate more to meet e.g. page-size requirements
-        expect(eq(buffer.size(), 1024)) << "for" << typeName;
+        expect(eq(buffer.size(), std::size_t{1024})) << "for" << typeName;
 
         // compile-time interface tests
         BufferReader auto reader = buffer.new_reader(); // tests matching read concept
@@ -42,10 +42,10 @@ const boost::ut::suite BasicConceptsTests = [] {
         static_assert(std::is_same_v<decltype(writer.buffer().new_reader()), decltype(reader)>);
 
         // runtime interface tests
-        expect(eq(reader.available(), 0));
-        expect(eq(reader.position(), -1));
-        expect(nothrow([&reader] { expect(eq(reader.get(0).size(), 0)); })) << typeName << "throws";
-        expect(nothrow([&reader] { expect(reader.consume(0)); }));
+        expect(eq(reader.available(), std::size_t{0}));
+        expect(eq(reader.position(), std::int64_t{-1}));
+        expect(nothrow([&reader] { expect(eq(reader.get(std::size_t{0}).size(), std::size_t{0})); })) << typeName << "throws";
+        expect(nothrow([&reader] { expect(reader.consume(std::size_t{0})); }));
 
         expect(writer.available() >= buffer.size());
         expect(nothrow([&writer] { writer.publish([](const std::span<int32_t> &) { /* noop */ }, 0); }));
@@ -70,7 +70,7 @@ const boost::ut::suite SequenceTests = [] {
 
     "Sequence"_test = [] {
         using namespace gr;
-        expect(eq(alignof(Sequence), 64));
+        expect(eq(alignof(Sequence), std::size_t{64}));
         expect(eq(-1L, kInitialCursorValue));
         expect(nothrow([] { Sequence(); }));
         expect(nothrow([] { Sequence(2); }));
@@ -79,48 +79,48 @@ const boost::ut::suite SequenceTests = [] {
         expect(eq(s1.value(), kInitialCursorValue));
 
         const auto s2 = Sequence(2);
-        expect(eq(s2.value(), 2));
+        expect(eq(s2.value(), std::int64_t{2}));
 
         expect(nothrow([&s1] { s1.setValue(3); }));
-        expect(eq(s1.value(), 3));
+        expect(eq(s1.value(), std::int64_t{3}));
 
         expect(nothrow([&s1] { expect(s1.compareAndSet(3, 4)); }));
-        expect(nothrow([&s1] { expect(eq(s1.value(), 4)); }));
+        expect(nothrow([&s1] { expect(eq(s1.value(), std::int64_t{4})); }));
         expect(nothrow([&s1] { expect(!s1.compareAndSet(3, 5)); }));
-        expect(eq(s1.value(), 4));
+        expect(eq(s1.value(), std::int64_t{4}));
 
-        expect(eq(s1.incrementAndGet(), 5));
-        expect(eq(s1.value(), 5));
-        expect(eq(s1.addAndGet(2), 7));
-        expect(eq(s1.value(), 7));
+        expect(eq(s1.incrementAndGet(), std::int64_t{5}));
+        expect(eq(s1.value(), std::int64_t{5}));
+        expect(eq(s1.addAndGet(2), std::int64_t{7}));
+        expect(eq(s1.value(), std::int64_t{7}));
 
         std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> sequences{
                 std::make_shared<std::vector<std::shared_ptr<Sequence>>>()
         };
         expect(eq(gr::detail::getMinimumSequence(*sequences), std::numeric_limits<std::int64_t>::max()));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), 2));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), std::int64_t{2}));
         sequences->emplace_back(std::make_shared<Sequence>(4));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), 4));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 5), 4));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), 2));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), std::int64_t{4}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 5), std::int64_t{4}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), std::int64_t{2}));
 
         auto cursor = std::make_shared<Sequence>(10);
         auto s3 = std::make_shared<Sequence>(1);
-        expect(eq(sequences->size(), 1));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), 4));
+        expect(eq(sequences->size(), std::size_t{1}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), std::int64_t{4}));
         expect(nothrow([&sequences, &cursor, &s3] { gr::detail::addSequences(sequences, *cursor, {s3}); }));
-        expect(eq(sequences->size(), 2));
+        expect(eq(sequences->size(), std::size_t{2}));
         // newly added sequences are set automatically to the cursor/write position
-        expect(eq(s3->value(), 10));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), 4));
+        expect(eq(s3->value(), std::int64_t{10}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), std::int64_t{4}));
 
         expect(nothrow([&sequences, &cursor] { gr::detail::removeSequence(sequences, cursor); }));
-        expect(eq(sequences->size(), 2));
+        expect(eq(sequences->size(), std::size_t{2}));
         expect(nothrow([&sequences, &s3] { gr::detail::removeSequence(sequences, s3); }));
-        expect(eq(sequences->size(), 1));
+        expect(eq(sequences->size(), std::size_t{1}));
 
         std::stringstream ss;
-        expect(eq(ss.str().size(), 0));
+        expect(eq(ss.str().size(), std::size_t{0}));
         expect(nothrow([&ss, &s3] { ss << fmt::format("{}", *s3); }));
         expect(not ss.str().empty());
     };
@@ -132,13 +132,13 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
 
     "DoubleMappedAllocator"_test = [] {
         using Allocator = std::pmr::polymorphic_allocator<int32_t>;
-        std::size_t size = getpagesize() / sizeof(int32_t);
+        std::size_t size = static_cast<std::size_t>(getpagesize()) / sizeof(int32_t);
         auto doubleMappedAllocator = gr::double_mapped_memory_resource::allocator<int32_t>();
         std::vector<int32_t, Allocator> vec(size, doubleMappedAllocator);
         expect(eq(vec.size(), size));
         std::iota(vec.begin(), vec.end(), 1);
         for (auto i = 0U; i < vec.size(); i++) {
-            expect(eq(vec[i], i + 1));
+            expect(eq(vec[i], static_cast<std::int32_t>(i + 1)));
             // to note: can safely read beyond size for this special vector
             expect(eq(vec[size + i], vec[i])); // identical to mirrored copy
         }
@@ -185,7 +185,7 @@ const boost::ut::suite UserApiExamples = [] {
         BufferWriter auto writer = buffer.new_writer();
         { // source only write example
             BufferReader auto localReader = buffer.new_reader();
-            expect(eq(localReader.available(), 0));
+            expect(eq(localReader.available(), std::size_t{0}));
 
             auto lambda = [](auto w) { // test writer generating consecutive samples
                 static int offset = 1;
@@ -196,17 +196,17 @@ const boost::ut::suite UserApiExamples = [] {
             expect(ge(writer.available(), buffer.size()));
             writer.publish(lambda, 10);
             expect(eq(writer.available(), buffer.size() - 10));
-            expect(eq(localReader.available(), 10));
-            expect(eq(buffer.n_readers(), 1)); // N.B. circular_buffer<..> specific
+            expect(eq(localReader.available(), std::size_t{10}));
+            expect(eq(buffer.n_readers(), std::size_t{1})); // N.B. circular_buffer<..> specific
         }
-        expect(eq(buffer.n_readers(), 0)); // reader not in scope release atomic reader index
+        expect(eq(buffer.n_readers(), std::size_t{0})); // reader not in scope release atomic reader index
 
         BufferReader auto reader = buffer.new_reader();
         // reader does not know about previous submitted data as it joined only after
         // data has been written <-> needed for thread-safe joining of readers while writing
-        expect(eq(reader.available(), 0));
+        expect(eq(reader.available(), std::size_t{0}));
         // populate with some more data
-        for (int i = 0; i < 3; i++) {
+        for (std::size_t i = 0; i < 3; i++) {
             const auto demoWriter = [](auto w) {
                 static int offset = 1;
                 std::iota(w.begin(), w.end(), offset);
@@ -248,9 +248,9 @@ const boost::ut::suite CircularBufferTests = [] {
         expect(ge(buffer.size(), 1024));
 
         BufferWriter auto writer = buffer.new_writer();
-        expect(nothrow([&writer] { expect(eq(writer.buffer().n_readers(), 0)); })); // no reader, just writer
+        expect(nothrow([&writer] { expect(eq(writer.buffer().n_readers(), std::size_t{0})); })); // no reader, just writer
         BufferReader auto reader = buffer.new_reader();
-        expect(nothrow([&reader] { expect(eq(reader.buffer().n_readers(), 1)); })); // created one reader
+        expect(nothrow([&reader] { expect(eq(reader.buffer().n_readers(), std::size_t{1})); })); // created one reader
 
         int offset = 1;
         auto lambda = [&offset](auto w) {
@@ -258,36 +258,37 @@ const boost::ut::suite CircularBufferTests = [] {
             offset += w.size();
         };
 
-        expect(eq(reader.available(), 0));
-        expect(eq(reader.get().size(), 0));
-        expect(eq(reader.get(1).size(), 0));
+        expect(eq(reader.available(), std::size_t{0}));
+        expect(eq(reader.get().size(), std::size_t{0}));
+        expect(eq(reader.get(1).size(), std::size_t{0}));
         expect(eq(writer.available(), buffer.size()));
         expect(not reader.consume(1)); // false: no data available yet
         expect(nothrow([&writer, &lambda, &buffer] { writer.publish(lambda, buffer.size()); })); // fully fill buffer
 
-        expect(eq(writer.available(), 0));
+        expect(eq(writer.available(), std::size_t{0}));
         expect(eq(reader.available(), buffer.size()));
         expect(eq(reader.get().size(), buffer.size()));
-        expect(eq(reader.get(1).size(), 1));
+        expect(eq(reader.get(1).size(), std::size_t{1}));
 
         // full buffer: fill buffer need to fail/return 'false'
         expect(not writer.try_publish(lambda, buffer.size()));
 
         expect(reader.consume(buffer.size()));
-        expect(eq(reader.available(), 0));
+        expect(eq(reader.available(), std::size_t{0}));
         expect(eq(writer.available(), buffer.size()));
 
         // test buffer wrap around twice
-        int32_t counter = 1;
-        for (const std::size_t blockSize: {1, 2, 3, 5, 7, 42}) {
-            for (uint32_t i = 0; i < buffer.size(); i++) {
+        std::size_t counter = 1;
+        for (const int _blockSize: {1, 2, 3, 5, 7, 42}) {
+            auto blockSize = static_cast<std::size_t>(_blockSize);
+            for (std::size_t i = 0; i < buffer.size(); i++) {
                 expect(writer.try_publish([&counter](auto &writable) {
                     std::iota(writable.begin(), writable.end(), counter += writable.size());
                 }, blockSize));
                 auto readable = reader.get();
                 expect(eq(readable.size(), blockSize));
-                expect(eq(readable.front(), counter));
-                expect(eq(readable.back(), counter + blockSize - 1));
+                expect(eq(readable.front(), static_cast<int>(counter)));
+                expect(eq(readable.back(), static_cast<int>(counter + blockSize - 1)));
                 expect(reader.consume(blockSize));
             }
         }
@@ -297,13 +298,13 @@ const boost::ut::suite CircularBufferTests = [] {
             // case 0: write fully reserved data
             auto [data, token] = writer.get(4);
             for (std::size_t i = 0; i < data.size(); i++) {
-                data[i] = i + 1;
+                data[i] = static_cast<int>(i + 1);
             }
             writer.publish(token, 4);
             auto read_data = reader.get();
-            expect(eq(4, read_data.size()));
+            expect(eq(read_data.size(), std::size_t{4}));
             for (std::size_t i = 0; i < data.size(); i++) {
-                expect(eq(i + 1, read_data[i])) << "case 0: read index " << i;
+                expect(eq(static_cast<int>(i + 1), read_data[i])) << "case 0: read index " << i;
             }
             expect(reader.consume(4));
         }
@@ -311,13 +312,13 @@ const boost::ut::suite CircularBufferTests = [] {
             // case 1: reserve more than actually written
             auto [data, token] = writer.get(4);
             for (std::size_t i = 0; i < data.size(); i++) {
-                data[i] = i + 1;
+                data[i] = static_cast<int>(i + 1);
             }
             writer.publish(token, 2);
             auto read_data = reader.get();
-            expect(eq(2, read_data.size()));
+            expect(eq(std::size_t{2}, read_data.size()));
             for (std::size_t i = 0; i < data.size(); i++) {
-                expect(eq(i + 1, read_data[i])) << "read 1: index " << i;
+                expect(eq(static_cast<int>(i + 1), read_data[i])) << "read 1: index " << i;
             }
             expect(reader.consume(2));
         }
@@ -343,7 +344,7 @@ const boost::ut::suite CircularBufferExceptionTests = [] {
         expect(throws<std::exception>([&writer] { writer.try_publish([](auto &) { throw std::exception(); }); }));
         expect(throws<std::runtime_error>([&writer] { writer.try_publish([](auto &) { throw ""; }); }));
 
-        expect(eq(reader.available(), 0)); // needed otherwise buffer write will not be called
+        expect(eq(reader.available(), std::size_t{0})); // needed otherwise buffer write will not be called
     };
 };
 
@@ -361,9 +362,9 @@ const boost::ut::suite UserDefinedTypeCasting = [] {
             w[0] = std::complex(1.0f, -1.0f);
             w[1] = std::complex(2.0f, -2.0f);
         }, 2);
-        expect(eq(reader.available(), 2));
+        expect(eq(reader.available(), std::size_t{2}));
         std::span<const std::complex<float>> data = reader.get();
-        expect(eq(data.size(), 2));
+        expect(eq(data.size(), std::size_t{2}));
 
         auto const const_bytes = std::as_bytes(data);
         expect(eq(const_bytes.size(), data.size() * sizeof(std::complex<float>)));
@@ -378,7 +379,7 @@ const boost::ut::suite UserDefinedTypeCasting = [] {
         expect(eq(floatArray[3], -2.0f));
 
         expect(reader.consume(data.size()));
-        expect(eq(reader.available(), 0)); // needed otherwise buffer write will not be called
+        expect(eq(reader.available(), std::size_t{0})); // needed otherwise buffer write will not be called
     };
 };
 
@@ -395,7 +396,7 @@ const boost::ut::suite StreamTagConcept = [] {
             std::string data;
         };
 
-        expect(eq(sizeof(buffer_tag), 64)) << "tag size";
+        expect(eq(sizeof(buffer_tag), std::size_t{64})) << "tag size";
         Buffer auto buffer = circular_buffer<int32_t>(1024);
         Buffer auto tagBuffer = circular_buffer<buffer_tag>(32);
         expect(ge(buffer.size(), 1024));
@@ -414,8 +415,8 @@ const boost::ut::suite StreamTagConcept = [] {
                 offset += w.size();
 
                 // read/generated by some method (e.g. reading another buffer)
-                tagWriter.publish([&writePosition](auto &tag) {
-                    tag[0] = {writePosition, fmt::format("<tag data at index {:3}>", writePosition)};
+                tagWriter.publish([&writePosition](auto &writeTag) {
+                    writeTag[0] = {writePosition, fmt::format("<tag data at index {:3}>", writePosition)};
                 }, 1);
             };
 
@@ -428,8 +429,8 @@ const boost::ut::suite StreamTagConcept = [] {
             const auto tags = tagReader.get();
 
             fmt::print("received {} tags\n", tags.size());
-            for (auto &tag: tags) {
-                fmt::print("stream-tag @{:3}: '{}'\n", tag.index, tag.data);
+            for (auto &readTag: tags) {
+                fmt::print("stream-tag @{:3}: '{}'\n", readTag.index, readTag.data);
             }
 
             expect(reader.consume(readData.size()));

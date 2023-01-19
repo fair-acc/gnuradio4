@@ -66,7 +66,7 @@ round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
     if (multiple == 0) {
         return num_to_round;
     }
-    const int remainder = num_to_round % multiple;
+    const auto remainder = num_to_round % multiple;
     if (remainder == 0) {
         return num_to_round;
     }
