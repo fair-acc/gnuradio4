@@ -5,12 +5,41 @@
 #include <concepts>
 #include <tuple>
 #include <type_traits>
+#include <string_view>
+#include <string>
 
 namespace fair::meta {
 
 template<typename... Ts>
 struct print_types;
 
+template<typename CharT, std::size_t SIZE>
+struct fixed_string {
+    constexpr static std::size_t N = SIZE;
+    CharT _data[N + 1] = {};
+
+    constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
+        if constexpr (N != 0) for (std::size_t i = 0; i < N; ++i) _data[i] = str[i];
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
+    [[nodiscard]] constexpr bool empty() const noexcept { return N == 0; }
+    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return {_data, N}; }
+    [[nodiscard]] constexpr explicit operator std::string() const noexcept { return {_data, N}; }
+    [[nodiscard]] operator const char *() const noexcept { return _data; }
+
+    [[nodiscard]] constexpr bool operator==(const fixed_string &other) const noexcept {
+        return std::string_view{_data, N} == std::string_view(other);
+    }
+
+    template<std::size_t N2>
+    [[nodiscard]] friend constexpr bool operator==(const fixed_string &, const fixed_string<CharT, N2> &) { return false; }
+};
+template<typename CharT, std::size_t N>
+fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
+
+template<fixed_string val>
+struct message_type{};
 
 template<typename... Ts>
 struct typelist;
@@ -274,7 +303,9 @@ struct typelist {
     using tuple_type    = std::tuple<Ts...>;
     using tuple_or_type = std::remove_pointer_t<decltype(
             [] {
-                if constexpr (sizeof...(Ts) == 1) {
+                if constexpr (sizeof...(Ts) == 0) {
+                    return static_cast<void*>(nullptr);
+                } else if constexpr (sizeof...(Ts) == 1) {
                     return static_cast<at<0>*>(nullptr);
                 } else {
                     return static_cast<tuple_type*>(nullptr);
