@@ -79,9 +79,11 @@ public:
             auto [data, token] = writer.get(1);
             data[0] = value;
             writer.publish(token, 1);
-        }
 
-        return fair::graph::work_result::success;
+            return fair::graph::work_result::success;
+        } else {
+            return fair::graph::work_result::inputs_empty;
+        }
     }
 
 };
