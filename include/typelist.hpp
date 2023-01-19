@@ -153,14 +153,14 @@ struct split_at<N, typelist<Ts...>> {
     using second = typename detail::splitter<N>::template second<Ts...>;
 };
 
-template<int N, typename List>
+template<std::size_t N, typename List>
 using left_of = typename split_at<N, List>::first;
 
-template<int N, typename List>
+template<std::size_t N, typename List>
 using right_of = typename split_at<N + 1, List>::second;
 
 // remove_at /////////////
-template<int Idx, typename List>
+template<std::size_t Idx, typename List>
 using remove_at = concat<left_of<Idx, List>, right_of<Idx, List>>;
 
 // first_type ////////////
@@ -229,12 +229,12 @@ struct typelist {
     using this_t = typelist<Ts...>;
     using typelist_tag = std::true_type;
 
-    static inline constexpr std::integral_constant<int, sizeof...(Ts)> size = {};
+    static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
 
     template<template<typename...> class Other>
     using apply = Other<Ts...>;
 
-    template<int I>
+    template<std::size_t I>
     using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
 
     template<typename... Other>

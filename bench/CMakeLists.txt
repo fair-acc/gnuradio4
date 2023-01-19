@@ -4,6 +4,8 @@ function(add_benchmark BM_NAME)
     add_executable(${BM_NAME} ${BM_NAME}.cpp)
     target_compile_options(${BM_NAME} PRIVATE -Wall -march=native)
     target_link_options(${BM_NAME} PRIVATE -Wall -march=native)
+    # target_compile_options(${BM_NAME} PRIVATE -Wall -march=native -fsanitize=address)
+    # target_link_options(${BM_NAME} PRIVATE -Wall -march=native -fsanitize=address)
     target_link_libraries(${BM_NAME} PRIVATE core refl-cpp fmt ut)
 endfunction()
 

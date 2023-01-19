@@ -51,7 +51,7 @@ public:
     }
 };
 
-template<typename T, int Count = 2>
+template<typename T, std::size_t Count = 2>
 class duplicate : public fg::node<
                              duplicate<T, Count>,
                              fair::meta::typelist<fg::IN<T, "in">>,
@@ -74,7 +74,7 @@ public:
     }
 };
 
-template<typename T, int Depth>
+template<typename T, std::size_t Depth>
     requires(Depth > 0)
 class delay : public fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">> {
     std::array<T, Depth> buffer = {};
@@ -110,7 +110,7 @@ main() {
         std::array<int, 4> b = { 10, 10, 10, 10 };
 
         int                r = 0;
-        for (int i = 0; i < 4; ++i) {
+        for (std::size_t i = 0; i < 4; ++i) {
             r += merged.process_one(a[i], b[i]);
         }
 
@@ -124,10 +124,8 @@ main() {
 
         // execute graph
         std::array<int, 4> a = { 1, 2, 3, 4 };
-        std::array<int, 4> b = { 10, 10, 10, 10 };
 
-        int                r = 0;
-        for (int i = 0; i < 4; ++i) {
+        for (std::size_t i = 0; i < 4; ++i) {
             auto tuple = merged.process_one(a[i]);
             auto [r1, r2] = tuple;
             fmt::print("{} {} \n", r1, r2);
@@ -142,7 +140,7 @@ main() {
         std::array<int, 4> b = { 10, 10, 10, 10 };
 
         int                r = 0;
-        for (int i = 0; i < 4; ++i) {
+        for (std::size_t i = 0; i < 4; ++i) {
             r += merged.process_one(a[i], b[i]);
         }
 
@@ -156,10 +154,8 @@ main() {
 
         // execute graph
         std::array<int, 4> a = { 1, 2, 3, 4 };
-        std::array<int, 4> b = { 10, 10, 10, 10 };
 
-        int                r = 0;
-        for (int i = 0; i < 4; ++i) {
+        for (std::size_t i = 0; i < 4; ++i) {
             auto tuple = merged.process_one(a[i]);
             auto [r1, r2, r3, r4] = tuple;
             fmt::print("{} {} {} {} \n", r1, r2, r3, r4);

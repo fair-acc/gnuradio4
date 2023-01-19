@@ -80,7 +80,7 @@ class buffer_skeleton
         template <typename... Args, WriterCallback<U, Args...> Translator>
         void publish(Translator&& /* translator */,
                      std::size_t /* n_slots_to_claim = 1 */,
-                     Args&&... /* args */) const noexcept { /* empty */ }; // blocks until elements are available
+                     Args&&... /* args */) const noexcept { /* empty */ } // blocks until elements are available
 
         template <typename... Args, WriterCallback<U, Args...> Translator>
         [[nodiscard]] bool try_publish(Translator&& /* translator */,
@@ -88,7 +88,7 @@ class buffer_skeleton
                                        Args&&... /* args */) const noexcept
         {
             return n_slots_to_claim == 0;
-        }; // returns false if cannot emplace data -> user may need to retry
+        } // returns false if cannot emplace data -> user may need to retry
 
         [[nodiscard]] constexpr std::size_t available() const noexcept
         {
