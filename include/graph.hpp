@@ -204,7 +204,7 @@ namespace work_policies {
         static work_result work(Self& self) noexcept {
             bool data_available = false;
             auto available_values_count = [&self, &data_available] {
-                if constexpr (Self::input_ports::size > 1) {
+                if constexpr (Self::input_ports::size > 0) {
                     auto availableForPort = [&data_available] <typename Port> (Port& port) {
                         auto available = port.reader().available();
                         if (available > 0) data_available = true;
@@ -214,7 +214,14 @@ namespace work_policies {
                     };
 
                     auto availableInAll = [&self, &availableForPort] <std::size_t... Idx> (std::index_sequence<Idx...>) {
-                        return std::min(availableForPort(std::get<Idx>(self._fixed_input_ports))...);
+                        auto betterMin = [] <typename Arg, typename... Args> (Arg arg, Args&&... args) {
+                            if constexpr (sizeof...(Args) == 0) {
+                                return arg;
+                            } else {
+                                return std::min(arg, args...);
+                            }
+                        };
+                        return betterMin(availableForPort(std::get<Idx>(self._fixed_input_ports))...);
                     } (std::make_index_sequence<Self::input_ports::size>());
 
                     return availableInAll < self.minInputs() ? 0
@@ -270,17 +277,21 @@ namespace work_policies {
                 }
             }
 
-            [&self, &writers_tuple, available_values_count] <std::size_t... Idx> (std::index_sequence<Idx...>) {
-                ((std::get<Idx>(self._fixed_output_ports).writer().publish(std::get<Idx>(writers_tuple).second, available_values_count)), ...);
-            } (std::make_index_sequence<Self::output_ports::size>());
+            if constexpr (Self::output_ports::size > 0) {
+                [&self, &writers_tuple, available_values_count] <std::size_t... Idx> (std::index_sequence<Idx...>) {
+                    ((std::get<Idx>(self._fixed_output_ports).writer().publish(std::get<Idx>(writers_tuple).second, available_values_count)), ...);
+                } (std::make_index_sequence<Self::output_ports::size>());
+            }
 
             bool success = true;
-            [&self, available_values_count, &success] <std::size_t... Idx> (std::index_sequence<Idx...>) {
-                ((success = success && std::get<Idx>(self._fixed_input_ports).reader().consume(available_values_count)), ...);
-            }(std::make_index_sequence<Self::input_ports::size>());
+            if constexpr (Self::input_ports::size > 0) {
+                [&self, available_values_count, &success] <std::size_t... Idx> (std::index_sequence<Idx...>) {
+                    ((success = success && std::get<Idx>(self._fixed_input_ports).reader().consume(available_values_count)), ...);
+                }(std::make_index_sequence<Self::input_ports::size>());
+            }
 
             if (!success) {
-                fmt::print("Node {} failed to consume inputs\n", self.name());
+                fmt::print("Node {} failed to consume {} values from inputs\n", self.name(), available_values_count);
             }
 
             return success ? work_result::success : work_result::error;
