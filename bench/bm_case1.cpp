@@ -31,20 +31,25 @@ public:
         return T{};
     }
 
+    void reset_counter() {
+        _counter = 0;
+    }
+
     fair::graph::work_result work() {
         if (_counter < count) {
             _counter++;
             auto& writer = base::template port<fair::graph::port_direction_t::OUTPUT, "out">().writer();
             auto [data, token] = writer.get(1);
-            if (token.second == -1) {
-                _counter = count;
+            if (data.size() == 0) {
                 return fair::graph::work_result::error;
             }
             data[0] = process_one();
             writer.publish(token, 1);
-        }
 
-        return fair::graph::work_result::success;
+            return fair::graph::work_result::success;
+        } else {
+            return fair::graph::work_result::inputs_empty;
+        }
     }
 };
 
@@ -248,7 +253,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(sink);
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, sink)));
 
-        "runtime   src->sink overhead"_benchmark.repeat<N_ITER>() = [&flow_graph]() {
+        "runtime   src->sink overhead"_benchmark.repeat<N_ITER>() = [&flow_graph, &src]() {
+            src.reset_counter();
             flow_graph.work();
         };
     }
@@ -264,7 +270,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(sink);
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, cpy)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy, sink)));
-        "runtime   src->copy->sink"_benchmark.repeat<N_ITER>() = [&flow_graph]() {
+        "runtime   src->copy->sink"_benchmark.repeat<N_ITER>() = [&flow_graph, &src]() {
+            src.reset_counter();
             flow_graph.work();
         };
     }
@@ -291,7 +298,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS,
                   flow_graph.connect<"out", "in">(cpy[cpy.size() - 1], sink)));
 
-        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>() = [&flow_graph]() {
+        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>() = [&flow_graph, &src]() {
+            src.reset_counter();
             flow_graph.work();
         };
     }
@@ -364,7 +372,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b1, b2)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b2, b3)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b3, sink)));
-        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>() = [&flow_graph]() {
+        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>() = [&flow_graph, &src]() {
+            src.reset_counter();
             flow_graph.work();
         };
     }
@@ -386,7 +395,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult1, mult2)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult2, add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1, sink)));
-        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>() = [&flow_graph]() {
+        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>() = [&flow_graph, &src]() {
+            src.reset_counter();
             flow_graph.work();
         };
     }
