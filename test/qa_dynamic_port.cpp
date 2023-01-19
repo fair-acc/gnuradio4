@@ -10,11 +10,79 @@
 
 namespace fg = fair::graph;
 
+using namespace std::string_literals;
+
 class dynamic_node : public fg::node<dynamic_node> {
 public:
-    dynamic_node(std::string_view name) {}
+    dynamic_node(std::string name)
+        : fg::node<dynamic_node>(name) {}
+
 };
 
+
+template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
+class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">> {
+public:
+    scale(std::string name)
+        : fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">>(std::move(name))
+    {}
+
+    template<fair::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a) const noexcept {
+        return a * Scale;
+    }
+};
+
+template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
+class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">> {
+public:
+    adder(std::string name)
+        : fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">>(std::move(name))
+    {}
+
+    template<fair::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a, V b) const noexcept {
+        return a + b;
+    }
+};
+
+template <typename T>
+class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">> {
+public:
+    cout_sink(std::string name)
+        : fg::node<cout_sink<T>, fg::IN<T, "sink">>(std::move(name))
+    {}
+
+    void process_one(T value) {
+        fmt::print("Sinking a value: {}\n", value);
+    }
+
+};
+
+template <typename T, T value, std::size_t count = 10>
+class repeater_source : public fg::node<repeater_source<T, value>, fg::OUT<T, "value">> {
+private:
+    using base = fg::node<repeater_source<T, value>, fg::OUT<T, "value">>;
+    std::size_t _counter = 0;
+
+public:
+    repeater_source(std::string name)
+        : fg::node<repeater_source<T, value>, fg::OUT<T, "value">>(std::move(name))
+    {}
+
+    fair::graph::work_result work() {
+        if (_counter < count) {
+            _counter++;
+            auto& writer = base::template port<fair::graph::port_direction_t::OUTPUT, "value">().writer();
+            auto [data, token] = writer.get(1);
+            data[0] = value;
+            writer.publish(token, 1);
+        }
+    }
+
+};
 
 const boost::ut::suite PortApiTests = [] {
     using namespace boost::ut;
@@ -69,9 +137,42 @@ const boost::ut::suite PortApiTests = [] {
     "ConnectionApi"_test = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
+
+        scale<int, 2> scaled("scaled"s);
+        adder<int> added("added"s);
+        cout_sink<int> out("out"s);
+
+        repeater_source<int, 42> answer("answer"s);
+        repeater_source<int, 6> number("number"s);
+
+        // Nodes need to be alive for as long as the flow is
+        graph flow;
+
+        // Generators
+        flow.register_node(answer);
+        flow.register_node(number);
+
+        flow.register_node(scaled);
+        flow.register_node(added);
+        flow.register_node(out);
+
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"value", "original">(number, scaled)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled", "addend0">(scaled, added)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"value", "addend1">(answer, added)));
+
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum", "sink">(added, out)));
+
+        flow.work();
+    };
+
+#ifdef ENABLE_DYNAMIC_PORTS
+    "PythonToBeConnectionApi"_test = [] {
+        using port_direction_t::INPUT;
+        using port_direction_t::OUTPUT;
         OUT<float, "out0"> output_port;
         BufferWriter auto& writer = output_port.writer();
         IN<float, "in0"> input_port;
+
 
         auto source = std::make_shared<dynamic_node>("source");
         source->add_port(output_port);
@@ -132,6 +233,7 @@ const boost::ut::suite PortApiTests = [] {
         expect(writer.try_publish(lambda, 32U));
         expect(eq(input_port.reader().available(), 32U));
     };
+#endif
 };
 
 
