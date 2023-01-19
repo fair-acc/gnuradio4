@@ -6,23 +6,58 @@
 
 //#define RUN_SIMD_TESTS
 
+auto this_source_location(std::source_location l = std::source_location::current())
+{
+    return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
+}
+
 namespace fg = fair::graph;
 
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
 
-template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class test_src : public fg::node<test_src<T, N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+template <typename T, std::size_t min = 0, std::size_t count = 1024>
+class test_src : public fg::node<test_src<T, min, count>, fg::OUT<T, "out">> {
+private:
+    using base = fg::node<test_src<T, min, count>, fg::OUT<T, "out">>;
+    std::size_t _counter = 0;
+
 public:
+    test_src(std::string name = this_source_location())
+        : fg::node<test_src<T, min, count>, fg::OUT<T, "out">>(std::move(name))
+    {}
+
     [[nodiscard]] constexpr T
     process_one() const noexcept {
         return T{};
     }
+
+    fair::graph::work_result work() {
+        if (_counter < count) {
+            _counter++;
+            auto& writer = base::template port<fair::graph::port_direction_t::OUTPUT, "out">().writer();
+            auto [data, token] = writer.get(1);
+            data[0] = process_one();
+            writer.publish(token, 1);
+        }
+    }
+
 };
+
+// template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
+// class test_src : public fg::node<test_src<T, N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+// public:
+//     [[nodiscard]] constexpr T
+//     process_one() const noexcept {
+//         return T{};
+//     }
+// };
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
 class test_sink : public fg::node<test_sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>> {
 
 public:
+    test_sink (std::string name = this_source_location()) : fg::node<test_sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>>(std::move(name)) {}
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -33,6 +68,7 @@ public:
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
 class copy : public fg::node<copy<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
 public:
+    copy (std::string name = this_source_location()) : fg::node<copy<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>>(std::move(name)) {}
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
     process_one(V a) const noexcept {
@@ -41,9 +77,9 @@ public:
 };
 
 template<typename T1, typename T2, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class convert
-        : public fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>> {
+class convert : public fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>> {
 public:
+    convert (std::string name = this_source_location()) : fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>>(std::move(name)) {}
     template<fair::meta::t_or_simd<T1> V>
     [[nodiscard]] constexpr T2
     process_one(V a) const noexcept {
@@ -52,9 +88,9 @@ public:
 };
 
 template<typename T, int addend, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class add
-        : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+class add : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
 public:
+    add (std::string name = this_source_location()) : fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>>(std::move(name)) {}
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
     process_one(V a) const noexcept {
@@ -63,11 +99,11 @@ public:
 };
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class multiply
-        : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+class multiply : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
+    multiply (std::string name = this_source_location()) : fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>>(std::move(name)) {}
     multiply() = delete;
 
     explicit multiply(T factor) : _factor(factor) {}
