@@ -76,8 +76,9 @@ round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
 
 // clang-format off
 class double_mapped_memory_resource : public std::pmr::memory_resource {
-    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
 #ifdef HAS_POSIX_MAP_INTERFACE
+    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
+
         const std::size_t size = 2 * required_size;
         if (size % 2LU != 0LU || size % static_cast<std::size_t>(getpagesize()) != 0LU) {
             throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
@@ -119,19 +120,25 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
         close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
         return first_copy;
+}
 #else
+    [[nodiscard]] void* do_allocate(const std::size_t, std::size_t) override {
         throw std::runtime_error("OS does not provide POSIX interface for mmap(...) and munmao(...)");
         // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
-#endif
     }
+#endif
 
-    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
+
 #ifdef HAS_POSIX_MAP_INTERFACE
+    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
+
         if (munmap(p, size) == -1) {
             throw std::runtime_error(fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
         }
-#endif
     }
+#else
+    void  do_deallocate(void*, std::size_t, size_t) override { }
+#endif
 
     bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
 
@@ -206,13 +213,15 @@ class circular_buffer
             _size(align_with_page_size(min_size, _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
         }
 
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
 #ifdef HAS_POSIX_MAP_INTERFACE
+        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
             return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
-#else
-            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
-#endif
         }
+#else
+        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
+            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
+        }
+#endif
 
         static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
             // double-mmaped behaviour requires the different size/alloc strategy

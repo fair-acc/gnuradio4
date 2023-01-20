@@ -475,7 +475,7 @@ diff(const std::vector<time_point> &stop, const std::vector<time_point> &start) 
 
 template<std::size_t n_iterations, typename MapType>
     requires(n_iterations > 0)
-constexpr auto
+auto
 convert(const std::vector<MapType> &in) {
     std::vector<std::pair<std::string, std::vector<time_point>>> ret;
     ret.resize(in[0].size());
