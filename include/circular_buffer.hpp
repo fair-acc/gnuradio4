@@ -84,7 +84,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         }
         const std::size_t size_half = size/2;
 
-        static int _counter;
+        static std::size_t _counter;
         const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
         const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
             return syscall(__NR_memfd_create, name, flags);
@@ -137,7 +137,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
 public:
     static inline double_mapped_memory_resource* defaultAllocator() {
-        static double_mapped_memory_resource instance = double_mapped_memory_resource();
+        static auto instance = double_mapped_memory_resource();
         return &instance;
     }
 
@@ -207,7 +207,11 @@ class circular_buffer
         }
 
         static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
-            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), getpagesize()) / sizeof(T) : min_size;
+#ifdef HAS_POSIX_MAP_INTERFACE
+            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
+#else
+            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
+#endif
         }
 
         static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
@@ -325,7 +329,7 @@ class circular_buffer
                 }
                 _claim_strategy->publish(publishSequence); // points at first non-writable index
             } catch (const std::exception& e) {
-                throw (e);
+                throw e;
             } catch (...) {
                 throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
             }
@@ -374,10 +378,10 @@ class circular_buffer
             const auto& data = *_data;
             if constexpr (strict_check) {
                 const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &data[_read_index_cached % _size], n };
+                return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
             }
             const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &data[_read_index_cached % _size], n };
+            return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
         }
 
         template <bool strict_check = true>
@@ -390,7 +394,7 @@ class circular_buffer
                     return false;
                 }
             }
-            _read_index_cached = _read_index->addAndGet(n_elements);
+            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
             return true;
         }
 
