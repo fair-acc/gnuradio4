@@ -127,16 +127,14 @@ public:
 
         // cache prediction metric
         attr.config = PERF_COUNT_HW_CACHE_MISSES;
-        _fd_misses  = static_cast<int>(
-                syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
+        _fd_misses  = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
         if (_fd_misses == -1) {
             print_access_right_msg("could not open SYS_perf_event_open -- misses");
             return;
         }
 
         attr.config  = PERF_COUNT_HW_CACHE_REFERENCES;
-        _fd_accesses = static_cast<int>(
-                syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
+        _fd_accesses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
         if (_fd_accesses == -1) {
             print_access_right_msg("could not open SYS_perf_event_open -- accesses");
             return;
@@ -144,16 +142,14 @@ public:
 
         // branch prediction metric
         attr.config       = PERF_COUNT_HW_BRANCH_MISSES;
-        _fd_branch_misses = static_cast<int>(
-                syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
+        _fd_branch_misses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
         if (_fd_branch_misses == -1) {
             print_access_right_msg("could not open SYS_perf_event_open -- branch misses");
             return;
         }
 
         attr.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
-        _fd_branch  = static_cast<int>(
-                syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
+        _fd_branch  = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
         if (_fd_branch == -1) {
             print_access_right_msg("could not open SYS_perf_event_open -- branch accesses");
             return;
@@ -161,8 +157,7 @@ public:
 
         // instruction count metric
         attr.config      = PERF_COUNT_HW_INSTRUCTIONS;
-        _fd_instructions = static_cast<int>(
-                syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
+        _fd_instructions = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
         if (_fd_instructions == -1) {
             print_access_right_msg("could not open SYS_perf_event_open -- instruction count");
             return;
@@ -171,19 +166,14 @@ public:
         // ctx switch count metric
         attr.type        = PERF_TYPE_SOFTWARE;
         attr.config      = PERF_COUNT_SW_CONTEXT_SWITCHES;
-        _fd_ctx_switches = static_cast<int>(
-                syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
+        _fd_ctx_switches = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
         if (_fd_ctx_switches == -1) {
             print_access_right_msg("could not open SYS_perf_event_open -- ctx switches");
             return;
         }
 
-        if (ioctl(_fd_misses, PERF_EVENT_IOC_ENABLE) == -1
-            || ioctl(_fd_accesses, PERF_EVENT_IOC_ENABLE) == -1
-            || ioctl(_fd_branch_misses, PERF_EVENT_IOC_ENABLE) == -1
-            || ioctl(_fd_branch, PERF_EVENT_IOC_ENABLE) == -1
-            || ioctl(_fd_instructions, PERF_EVENT_IOC_ENABLE) == -1
-            || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_ENABLE) == -1) {
+        if (ioctl(_fd_misses, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_accesses, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_branch_misses, PERF_EVENT_IOC_ENABLE) == -1
+            || ioctl(_fd_branch, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_instructions, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_ENABLE) == -1) {
             print_access_right_msg("could not PERF_EVENT_IOC_ENABLE");
             return;
         }
@@ -191,12 +181,8 @@ public:
 
     ~PerformanceCounter() {
         if (_has_required_rights
-            && (ioctl(_fd_misses, PERF_EVENT_IOC_DISABLE) == -1
-                || ioctl(_fd_accesses, PERF_EVENT_IOC_DISABLE) == -1
-                || ioctl(_fd_branch_misses, PERF_EVENT_IOC_DISABLE) == -1
-                || ioctl(_fd_branch, PERF_EVENT_IOC_DISABLE) == -1
-                || ioctl(_fd_instructions, PERF_EVENT_IOC_DISABLE) == -1
-                || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_DISABLE) == -1)) {
+            && (ioctl(_fd_misses, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_accesses, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_branch_misses, PERF_EVENT_IOC_DISABLE) == -1
+                || ioctl(_fd_branch, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_instructions, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_DISABLE) == -1)) {
             print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
         }
         close(_fd_misses);
@@ -228,14 +214,9 @@ public:
             return {};
         }
         perf_metric           ret;
-        constexpr static auto read_metric = [](int metric_fd, auto &data) noexcept -> bool {
-            return read(metric_fd, &data, sizeof(data)) != sizeof(data);
-        };
-        if (read_metric(_fd_misses, ret.cache.misses) || read_metric(_fd_accesses, ret.cache.total)
-            || read_metric(_fd_branch_misses, ret.branch.misses)
-            || read_metric(_fd_branch, ret.branch.total)
-            || read_metric(_fd_instructions, ret.instructions)
-            || read_metric(_fd_ctx_switches, ret.ctx_switches)) {
+        constexpr static auto read_metric = [](int metric_fd, auto &data) noexcept -> bool { return read(metric_fd, &data, sizeof(data)) != sizeof(data); };
+        if (read_metric(_fd_misses, ret.cache.misses) || read_metric(_fd_accesses, ret.cache.total) || read_metric(_fd_branch_misses, ret.branch.misses) || read_metric(_fd_branch, ret.branch.total)
+            || read_metric(_fd_instructions, ret.instructions) || read_metric(_fd_ctx_switches, ret.ctx_switches)) {
             return {};
         }
         using T          = decltype(ret.cache.ratio);
@@ -292,13 +273,11 @@ struct fixed_string {
         return N == 0;
     }
 
-    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return { _data, N }; }
 
-    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit           operator std::string() const noexcept { return { _data, N }; }
 
-    [[nodiscard]]          operator const char *() const noexcept { return _data; }
+    [[nodiscard]]                    operator const char *() const noexcept { return _data; }
 
     [[nodiscard]] constexpr bool
     operator==(const fixed_string &other) const noexcept {
@@ -334,11 +313,7 @@ class const_key_map {
     template<fixed_string key>
     constexpr static std::size_t
     get_index_by_name() noexcept {
-        if constexpr (constexpr auto itr = std::find_if(_keys.cbegin(), _keys.cend(),
-                                                        [](auto const &v) {
-                                                            return v == std::string_view(key);
-                                                        });
-                      itr != std::cend(_keys)) {
+        if constexpr (constexpr auto itr = std::find_if(_keys.cbegin(), _keys.cend(), [](auto const &v) { return v == std::string_view(key); }); itr != std::cend(_keys)) {
             return std::distance(std::cbegin(_keys), itr);
         } else {
             static_assert(key_not_found<key>, "key not found");
@@ -347,11 +322,7 @@ class const_key_map {
 
     constexpr static std::size_t
     get_index_by_name(std::string_view key) {
-        if (const auto itr = std::find_if(_keys.cbegin(), _keys.cend(),
-                                          [&key](const auto &v) {
-                                              return v == std::string_view(key);
-                                          });
-            itr != std::cend(_keys)) {
+        if (const auto itr = std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto &v) { return v == std::string_view(key); }); itr != std::cend(_keys)) {
             return std::distance(std::cbegin(_keys), itr);
         } else {
             throw std::range_error("key not found");
@@ -412,8 +383,7 @@ public:
 
     [[nodiscard]] constexpr bool
     contains(const std::string_view key) const {
-        return std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto &v) { return v == key; })
-            != std::cend(_keys);
+        return std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto &v) { return v == key; }) != std::cend(_keys);
     }
 };
 
@@ -436,10 +406,7 @@ struct StringHash {
     }
 };
 
-using ResultMap = std::unordered_map<
-        std::string,
-        std::pair<std::variant<std::monostate, long double, uint64_t, perf_sub_metric>, std::string>,
-        StringHash, std::equal_to<>>;
+using ResultMap = std::unordered_map<std::string, std::pair<std::variant<std::monostate, long double, uint64_t, perf_sub_metric>, std::string>, StringHash, std::equal_to<>>;
 
 class results {
     using EntryType = std::pair<std::string, ResultMap>;
@@ -477,17 +444,16 @@ public:
 
     timeDiff
     operator-(const time_point &start_marker) const noexcept {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(_time_point
-                                                                    - start_marker._time_point);
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(_time_point - start_marker._time_point);
     }
 };
 
 namespace utils {
 
 template<std::size_t N, typename T>
-requires (N > 0)
+    requires(N > 0)
 constexpr std::vector<T>
-diff(const std::vector<time_point>& stop, time_point start) {
+diff(const std::vector<time_point> &stop, time_point start) {
     std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9 * static_cast<T>((stop[i] - start).count());
@@ -497,10 +463,10 @@ diff(const std::vector<time_point>& stop, time_point start) {
 }
 
 template<std::size_t N, typename T>
-requires (N > 0)
+    requires(N > 0)
 constexpr std::vector<T>
 diff(const std::vector<time_point> &stop, const std::vector<time_point> &start) {
-    std::vector<T>    ret(N);
+    std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9 * static_cast<T>((stop[i] - start[i]).count());
     }
@@ -535,8 +501,7 @@ compute_statistics(const std::vector<T> &values) {
     const auto mean   = std::accumulate(values.begin(), values.end(), T{}) / static_cast<T>(N);
 
     T          stddev{};
-    std::for_each(values.cbegin(), values.cend(),
-                  [&](const auto x) { stddev += (x - mean) * (x - mean); });
+    std::for_each(values.cbegin(), values.cend(), [&](const auto x) { stddev += (x - mean) * (x - mean); });
     stddev /= static_cast<T>(N);
     stddev = std::sqrt(stddev);
 
@@ -553,15 +518,13 @@ concept Numeric = std::integral<T> || std::floating_point<T>;
 template<Numeric T>
 std::string
 to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
-    static constexpr std::array si_prefixes{ 'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ',
-                                             'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q' };
+    static constexpr std::array si_prefixes{ 'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q' };
     static constexpr double     base     = 1000.0;
     long double                 value    = value_base;
 
     std::size_t                 exponent = 10;
     if (value == 0) {
-        return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ",
-                           si_prefixes[exponent], unit);
+        return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
     }
     while (value >= base && exponent < si_prefixes.size()) {
         value /= base;
@@ -572,8 +535,7 @@ to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_
         --exponent;
     }
 
-    return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ",
-                       si_prefixes[exponent], unit);
+    return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
 }
 
 } // namespace utils
@@ -620,13 +582,10 @@ template<typename T>
 struct fn_traits : detail::class_with_call_operator<decltype(&T::operator())> {};
 
 template<typename T>
-using return_type_of_t = typename fn_traits<
-        typename std::remove_const_t<typename std::remove_reference_t<T>>>::result_type;
+using return_type_of_t = typename fn_traits<typename std::remove_const_t<typename std::remove_reference_t<T>>>::result_type;
 
 template<typename T>
-using first_arg_of_t = std::tuple_element_t<
-        0, typename fn_traits<
-                   typename std::remove_const_t<typename std::remove_reference_t<T>>>::args_tuple>;
+using first_arg_of_t = std::tuple_element_t<0, typename fn_traits<typename std::remove_const_t<typename std::remove_reference_t<T>>>::args_tuple>;
 } // namespace detail
 
 template<typename TestFunction>
@@ -658,42 +617,40 @@ get_marker_array() {
     }
 }
 
-template<std::size_t n_iterations = 1LU, typename ResultType = results,
-         fixed_string... meas_marker_names>
+template<std::size_t N_ITERATIONS = 1LU, std::size_t N_SCALE_OPS = 1LU, typename ResultType = results, fixed_string... meas_marker_names>
 class benchmark : public ut::detail::test {
 public:
     benchmark() = delete;
 
     explicit benchmark(std::string_view _name) : ut::detail::test{ "benchmark", _name } {}
 
-    template<class TestFunction, std::size_t MARKER_SIZE = argument_size<TestFunction>(),
-             bool has_arguments = MARKER_SIZE != 0>
+    template<class TestFunction, std::size_t MARKER_SIZE = argument_size<TestFunction>(), bool has_arguments = MARKER_SIZE != 0>
     // template<fixed_string ...meas_marker, Callback<meas_marker...> Test>
     constexpr benchmark &
     operator=(TestFunction &&_test) {
         static_cast<ut::detail::test &>(*this) = [&_test, this] {
             auto &result_map = ResultType::add_result(name);
-            if constexpr (n_iterations != 1) {
-                result_map.try_emplace("n-iter", n_iterations, "");
+            if constexpr (N_ITERATIONS != 1) {
+                result_map.try_emplace("n-iter", N_ITERATIONS, "");
             } else {
                 result_map.try_emplace("n-iter", std::monostate{}, "");
             }
 
-            std::vector<time_point> stop_iter(n_iterations);
-            auto                    marker_iter = get_marker_array<TestFunction, n_iterations>();
+            std::vector<time_point> stop_iter(N_ITERATIONS);
+            auto                    marker_iter = get_marker_array<TestFunction, N_ITERATIONS>();
 
             PerformanceCounter      execMetrics;
             const auto              start = time_point().now();
 
-            if constexpr (n_iterations == 1) {
+            if constexpr (N_ITERATIONS == 1) {
                 if constexpr (std::invocable<TestFunction>) {
                     _test();
                 } else {
                     _test(marker_iter[0]);
                 }
                 stop_iter[0].now();
-            } else if constexpr (n_iterations >= 1) {
-                for (auto i = 0LU; i < n_iterations; i++) {
+            } else if constexpr (N_ITERATIONS >= 1) {
+                for (auto i = 0LU; i < N_ITERATIONS; i++) {
                     if constexpr (std::invocable<TestFunction>) {
                         _test();
                     } else {
@@ -702,8 +659,7 @@ public:
                     stop_iter[i].now();
                 }
             } else {
-                throw std::invalid_argument(
-                        "benchmark n_iteration := 0 parameter not (yet) implemented");
+                throw std::invalid_argument("benchmark n_iteration := 0 parameter not (yet) implemented");
             }
             // N.B. need to retrieve CPU performance count here no to spoil the result by further
             // post-processing
@@ -712,19 +668,17 @@ public:
                 const perf_metric perf_data = execMetrics.results();
                 result_map.try_emplace("CPU cache misses", perf_data.cache, "");
                 result_map.try_emplace("CPU branch misses", perf_data.branch, "");
-                result_map.try_emplace("CPU-I", perf_data.instructions / n_iterations, "");
+                result_map.try_emplace("CPU-I", perf_data.instructions / (N_ITERATIONS * N_SCALE_OPS), "");
                 result_map.try_emplace("CTX-SW", perf_data.ctx_switches, "");
             }
             // not time-critical post-processing starts here
-            const auto        time_differences_ns = utils::diff<n_iterations, long double>(stop_iter, start);
-            const auto        ns                  = stop_iter[n_iterations - 1] - start;
+            const auto        time_differences_ns = utils::diff<N_ITERATIONS, long double>(stop_iter, start);
+            const auto        ns                  = stop_iter[N_ITERATIONS - 1] - start;
             const long double duration_s          = 1e-9 * static_cast<long double>(ns.count());
 
-            const auto        add_statistics      = [&duration_s]<typename T>(ResultMap &map,
-                                                                  const T   &time_diff) {
-                if constexpr (n_iterations != 1) {
-                    const auto [min, mean, stddev, median, max] = utils::compute_statistics(
-                            time_diff);
+            const auto        add_statistics      = [&duration_s]<typename T>(ResultMap &map, const T &time_diff) {
+                if constexpr (N_ITERATIONS != 1) {
+                    const auto [min, mean, stddev, median, max] = utils::compute_statistics(time_diff);
                     map.try_emplace("min", min, "s");
                     map.try_emplace("mean", mean, "s");
                     if (stddev == 0) {
@@ -736,7 +690,7 @@ public:
                     map.try_emplace("max", max, "s");
                 } else {
                     map.try_emplace("min", std::monostate{}, "s");
-                    map.try_emplace("mean", duration_s / n_iterations, "s");
+                    map.try_emplace("mean", duration_s / N_ITERATIONS, "s");
                     map.try_emplace("stddev", std::monostate{}, "s");
                     map.try_emplace("median", std::monostate{}, "s");
                     map.try_emplace("max", std::monostate{}, "s");
@@ -745,20 +699,16 @@ public:
             add_statistics(result_map, time_differences_ns);
 
             result_map.try_emplace("total time", duration_s, "s");
-            result_map.try_emplace("ops/s", n_iterations / duration_s, "");
+            result_map.try_emplace("ops/s", N_SCALE_OPS * N_ITERATIONS / duration_s, "");
 
             if constexpr (MARKER_SIZE > 0) {
-                auto transposed_map = utils::convert<n_iterations>(marker_iter);
+                auto transposed_map = utils::convert<N_ITERATIONS>(marker_iter);
                 for (auto keyID = 0LU; keyID < transposed_map.size(); keyID++) {
                     if (keyID > 0) {
-                        const auto meas = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
-                                                      keyID < transposed_map.size() - 1 ? "├" : "└",
-                                                      keyID, transposed_map[0].first,
-                                                      transposed_map[keyID].first);
+                        const auto meas              = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
+                                                      keyID < transposed_map.size() - 1 ? "├" : "└", keyID, transposed_map[0].first, transposed_map[keyID].first);
                         auto      &marker_result_map = ResultType::add_result(meas);
-                        add_statistics(marker_result_map,
-                                       utils::diff<n_iterations, long double>(transposed_map[keyID].second,
-                                                                transposed_map[0].second));
+                        add_statistics(marker_result_map, utils::diff<N_ITERATIONS, long double>(transposed_map[keyID].second, transposed_map[0].second));
                     }
                 }
             }
@@ -766,16 +716,14 @@ public:
         return *this;
     }
 
-    template<size_t n>
+    template<std::size_t N, std::size_t N_SCALE = 1LU>
     auto
     repeat() {
-        return ::benchmark::benchmark<n, ResultType, meas_marker_names...>(this->name);
+        return ::benchmark::benchmark<N, N_SCALE, ResultType, meas_marker_names...>(this->name);
     }
 };
 
-[[nodiscard]] auto operator""_benchmark(const char *name, std::size_t size) {
-    return ::benchmark::benchmark<1LU>{ { name, size } };
-}
+[[nodiscard]] auto operator""_benchmark(const char *name, std::size_t size) { return ::benchmark::benchmark<1LU>{ { name, size } }; }
 
 } // namespace benchmark
 
@@ -803,7 +751,8 @@ public:
     }
 
     constexpr void
-    on(const ut::events::test_begin &) const noexcept { /* not needed */ }
+    on(const ut::events::test_begin &) const noexcept { /* not needed */
+    }
 
     void
     on(const ut::events::test_run &test_run) {
@@ -811,15 +760,16 @@ public:
     }
 
     constexpr void
-    on(const ut::events::test_skip &) const noexcept { /* not needed */ }
+    on(const ut::events::test_skip &bench) const noexcept {
+        std::cerr << fmt::format("SKIPPED - {}", bench.name) << std::endl;
+        [[maybe_unused]] const auto& map = benchmark::results::add_result(bench.name);
+    }
 
     void
     on(const ut::events::test_end &test_end) {
         if (_asserts.fail > 0) {
             ++_benchmarks.fail;
-            _printer << _printer.colors().fail
-                     << fmt::format("... in benchmark '{}'", test_end.name)
-                     << _printer.colors().none << '\n';
+            _printer << _printer.colors().fail << fmt::format("... in benchmark '{}'", test_end.name) << _printer.colors().none << '\n';
             _asserts.fail--;
         }
     }
@@ -845,14 +795,9 @@ public:
     template<class TExpr>
     void
     on(ut::events::assertion_fail<TExpr> assertion) {
-        constexpr auto short_name = [](std::string_view name) {
-            return name.rfind('/') != std::string_view::npos ? name.substr(name.rfind('/') + 1)
-                                                             : name;
-        };
-        _printer << "\n  " << short_name(assertion.location.file_name()) << ':'
-                 << assertion.location.line() << ':' << _printer.colors().fail << "FAILED"
-                 << _printer.colors().none << " [" << std::boolalpha << assertion.expr
-                 << _printer.colors().none << ']';
+        constexpr auto short_name = [](std::string_view name) { return name.rfind('/') != std::string_view::npos ? name.substr(name.rfind('/') + 1) : name; };
+        _printer << "\n  " << short_name(assertion.location.file_name()) << ':' << assertion.location.line() << ':' << _printer.colors().fail << "FAILED" << _printer.colors().none << " ["
+                 << std::boolalpha << assertion.expr << _printer.colors().none << ']';
         ++_asserts.fail;
     }
 
@@ -864,11 +809,9 @@ public:
     on(const ut::events::summary &) {
         if (_benchmarks.fail || _asserts.fail) {
             std::cout << _printer.str() << std::endl;
-            std::cout << fmt::format("\033[31m{} micro-benchmark(s) failed:\n\033[m",
-                                     _benchmarks.fail);
+            std::cout << fmt::format("\033[31m{} micro-benchmark(s) failed:\n\033[m", _benchmarks.fail);
         } else {
-            std::cout << _printer.colors().pass << "all micro-benchmarks passed:\n"
-                      << _printer.colors().none;
+            std::cout << _printer.colors().pass << "all micro-benchmarks passed:\n" << _printer.colors().none;
         }
         print();
         std::cerr.flush();
@@ -886,15 +829,12 @@ public:
         // N.B. using <algorithm> rather than <ranges> to be compatible with libc/Emscripten
         // for details see: https://libcxx.llvm.org/Status/Ranges.html
         // not as of clang 15: https://compiler-explorer.com/z/8arxzodh3 ('trunk' seems to be OK)
-        std::transform(data.cbegin(), data.cend(), v.begin(),
-                       [](auto val) { return val.first.size(); });
+        std::transform(data.cbegin(), data.cend(), v.begin(), [](auto val) { return val.first.size(); });
 
         const std::string test_case_label = "benchmark:";
-        const std::size_t name_max_size   = std::max(*std::max_element(v.cbegin(), v.cend()),
-                                                     test_case_label.size())
-                                        + 1LU;
+        const std::size_t name_max_size   = std::max(*std::max_element(v.cbegin(), v.cend()), test_case_label.size()) + 1LU;
 
-        const auto format = [](auto &value, const std::string &unit) -> std::string {
+        const auto        format          = [](auto &value, const std::string &unit) -> std::string {
             using ::benchmark::utils::to_si_prefix;
             if (std::holds_alternative<std::monostate>(value)) {
                 return "";
@@ -905,8 +845,7 @@ public:
             } else if (std::holds_alternative<benchmark::perf_sub_metric>(value)) {
                 const auto stat = std::get<benchmark::perf_sub_metric>(value);
                 return fmt::format("{:>4} / {:>4} = {:4.1f}%", //
-                                   to_si_prefix(stat.misses, unit, 0),
-                                   to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
+                                                   to_si_prefix(stat.misses, unit, 0), to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
             }
             throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
         };
@@ -936,7 +875,9 @@ public:
                 first_row = false;
             }
             fmt::print("│ {1:<{0}} ", name_max_size, test_name);
-            if (result_map.size() == 1) {
+            if (result_map.size() == 0) {
+                fmt::print("│ \033[33mSKIP\033[0m ");
+            } else if (result_map.size() == 1) {
                 fmt::print("│ \033[31mFAIL\033[0m ");
             } else {
                 fmt::print("│ \033[32mPASS\033[0m ");
