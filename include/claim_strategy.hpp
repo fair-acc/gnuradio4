@@ -36,8 +36,8 @@ concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_pt
 };
 
 namespace claim_strategy::util {
-constexpr unsigned    floorlog2(unsigned x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(unsigned x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
 }
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
@@ -90,7 +90,7 @@ public:
         return nextSequence;
     }
 
-    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim) {
+    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
         if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
@@ -166,7 +166,7 @@ public:
         return true;
     }
 
-    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) {
+    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
         std::int64_t current;
@@ -200,7 +200,7 @@ public:
         return next;
     }
 
-    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) {
+    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
         std::int64_t current;
