@@ -365,7 +365,7 @@ public:
     port(const port&) = delete;
     auto operator=(const port&) = delete;
 
-    constexpr port(std::string port_name, std::int16_t priority = 0, std::size_t n_history = 0,
+    port(std::string port_name, std::int16_t priority = 0, std::size_t n_history = 0,
                           std::size_t min_samples = 0U, std::size_t max_samples = SIZE_MAX) noexcept
         : _name(std::move(port_name))
         , _priority{priority}
@@ -833,7 +833,7 @@ public:
     }
 
 protected:
-    constexpr node(std::string name = {})
+    node(std::string name = {})
         : _name(std::move(name)) {}
 
 };
@@ -955,8 +955,8 @@ private:
     [[gnu::always_inline]] constexpr auto
     apply_right(auto &&input_tuple, auto &&tmp) {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
-            constexpr int first_offset  = Left::input_port_types::size;
-            constexpr int second_offset = Left::input_port_types::size + sizeof...(Is);
+            constexpr std::size_t first_offset  = Left::input_port_types::size;
+            constexpr std::size_t second_offset = Left::input_port_types::size + sizeof...(Is);
             static_assert(second_offset + sizeof...(Js)
                           == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
             return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp),
@@ -1062,8 +1062,8 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, meta::source_node A, meta::sink_node B>
 [[gnu::always_inline]] constexpr auto
 merge(A &&a, B &&b) {
-    constexpr std::size_t OutId = meta::indexForName<OutName, typename A::output_ports>();
-    constexpr std::size_t InId = meta::indexForName<InName, typename B::input_ports>();
+    constexpr int OutId = meta::indexForName<OutName, typename A::output_ports>();
+    constexpr int InId = meta::indexForName<InName, typename B::input_ports>();
     static_assert(OutId != -1);
     static_assert(InId != -1);
     static_assert(std::same_as<typename std::remove_cvref_t<A>::output_port_types::template at<OutId>,

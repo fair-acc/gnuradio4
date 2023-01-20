@@ -11,10 +11,17 @@
 inline constexpr std::size_t N_ITER = 1;
 inline constexpr std::size_t N_SAMPLES = 1'000'000;
 
+#ifndef __EMSCRIPTEN__
 auto
 this_source_location(std::source_location l = std::source_location::current()) {
     return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
 }
+#else
+auto
+this_source_location() {
+    return "not yet implemented";
+}
+#endif // __EMSCRIPTEN__
 
 namespace fg                       = fair::graph;
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();

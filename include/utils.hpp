@@ -38,7 +38,7 @@ struct fixed_string {
         return { _data, N };
     }
 
-    [[nodiscard]] constexpr explicit operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
 
     [[nodiscard]]                    operator const char *() const noexcept { return _data; }
 
