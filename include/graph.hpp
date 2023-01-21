@@ -257,6 +257,15 @@ namespace work_policies {
                 return at_least_one_input_has_data ? work_result::has_unprocessed_data : work_result::inputs_empty;
             }
 
+            bool all_writers_available =
+                [&self, available_values_count] <std::size_t... Idx> (std::index_sequence<Idx...>) {
+                    return ((std::get<Idx>(self._fixed_output_ports).writer().available() >= available_values_count) && ... && true);
+                } (std::make_index_sequence<Self::output_ports::size>());
+
+            if (!all_writers_available) {
+                return work_result::writers_not_available;
+            }
+
             auto input_spans =
                 [&self, available_values_count] <std::size_t... Idx> (std::index_sequence<Idx...>) {
                     return std::make_tuple(
