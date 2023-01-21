@@ -68,8 +68,6 @@ public:
                 //         [this](std::span<T> output) {
                 //             throw "NOT CALLED";
                 //             for (auto &val : output) {
-                //                 if (fair::graph::global_work_debug)
-                //                     fmt::print("    calling process_one\n");
                 //                 val = process_one();
                 //             }
                 //         },
@@ -554,8 +552,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         //  |
         //  v
         //  m0     m1     m2     m3     m4     m5     m6
-        //  |     /|     /|     /|     /|     /|     /|
-        //  |    v |    v |    v |    v |    v |    v |
+        //  |     ^|     ^|     ^|     ^|     ^|     ^|
+        //  |    / |    / |    / |    / |    / |    / |
         //  |  a0  |  a1  |  a2  |  a3  |  a4  |  a5  |  a6
         //  |  ^   |  ^   |  ^   |  ^   |  ^   |  ^   | ^ |
         //  v /    v /    v /    v /    v /    v /    v/  |
@@ -567,14 +565,14 @@ inline const boost::ut::suite _runtime_tests = [] {
             if (i == 0) {
                 expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, mult1[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult1[i], add1[i - 1])));
+                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1[i - 1], mult1[i])));
             }
             expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult1[i], mult2[i])));
             expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult2[i], add1[i])));
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1[add1.size() - 1], sink)));
 
-        skip / "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER, N_SAMPLES>() = [&flow_graph]() {
+        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER, N_SAMPLES>() = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             flow_graph.work();
