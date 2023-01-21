@@ -493,7 +493,9 @@ inline const boost::ut::suite _runtime_tests = [] {
             test::n_samples_consumed = 0LU;
             flow_graph.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
-            expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
+            // some samples will never reach the destination as
+            // their count will not go over the LCM(23,1024) barrier
+            expect(eq(test::n_samples_consumed, N_SAMPLES / 1024 * 1024)) << "did not consume enough input samples";
         };
     }
 
@@ -529,6 +531,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         fg::graph           flow_graph;
         flow_graph.register_node(src);
+        flow_graph.register_node(sink);
 
         std::vector<multiply<float>> mult1;
         std::vector<multiply<float>> mult2;

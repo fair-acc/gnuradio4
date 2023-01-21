@@ -115,6 +115,7 @@ enum class work_result {
     success,
     has_unprocessed_data,
     inputs_empty,
+    writers_not_available,
     error
 };
 
@@ -1113,6 +1114,7 @@ private:
         virtual ~node_model() = default;
         virtual std::string_view name() const = 0;
         virtual work_result work() = 0;
+        virtual void* raw() const = 0;
     };
 
     template<typename T>
@@ -1151,6 +1153,10 @@ private:
 
         std::string_view name() const override {
             return data().name();
+        }
+
+        void* raw() const override {
+            return _node;
         }
     };
 
@@ -1238,6 +1244,17 @@ public:
         OutPort auto& source_port = src_node_raw.template port<port_direction_t::OUTPUT, src_port_index>();
         InPort auto& destination_port = dst_node_raw.template port<port_direction_t::INPUT, dst_port_index>();
 
+        if (!std::any_of(_nodes.begin(), _nodes.end(),
+                    [&] (const auto& registered_node) {
+                        return registered_node->raw() == std::addressof(src_node_raw);
+                    }) ||
+            !std::any_of(_nodes.begin(), _nodes.end(),
+                    [&] (const auto& registered_node) {
+                        return registered_node->raw() == std::addressof(dst_node_raw);
+                    })) {
+            throw fmt::format("Can not connect nodes that are not registered first");
+        }
+
         auto result = source_port.connect(destination_port);
         if (result == connection_result_t::SUCCESS) {
             std::unique_ptr<node_model> src_node = std::make_unique<reference_node_wrapper<Source>>(std::addressof(src_node_raw));
@@ -1285,6 +1302,9 @@ public:
                     // nothing
                 }
                 else if (result == work_result::success) {
+                    something_happened = true;
+                }
+                else if (result == work_result::writers_not_available) {
                     something_happened = true;
                 }
             }
