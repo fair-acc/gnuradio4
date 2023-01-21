@@ -7,10 +7,23 @@
 
 namespace fg = fair::graph;
 
+#ifndef __EMSCRIPTEN__
+auto
+this_source_location(std::source_location l = std::source_location::current()) {
+    return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
+}
+#else
+auto
+this_source_location() {
+    return "not yet implemented";
+}
+#endif // __EMSCRIPTEN__
+
 template <typename T>
 class random_source : public fg::node<random_source<T>, fg::OUT<T, "random">> {
+    using base = fg::node<random_source<T>, fg::OUT<T, "random">>;
 public:
-    random_source() {}
+    random_source(std::string name = this_source_location()) : base(name) {}
 
     constexpr T
     process_one() {
@@ -21,8 +34,9 @@ public:
 
 template <typename T>
 class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">> {
+    using base = fg::node<cout_sink<T>, fg::IN<T, "sink">>;
 public:
-    cout_sink() {}
+    cout_sink(std::string name = this_source_location()) : base(name) {}
 
     void process_one(T value) {
         std::cout << value << std::endl;
@@ -33,7 +47,10 @@ public:
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">> {
+    using base = fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">>;
 public:
+    scale(std::string name = this_source_location()) : base(name) {}
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -43,7 +60,10 @@ public:
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">> {
+    using base = fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">>;
 public:
+    adder(std::string name = this_source_location()) : base(name) {}
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -64,6 +84,8 @@ class duplicate : public fg::node<
                  >;
 
 public:
+    duplicate(std::string name = this_source_location()) : base(name) {}
+
     using return_type = typename base::return_type;
 
     [[nodiscard]] constexpr return_type
@@ -77,10 +99,13 @@ public:
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
 class delay : public fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">> {
+    using base = fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">>;
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
 public:
+    delay(std::string name = this_source_location()) : base(name) {}
+
     [[nodiscard]] constexpr T
     process_one(T in) noexcept {
         T ret       = buffer[pos];
