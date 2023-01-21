@@ -12,19 +12,22 @@ namespace fg = fair::graph;
 
 using namespace std::string_literals;
 
+#ifdef ENABLE_DYNAMIC_PORTS
 class dynamic_node : public fg::node<dynamic_node> {
 public:
     dynamic_node(std::string name)
         : fg::node<dynamic_node>(name) {}
 
 };
+#endif
 
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">> {
+class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">, fg::limits<0, 1024>> {
+        using base = fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">, fg::limits<0, 1024>>;
 public:
     scale(std::string name)
-        : fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">>(std::move(name))
+        : base(std::move(name))
     {}
 
     template<fair::meta::t_or_simd<T> V>
@@ -35,10 +38,11 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">> {
+class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">, fg::limits<0, 1024>> {
+        using base = fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">, fg::limits<0, 1024>>;
 public:
     adder(std::string name)
-        : fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">>(std::move(name))
+        : base(std::move(name))
     {}
 
     template<fair::meta::t_or_simd<T> V>
@@ -49,10 +53,11 @@ public:
 };
 
 template <typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">> {
+class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">, fg::limits<0, 1024>> {
+            using base = fg::node<cout_sink<T>, fg::IN<T, "sink">, fg::limits<0, 1024>>;
 public:
     cout_sink(std::string name)
-        : fg::node<cout_sink<T>, fg::IN<T, "sink">>(std::move(name))
+        : base(std::move(name))
     {}
 
     void process_one(T value) {
@@ -62,14 +67,14 @@ public:
 };
 
 template <typename T, T value, std::size_t count = 10>
-class repeater_source : public fg::node<repeater_source<T, value>, fg::OUT<T, "value">> {
+class repeater_source : public fg::node<repeater_source<T, value>, fg::OUT<T, "value">, fg::limits<0, 1024>> {
+                  using base = fg::node<repeater_source<T, value>, fg::OUT<T, "value">, fg::limits<0, 1024>>;
 private:
-    using base = fg::node<repeater_source<T, value>, fg::OUT<T, "value">>;
     std::size_t _counter = 0;
 
 public:
     repeater_source(std::string name)
-        : fg::node<repeater_source<T, value>, fg::OUT<T, "value">>(std::move(name))
+        : base(std::move(name))
     {}
 
     fair::graph::work_result work() {

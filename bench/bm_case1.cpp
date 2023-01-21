@@ -27,17 +27,17 @@ namespace fg                       = fair::graph;
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
 
 namespace test {
-inline static std::size_t n_samples_produced = 0LU;
+std::size_t n_samples_produced = 0LU;
 
 template<typename T, std::size_t min = 0, std::size_t count = 8192, bool use_bulk_operation = true>
-class source : public fg::node<source<T, min, count>, fg::OUT<T, "out">> {
+class source : public fg::node<source<T, min, count>, fg::OUT<T, "out">, fg::limits<min, count>> {
+         using base = fg::node<source<T, min, count>, fg::OUT<T, "out">, fg::limits<min, count>>;
 private:
-    using base = fg::node<source<T, min, count>, fg::OUT<T, "out">>;
     std::size_t _n_samples_max;
 
 public:
     source(std::size_t n_samples, std::string name = this_source_location()) //
-        : fg::node<source<T, min, count>, fg::OUT<T, "out">>(std::move(name))
+        : base(std::move(name))
         , _n_samples_max(n_samples) {}
 
     [[nodiscard]] constexpr T
@@ -58,13 +58,22 @@ public:
                 if (n_write == 0) {
                     return fair::graph::work_result::error;
                 }
-                writer.publish(
-                        [this](std::span<T> output) {
-                            for (auto &val : output) {
-                                val = process_one();
-                            }
-                        },
-                        n_write);
+                auto [data, token] = writer.get(n_write);
+                for (auto& item: data) {
+                    item = process_one();
+                }
+                writer.publish(token, n_write);
+                // TODO: This API doesn't work, investigate
+                // writer.publish(
+                //         [this](std::span<T> output) {
+                //             throw "NOT CALLED";
+                //             for (auto &val : output) {
+                //                 if (fair::graph::global_work_debug)
+                //                     fmt::print("    calling process_one\n");
+                //                 val = process_one();
+                //             }
+                //         },
+                //         n_write);
             } else {
                 auto [data, token] = writer.get(1);
                 if (data.size() == 0) {
@@ -80,13 +89,14 @@ public:
     }
 };
 
-inline static std::size_t n_samples_consumed = 0LU;
+std::size_t n_samples_consumed = 0LU;
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class sink : public fg::node<sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>> {
+class sink : public fg::node<sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+       using base = fg::node<sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
 public:
     sink(std::string name = this_source_location()) //
-        : fg::node<sink<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>>(std::move(name)) {}
+        : base(std::move(name)) {}
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -99,10 +109,11 @@ public:
 } // namespace test
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class copy : public fg::node<copy<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+class copy : public fg::node<copy<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+       using base = fg::node<copy<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
 public:
     copy(std::string name = this_source_location()) //
-        : fg::node<copy<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>>(std::move(name)) {}
+        : base(std::move(name)) {}
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
@@ -112,10 +123,11 @@ public:
 };
 
 template<typename T1, typename T2, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class convert : public fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>> {
+class convert : public fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+          using base = fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
 public:
     convert(std::string name = this_source_location()) //
-        : fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>>(std::move(name)) {}
+        : base(std::move(name)) {}
 
     template<fair::meta::t_or_simd<T1> V>
     [[nodiscard]] constexpr T2
@@ -125,10 +137,11 @@ public:
 };
 
 template<typename T, int addend, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class add : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+class add : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+      using base = fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
 public:
     add(std::string name = this_source_location()) //
-        : fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>>(std::move(name)) {}
+        : base(std::move(name)) {}
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
@@ -138,16 +151,17 @@ public:
 };
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class multiply : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>> {
+class multiply : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+           using base = fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
     T _factor = static_cast<T>(1.0f);
 
 public:
     multiply(std::string name = this_source_location()) //
-        : fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>>(std::move(name)) {}
+        : base(std::move(name)) {}
 
     multiply() = delete;
 
-    explicit multiply(T factor) : _factor(factor) {}
+    explicit multiply(T factor, std::string name = this_source_location()) : base(name), _factor(factor) {}
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
@@ -379,20 +393,34 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         fg::graph           flow_graph;
         flow_graph.register_node(src);
+        flow_graph.register_node(sink);
 
         std::vector<copy<float>> cpy(10);
+
+        //
+        // src
+        //  |
+        //  v
+        //  c0 -> c1 -> ... -> cn
+        //                     |
+        //                     v
+        //                     sink
+        //
+
         for (std::size_t i = 0; i < cpy.size(); i++) {
+            cpy[i].set_name(fmt::format("copy {} at {}", i, this_source_location()));
             flow_graph.register_node(cpy[i]);
+
             if (i == 0) {
                 expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, cpy[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy[i], cpy[i - 1])));
+                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy[i - 1], cpy[i])));
             }
         }
 
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy[cpy.size() - 1], sink)));
 
-        skip / "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER, N_SAMPLES>() = [&flow_graph, &src]() {
+        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER, N_SAMPLES>() = [&flow_graph, &src]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             flow_graph.work();
@@ -510,9 +538,32 @@ inline const boost::ut::suite _runtime_tests = [] {
         for (std::size_t i = 0; i < add1.size(); i++) {
             mult1.emplace_back(2.0f);
             mult2.emplace_back(0.5f);
+            add1[i].set_name(fmt::format("add1.{}", i));
+            mult1[i].set_name(fmt::format("mult1.{}", i));
+            mult2[i].set_name(fmt::format("mult2.{}", i));
+        }
+
+        for (std::size_t i = 0; i < add1.size(); i++) {
             flow_graph.register_node(mult1[i]);
             flow_graph.register_node(mult2[i]);
             flow_graph.register_node(add1[i]);
+        }
+
+        //
+        //  src
+        //  |
+        //  v
+        //  m0     m1     m2     m3     m4     m5     m6
+        //  |     /|     /|     /|     /|     /|     /|
+        //  |    v |    v |    v |    v |    v |    v |
+        //  |  a0  |  a1  |  a2  |  a3  |  a4  |  a5  |  a6
+        //  |  ^   |  ^   |  ^   |  ^   |  ^   |  ^   | ^ |
+        //  v /    v /    v /    v /    v /    v /    v/  |
+        //  M0     M1     M2     M3     M4     M5     M6  |
+        //                                                v
+        //                                                sink
+        //
+        for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
                 expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, mult1[i])));
             } else {

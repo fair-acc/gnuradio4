@@ -77,6 +77,24 @@ template <typename T>
     requires (meta::is_typelist_v<T> and T::template all_of<has_fixed_port_info>)
 struct has_fixed_port_info_or_is_typelist<T> : std::true_type {};
 
+template <std::size_t _min, std::size_t _max>
+struct limits {
+    using limits_tag = std::true_type;
+    static constexpr std::size_t min = _min;
+    static constexpr std::size_t max = _max;
+};
+
+template <typename T>
+concept is_limits_v = requires {
+    typename T::limits_tag;
+};
+
+static_assert(!is_limits_v<int>);
+static_assert(!is_limits_v<std::size_t>);
+static_assert(is_limits_v<limits<0, 1024>>);
+
+template <typename T>
+using is_limits = std::integral_constant<bool, is_limits_v<T>>;
 
 template<typename Port>
 using port_type = typename Port::value_type;
@@ -202,19 +220,19 @@ namespace work_policies {
     struct read_many_and_publish_many {
         template<typename Self>
         static work_result work(Self& self) noexcept {
-            bool data_available = false;
-            auto available_values_count = [&self, &data_available] {
+            bool at_least_one_input_has_data = false;
+            std::same_as<std::size_t> auto available_values_count = [&self, &at_least_one_input_has_data] () {
                 if constexpr (Self::input_ports::size > 0) {
-                    auto availableForPort = [&data_available] <typename Port> (Port& port) {
-                        auto available = port.reader().available();
-                        if (available > 0) data_available = true;
-                        return available < port.min_buffer_size() ? 0 // not enough values available
+                    auto availableForPort = [&at_least_one_input_has_data] <typename Port> (Port& port) {
+                        std::size_t available = port.reader().available();
+                        if (available > 0) at_least_one_input_has_data = true;
+                        return available < port.min_buffer_size() ? std::size_t{0} // not enough values available
                              : available > port.max_buffer_size() ? port.max_buffer_size()
                              : /* otherwise */          available;
                     };
 
                     auto availableInAll = [&self, &availableForPort] <std::size_t... Idx> (std::index_sequence<Idx...>) {
-                        auto betterMin = [] <typename Arg, typename... Args> (Arg arg, Args&&... args) {
+                        auto betterMin = [] <typename Arg, typename... Args> (Arg arg, Args&&... args) -> std::size_t {
                             if constexpr (sizeof...(Args) == 0) {
                                 return arg;
                             } else {
@@ -224,18 +242,18 @@ namespace work_policies {
                         return betterMin(availableForPort(std::get<Idx>(self._fixed_input_ports))...);
                     } (std::make_index_sequence<Self::input_ports::size>());
 
-                    return availableInAll < self.minInputs() ? 0
-                         : availableInAll > self.maxInputs() ? self.maxInputs()
+                    return availableInAll < self.min_samples() ? std::size_t{0}
+                         : availableInAll > self.max_samples() ? self.max_samples()
                          : availableInAll;
 
                 } else {
                     (void)self;
-                    return 1;
+                    return std::size_t{1};
                 }
             }();
 
             if (available_values_count == 0) {
-                return data_available ? work_result::has_unprocessed_data : work_result::inputs_empty;
+                return at_least_one_input_has_data ? work_result::has_unprocessed_data : work_result::inputs_empty;
             }
 
             auto input_spans =
@@ -705,6 +723,11 @@ public:
     using work_policy = work_policies::default_policy;
     friend work_policy;
 
+    using min_max_limits =
+        typename meta::typelist<Arguments...>
+        ::template filter<is_limits>;
+    static_assert(min_max_limits::size <= 1);
+
 private:
     using setting_map = std::map<std::string, int, std::less<>>;
     std::string _name;
@@ -720,6 +743,7 @@ public:
     const auto& self() const { return *static_cast<const Derived*>(this); }
 
     std::string_view name() const { return _name; }
+    void set_name(std::string name) { _name = std::move(name); }
 
     template <port_direction_t Direction, std::size_t Index>
     auto& port()
@@ -820,12 +844,20 @@ public:
     [[nodiscard]] setting_map &exec_metrics() noexcept { return _exec_metrics; }
     [[nodiscard]] setting_map const &exec_metrics() const noexcept { return _exec_metrics; }
 
-    std::size_t minInputs() const {
-        return 0;
+    std::size_t min_samples() const {
+        if constexpr (min_max_limits::size == 1) {
+            return min_max_limits::template at<0>::min;
+        } else {
+            return 0;
+        }
     }
 
-    std::size_t maxInputs() const {
-        return 1024;
+    std::size_t max_samples() const {
+        if constexpr (min_max_limits::size == 1) {
+            return min_max_limits::template at<0>::max;
+        } else {
+            return std::numeric_limits<std::size_t>::max();
+        }
     }
 
     work_result work() noexcept {
@@ -833,8 +865,9 @@ public:
     }
 
 protected:
-    node(std::string name = {})
-        : _name(std::move(name)) {}
+    node(std::string name)
+        : _name(std::move(name)) {
+    }
 
 };
 
@@ -970,7 +1003,7 @@ public:
     using return_type  = typename base::return_type;
 
     [[gnu::always_inline]] constexpr merged_node(Left l, Right r)
-        : left(std::move(l)), right(std::move(r)) {}
+        : base(fmt::format("[merged {} {}]", l.name(), r.name())), left(std::move(l)), right(std::move(r)) {}
 
     template<meta::any_simd... Ts>
         requires meta::vectorizable<return_type>
@@ -1062,8 +1095,8 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, meta::source_node A, meta::sink_node B>
 [[gnu::always_inline]] constexpr auto
 merge(A &&a, B &&b) {
-    constexpr int OutId = meta::indexForName<OutName, typename A::output_ports>();
-    constexpr int InId = meta::indexForName<InName, typename B::input_ports>();
+    constexpr std::size_t OutId = meta::indexForName<OutName, typename A::output_ports>();
+    constexpr std::size_t InId = meta::indexForName<InName, typename B::input_ports>();
     static_assert(OutId != -1);
     static_assert(InId != -1);
     static_assert(std::same_as<typename std::remove_cvref_t<A>::output_port_types::template at<OutId>,
