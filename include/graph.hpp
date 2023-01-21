@@ -1279,7 +1279,7 @@ public:
                     return work_result::error;
                 }
                 else if (result == work_result::has_unprocessed_data) {
-                    something_happened = true;
+                    // nothing
                 }
                 else if (result == work_result::inputs_empty) {
                     // nothing
