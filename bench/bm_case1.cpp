@@ -490,7 +490,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b1, b2)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b2, b3)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b3, sink)));
-        skip / "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER, N_SAMPLES>() = [&flow_graph]() {
+        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER, N_SAMPLES>() = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             flow_graph.work();
