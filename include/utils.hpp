@@ -9,6 +9,12 @@
 #include "typelist.hpp"
 #include "vir/simd.h"
 
+#ifndef __EMSCRIPTEN__
+#include <cxxabi.h>
+#include <iostream>
+#include <typeinfo>
+#endif
+
 namespace fair::meta {
 
 template<typename... Ts>
@@ -34,11 +40,9 @@ struct fixed_string {
         return N == 0;
     }
 
-    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return { _data, N }; }
 
-    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit           operator std::string() const noexcept { return { _data, N }; }
 
     [[nodiscard]]                    operator const char *() const noexcept { return _data; }
 
@@ -56,6 +60,23 @@ struct fixed_string {
 
 template<typename CharT, std::size_t N>
 fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
+
+template<typename T>
+[[nodiscard]] constexpr std::string
+type_name() noexcept {
+#ifndef __EMSCRIPTEN__
+    std::string type_name = typeid(T).name();
+    int         status;
+    char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
+    if (status == 0) {
+        return demangled_name;
+    } else {
+        return typeid(T).name();
+    }
+#else
+    return typeid(T).name(); // TODO: to be replaced by refl-cpp
+#endif
+}
 
 template<fixed_string val>
 struct message_type {};
@@ -78,9 +99,8 @@ invoke_void_wrapped(F &&f, Args &&...args) {
 
 static_assert(std::is_same_v<decltype(invoke_void_wrapped([] {})), dummy_t>);
 static_assert(std::is_same_v<decltype(invoke_void_wrapped([] { return 42; })), int>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([] (int) {}, 42)), dummy_t>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([] (int i) { return i; }, 42)), int>);
-
+static_assert(std::is_same_v<decltype(invoke_void_wrapped([](int) {}, 42)), dummy_t>);
+static_assert(std::is_same_v<decltype(invoke_void_wrapped([](int i) { return i; }, 42)), int>);
 
 #if HAVE_SOURCE_LOCATION
 [[gnu::always_inline]] inline void
@@ -88,8 +108,7 @@ precondition(bool cond, const std::source_location loc = std::source_location::c
     struct handle {
         [[noreturn]] static void
         failure(std::source_location const &loc) {
-            std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':'
-                      << loc.column() << ": `" << loc.function_name() << "`\n";
+            std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':' << loc.column() << ": `" << loc.function_name() << "`\n";
             __builtin_trap();
         }
     };
@@ -116,8 +135,7 @@ precondition(bool cond) {
 namespace stdx = vir::stdx;
 
 template<typename V, typename T = void>
-concept any_simd = stdx::is_simd_v<V>
-                && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
+concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
 
 template<typename V, typename T>
 concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
@@ -126,8 +144,7 @@ template<typename T>
 concept vectorizable = std::constructible_from<stdx::simd<T>>;
 
 template<typename A, typename B>
-struct wider_native_simd_size
-    : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
+struct wider_native_simd_size : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
 
 template<typename A>
 struct wider_native_simd_size<A, A> {
@@ -162,13 +179,8 @@ concept source_node = requires(Node &node, typename Node::input_port_types::tupl
                           {
                               [](Node &n, auto &inputs) {
                                   if constexpr (Node::input_port_types::size > 0) {
-                                      return []<std::size_t... Is>(Node &n_inside, auto const &tup,
-                                                                   std::index_sequence<Is...>)
-                                              ->decltype(n_inside.process_one(std::get<Is>(tup)...)) {
-                                          return {};
-                                      }
-                                      (n, inputs,
-                                       std::make_index_sequence<Node::input_port_types::size>());
+                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
+                                      (n, inputs, std::make_index_sequence<Node::input_port_types::size>());
                                   } else {
                                       return n.process_one();
                                   }
@@ -180,8 +192,7 @@ template<typename Node>
 concept sink_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
                         {
                             [](Node &n, auto &inputs) {
-                                []<std::size_t... Is>(Node &n_inside, auto const &tup,
-                                                      std::index_sequence<Is...>) {
+                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
                                     if constexpr (Node::output_port_types::size > 0) {
                                         auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
                                     } else {
@@ -197,18 +208,12 @@ template<typename Node>
 concept any_node = source_node<Node> || sink_node<Node>;
 
 template<typename Node>
-concept node_can_process_simd
-        = any_node<Node>
-       && requires(Node &n, typename transform_to_widest_simd<typename Node::input_port_types>::
-                                    template apply<std::tuple> const &inputs) {
-              {
-                  []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)
-                          ->decltype(n.process_one(std::get<Is>(tup)...)) {
-                      return {};
-                  }
-                  (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
-                  } -> any_simd<typename Node::return_type>;
-          };
+concept node_can_process_simd = any_node<Node> && requires(Node &n, typename transform_to_widest_simd<typename Node::input_port_types>::template apply<std::tuple> const &inputs) {
+                                                      {
+                                                          []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)->decltype(n.process_one(std::get<Is>(tup)...)) { return {}; }
+                                                          (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
+                                                          } -> any_simd<typename Node::return_type>;
+                                                  };
 
 template<fixed_string Name, typename PortList>
 consteval int
@@ -230,25 +235,25 @@ template<typename... Lambdas>
 overloaded(Lambdas...) -> overloaded<Lambdas...>;
 
 namespace detail {
-template<template<typename...> typename Mapper,
-         template<typename...> typename Wrapper,
-         typename... Args>
-Wrapper<Mapper<Args>...>* type_transform_impl(Wrapper<Args...>*);
+template<template<typename...> typename Mapper, template<typename...> typename Wrapper, typename... Args>
+Wrapper<Mapper<Args>...> *
+type_transform_impl(Wrapper<Args...> *);
 
-template<template<typename...> typename Mapper,
-         typename T>
-Mapper<T>* type_transform_impl(T*);
-
-template<template<typename...> typename Mapper>
-void* type_transform_impl(void*);
+template<template<typename...> typename Mapper, typename T>
+Mapper<T> *
+type_transform_impl(T *);
 
 template<template<typename...> typename Mapper>
-fair::meta::dummy_t* type_transform_impl(fair::meta::dummy_t*);
+void *
+type_transform_impl(void *);
+
+template<template<typename...> typename Mapper>
+fair::meta::dummy_t *
+type_transform_impl(fair::meta::dummy_t *);
 } // namespace detail
 
 template<template<typename...> typename Mapper, typename T>
-using type_transform = std::remove_pointer_t<
-    decltype(detail::type_transform_impl<Mapper>(static_cast<T*>(nullptr)))>;
+using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
 
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);

@@ -15,21 +15,13 @@ using namespace std::string_literals;
 #ifdef ENABLE_DYNAMIC_PORTS
 class dynamic_node : public fg::node<dynamic_node> {
 public:
-    dynamic_node(std::string name)
-        : fg::node<dynamic_node>(name) {}
-
+    dynamic_node(std::string name) : fg::node<dynamic_node>(name) {}
 };
 #endif
 
-
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">, fg::limits<0, 1024>> {
-        using base = fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">, fg::limits<0, 1024>>;
 public:
-    scale(std::string name)
-        : base(std::move(name))
-    {}
-
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -39,12 +31,7 @@ public:
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">, fg::limits<0, 1024>> {
-        using base = fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">, fg::limits<0, 1024>>;
 public:
-    adder(std::string name)
-        : base(std::move(name))
-    {}
-
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -52,37 +39,28 @@ public:
     }
 };
 
-template <typename T>
+template<typename T>
 class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">, fg::limits<0, 1024>> {
-            using base = fg::node<cout_sink<T>, fg::IN<T, "sink">, fg::limits<0, 1024>>;
 public:
-    cout_sink(std::string name)
-        : base(std::move(name))
-    {}
-
-    void process_one(T value) {
+    void
+    process_one(T value) {
         fmt::print("Sinking a value: {}\n", value);
     }
-
 };
 
-template <typename T, T value, std::size_t count = 10>
+template<typename T, T value, std::size_t count = 10>
 class repeater_source : public fg::node<repeater_source<T, value>, fg::OUT<T, "value">, fg::limits<0, 1024>> {
-                  using base = fg::node<repeater_source<T, value>, fg::OUT<T, "value">, fg::limits<0, 1024>>;
 private:
     std::size_t _counter = 0;
 
 public:
-    repeater_source(std::string name)
-        : base(std::move(name))
-    {}
-
-    fair::graph::work_result work() {
+    fair::graph::work_result
+    work() {
         if (_counter < count) {
             _counter++;
-            auto& writer = output_port<"value">(this).writer();
+            auto &writer       = output_port<"value">(this).writer();
             auto [data, token] = writer.get(1);
-            data[0] = value;
+            data[0]            = value;
             writer.publish(token, 1);
 
             return fair::graph::work_result::success;
@@ -90,7 +68,6 @@ public:
             return fair::graph::work_result::inputs_empty;
         }
     }
-
 };
 
 const boost::ut::suite PortApiTests = [] {
@@ -111,48 +88,48 @@ const boost::ut::suite PortApiTests = [] {
 
     "PortBufferApi"_test = [] {
         OUT<float, "out0"> output_port;
-        BufferWriter auto& writer = output_port.writer();
-        expect(ge(writer.available(), std::size_t{32}));
+        BufferWriter auto &writer = output_port.writer();
+        expect(ge(writer.available(), std::size_t{ 32 }));
 
-        IN<float, "int0"> input_port;
-        const BufferReader auto& reader = input_port.reader();
-        expect(eq(reader.available(), std::size_t{0}));
+        IN<float, "int0">        input_port;
+        const BufferReader auto &reader = input_port.reader();
+        expect(eq(reader.available(), std::size_t{ 0 }));
         input_port.setBuffer(output_port.buffer());
 
-        expect(eq(output_port.buffer().n_readers(), std::size_t{1}));
+        expect(eq(output_port.buffer().n_readers(), std::size_t{ 1 }));
 
-        int offset = 1;
-        auto lambda = [&offset](auto& w) {
+        int  offset = 1;
+        auto lambda = [&offset](auto &w) {
             std::iota(w.begin(), w.end(), offset);
             fmt::print("typed-port connected output vector: {}\n", w);
             offset += w.size();
         };
 
-        expect(writer.try_publish(lambda, std::size_t{32}));
+        expect(writer.try_publish(lambda, std::size_t{ 32 }));
     };
 
     "RuntimePortApi"_test = [] {
         // declare in block
-        OUT<float, "out"> out;
-        IN<float, "in"> in;
+        OUT<float, "out">         out;
+        IN<float, "in">           in;
         std::vector<dynamic_port> port_list;
 
         port_list.emplace_back(out);
         port_list.emplace_back(in);
 
-        expect(eq(port_list.size(), std::size_t{2}));
+        expect(eq(port_list.size(), std::size_t{ 2 }));
     };
 
     "ConnectionApi"_test = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
 
-        scale<int, 2> scaled("scaled"s);
-        adder<int> added("added"s);
-        cout_sink<int> out("out"s);
+        scale<int, 2>            scaled;
+        adder<int>               added;
+        cout_sink<int>           out;
 
-        repeater_source<int, 42> answer("answer"s);
-        repeater_source<int, 6> number("number"s);
+        repeater_source<int, 42> answer;
+        repeater_source<int, 6>  number;
 
         // Nodes need to be alive for as long as the flow is
         graph flow;
@@ -179,21 +156,20 @@ const boost::ut::suite PortApiTests = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
         OUT<float, "out0"> output_port;
-        BufferWriter auto& writer = output_port.writer();
-        IN<float, "in0"> input_port;
+        BufferWriter auto &writer = output_port.writer();
+        IN<float, "in0">   input_port;
 
-
-        auto source = std::make_shared<dynamic_node>("source");
+        auto               source = std::make_shared<dynamic_node>("source");
         source->add_port(output_port);
         source->add_port(OUT<float, "out1">());
         expect(eq(source->dynamic_output_ports().size(), 2U));
         expect(eq(source->dynamic_input_ports().size(), 0U));
 
         auto sink = std::make_shared<dynamic_node>("sink");
-        expect(nothrow([&sink, &input_port] () { sink->add_port(input_port); } ));
-        expect(nothrow([&sink] () { sink->add_port(IN<float, "in1">()); } ));
-        expect(nothrow([&sink] () { sink->add_port(IN<float>("in2")); } ));
-        expect(throws([&sink] () { sink->add_port(IN<float>("in1")); } ));
+        expect(nothrow([&sink, &input_port]() { sink->add_port(input_port); }));
+        expect(nothrow([&sink]() { sink->add_port(IN<float, "in1">()); }));
+        expect(nothrow([&sink]() { sink->add_port(IN<float>("in2")); }));
+        expect(throws([&sink]() { sink->add_port(IN<float>("in1")); }));
         expect(eq(sink->dynamic_output_ports().size(), 0U));
         expect(eq(sink->dynamic_input_ports().size(), 3U));
 
@@ -207,7 +183,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(graph.edges_count(), 2U));
 
-        auto mismatched_sink = std::make_shared<dynamic_node>("mismatched_sink");
+        auto               mismatched_sink = std::make_shared<dynamic_node>("mismatched_sink");
         IN<int32_t, "in0"> mismatched_typed_port;
         mismatched_sink->add_port(mismatched_typed_port);
 
@@ -215,12 +191,11 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(graph.edges_count(), 2U));
 
-
         // test runtime growing of src ports
         expect(ge(writer.available(), 32U));
         expect(eq(output_port.buffer().n_readers(), 0U));
         const auto old_size = writer.available();
-        expect(eq(source->port<OUTPUT>("out0").value()->resize_buffer(old_size+1), connection_result_t::SUCCESS));
+        expect(eq(source->port<OUTPUT>("out0").value()->resize_buffer(old_size + 1), connection_result_t::SUCCESS));
         expect(gt(writer.available(), old_size)) << fmt::format("runtime increase of buffer size {} -> {}", old_size, writer.available());
 
         // test runtime connection between ports
@@ -229,12 +204,12 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(source->port<OUTPUT>("out0").value()->connect(*sink->port<INPUT>("in0").value()), connection_result_t::SUCCESS)) << "double connection";
         expect(eq(source->port<OUTPUT>("out0").value()->connect(*sink->port<INPUT>("in1").value()), connection_result_t::SUCCESS)) << "second connection";
 
-        const BufferReader auto& reader = input_port.reader();
+        const BufferReader auto &reader = input_port.reader();
         expect(eq(reader.available(), 0U)) << fmt::format("reader already has some bytes pending: {}", reader.available());
 
         expect(eq(output_port.buffer().n_readers(), 2U));
 
-        constexpr auto lambda = [](auto& w) {
+        constexpr auto lambda = [](auto &w) {
             std::iota(w.begin(), w.end(), 0U);
             fmt::print("dyn_port connected sink output: {}\n", w);
         };
@@ -245,5 +220,6 @@ const boost::ut::suite PortApiTests = [] {
 #endif
 };
 
-
-int main() { /* tests are statically executed */ }
+int
+main() { /* tests are statically executed */
+}
