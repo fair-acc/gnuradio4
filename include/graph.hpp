@@ -136,7 +136,7 @@ namespace fair::graph {
             static work_result work(Self &self) noexcept {
                 auto inputs_available =
                         [&self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-                            return ((std::get<Idx>(self._fixed_input_ports).reader().available() > 0) && ...);
+                            return ((input_port<Idx>(&self).reader().available() > 0) && ...);
                         }(std::make_index_sequence<Self::input_ports::size>());
 
                 if (!inputs_available) {
@@ -149,10 +149,10 @@ namespace fair::graph {
                                     [&self]<typename...Args>(Args... args) {
                                         return self.process_one(std::forward<Args>(args)...);
                                     },
-                                    std::get<Idx>(self._fixed_input_ports).reader().get(1)[0] ...);
+                                    input_port<Idx>(&self).reader().get(1)[0] ...);
 
                             bool success = true;
-                            ((success = success && std::get<Idx>(self._fixed_input_ports).reader().consume(1)), ...);
+                            ((success = success && input_port<Idx>(&self).reader().consume(1)), ...);
                             if (!success) throw fmt::format("Buffers reported more available data than was available");
 
                             return result;
@@ -164,13 +164,13 @@ namespace fair::graph {
                 } else if constexpr (requires { std::get<0>(results); }) {
                     static_assert(std::tuple_size_v<decltype(results)> == Self::output_ports::size);
                     [&self, &results]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-                        ((std::get<Idx>(self._fixed_output_ports).writer().publish(
+                        ((output_port<Idx>(&self).writer().publish(
                                 [&results](auto &w) { w[0] = std::get<Idx>(std::move(results)); }, 1)), ...);
                     }(std::make_index_sequence<Self::output_ports::size>());
 
                 } else {
                     static_assert(Self::output_ports::size == 1);
-                    std::get<0>(self._fixed_output_ports).writer().publish(
+                    output_port<0>(&self).writer().publish(
                             [&results](auto &w) { w[0] = std::move(results); }, 1);
                 }
 
@@ -184,7 +184,7 @@ namespace fair::graph {
                 auto available_values_count =
                         [&self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
                             return std::min({std::numeric_limits<std::size_t>::max(),
-                                             std::clamp((std::get<Idx>(self._fixed_input_ports).reader().available()),
+                                             std::clamp((input_port<Idx>(&self).reader().available()),
                                                         std::size_t{0}, std::size_t{1024}) ...}); // TODO min and max
                         }(std::make_index_sequence<Self::input_ports::size>());
 
@@ -195,7 +195,7 @@ namespace fair::graph {
                 auto input_spans =
                         [&self, available_values_count]<std::size_t... Idx>(std::index_sequence<Idx...>) {
                             return std::make_tuple(
-                                    std::get<Idx>(self._fixed_input_ports).reader().get(available_values_count)...
+                                    input_port<Idx>(&self).reader().get(available_values_count)...
                             );
                         }(std::make_index_sequence<Self::input_ports::size>());
 
@@ -217,20 +217,20 @@ namespace fair::graph {
                     } else if constexpr (requires { std::get<0>(results); }) {
                         static_assert(std::tuple_size_v<decltype(results)> == Self::output_ports::size);
                         [&self, &results]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-                            ((std::get<Idx>(self._fixed_output_ports).writer().publish(
+                            ((output_port<Idx>(&self).writer().publish(
                                     [&results](auto &w) { w[0] = std::get<Idx>(std::move(results)); }, 1)), ...);
                         }(std::make_index_sequence<Self::output_ports::size>());
 
                     } else {
                         static_assert(Self::output_ports::size == 1);
-                        std::get<0>(self._fixed_output_ports).writer().publish(
+                        output_port<0>(&self).writer().publish(
                                 [&results](auto &w) { w[0] = std::move(results); }, 1);
                     }
                 }
 
                 [&self, available_values_count]<std::size_t... Idx>(std::index_sequence<Idx...>) {
                     return std::make_tuple(
-                            std::get<Idx>(self._fixed_input_ports).reader().consume(available_values_count)...
+                            input_port<Idx>(&self).reader().consume(available_values_count)...
                     );
                 }(std::make_index_sequence<Self::input_ports::size>());
             }
@@ -263,7 +263,7 @@ namespace fair::graph {
                                     return std::min(arg, args...);
                                 }
                             };
-                            return betterMin(availableForPort(std::get<Idx>(self._fixed_input_ports))...);
+                            return betterMin(availableForPort(input_port<Idx>(&self))...);
                         }(std::make_index_sequence<Self::input_ports::size>());
 
 
@@ -284,7 +284,7 @@ namespace fair::graph {
 
                 bool all_writers_available =
                         [&self, available_values_count]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-                            return ((std::get<Idx>(self._fixed_output_ports).writer().available() >=
+                            return ((output_port<Idx>(&self).writer().available() >=
                                      available_values_count) && ... && true);
                         }(std::make_index_sequence<Self::output_ports::size>());
 
@@ -294,13 +294,13 @@ namespace fair::graph {
 
                 auto input_spans = [&self, available_values_count]<std::size_t... Idx>(std::index_sequence<Idx...>) {
                     return std::make_tuple(
-                            std::get<Idx>(self._fixed_input_ports).reader().get(available_values_count)...);
+                            input_port<Idx>(&self).reader().get(available_values_count)...);
                 }(std::make_index_sequence<Self::input_ports::size>());
 
                 auto writers_tuple =
                         [&self, available_values_count]<std::size_t... Idx>(std::index_sequence<Idx...>) {
                             return std::make_tuple(
-                                    std::get<Idx>(self._fixed_output_ports).writer().get(available_values_count)...);
+                                    output_port<Idx>(&self).writer().get(available_values_count)...);
                         }(std::make_index_sequence<Self::output_ports::size>());
 
                 // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
@@ -339,7 +339,7 @@ namespace fair::graph {
 
                 if constexpr (Self::output_ports::size > 0) {
                     [&self, &writers_tuple, available_values_count]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-                        ((std::get<Idx>(self._fixed_output_ports).writer().publish(std::get<Idx>(writers_tuple).second,
+                        ((output_port<Idx>(&self).writer().publish(std::get<Idx>(writers_tuple).second,
                                                                                    available_values_count)), ...);
                     }(std::make_index_sequence<Self::output_ports::size>());
                 }
@@ -347,7 +347,7 @@ namespace fair::graph {
                 bool success = true;
                 if constexpr (Self::input_ports::size > 0) {
                     [&self, available_values_count, &success]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-                        ((success = success && std::get<Idx>(self._fixed_input_ports).reader().consume(
+                        ((success = success && input_port<Idx>(&self).reader().consume(
                                 available_values_count)), ...);
                     }(std::make_index_sequence<Self::input_ports::size>());
                 }
@@ -755,12 +755,12 @@ namespace fair::graph {
 
 
     template<typename...>
-    struct fixed_node_ports_data;
+    struct fixed_node_ports_data_helper;
 
     template<meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts> requires
     InputPorts::template all_of<has_fixed_port_info>
     && OutputPorts::template all_of<has_fixed_port_info>
-    struct fixed_node_ports_data<InputPorts, OutputPorts> {
+    struct fixed_node_ports_data_helper<InputPorts, OutputPorts> {
         using input_ports = InputPorts;
         using output_ports = OutputPorts;
 
@@ -775,7 +775,7 @@ namespace fair::graph {
     };
 
     template<has_fixed_port_info_v... Ports>
-    struct fixed_node_ports_data<Ports...> {
+    struct fixed_node_ports_data_helper<Ports...> {
         using all_ports = meta::concat<
                 std::conditional_t<fair::meta::is_typelist_v<Ports>,
                         Ports,
@@ -797,23 +797,26 @@ namespace fair::graph {
                 ::template transform<port_type>;
     };
 
+    template <typename... Arguments>
+    using fixed_node_ports_data = typename meta::typelist<Arguments...>
+    ::template filter<has_fixed_port_info_or_is_typelist>
+    ::template apply<fixed_node_ports_data_helper>;
+    
+
 // Ports can either be a list of ports instances,
 // or two typelists containing port instances -- one for input
 // ports and one for output ports
     template<typename Derived, typename... Arguments>
-    class node : public meta::typelist<Arguments...>
-    ::template filter<has_fixed_port_info_or_is_typelist>
-    ::template apply<fixed_node_ports_data> {
+    // class node: fixed_node_ports_data<Arguments...>::all_ports::tuple_type {
+    class node: protected std::tuple<Arguments...> {
     public:
-        using base = typename meta::typelist<Arguments...>
-        ::template filter<has_fixed_port_info_or_is_typelist>
-        ::template apply<fixed_node_ports_data>;
+        using fixed_ports_data = fixed_node_ports_data<Arguments...>;
 
-        using all_ports = typename base::all_ports;
-        using input_ports = typename base::input_ports;
-        using output_ports = typename base::output_ports;
-        using input_port_types = typename base::input_port_types;
-        using output_port_types = typename base::output_port_types;
+        using all_ports = typename fixed_ports_data::all_ports;
+        using input_ports = typename fixed_ports_data::input_ports;
+        using output_ports = typename fixed_ports_data::output_ports;
+        using input_port_types = typename fixed_ports_data::input_port_types;
+        using output_port_types = typename fixed_ports_data::output_port_types;
 
         using return_type = typename output_port_types::tuple_or_type;
         using work_policy = work_policies::default_policy;
@@ -828,8 +831,6 @@ namespace fair::graph {
         using setting_map = std::map<std::string, int, std::less<>>;
         std::string _name;
 
-        typename input_ports::tuple_type _fixed_input_ports;
-        typename output_ports::tuple_type _fixed_output_ports;
         setting_map _exec_metrics{}; //  →  std::map<string, pmt> → fair scheduling, 'int' stand-in for pmtv
 
         friend class graph;
@@ -843,25 +844,17 @@ namespace fair::graph {
 
         void set_name(std::string name) noexcept { _name = std::move(name); }
 
-        template<port_direction_t Direction, std::size_t Index>
-        [[nodiscard]] constexpr auto &port() noexcept {
-            if constexpr (Direction == port_direction_t::INPUT) {
-                return std::get<Index>(_fixed_input_ports);
-            } else {
-                return std::get<Index>(_fixed_output_ports);
-            }
-        }
+        template<std::size_t Index, typename Self>
+        friend constexpr auto &input_port(Self* self) noexcept;
 
-        template<port_direction_t Direction, fixed_string Name>
-        [[nodiscard]] constexpr auto &port() noexcept {
-            if constexpr (Direction == port_direction_t::INPUT) {
-                constexpr int Index = meta::indexForName<Name, input_ports>();
-                return std::get<Index>(_fixed_input_ports);
-            } else {
-                constexpr int Index = meta::indexForName<Name, output_ports>();
-                return std::get<Index>(_fixed_output_ports);
-            }
-        }
+        template<std::size_t Index, typename Self>
+        friend constexpr auto &output_port(Self* self) noexcept;
+
+        template<fixed_string Name, typename Self>
+        friend constexpr auto &input_port(Self* self) noexcept;
+
+        template<fixed_string Name, typename Self>
+        friend constexpr auto &output_port(Self* self) noexcept;
 
         template<std::size_t N>
         [[gnu::always_inline]] constexpr bool
@@ -967,6 +960,28 @@ namespace fair::graph {
         }
 
     };
+
+    template<std::size_t Index, typename Self>
+    [[nodiscard]] constexpr auto &input_port(Self* self) noexcept {
+        return std::get<typename Self::input_ports::template at<Index>>(*self);
+    }
+
+    template<std::size_t Index, typename Self>
+    [[nodiscard]] constexpr auto &output_port(Self* self) noexcept {
+        return std::get<typename Self::output_ports::template at<Index>>(*self);
+    }
+
+    template<fixed_string Name, typename Self>
+    [[nodiscard]] constexpr auto &input_port(Self* self) noexcept {
+        constexpr int Index = meta::indexForName<Name, typename Self::input_ports>();
+        return std::get<typename Self::input_ports::template at<Index>>(*self);
+    }
+
+    template<fixed_string Name, typename Self>
+    [[nodiscard]] constexpr auto &output_port(Self* self) noexcept {
+        constexpr int Index = meta::indexForName<Name, typename Self::output_ports>();
+        return std::get<typename Self::output_ports::template at<Index>>(*self);
+    }
 
 #define ENABLE_PYTHON_INTEGRATION
 #ifdef ENABLE_PYTHON_INTEGRATION
@@ -1367,8 +1382,8 @@ namespace fair::graph {
                                   typename Destination::input_port_types::template at<dst_port_index>>,
                           "The source port type needs to match the sink port type");
 
-            OutPort auto &source_port = src_node_raw.template port<port_direction_t::OUTPUT, src_port_index>();
-            InPort auto &destination_port = dst_node_raw.template port<port_direction_t::INPUT, dst_port_index>();
+            OutPort auto &source_port = output_port<src_port_index>(&src_node_raw);
+            InPort auto &destination_port = input_port<dst_port_index>(&dst_node_raw);
 
             if (!std::any_of(_nodes.begin(), _nodes.end(),
                              [&](const auto &registered_node) {

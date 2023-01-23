@@ -80,7 +80,7 @@ public:
     fair::graph::work_result work() {
         if (_counter < count) {
             _counter++;
-            auto& writer = base::template port<fair::graph::port_direction_t::OUTPUT, "value">().writer();
+            auto& writer = output_port<"value">(this).writer();
             auto [data, token] = writer.get(1);
             data[0] = value;
             writer.publish(token, 1);

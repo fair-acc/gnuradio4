@@ -61,8 +61,8 @@ public:
 
     fair::graph::work_result
     work_alt() noexcept { //TODO - make this an alternate version to 'process_one'
-        auto &in_port = base::template port<fg::port_direction_t::INPUT, "in">();
-        auto &out_port = base::template port<fg::port_direction_t::OUTPUT, "out">();
+        auto &out_port = output_port<"out">(this);
+        auto &in_port = input_port<"in">(this);
 
         auto &reader = in_port.reader();
         auto &writer = out_port.writer();

@@ -44,7 +44,7 @@ namespace test {
         work() {
             const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
             if (n_to_publish > 0) {
-                auto &port = base::template port<fair::graph::port_direction_t::OUTPUT, "out">();
+                auto &port = output_port<"out">(this);
                 auto &writer = port.writer();
 
                 if constexpr (use_bulk_operation) {
