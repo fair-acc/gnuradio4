@@ -7,50 +7,27 @@
 
 namespace fg = fair::graph;
 
-#ifndef __EMSCRIPTEN__
-auto
-this_source_location(std::source_location l = std::source_location::current()) {
-    return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
-}
-#else
-auto
-this_source_location() {
-    return "not yet implemented";
-}
-#endif // __EMSCRIPTEN__
-
-template <typename T>
+template<typename T>
 class random_source : public fg::node<random_source<T>, fg::OUT<T, "random">> {
-    using base = fg::node<random_source<T>, fg::OUT<T, "random">>;
 public:
-    random_source(std::string name = this_source_location()) : base(name) {}
-
     constexpr T
     process_one() {
         return 42;
     }
-
 };
 
-template <typename T>
+template<typename T>
 class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">> {
-    using base = fg::node<cout_sink<T>, fg::IN<T, "sink">>;
 public:
-    cout_sink(std::string name = this_source_location()) : base(name) {}
-
-    void process_one(T value) {
+    void
+    process_one(T value) {
         std::cout << value << std::endl;
     }
-
 };
-
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">> {
-    using base = fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">>;
 public:
-    scale(std::string name = this_source_location()) : base(name) {}
-
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -60,10 +37,7 @@ public:
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">> {
-    using base = fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">>;
 public:
-    adder(std::string name = this_source_location()) : base(name) {}
-
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -72,40 +46,26 @@ public:
 };
 
 template<typename T, std::size_t Count = 2>
-class duplicate : public fg::node<
-                             duplicate<T, Count>,
-                             fair::meta::typelist<fg::IN<T, "in">>,
-                             fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>> {
-
-    using base = fg::node<
-                     duplicate<T, Count>,
-                     fair::meta::typelist<fg::IN<T, "in">>,
-                     fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>
-                 >;
+class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>> {
+    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>>;
 
 public:
-    duplicate(std::string name = this_source_location()) : base(name) {}
-
     using return_type = typename base::return_type;
 
     [[nodiscard]] constexpr return_type
     process_one(T a) const noexcept {
-        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return std::make_tuple(((void) Is, a)...);
-        }(std::make_index_sequence<Count>());
+        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::make_tuple(((void) Is, a)...); }
+        (std::make_index_sequence<Count>());
     }
 };
 
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
 class delay : public fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">> {
-    using base = fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">>;
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
 public:
-    delay(std::string name = this_source_location()) : base(name) {}
-
     [[nodiscard]] constexpr T
     process_one(T in) noexcept {
         T ret       = buffer[pos];
@@ -119,12 +79,10 @@ public:
     }
 };
 
-
-
 int
 main() {
-    using fg::merge_by_index;
     using fg::merge;
+    using fg::merge_by_index;
 
     {
         // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
@@ -151,7 +109,7 @@ main() {
         std::array<int, 4> a = { 1, 2, 3, 4 };
 
         for (std::size_t i = 0; i < 4; ++i) {
-            auto tuple = merged.process_one(a[i]);
+            auto tuple    = merged.process_one(a[i]);
             auto [r1, r2] = tuple;
             fmt::print("{} {} \n", r1, r2);
         }
@@ -175,21 +133,19 @@ main() {
     }
 
     {
-        auto merged = merge_by_index<1,0>(merge_by_index<0, 0>(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
+        auto merged = merge_by_index<1, 0>(merge_by_index<0, 0>(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
 
         // execute graph
         std::array<int, 4> a = { 1, 2, 3, 4 };
 
         for (std::size_t i = 0; i < 4; ++i) {
-            auto tuple = merged.process_one(a[i]);
+            auto tuple            = merged.process_one(a[i]);
             auto [r1, r2, r3, r4] = tuple;
             fmt::print("{} {} {} {} \n", r1, r2, r3, r4);
         }
     }
 
-    {
-        auto delayed = delay<int, 2>{};
-    }
+    { auto delayed = delay<int, 2>{}; }
 
     {
         auto random = random_source<int>{};
@@ -205,4 +161,3 @@ main() {
         merged.process_one();
     }
 }
-

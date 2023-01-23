@@ -4,23 +4,19 @@
 #include <boost/ut.hpp>
 #include <functional>
 
-#include <graph.hpp>
 #include "bm_test_helper.hpp"
+#include <graph.hpp>
 
 // #define RUN_SIMD_TESTS
 
-namespace fg = fair::graph;
+namespace fg                           = fair::graph;
 
-inline constexpr std::size_t N_ITER = 10;
+inline constexpr std::size_t N_ITER    = 10;
 inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
 
 template<typename T, int addend, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class add
-        : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
-    using base = fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
+class add : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
 public:
-    add(std::string name = this_source_location()) : base(std::move(name)) {}
-
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
     process_one(V a) const noexcept {
@@ -29,15 +25,15 @@ public:
 };
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class multiply
-        : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
-    using base = fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
+class multiply : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
     multiply() = delete;
 
-    explicit multiply(T factor, std::string name = this_source_location()) : base(std::move(name)), _factor(factor) {}
+    explicit multiply(T factor, std::string name = fair::graph::this_source_location()) : _factor(factor) {
+        this->set_name(name);
+    }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
@@ -46,13 +42,9 @@ public:
     }
 };
 
-template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX, bool use_bulk_operation = false, bool use_memcopy = false>
-class copy
-        : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
-    using base = fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
+template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX, bool use_bulk_operation = false, bool use_memcopy = true>
+class copy : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
 public:
-    copy(std::string name = this_source_location()) : base(std::move(name)) {}
-
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
     process_one(V a) const noexcept {
@@ -60,12 +52,12 @@ public:
     }
 
     fair::graph::work_result
-    work_alt() noexcept { //TODO - make this an alternate version to 'process_one'
-        auto &out_port = output_port<"out">(this);
-        auto &in_port = input_port<"in">(this);
+    work() noexcept { // TODO - make this an alternate version to 'process_one'
+        auto      &out_port   = output_port<"out">(this);
+        auto      &in_port    = input_port<"in">(this);
 
-        auto &reader = in_port.reader();
-        auto &writer = out_port.writer();
+        auto      &reader     = in_port.reader();
+        auto      &writer     = out_port.writer();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
@@ -75,35 +67,30 @@ public:
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
 
-
         if constexpr (use_memcopy) {
-            //fmt::print("n_to_publish {} - {} {}\n", n_to_publish, use_bulk_operation, use_memcopy);
+            // fmt::print("n_to_publish {} - {} {}\n", n_to_publish, use_bulk_operation, use_memcopy);
             writer.publish( //
-                    [&reader, n_to_publish](std::span<T> output) {
-                        std::memcpy(output.data(), reader.get().data(), n_to_publish * sizeof(T));
-                    }, n_to_publish);
+                    [&reader, n_to_publish](std::span<T> output) { std::memcpy(output.data(), reader.get().data(), n_to_publish * sizeof(T)); }, n_to_publish);
         } else {
-            writer.publish(//
+            writer.publish( //
                     [&reader, n_to_publish](std::span<T> output) {
                         const auto input = reader.get();
                         for (std::size_t i = 0; i < n_to_publish; i++) {
                             output[i] = input[i];
                         }
-                    }, n_to_publish);
+                    },
+                    n_to_publish);
         }
-
+        if (!reader.consume(n_to_publish)) {
+            return fair::graph::work_result::error;
+        }
         return fair::graph::work_result::success;
     }
 };
 
-
 template<typename T1, typename T2, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class convert
-        : public fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
-    using base = fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>>;
+class convert : public fg::node<convert<T1, T2, N_MIN, N_MAX>, fg::IN<T1, "in", N_MIN, N_MAX>, fg::OUT<T2, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
 public:
-    convert(std::string name = this_source_location()) : base(std::move(name)) {}
-
     template<fair::meta::t_or_simd<T1> V>
     [[nodiscard]] constexpr T2
     process_one(V a) const noexcept {
@@ -142,8 +129,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), copy<float>()),
-                                              test::sink<float>());
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), copy<float>()), test::sink<float>());
         //
         "constexpr src->copy->sink V1"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
@@ -167,9 +153,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto merged_node = merge<"out", "in">(
-                merge<"out", "in">(test::source<float>(N_SAMPLES), test::cascade<10, copy<float>>(copy<float>())),
-                test::sink<float>());
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), test::cascade<10, copy<float>>(copy<float>())), test::sink<float>());
         "constexpr src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -188,9 +172,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
     using float_simd = native_simd<float>;
     fmt::print(stderr, "float_simd::size() = {}\n", float_simd::size());
     {
-        auto merged_node = merge<"out", "in">(
-                merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), convert<float, float_simd>()),
-                                   copy<float_simd>()), test::sink<float_simd>());
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), convert<float, float_simd>()), copy<float_simd>()), test::sink<float_simd>());
         "constexpr src->copy->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -203,9 +185,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float_simd>(N_SAMPLES),
-                                                                 cascade<10, copy<float_simd>>(copy<float_simd>())),
-                                              test::sink<float_simd>());
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float_simd>(N_SAMPLES), cascade<10, copy<float_simd>>(copy<float_simd>())), test::sink<float_simd>());
         "constexpr src->copy^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -219,13 +199,10 @@ inline const boost::ut::suite _constexpr_bm = [] {
 #endif // - #RUN_SIMD_TESTS
 
     {
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(
-                                                                         merge<"out", "in">(test::source<float, 1024, 1024>(N_SAMPLES), copy<float, 0, 128>()),
-                                                                         copy<float, 0, 1024>()),
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(test::source<float, 1024, 1024>(N_SAMPLES), copy<float, 0, 128>()), copy<float, 0, 1024>()),
                                                                  copy<float, 32, 128>()),
                                               test::sink<float>());
-        "constexpr src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(
-                N_SAMPLES) = [&merged_node]() {
+        "constexpr src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             for (std::size_t i = 0; i < N_SAMPLES; i++) {
@@ -237,13 +214,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto gen_mult_block_float = [] {
-            return merge<"out", "in">(multiply<float>(2.0f),
-                                      merge<"out", "in">(multiply<float>(0.5f),
-                                                         add<float, -1>()));
-        };
-        auto merged_node = merge<"out", "in">(
-                merge<"out", "in">(test::source<float>(N_SAMPLES), gen_mult_block_float()), test::sink<float>());
+        auto gen_mult_block_float = [] { return merge<"out", "in">(multiply<float>(2.0f), merge<"out", "in">(multiply<float>(0.5f), add<float, -1>())); };
+        auto merged_node          = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), gen_mult_block_float()), test::sink<float>());
         "constexpr src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -256,17 +228,11 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto gen_mult_block_float = [] {
-            return merge<"out", "in">(multiply<float>(2.0f),
-                                      merge<"out", "in">(multiply<float>(0.5f),
-                                                         add<float, -1>()));
-        };
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), //
-                                                                 test::cascade<10, decltype(gen_mult_block_float())>(
-                                                                         gen_mult_block_float(), gen_mult_block_float)),
+        auto gen_mult_block_float = [] { return merge<"out", "in">(multiply<float>(2.0f), merge<"out", "in">(multiply<float>(0.5f), add<float, -1>())); };
+        auto merged_node          = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), //
+                                                                 test::cascade<10, decltype(gen_mult_block_float())>(gen_mult_block_float(), gen_mult_block_float)),
                                               test::sink<float>());
-        "constexpr src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(
-                N_SAMPLES) = [&merged_node]() {
+        "constexpr src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             for (std::size_t i = 0; i < N_SAMPLES; i++) {
@@ -277,31 +243,19 @@ inline const boost::ut::suite _constexpr_bm = [] {
         };
     }
 #ifdef RUN_SIMD_TESTS
-    auto src_constraint_sink_SIMD = merge<"out", "in">(
-            merge<"out", "in">(
-                    merge<"out", "in">(
-                            merge<"out", "in">(
-                                    test::source<float_simd, 1024, 1024>(N_SAMPLES), copy<float_simd, 0, 128>()),
-                            copy<float_simd, 0, 1024>()),
-                    copy<float_simd, 32, 128>()),
-            test::sink<float_simd>());
+    auto src_constraint_sink_SIMD = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(test::source<float_simd, 1024, 1024>(N_SAMPLES), copy<float_simd, 0, 128>()),
+                                                                                             copy<float_simd, 0, 1024>()),
+                                                                          copy<float_simd, 32, 128>()),
+                                                       test::sink<float_simd>());
     "constexpr src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&src_constraint_sink_SIMD]() { src_constraint_sink_SIMD.process_one(); };
 
-    auto gen_mult_block_simd_float = [] {
-        return merge<"out", "in">(multiply<float_simd>(2.0f),
-                                  merge<"out", "in">(multiply<float_simd>(0.5f),
-                                                     add<float_simd, -1>()));
-    };
+    auto gen_mult_block_simd_float = [] { return merge<"out", "in">(multiply<float_simd>(2.0f), merge<"out", "in">(multiply<float_simd>(0.5f), add<float_simd, -1>())); };
 
-    auto src_mult_sink_SIMD = merge<"out", "in">(
-            merge<"out", "in">(test::source<float_simd>(N_SAMPLES), gen_mult_block_simd_float()),
-            test::sink<float_simd>());
-    "constexpr src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&src_mult_sink_SIMD]() { src_mult_sink_SIMD.process_one(); };
+    auto src_mult_sink_SIMD        = merge<"out", "in">(merge<"out", "in">(test::source<float_simd>(N_SAMPLES), gen_mult_block_simd_float()), test::sink<float_simd>());
+    "constexpr src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES)      = [&src_mult_sink_SIMD]() { src_mult_sink_SIMD.process_one(); };
 
-    auto src_mult_n_sink_SIMD = merge<"out", "in">(merge<"out", "in">(test::source<float_simd>(N_SAMPLES),
-                                                                      test::cascade<10, decltype(gen_mult_block_simd_float())>(
-                                                                              gen_mult_block_simd_float(),
-                                                                              gen_mult_block_simd_float)),
+    auto src_mult_n_sink_SIMD                                                                            = merge<"out", "in">(merge<"out", "in">(test::source<float_simd>(N_SAMPLES),
+                                                                      test::cascade<10, decltype(gen_mult_block_simd_float())>(gen_mult_block_simd_float(), gen_mult_block_simd_float)),
                                                    test::sink<float_simd>());
     "constexpr src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&src_mult_n_sink_SIMD]() { src_mult_n_sink_SIMD.process_one(); };
 
@@ -314,9 +268,9 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
+        test::sink<float>   sink;
 
-        fg::graph flow_graph;
+        fg::graph           flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(sink);
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, sink)));
@@ -332,10 +286,10 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
-        copy<float> cpy;
+        test::sink<float>   sink;
+        copy<float>         cpy;
 
-        fg::graph flow_graph;
+        fg::graph           flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(cpy);
         flow_graph.register_node(sink);
@@ -352,15 +306,15 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
+        test::sink<float>   sink;
 
-        fg::graph flow_graph;
+        fg::graph           flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(sink);
 
         std::vector<copy<float, 0, N_MAX, true, true>> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i].set_name(fmt::format("copy {} at {}", i, this_source_location()));
+            cpy[i].set_name(fmt::format("copy {} at {}", i, fair::graph::this_source_location()));
             flow_graph.register_node(cpy[i]);
 
             if (i == 0) {
@@ -389,10 +343,10 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float_simd> src(N_SAMPLES);
-        test::sink<float_simd> sink;
-        copy<float_simd> cpy;
+        test::sink<float_simd>   sink;
+        copy<float_simd>         cpy;
 
-        fg::graph flow_graph;
+        fg::graph                flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(cpy);
         flow_graph.register_node(sink);
@@ -403,9 +357,9 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float_simd> src(N_SAMPLES);
-        test::sink<float_simd> sink;
+        test::sink<float_simd>   sink;
 
-        fg::graph flow_graph;
+        fg::graph                flow_graph;
         flow_graph.register_node(src);
 
         std::vector<copy<float_simd>> cpy(10);
@@ -427,12 +381,12 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float, 0, 1024> src(N_SAMPLES);
-        copy<float, 0, 128> b1;
-        copy<float, 1024, 1024> b2;
-        copy<float, 32, 128> b3;
-        test::sink<float> sink;
+        copy<float, 0, 128>          b1;
+        copy<float, 1024, 1024>      b2;
+        copy<float, 32, 128>         b3;
+        test::sink<float>            sink;
 
-        fg::graph flow_graph;
+        fg::graph                    flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(b1);
         flow_graph.register_node(b2);
@@ -442,8 +396,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b1, b2)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b2, b3)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b3, sink)));
-        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(
-                N_SAMPLES) = [&flow_graph]() {
+        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             flow_graph.work();
@@ -454,12 +407,12 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float> src(N_SAMPLES);
-        multiply<float> mult1(2.0f);
-        multiply<float> mult2(0.5f);
-        add<float, -1> add1;
-        test::sink<float> sink;
+        multiply<float>     mult1(2.0f);
+        multiply<float>     mult2(0.5f);
+        add<float, -1>      add1;
+        test::sink<float>   sink;
 
-        fg::graph flow_graph;
+        fg::graph           flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(mult1);
         flow_graph.register_node(mult2);
@@ -480,19 +433,19 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
+        test::sink<float>   sink;
 
-        fg::graph flow_graph;
+        fg::graph           flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(sink);
 
         std::vector<multiply<float>> mult1;
         std::vector<multiply<float>> mult2;
-        std::vector<add<float, -1>> add1;
+        std::vector<add<float, -1>>  add1;
         for (std::size_t i = 0; i < 10; i++) {
             mult1.emplace_back(2.0f, fmt::format("mult1.{}", i));
             mult2.emplace_back(0.5f, fmt::format("mult2.{}", i));
-            add1.emplace_back(fmt::format("add1.{}", i));
+            add1.emplace_back();
         }
 
         for (std::size_t i = 0; i < add1.size(); i++) {
@@ -512,8 +465,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1[add1.size() - 1], sink)));
 
-        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(
-                N_SAMPLES) = [&flow_graph]() {
+        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             flow_graph.work();
