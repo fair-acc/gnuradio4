@@ -2,7 +2,7 @@ name: CMake
 
 on:
   push:
-    branches: [ main singleheader_merge ] # singleheader_merge branch used for modifications to the CI
+    #branches: [ main singleheader_merge ] # singleheader_merge branch used for modifications to the CI
 
 jobs:
   build:
