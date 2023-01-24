@@ -30,7 +30,7 @@ jobs:
 
     - name: Configure CMake to fetch UT dependency
       shell: bash
-      run: cmake -S . -B ../build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release
 
     - name: create single-header
       shell: bash
@@ -43,7 +43,7 @@ jobs:
         cat $(cat include/graph.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
         rm include/graph.hpp.* # remove generated precompiled header
         echo "== Headers for benchmark =="
-        gcc -Iinclude -Ibuild/_deps/ut-src/include -Ibuild/_deps/fmt/include -std=c++20 -H bench/benchmark.hpp 2>&1 | tee bench/benchmark.hpp.deps || true
+        gcc -Iinclude -Ibuild/_deps/ut-src/include -Ibuild/_deps/fmt-src/include -std=c++20 -H bench/benchmark.hpp 2>&1 | tee bench/benchmark.hpp.deps || true
         cat $(cat bench/benchmark.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
         rm bench/benchmark.hpp.* # remove generated precompiled header
       
