@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
       with:
         fetch-depth: 100
 
@@ -48,7 +48,7 @@ jobs:
         git config --global user.name "single header generator"
         git config --global user.email "noreply@example.com"
         git add singleheader
-        git reset --soft single-header
+        git reset --soft origin/single-header
         git rev-parse HEAD@{1} > .git/MERGE_HEAD
-        git commit -m "single-header of $(git rev-parse --short HEAD@1)"
+        git commit -m "single-header of $(git rev-parse --short HEAD@{1})"
         git push origin single-header
