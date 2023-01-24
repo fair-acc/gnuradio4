@@ -1,6 +1,7 @@
 #ifndef GNURADIO_CLAIM_STRATEGY_HPP
 #define GNURADIO_CLAIM_STRATEGY_HPP
 
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <memory>
@@ -8,12 +9,8 @@
 #include <stdexcept>
 #include <vector>
 
-#ifndef GNURADIO_SEQUENCE_HPP
-#include <sequence.hpp>
-#endif
-#ifndef GNURADIO_WAIT_STRATEGY_HPP
-#include <wait_strategy.hpp>
-#endif
+#include <wait_strategy.hpp> // localinclude
+#include <sequence.hpp> // localinclude
 
 namespace gr {
 
