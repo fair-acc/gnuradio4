@@ -38,10 +38,14 @@ jobs:
         mkdir -p singleheader
         # merge headers by precompiling toplevel headers to get list of included headers, filter for only lines with local headers, reverse the list to get deepest deps first
         # then concat all headers and filter out local includes (quoted includes and bracket includes with `// localinclude` comment) and write to single header file
-        cat $(gcc -I include -std=c++20 -H include/graph.hpp 2>&1 | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac ) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
-        rm include/graph.hpp.gch # remove generated precompiled header
-        cat $(gcc -I include -I build/_deps/ut-src/include -std=c++20 -H bench/benchmark.hpp 2>&1 | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac ) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
-        rm bench/benchmark.hpp.gch # remove generated precompiled header
+        echo "== Headers for graph =="
+        gcc -I include -I build/fmt-src/include -std=c++20 -H include/graph.hpp 2>&1 | tee include/graph.hpp.deps || true
+        cat $(cat include/graph.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
+        rm include/graph.hpp.* # remove generated precompiled header
+        echo "== Headers for benchmark =="
+        gcc -I include -I build/_deps/ut-src/include -I build/fmt/include -std=c++20 -H bench/benchmark.hpp 2>&1 | tee bench/benchmark.hpp.deps || true
+        cat $(cat bench/benchmark.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
+        rm bench/benchmark.hpp.* # remove generated precompiled header
       
     - name: upload to branch # keeping history of single-header branch
       run: |
