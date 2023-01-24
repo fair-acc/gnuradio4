@@ -4933,10 +4933,11 @@ public:
 
     template<typename Other>
     [[nodiscard]] connection_result_t
-    connect(Other &&other) noexcept {
+    connect(Other &&other) {
         static_assert(IS_OUTPUT && std::remove_cvref_t<Other>::IS_INPUT);
         auto src_buffer = writer_handler_internal();
-        return std::forward<Other>(other).update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
+        return std::forward<Other>(other).update_reader_internal(src_buffer) ? connection_result_t::SUCCESS
+                                                                             : connection_result_t::FAILED;
     }
 
     friend class dynamic_port;
@@ -5017,8 +5018,7 @@ class dynamic_port {
                 = 0;
 
         [[nodiscard]] virtual connection_result_t
-        connect(dynamic_port &dst_port) noexcept
-                = 0;
+        connect(dynamic_port &dst_port) = 0;
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool
@@ -5114,10 +5114,11 @@ class dynamic_port {
         }
 
         [[nodiscard]] connection_result_t
-        connect(dynamic_port &dst_port) noexcept override {
+        connect(dynamic_port &dst_port) override {
             if constexpr (T::IS_OUTPUT) {
                 auto src_buffer = _value.writer_handler_internal();
-                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
+                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS
+                                                                   : connection_result_t::FAILED;
             } else {
                 assert(!"This works only on input ports");
                 return connection_result_t::FAILED;
@@ -5178,7 +5179,7 @@ public:
     }
 
     [[nodiscard]] connection_result_t
-    connect(dynamic_port &dst_port) noexcept {
+    connect(dynamic_port &dst_port) {
         return _accessor->connect(dst_port);
     }
 };
@@ -5802,13 +5803,16 @@ public:
 
     template<fixed_string src_port_name, fixed_string dst_port_name, typename Source_, typename Destination_>
     [[nodiscard]] connection_result_t
-    connect(Source_ &&src_node_raw, Destination_ &&dst_node_raw, int32_t weight = 0, std::string_view name = "unnamed edge") noexcept {
-        using Source      = std::remove_cvref_t<Source_>;
+    connect(Source_ &&src_node_raw, Destination_ &&dst_node_raw, int32_t weight = 0,
+            std::string_view name = "unnamed edge") {
+        using Source = std::remove_cvref_t<Source_>;
         using Destination = std::remove_cvref_t<Destination_>;
-        return connect<meta::indexForName<src_port_name, typename Source::output_ports>(), meta::indexForName<dst_port_name, typename Destination::input_ports>()>(std::forward<Source_>(src_node_raw),
-                                                                                                                                                                   std::forward<Destination_>(
-                                                                                                                                                                           dst_node_raw),
-                                                                                                                                                                   weight, name);
+        return connect < meta::indexForName<src_port_name, typename Source::output_ports>(),
+                meta::indexForName<dst_port_name, typename Destination::input_ports>() >
+                (std::forward<Source_>(src_node_raw),
+                        std::forward<Destination_>(
+                                dst_node_raw),
+                        weight, name);
     }
 
     auto
