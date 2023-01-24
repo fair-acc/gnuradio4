@@ -49,7 +49,7 @@ jobs:
         git config --global user.email "noreply@example.com"
         git add singleheader
         git fetch --depth=1 origin single-header:single-header
-        git reset --soft single-header
+        git reset --soft origin/single-header
         git rev-parse HEAD@{1} > .git/MERGE_HEAD
         git commit -m "single-header of $(git rev-parse --short HEAD@{1})"
-        git push origin single-header
+        git push origin HEAD:single-header
