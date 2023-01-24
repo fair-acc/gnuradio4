@@ -1,11 +1,11 @@
 #ifndef GNURADIO_GRAPH_HPP
 #define GNURADIO_GRAPH_HPP
 
-#include "buffer.hpp"
-#include "circular_buffer.hpp"
-#include "typelist.hpp"
-#include "utils.hpp"
-#include "vir/simd.h"
+#include <buffer.hpp> // localinclude
+#include <circular_buffer.hpp> // localinclude
+#include <typelist.hpp> // localinclude
+#include <utils.hpp> // localinclude
+#include <vir/simd.h> // localinclude
 
 #include <algorithm>
 #include <complex>
