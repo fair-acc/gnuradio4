@@ -11,9 +11,7 @@
 #include <thread>
 #include <vector>
 
-#ifndef GNURADIO_SEQUENCE_HPP
-#include "sequence.hpp"
-#endif
+#include <sequence.hpp> // localinclude
 
 namespace gr {
 // clang-format off

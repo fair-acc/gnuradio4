@@ -20,7 +20,7 @@
 #ifndef VIR_DETAILS_H
 #define VIR_DETAILS_H
 
-#include "simd.h"
+#include <vir/simd.h> // localinclude
 #include <type_traits>
 #include <bit>
 
