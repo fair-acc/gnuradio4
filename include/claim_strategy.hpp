@@ -1,6 +1,7 @@
 #ifndef GNURADIO_CLAIM_STRATEGY_HPP
 #define GNURADIO_CLAIM_STRATEGY_HPP
 
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <memory>
