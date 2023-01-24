@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include "typelist.hpp"
-#include "vir/simd.h"
+#include <typelist.hpp> // localinclude
+#include <vir/simd.h> // localinclude
 
 #ifndef __EMSCRIPTEN__
 #include <cxxabi.h>
