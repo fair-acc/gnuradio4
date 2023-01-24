@@ -9,10 +9,10 @@
 #include <vector>
 
 #ifndef GNURADIO_SEQUENCE_HPP
-#include <sequence.hpp>
+#include <sequence.hpp> // localinclude
 #endif
 #ifndef GNURADIO_WAIT_STRATEGY_HPP
-#include <wait_strategy.hpp>
+#include <wait_strategy.hpp> // localinclude
 #endif
 
 namespace gr {
