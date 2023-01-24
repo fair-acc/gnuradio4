@@ -1,0 +1,59 @@
+name: CMake
+
+on:
+  push:
+    branches: [ main, singleheader_merge ] # singleheader_merge branch used for modifications to the CI
+
+jobs:
+  build:
+    name: "Create single-header release"
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 100
+
+    - name: Cache
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-fetchContent-cache
+      with:
+        path: ${{runner.workspace}}/build/_deps
+        key: ${{ runner.os }}-gcc-Release-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+    - name: Install gcc-12
+      run: |
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa # provides newer gcc 12.2.0 instead of 12.1.0
+        sudo apt-get install -y gcc-12 g++-12
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 110 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+
+    - name: Configure CMake to fetch UT dependency
+      shell: bash
+      run: cmake -S . -B ../build -DCMAKE_BUILD_TYPE=Release
+
+    - name: create single-header
+      shell: bash
+      run: |
+        mkdir -p singleheader
+        # merge headers by precompiling toplevel headers to get list of included headers, filter for only lines with local headers, reverse the list to get deepest deps first
+        # then concat all headers and filter out local includes (quoted includes and bracket includes with `// localinclude` comment) and write to single header file
+        echo "== Headers for graph =="
+        gcc -I include -I build/fmt-src/include -std=c++20 -H include/graph.hpp 2>&1 | tee include/graph.hpp.deps || true
+        cat $(cat include/graph.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
+        rm include/graph.hpp.* # remove generated precompiled header
+        echo "== Headers for benchmark =="
+        gcc -I include -I build/_deps/ut-src/include -I build/fmt/include -std=c++20 -H bench/benchmark.hpp 2>&1 | tee bench/benchmark.hpp.deps || true
+        cat $(cat bench/benchmark.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
+        rm bench/benchmark.hpp.* # remove generated precompiled header
+      
+    - name: upload to branch # keeping history of single-header branch
+      run: |
+        git config --global user.name "single header generator"
+        git config --global user.email "noreply@example.com"
+        git add singleheader
+        git fetch --depth=1 origin single-header:single-header
+        git reset --soft origin/single-header
+        git rev-parse HEAD@{1} > .git/MERGE_HEAD
+        git commit -m "single-header of $(git rev-parse --short HEAD@{1})"
+        git push origin HEAD:single-header

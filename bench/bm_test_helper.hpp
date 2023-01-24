@@ -1,7 +1,9 @@
 #ifndef GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
 #define GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
 
+#ifndef GNURADIO_GRAPH_HPP
 #include <graph.hpp>
+#endif
 
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
 
