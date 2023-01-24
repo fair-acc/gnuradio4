@@ -2968,298 +2968,207 @@ static_assert(std::is_same_v<dummy_t, type_transform<std::vector, dummy_t>>);
 } // namespace fair::meta
 
 #endif // include guard
-#ifndef GNURADIO_CLAIM_STRATEGY_HPP
-#define GNURADIO_CLAIM_STRATEGY_HPP
-
-#include <concepts>
-#include <cstdint>
-#include <memory>
-#include <span>
-#include <stdexcept>
-#include <vector>
-
 #ifndef GNURADIO_SEQUENCE_HPP
-#endif
-#ifndef GNURADIO_WAIT_STRATEGY_HPP
-#endif
+#define GNURADIO_SEQUENCE_HPP
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <ranges>
+#include <vector>
 
 namespace gr {
 
-struct NoCapacityException : public std::runtime_error {
-    NoCapacityException() : std::runtime_error("NoCapacityException"){};
-};
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
 
-// clang-format off
-
-template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
-        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
-    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
-    { t.publish(sequence) } -> std::same_as<void>;
-    { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
-};
-
-namespace claim_strategy::util {
-constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-}
-
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class alignas(kCacheLine) SingleThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    alignas(kCacheLine) mutable std::int64_t _cachedValue{ kInitialCursorValue };
-
-public:
-    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
-    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
-    void operator=(const SingleThreadedStrategy &) = delete;
-
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
-        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
-            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
-            _cachedValue     = minSequence;
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
-
-        auto nextSequence = _nextValue + n_slots_to_claim;
-        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
-
-        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            _cursor.setValue(_nextValue);
-
-            SpinWait     spinWait;
-            std::int64_t minSequence;
-            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
-                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                    _waitStrategy.signalAllWhenBlocking();
-                }
-                spinWait.spinOnce();
-            }
-            _cachedValue = minSequence;
-        }
-        _nextValue = nextSequence;
-
-        return nextSequence;
-    }
-
-    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
-            throw NoCapacityException();
-        }
-
-        const auto nextSequence = _nextValue + n_slots_to_claim;
-        _nextValue              = nextSequence;
-
-        return nextSequence;
-    }
-
-    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
-        const auto produced = _nextValue;
-
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
-    }
-
-    void publish(std::int64_t sequence) {
-        _cursor.setValue(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
-};
-static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+static constexpr const std::size_t kCacheLine
+        = 64; // waiting for clang: std::hardware_destructive_interference_size
+static constexpr const std::int64_t kInitialCursorValue = -1L;
 
 /**
- * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
- * Suitable for use for sequencing across multiple publisher threads.
- * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
- * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ * Concurrent sequence class used for tracking the progress of the ring buffer and event
+ * processors. Support a number of concurrent operations including CAS and order writes.
+ * Also attempts to be more efficient with regards to false sharing by adding padding
+ * around the volatile field.
  */
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class MultiThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-    alignas(kCacheLine) std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    const std::int32_t _indexMask;
-    const std::int32_t _indexShift;
+// clang-format off
+class Sequence
+{
+    alignas(kCacheLine) std::atomic<std::int64_t> _fieldsValue{};
 
 public:
-    MultiThreadedStrategy() = delete;
-    explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
-        _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
-        for (std::size_t i = _size - 1; i != 0; i--) {
-            setAvailableBufferValue(i, -1);
-        }
-        setAvailableBufferValue(0, -1);
-    }
-    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
-    void               operator=(const MultiThreadedStrategy &) = delete;
-
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
-
-        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
-            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
-            _gatingSequenceCache->setValue(minSequence);
-
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
+    Sequence(const Sequence&) = delete;
+    Sequence(const Sequence&&) = delete;
+    void operator=(const Sequence&) = delete;
+    explicit Sequence(std::int64_t initialValue = kInitialCursorValue) noexcept
+        : _fieldsValue(initialValue)
+    {
     }
 
-    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        std::int64_t current;
-        std::int64_t next;
-
-        SpinWait     spinWait;
-        do {
-            current                           = _cursor.value();
-            next                              = current + n_slots_to_claim;
-
-            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
-            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
-
-            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
-
-                if (wrapPoint > gatingSequence) {
-                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                        _waitStrategy.signalAllWhenBlocking();
-                    }
-                    spinWait.spinOnce();
-                    continue;
-                }
-
-                _gatingSequenceCache->setValue(gatingSequence);
-            } else if (_cursor.compareAndSet(current, next)) {
-                break;
-            }
-        } while (true);
-
-        return next;
+    [[nodiscard]] forceinline std::int64_t value() const noexcept
+    {
+        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
     }
 
-    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        std::int64_t current;
-        std::int64_t next;
-
-        do {
-            current = _cursor.value();
-            next    = current + n_slots_to_claim;
-
-            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
-                throw NoCapacityException();
-            }
-        } while (!_cursor.compareAndSet(current, next));
-
-        return next;
+    forceinline void setValue(const std::int64_t value) noexcept
+    {
+        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
     }
 
-    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto produced = _cursor.value();
-        const auto consumed = detail::getMinimumSequence(dependents, produced);
-
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
+    [[nodiscard]] forceinline bool compareAndSet(std::int64_t expectedSequence,
+                                                 std::int64_t nextSequence) noexcept
+    {
+        // atomically set the value to the given updated value if the current value == the
+        // expected value (true, otherwise folse).
+        return std::atomic_compare_exchange_strong(
+            &_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    void publish(std::int64_t sequence) {
-        setAvailable(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
+    [[nodiscard]] forceinline std::int64_t incrementAndGet() noexcept
+    {
+        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
     }
 
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
-        const auto index = calculateIndex(sequence);
-        const auto flag  = calculateAvailabilityFlag(sequence);
-
-        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
+    [[nodiscard]] forceinline std::int64_t addAndGet(std::int64_t value) noexcept
+    {
+        return std::atomic_fetch_add(&_fieldsValue, value) + value;
     }
-
-    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
-        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
-            if (!isAvailable(sequence)) {
-                return sequence - 1;
-            }
-        }
-
-        return availableSequence;
-    }
-
-private:
-    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & _indexMask); }
-};
-static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
-// clang-format on
-
-enum class ProducerType {
-    /**
-     * creates a buffer assuming a single producer-thread and multiple consumer
-     */
-    Single,
-
-    /**
-     * creates a buffer assuming multiple producer-threads and multiple consumer
-     */
-    Multi
 };
 
 namespace detail {
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-struct producer_type;
+/**
+ * Get the minimum sequence from an array of Sequences.
+ *
+ * \param sequences sequences to compare.
+ * \param minimum an initial default minimum.  If the array is empty this value will
+ * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
+ */
+inline std::int64_t getMinimumSequence(
+    const std::vector<std::shared_ptr<Sequence>>& sequences,
+    std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
+{
+    if (sequences.empty()) {
+        return minimum;
+    }
+#if not defined(_LIBCPP_VERSION)
+    return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
+#else
+    std::vector<int64_t> v(sequences.size());
+    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
+    auto min = std::min(v.begin(), v.end());
+    return std::min(*min, minimum);
+#endif
+}
 
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
-    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
-};
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
-    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
-};
+inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
+             const Sequence& cursor,
+             const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
+{
+    std::int64_t cursorSequence;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+    do {
+        currentSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+        updatedSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(currentSequences->size() + sequencesToAdd.size());
+
+#if not defined(_LIBCPP_VERSION)
+        std::ranges::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
+#else
+        std::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
+#endif
+
+        cursorSequence = cursor.value();
+
+        auto index = currentSequences->size();
+        for (auto&& sequence : sequencesToAdd) {
+            sequence->setValue(cursorSequence);
+            (*updatedSequences)[index] = sequence;
+            index++;
+        }
+    } while (!std::atomic_compare_exchange_weak(&sequences, &currentSequences, updatedSequences)); // xTODO: explicit memory order
+
+    cursorSequence = cursor.value();
+
+    for (auto&& sequence : sequencesToAdd) {
+        sequence->setValue(cursorSequence);
+    }
+}
+
+inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence)
+{
+    std::uint32_t numToRemove;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
+
+    do {
+        oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+#if not defined(_LIBCPP_VERSION)
+        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
+#else
+        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
+#endif
+        if (numToRemove == 0) {
+            break;
+        }
+
+        auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
+        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(
+            oldSize - numToRemove);
+
+        for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
+            const auto& testSequence = (*oldSequences)[i];
+            if (sequence != testSequence) {
+                (*newSequences)[pos] = testSequence;
+                pos++;
+            }
+        }
+    } while (!std::atomic_compare_exchange_weak(&sequences, &oldSequences, newSequences));
+
+    return numToRemove != 0;
+}
+
+// clang-format on
 
 } // namespace detail
 
 } // namespace gr
 
+#ifdef FMT_FORMAT_H_
+#include <fmt/core.h>
+#include <fmt/ostream.h>
 
-#endif // GNURADIO_CLAIM_STRATEGY_HPP
+template<>
+struct fmt::formatter<gr::Sequence> {
+    template<typename ParseContext>
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    auto
+    format(gr::Sequence const &value, FormatContext &ctx) {
+        return fmt::format_to(ctx.out(), "{}", value.value());
+    }
+};
+
+namespace gr {
+inline std::ostream &
+operator<<(std::ostream &os, const Sequence &v) {
+    return os << fmt::format("{}", v);
+}
+} // namespace gr
+
+#endif // FMT_FORMAT_H_
+
+#endif // GNURADIO_SEQUENCE_HPP
 #ifndef GNURADIO_WAIT_STRATEGY_HPP
 #define GNURADIO_WAIT_STRATEGY_HPP
 
@@ -3635,207 +3544,294 @@ public:
 
 
 #endif // GNURADIO_WAIT_STRATEGY_HPP
-#ifndef GNURADIO_SEQUENCE_HPP
-#define GNURADIO_SEQUENCE_HPP
+#ifndef GNURADIO_CLAIM_STRATEGY_HPP
+#define GNURADIO_CLAIM_STRATEGY_HPP
 
-#include <algorithm>
-#include <atomic>
+#include <concepts>
 #include <cstdint>
-#include <limits>
 #include <memory>
-#include <ranges>
+#include <span>
+#include <stdexcept>
 #include <vector>
+
 
 namespace gr {
 
-#ifndef forceinline
-// use this for hot-spots only <-> may bloat code size, not fit into cache and
-// consequently slow down execution
-#define forceinline inline __attribute__((always_inline))
-#endif
+struct NoCapacityException : public std::runtime_error {
+    NoCapacityException() : std::runtime_error("NoCapacityException"){};
+};
 
-static constexpr const std::size_t kCacheLine
-        = 64; // waiting for clang: std::hardware_destructive_interference_size
-static constexpr const std::int64_t kInitialCursorValue = -1L;
-
-/**
- * Concurrent sequence class used for tracking the progress of the ring buffer and event
- * processors. Support a number of concurrent operations including CAS and order writes.
- * Also attempts to be more efficient with regards to false sharing by adding padding
- * around the volatile field.
- */
 // clang-format off
-class Sequence
-{
-    alignas(kCacheLine) std::atomic<std::int64_t> _fieldsValue{};
+
+template<typename T>
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
+        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
+    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
+    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
+    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
+    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
+    { t.publish(sequence) } -> std::same_as<void>;
+    { t.isAvailable(sequence) } -> std::same_as<bool>;
+    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
+};
+
+namespace claim_strategy::util {
+constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+}
+
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+class alignas(kCacheLine) SingleThreadedStrategy {
+    alignas(kCacheLine) const std::size_t _size;
+    alignas(kCacheLine) Sequence &_cursor;
+    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
+    alignas(kCacheLine) std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    alignas(kCacheLine) mutable std::int64_t _cachedValue{ kInitialCursorValue };
 
 public:
-    Sequence(const Sequence&) = delete;
-    Sequence(const Sequence&&) = delete;
-    void operator=(const Sequence&) = delete;
-    explicit Sequence(std::int64_t initialValue = kInitialCursorValue) noexcept
-        : _fieldsValue(initialValue)
-    {
+    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
+        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
+    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
+    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
+    void operator=(const SingleThreadedStrategy &) = delete;
+
+    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
+        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
+            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
+            _cachedValue     = minSequence;
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
     }
 
-    [[nodiscard]] forceinline std::int64_t value() const noexcept
-    {
-        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
+    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
+        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
+
+        auto nextSequence = _nextValue + n_slots_to_claim;
+        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
+
+        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
+            _cursor.setValue(_nextValue);
+
+            SpinWait     spinWait;
+            std::int64_t minSequence;
+            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
+                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                    _waitStrategy.signalAllWhenBlocking();
+                }
+                spinWait.spinOnce();
+            }
+            _cachedValue = minSequence;
+        }
+        _nextValue = nextSequence;
+
+        return nextSequence;
     }
 
-    forceinline void setValue(const std::int64_t value) noexcept
-    {
-        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
+    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
+            throw NoCapacityException();
+        }
+
+        const auto nextSequence = _nextValue + n_slots_to_claim;
+        _nextValue              = nextSequence;
+
+        return nextSequence;
     }
 
-    [[nodiscard]] forceinline bool compareAndSet(std::int64_t expectedSequence,
-                                                 std::int64_t nextSequence) noexcept
-    {
-        // atomically set the value to the given updated value if the current value == the
-        // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(
-            &_fieldsValue, &expectedSequence, nextSequence);
+    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
+        const auto produced = _nextValue;
+
+        return static_cast<std::int64_t>(_size) - (produced - consumed);
     }
 
-    [[nodiscard]] forceinline std::int64_t incrementAndGet() noexcept
-    {
-        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
+    void publish(std::int64_t sequence) {
+        _cursor.setValue(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
     }
 
-    [[nodiscard]] forceinline std::int64_t addAndGet(std::int64_t value) noexcept
-    {
-        return std::atomic_fetch_add(&_fieldsValue, value) + value;
+    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
+    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
+};
+static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+
+/**
+ * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
+ * Suitable for use for sequencing across multiple publisher threads.
+ * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
+ * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ */
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+class MultiThreadedStrategy {
+    alignas(kCacheLine) const std::size_t _size;
+    alignas(kCacheLine) Sequence &_cursor;
+    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
+    alignas(kCacheLine) std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
+    alignas(kCacheLine) std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
+    const std::int32_t _indexMask;
+    const std::int32_t _indexShift;
+
+public:
+    MultiThreadedStrategy() = delete;
+    explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
+        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
+        _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
+        for (std::size_t i = _size - 1; i != 0; i--) {
+            setAvailableBufferValue(i, -1);
+        }
+        setAvailableBufferValue(0, -1);
     }
+    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
+    void               operator=(const MultiThreadedStrategy &) = delete;
+
+    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
+        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
+
+        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
+            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
+            _gatingSequenceCache->setValue(minSequence);
+
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        std::int64_t current;
+        std::int64_t next;
+
+        SpinWait     spinWait;
+        do {
+            current                           = _cursor.value();
+            next                              = current + n_slots_to_claim;
+
+            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
+            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
+
+            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
+                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
+
+                if (wrapPoint > gatingSequence) {
+                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                        _waitStrategy.signalAllWhenBlocking();
+                    }
+                    spinWait.spinOnce();
+                    continue;
+                }
+
+                _gatingSequenceCache->setValue(gatingSequence);
+            } else if (_cursor.compareAndSet(current, next)) {
+                break;
+            }
+        } while (true);
+
+        return next;
+    }
+
+    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        std::int64_t current;
+        std::int64_t next;
+
+        do {
+            current = _cursor.value();
+            next    = current + n_slots_to_claim;
+
+            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
+                throw NoCapacityException();
+            }
+        } while (!_cursor.compareAndSet(current, next));
+
+        return next;
+    }
+
+    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto produced = _cursor.value();
+        const auto consumed = detail::getMinimumSequence(dependents, produced);
+
+        return static_cast<std::int64_t>(_size) - (produced - consumed);
+    }
+
+    void publish(std::int64_t sequence) {
+        setAvailable(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
+        const auto index = calculateIndex(sequence);
+        const auto flag  = calculateAvailabilityFlag(sequence);
+
+        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
+    }
+
+    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
+        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
+            if (!isAvailable(sequence)) {
+                return sequence - 1;
+            }
+        }
+
+        return availableSequence;
+    }
+
+private:
+    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
+    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & _indexMask); }
+};
+static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
+// clang-format on
+
+enum class ProducerType {
+    /**
+     * creates a buffer assuming a single producer-thread and multiple consumer
+     */
+    Single,
+
+    /**
+     * creates a buffer assuming multiple producer-threads and multiple consumer
+     */
+    Multi
 };
 
 namespace detail {
-/**
- * Get the minimum sequence from an array of Sequences.
- *
- * \param sequences sequences to compare.
- * \param minimum an initial default minimum.  If the array is empty this value will
- * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
- */
-inline std::int64_t getMinimumSequence(
-    const std::vector<std::shared_ptr<Sequence>>& sequences,
-    std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
-{
-    if (sequences.empty()) {
-        return minimum;
-    }
-#if not defined(_LIBCPP_VERSION)
-    return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
-#else
-    std::vector<int64_t> v(sequences.size());
-    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
-    auto min = std::min(v.begin(), v.end());
-    return std::min(*min, minimum);
-#endif
-}
+template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+struct producer_type;
 
-inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
-             const Sequence& cursor,
-             const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
-{
-    std::int64_t cursorSequence;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
+template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
+    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
+};
+template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
+    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
+};
 
-    do {
-        currentSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
-        updatedSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(currentSequences->size() + sequencesToAdd.size());
-
-#if not defined(_LIBCPP_VERSION)
-        std::ranges::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
-#else
-        std::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
-#endif
-
-        cursorSequence = cursor.value();
-
-        auto index = currentSequences->size();
-        for (auto&& sequence : sequencesToAdd) {
-            sequence->setValue(cursorSequence);
-            (*updatedSequences)[index] = sequence;
-            index++;
-        }
-    } while (!std::atomic_compare_exchange_weak(&sequences, &currentSequences, updatedSequences)); // xTODO: explicit memory order
-
-    cursorSequence = cursor.value();
-
-    for (auto&& sequence : sequencesToAdd) {
-        sequence->setValue(cursorSequence);
-    }
-}
-
-inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence)
-{
-    std::uint32_t numToRemove;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
-
-    do {
-        oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
-#if not defined(_LIBCPP_VERSION)
-        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
-#else
-        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
-#endif
-        if (numToRemove == 0) {
-            break;
-        }
-
-        auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
-        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(
-            oldSize - numToRemove);
-
-        for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto& testSequence = (*oldSequences)[i];
-            if (sequence != testSequence) {
-                (*newSequences)[pos] = testSequence;
-                pos++;
-            }
-        }
-    } while (!std::atomic_compare_exchange_weak(&sequences, &oldSequences, newSequences));
-
-    return numToRemove != 0;
-}
-
-// clang-format on
+template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
 
 } // namespace detail
 
 } // namespace gr
 
-#ifdef FMT_FORMAT_H_
-#include <fmt/core.h>
-#include <fmt/ostream.h>
 
-template<>
-struct fmt::formatter<gr::Sequence> {
-    template<typename ParseContext>
-    constexpr auto
-    parse(ParseContext &ctx) {
-        return ctx.begin();
-    }
-
-    template<typename FormatContext>
-    auto
-    format(gr::Sequence const &value, FormatContext &ctx) {
-        return fmt::format_to(ctx.out(), "{}", value.value());
-    }
-};
-
-namespace gr {
-inline std::ostream &
-operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v);
-}
-} // namespace gr
-
-#endif // FMT_FORMAT_H_
-
-#endif // GNURADIO_SEQUENCE_HPP
+#endif // GNURADIO_CLAIM_STRATEGY_HPP
 #ifndef GNURADIO_CIRCULAR_BUFFER_HPP
 #define GNURADIO_CIRCULAR_BUFFER_HPP
 
