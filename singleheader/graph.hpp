@@ -5770,17 +5770,23 @@ private:
 public:
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source_, typename Destination_>
     [[nodiscard]] connection_result_t
-    connect(Source_ &src_node_raw, Destination_ &dst_node_raw, int32_t weight = 0, std::string_view name = "unnamed edge") noexcept {
-        using Source      = std::remove_cvref_t<Source_>;
+    connect(Source_ &src_node_raw, Destination_ &dst_node_raw, int32_t weight = 0,
+            std::string_view name = "unnamed edge") {
+        using Source = std::remove_cvref_t<Source_>;
         using Destination = std::remove_cvref_t<Destination_>;
-        static_assert(std::is_same_v<typename Source::output_port_types::template at<src_port_index>, typename Destination::input_port_types::template at<dst_port_index>>,
-                      "The source port type needs to match the sink port type");
+        static_assert(
+                std::is_same_v<typename Source::output_port_types::template at<src_port_index>, typename Destination::input_port_types::template at<dst_port_index>>,
+                "The source port type needs to match the sink port type");
 
-        OutPort auto &source_port      = output_port<src_port_index>(&src_node_raw);
-        InPort auto  &destination_port = input_port<dst_port_index>(&dst_node_raw);
+        OutPort auto &source_port = output_port<src_port_index>(&src_node_raw);
+        InPort auto &destination_port = input_port<dst_port_index>(&dst_node_raw);
 
-        if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(src_node_raw); })
-            || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(dst_node_raw); })) {
+        if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) {
+            return registered_node->raw() == std::addressof(src_node_raw);
+        })
+            || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) {
+            return registered_node->raw() == std::addressof(dst_node_raw);
+        })) {
             throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name(), src_port_index, dst_node_raw.name(), dst_port_index));
         }
 
