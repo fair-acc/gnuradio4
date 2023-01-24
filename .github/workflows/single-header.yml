@@ -40,11 +40,11 @@ jobs:
         # then concat all headers and filter out local includes (quoted includes and bracket includes with `// localinclude` comment) and write to single header file
         echo "== Headers for graph =="
         gcc -Iinclude -Ibuild/_deps/fmt-src/include -std=c++20 -H include/graph.hpp 2>&1 | tee include/graph.hpp.deps || true
-        cat $(cat include/graph.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
+        cat $(cat include/graph.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | grep -v "fmt-src" | tac) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
         rm include/graph.hpp.* # remove generated precompiled header
         echo "== Headers for benchmark =="
         gcc -Iinclude -Ibuild/_deps/ut-src/include -Ibuild/_deps/fmt-src/include -std=c++20 -H bench/benchmark.hpp 2>&1 | tee bench/benchmark.hpp.deps || true
-        cat $(cat bench/benchmark.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | tac) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
+        cat $(cat bench/benchmark.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | grep -v "fmt-src" | tac) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
         rm bench/benchmark.hpp.* # remove generated precompiled header
       
     - name: upload to branch # keeping history of single-header branch
