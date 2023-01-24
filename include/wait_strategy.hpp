@@ -12,7 +12,7 @@
 #include <vector>
 
 #ifndef GNURADIO_SEQUENCE_HPP
-#include "sequence.hpp"
+#include <sequence.hpp> // localinclude
 #endif
 
 namespace gr {

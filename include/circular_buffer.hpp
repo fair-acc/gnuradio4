@@ -47,15 +47,15 @@ static constexpr bool has_posix_mmap_interface = false;
 }
 #endif
 
-#include "buffer.hpp"
+#include <buffer.hpp> // localinclude
 #ifndef GNURADIO_CLAIM_STRATEGY_HPP
-#include "claim_strategy.hpp"
+#include <claim_strategy.hpp> // localinclude
 #endif
 #ifndef GNURADIO_SEQUENCE_HPP
-#include "sequence.hpp"
+#include <sequence.hpp> // localinclude
 #endif
 #ifdef GNURADIO_WAIT_STRATEGY_HPP
-#include "wait_strategy.hpp"
+#include <wait_strategy.hpp> // localinclude
 #endif
 
 namespace gr {
