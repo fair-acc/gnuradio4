@@ -2480,7 +2480,7 @@ using operators::operator>>;
 #include <fmt/color.h>
 #include <fmt/format.h>
 
-#if __has_include(<unistd.h>)  && __has_include(<sys/ioctl.h>)  && __has_include(<sys/syscall.h>) && __has_include(<linux/perf_event.h>)
+#if __has_include(<unistd.h>)  && __has_include(<sys/ioctl.h>)  && __has_include(<sys/syscall.h>) && __has_include(<linux/perf_event.h>) && !defined(BENCHMARK_NO_PERF_COUNTER)
 #define HAS_LINUX_PERFORMANCE_HEADER
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>

@@ -1,3 +1,4 @@
+//#define BENCHMARK_NO_PERF_COUNTER 1
 #include "benchmark.hpp"
 
 #include <algorithm>
