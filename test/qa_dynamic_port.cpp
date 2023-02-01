@@ -54,7 +54,7 @@ private:
     std::size_t _counter = 0;
 
 public:
-    fair::graph::work_result
+    fair::graph::work_return_t
     work() {
         if (_counter < count) {
             _counter++;
@@ -63,9 +63,9 @@ public:
             data[0]            = value;
             writer.publish(token, 1);
 
-            return fair::graph::work_result::success;
+            return fair::graph::work_return_t::OK;
         } else {
-            return fair::graph::work_result::inputs_empty;
+            return fair::graph::work_return_t::DONE;
         }
     }
 };
@@ -142,13 +142,15 @@ const boost::ut::suite PortApiTests = [] {
         flow.register_node(added);
         flow.register_node(out);
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value", "original">(number, scaled)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled", "addend0">(scaled, added)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value", "addend1">(answer, added)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum", "sink">(added, out)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        flow.work();
+        auto token = flow.init();
+        expect(token);
+        flow.work(token);
     };
 
 #ifdef ENABLE_DYNAMIC_PORTS
