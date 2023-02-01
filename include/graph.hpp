@@ -539,6 +539,8 @@ private:
         return result;
     }
 
+    std::vector<std::function<connection_result_t(graph&)>> _connection_definitions;
+
     // Just a dummy class that stores the graph and the source node and port
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
@@ -551,18 +553,28 @@ private:
 
         template <std::size_t dst_port_index, typename Destination>
         [[nodiscard]] auto to(Destination& destination) {
-            return self.connect_impl<src_port_index, dst_port_index>(source, destination);
+            self._connection_definitions.push_back([source = &source, &destination] (graph& _self) {
+                return _self.connect_impl<src_port_index, dst_port_index>(*source, destination);
+            });
+            return connection_result_t::SUCCESS;
         }
 
         template <fixed_string dst_port_name, typename Destination>
         [[nodiscard]] auto to(Destination& destination) {
-            return self.connect_impl<src_port_index, meta::indexForName<dst_port_name, typename Destination::input_ports>()>(source, destination);
+            return to<meta::indexForName<dst_port_name, typename Destination::input_ports>()>(destination);
         }
 
         source_connector(const source_connector&) = delete;
         source_connector(source_connector&&) = delete;
         source_connector& operator=(const source_connector&) = delete;
         source_connector& operator=(source_connector&&) = delete;
+    };
+
+    struct init_proof {
+        init_proof(bool _success) : success(_success) {}
+        bool success = true;
+
+        operator bool() const { return success; }
     };
 
 public:
@@ -588,8 +600,18 @@ public:
         _nodes.push_back(std::make_unique<reference_node_wrapper<Node>>(std::addressof(node)));
     }
 
+    init_proof init() {
+        return init_proof(
+            std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [this] (auto& connection_definition) {
+                return connection_definition(*this) == connection_result_t::SUCCESS;
+            }));
+    }
+
     node_ports_state
-    work() {
+    work(init_proof& init) {
+        if (!init) {
+            return node_ports_state::error;
+        }
         bool run = true;
         while (run) {
             bool something_happened = false;
