@@ -11,6 +11,7 @@
 namespace fair::graph {
 
 using fair::meta::fixed_string;
+using namespace fair::literals;
 
 // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
 using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> /*, ...*/>;
@@ -31,28 +32,6 @@ concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
                    { t.disconnect() } -> std::same_as<connection_result_t>;
                };
 
-template<typename T>
-concept has_fixed_port_info_v = requires {
-                                    typename T::value_type;
-                                    { T::static_name() };
-                                    { T::direction() } -> std::same_as<port_direction_t>;
-                                    { T::type() } -> std::same_as<port_type_t>;
-                                };
-
-template<typename T>
-using has_fixed_port_info = std::integral_constant<bool, has_fixed_port_info_v<T>>;
-
-template<typename T>
-struct has_fixed_port_info_or_is_typelist : std::false_type {};
-
-template<typename T>
-    requires has_fixed_port_info_v<T>
-struct has_fixed_port_info_or_is_typelist<T> : std::true_type {};
-
-template<typename T>
-    requires(meta::is_typelist_v<T> and T::template all_of<has_fixed_port_info>)
-struct has_fixed_port_info_or_is_typelist<T> : std::true_type {};
-
 template<std::size_t _min, std::size_t _max>
 struct limits {
     using limits_tag                 = std::true_type;
@@ -60,34 +39,9 @@ struct limits {
     static constexpr std::size_t max = _max;
 };
 
-template<typename T>
-concept is_limits_v = requires { typename T::limits_tag; };
 
-static_assert(!is_limits_v<int>);
-static_assert(!is_limits_v<std::size_t>);
-static_assert(is_limits_v<limits<0, 1024>>);
-
-template<typename T>
-using is_limits = std::integral_constant<bool, is_limits_v<T>>;
-
-template<typename Port>
-using port_type = typename Port::value_type;
-
-template<typename Port>
-using is_in_port = std::integral_constant<bool, Port::direction() == port_direction_t::INPUT>;
-
-template<typename Port>
-concept InPort = is_in_port<Port>::value;
-
-template<typename Port>
-using is_out_port = std::integral_constant<bool, Port::direction() == port_direction_t::OUTPUT>;
-
-template<typename Port>
-concept OutPort = is_out_port<Port>::value;
-
-
-template<typename T, fixed_string PortName, port_type_t Porttype, port_direction_t PortDirection, // TODO: sort default arguments
-         std::size_t N_HISTORY = std::dynamic_extent, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, bool OPTIONAL = false,
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
+         std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent,
          gr::Buffer BufferType = gr::circular_buffer<T>>
 class port {
 public:
@@ -100,6 +54,9 @@ public:
 
     using port_tag                  = std::true_type;
 
+    template <fixed_string NewName>
+    using with_name = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
+
 private:
     using ReaderType          = decltype(std::declval<BufferType>().new_reader());
     using WriterType          = decltype(std::declval<BufferType>().new_writer());
@@ -107,7 +64,6 @@ private:
 
     std::string  _name        = static_cast<std::string>(PortName);
     std::int16_t _priority    = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t  _n_history   = N_HISTORY;
     std::size_t  _min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
     std::size_t  _max_samples = MAX_SAMPLES;
     bool         _connected   = false;
@@ -156,10 +112,9 @@ public:
     operator=(const port &)
             = delete;
 
-    port(std::string port_name, std::int16_t priority = 0, std::size_t n_history = 0, std::size_t min_samples = 0U, std::size_t max_samples = SIZE_MAX) noexcept
+    port(std::string port_name, std::int16_t priority = 0, std::size_t min_samples = 0_UZ, std::size_t max_samples = SIZE_MAX) noexcept
         : _name(std::move(port_name))
         , _priority{ priority }
-        , _n_history(n_history)
         , _min_samples(min_samples)
         , _max_samples(max_samples) {
         static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
@@ -168,7 +123,6 @@ public:
     constexpr port(port &&other) noexcept
         : _name(std::move(other._name))
         , _priority{ other._priority }
-        , _n_history(other._n_history)
         , _min_samples(other._min_samples)
         , _max_samples(other._max_samples) {}
 
@@ -177,7 +131,6 @@ public:
         port tmp(std::move(other));
         std::swap(_name, tmp._name);
         std::swap(_priority, tmp._priority);
-        std::swap(_n_history, tmp._n_history);
         std::swap(_min_samples, tmp._min_samples);
         std::swap(_max_samples, tmp._max_samples);
         std::swap(_connected, tmp._connected);
@@ -187,7 +140,7 @@ public:
 
     [[nodiscard]] constexpr static port_type_t
     type() noexcept {
-        return Porttype;
+        return PortType;
     }
 
     [[nodiscard]] constexpr static port_direction_t
@@ -216,11 +169,6 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr static bool
-    is_optional() noexcept {
-        return OPTIONAL;
-    }
-
     [[nodiscard]] constexpr std::int16_t
     priority() const noexcept {
         return _priority;
@@ -230,15 +178,6 @@ public:
     available() noexcept {
         return 0;
     } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
-
-    [[nodiscard]] constexpr std::size_t
-    n_history() const noexcept {
-        if constexpr (N_HISTORY == std::dynamic_extent) {
-            return _n_history;
-        } else {
-            return N_HISTORY;
-        }
-    }
 
     [[nodiscard]] constexpr std::size_t
     min_buffer_size() const noexcept {
@@ -346,28 +285,31 @@ repeated_ports_impl(std::index_sequence<Is...>) {
 } // namespace detail
 
 // TODO: Add port index to BaseName
-template<std::size_t Count, typename T, fixed_string BaseName, port_type_t Porttype, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
+template<std::size_t Count, typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
          std::size_t MAX_SAMPLES = std::dynamic_extent>
-using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, Porttype, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
+using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
 
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
 using IN = port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
 using OUT = port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
 using IN_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
 using OUT_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
 
-static_assert(Port<IN<float, "in">>);
-static_assert(Port<decltype(IN<float>("in"))>);
-static_assert(Port<OUT<float, "out">>);
-static_assert(Port<IN_MSG<float, "in_msg">>);
-static_assert(Port<OUT_MSG<float, "out_msg">>);
+static_assert(Port<IN<float>>);
+static_assert(Port<decltype(IN<float>())>);
+static_assert(Port<OUT<float>>);
+static_assert(Port<IN_MSG<float>>);
+static_assert(Port<OUT_MSG<float>>);
 
-static_assert(IN<float, "in">::static_name() == fixed_string("in"));
+static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
 static_assert(requires { IN<float>("in").name(); });
 
+static_assert(OUT_MSG<float, 0, 0, "out_msg">::static_name() == fixed_string("out_msg"));
+static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
+static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
 
 }
 

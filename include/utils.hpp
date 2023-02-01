@@ -15,7 +15,17 @@
 #include <typeinfo>
 #endif
 
+namespace fair::literals {
+    // C++23 has literal suffixes for std::size_t, but we are not
+    // in C++23 just yet
+    constexpr std::size_t operator"" _UZ(unsigned long long n) {
+        return static_cast<std::size_t>(n);
+    }
+}
+
 namespace fair::meta {
+
+using namespace fair::literals;
 
 template<typename... Ts>
 struct print_types;
@@ -85,6 +95,8 @@ template<class... T>
 constexpr bool always_false = false;
 
 struct dummy_t {};
+
+constexpr std::size_t invalid_index = -1_UZ;
 
 template<typename F, typename... Args>
 auto
@@ -173,47 +185,6 @@ using transform_by_rebind_simd = meta::transform_types<rebind_simd_helper<V>::te
 
 template<typename List>
 using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
-
-template<typename Node>
-concept source_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
-                          {
-                              [](Node &n, auto &inputs) {
-                                  if constexpr (Node::input_port_types::size > 0) {
-                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
-                                      (n, inputs, std::make_index_sequence<Node::input_port_types::size>());
-                                  } else {
-                                      return n.process_one();
-                                  }
-                              }(node, inputs)
-                              } -> std::same_as<typename Node::return_type>;
-                      };
-
-template<typename Node>
-concept sink_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
-                        {
-                            [](Node &n, auto &inputs) {
-                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
-                                    if constexpr (Node::output_port_types::size > 0) {
-                                        auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
-                                    } else {
-                                        n_inside.process_one(std::get<Is>(tup)...);
-                                    }
-                                }
-                                (n, inputs, std::make_index_sequence<Node::input_port_types::size>());
-                            }(node, inputs)
-                        };
-                    };
-
-template<typename Node>
-concept any_node = source_node<Node> || sink_node<Node>;
-
-template<typename Node>
-concept node_can_process_simd = any_node<Node> && requires(Node &n, typename transform_to_widest_simd<typename Node::input_port_types>::template apply<std::tuple> const &inputs) {
-                                                      {
-                                                          []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)->decltype(n.process_one(std::get<Is>(tup)...)) { return {}; }
-                                                          (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
-                                                          } -> any_simd<typename Node::return_type>;
-                                                  };
 
 template<fixed_string Name, typename PortList>
 consteval int
