@@ -148,7 +148,9 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        flow.work();
+        auto token = flow.init();
+        expect(token);
+        flow.work(token);
     };
 
 #ifdef ENABLE_DYNAMIC_PORTS
