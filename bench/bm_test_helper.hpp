@@ -1,9 +1,8 @@
 #ifndef GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
 #define GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
 
-#ifndef GNURADIO_GRAPH_HPP
 #include <graph.hpp>
-#endif
+#include <merged_node.hpp>
 
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
 
@@ -26,7 +25,7 @@ public:
         return T{};
     }
 
-    fair::graph::work_result
+    fair::graph::node_ports_state
     work() {
         const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
         if (n_to_publish > 0) {
@@ -36,7 +35,7 @@ public:
             if constexpr (use_bulk_operation) {
                 std::size_t n_write = std::clamp(n_to_publish, 0UL, std::min(writer.available(), port.max_buffer_size()));
                 if (n_write == 0) {
-                    return fair::graph::work_result::has_unprocessed_data;
+                    return fair::graph::node_ports_state::has_unprocessed_data;
                 }
 
                 writer.publish( //
@@ -49,14 +48,14 @@ public:
             } else {
                 auto [data, token] = writer.get(1);
                 if (data.size() == 0) {
-                    return fair::graph::work_result::error;
+                    return fair::graph::node_ports_state::error;
                 }
                 data[0] = process_one();
                 writer.publish(token, 1);
             }
-            return fair::graph::work_result::success;
+            return fair::graph::node_ports_state::success;
         } else {
-            return fair::graph::work_result::inputs_empty;
+            return fair::graph::node_ports_state::inputs_empty;
         }
     }
 };

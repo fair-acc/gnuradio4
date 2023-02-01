@@ -255,6 +255,41 @@ type_transform_impl(fair::meta::dummy_t *);
 template<template<typename...> typename Mapper, typename T>
 using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
 
+template<typename Arg, typename... Args>
+auto safe_min(Arg&& arg, Args&&... args)
+{
+    if constexpr (sizeof...(Args) == 0) {
+        return arg;
+    } else {
+        return std::min(std::forward<Arg>(arg), std::forward<Args>(args)...);
+    }
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto tuple_for_each(Function&& function, Tuple&& tuple, Tuples&&... tuples)
+{
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        auto callFunction = [&function, &tuple, &tuples...]<std::size_t I>() {
+            function(std::get<I>(tuple), std::get<I>(tuples)...);
+        };
+        ((callFunction.template operator()<Idx>(), ...));
+    }(std::make_index_sequence<std::tuple_size_v<Tuple>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
+{
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        auto callFunction = [&function, &tuple, &tuples...]<std::size_t I>() {
+            return function(std::get<I>(tuple), std::get<I>(tuples)...);
+        };
+        return std::make_tuple(callFunction.template operator()<Idx>()...);
+    }(std::make_index_sequence<std::tuple_size_v<Tuple>>());
+}
+
+
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
 static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
