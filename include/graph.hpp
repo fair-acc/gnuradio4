@@ -346,7 +346,7 @@ private:
         name() const
                 = 0;
 
-        virtual node_ports_state
+        virtual work_return_t
         work() = 0;
 
         virtual void *
@@ -390,7 +390,7 @@ private:
         template<typename In>
         reference_node_wrapper(In &&node) : _node(std::forward<In>(node)) {}
 
-        node_ports_state
+        work_return_t
         work() override {
             return data().work();
         }
@@ -607,25 +607,25 @@ public:
             }));
     }
 
-    node_ports_state
+    work_return_t
     work(init_proof& init) {
         if (!init) {
-            return node_ports_state::error;
+            return work_return_t::ERROR;
         }
         bool run = true;
         while (run) {
             bool something_happened = false;
             for (auto &node : _nodes) {
                 auto result = node->work();
-                if (result == node_ports_state::error) {
-                    return node_ports_state::error;
-                } else if (result == node_ports_state::has_unprocessed_data) {
+                if (result == work_return_t::ERROR) {
+                    return work_return_t::ERROR;
+                } else if (result == work_return_t::INSUFFICIENT_INPUT_ITEMS) {
                     // nothing
-                } else if (result == node_ports_state::inputs_empty) {
+                } else if (result == work_return_t::DONE) {
                     // nothing
-                } else if (result == node_ports_state::success) {
+                } else if (result == work_return_t::OK) {
                     something_happened = true;
-                } else if (result == node_ports_state::writers_not_available) {
+                } else if (result == work_return_t::INSUFFICIENT_OUTPUT_ITEMS) {
                     something_happened = true;
                 }
             }
@@ -633,7 +633,7 @@ public:
             run = something_happened;
         }
 
-        return node_ports_state::inputs_empty;
+        return work_return_t::DONE;
     }
 };
 

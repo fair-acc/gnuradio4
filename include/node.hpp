@@ -15,7 +15,19 @@ namespace fair::graph {
 namespace stdx = vir::stdx;
 using fair::meta::fixed_string;
 
-enum class node_ports_state { success, has_unprocessed_data, inputs_empty, writers_not_available, error };
+enum class work_return_t {
+    ERROR = -100, /// error occurred in the work function
+    INSUFFICIENT_OUTPUT_ITEMS =
+        -3, /// work requires a larger output buffer to produce output
+    INSUFFICIENT_INPUT_ITEMS =
+        -2, /// work requires a larger input buffer to produce output
+    DONE =
+        -1, /// this block has completed its processing and the flowgraph should be done
+    OK = 0, /// work call was successful and return values in i/o structs are valid
+    CALLBACK_INITIATED =
+        1, /// rather than blocking in the work function, the block will call back to the
+           /// parent interface when it is ready to be called again
+};
 
 namespace work_strategies {
 template<typename Self>
@@ -88,13 +100,13 @@ consume_readers(Self& self, std::size_t available_values_count) {
 struct read_many_and_publish_many {
 
     template<typename Self>
-    static node_ports_state
+    static work_return_t
     work(Self &self) noexcept {
         // Capturing structured bindings does not work in Clang...
         auto inputs_status = work_strategies::inputs_status(self);
 
         if (inputs_status.available_values_count == 0) {
-            return inputs_status.at_least_one_input_has_data ? node_ports_state::has_unprocessed_data : node_ports_state::inputs_empty;
+            return inputs_status.at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
         }
 
         bool all_writers_available = std::apply([inputs_status](auto&... output_port) {
@@ -102,7 +114,7 @@ struct read_many_and_publish_many {
             }, output_ports(&self));
 
         if (!all_writers_available) {
-            return node_ports_state::writers_not_available;
+            return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
         auto input_spans = meta::tuple_transform([inputs_status](auto& input_port) {
@@ -153,7 +165,7 @@ struct read_many_and_publish_many {
             fmt::print("Node {} failed to consume {} values from inputs\n", self.name(), inputs_status.available_values_count);
         }
 
-        return success ? node_ports_state::success : node_ports_state::error;
+        return success ? work_return_t::OK : work_return_t::ERROR;
     }
 };
 
@@ -335,7 +347,7 @@ public:
         }
     }
 
-    node_ports_state
+    work_return_t
     work() noexcept {
         return work_strategy::work(self());
     }
