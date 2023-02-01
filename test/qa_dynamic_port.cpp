@@ -142,11 +142,11 @@ const boost::ut::suite PortApiTests = [] {
         flow.register_node(added);
         flow.register_node(out);
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value", "original">(number, scaled)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled", "addend0">(scaled, added)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value", "addend1">(answer, added)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum", "sink">(added, out)));
+        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
         flow.work();
     };

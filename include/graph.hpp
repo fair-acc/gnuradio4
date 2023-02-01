@@ -507,10 +507,9 @@ private:
     std::vector<edge>                        _edges;
     std::vector<std::unique_ptr<node_model>> _nodes;
 
-public:
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source_, typename Destination_>
     [[nodiscard]] connection_result_t
-    connect(Source_ &src_node_raw, Destination_ &dst_node_raw, int32_t weight = 0,
+    connect_impl(Source_ &src_node_raw, Destination_ &dst_node_raw, int32_t weight = 0,
             std::string_view name = "unnamed edge") {
         using Source = std::remove_cvref_t<Source_>;
         using Destination = std::remove_cvref_t<Destination_>;
@@ -540,18 +539,41 @@ public:
         return result;
     }
 
-    template<fixed_string src_port_name, fixed_string dst_port_name, typename Source_, typename Destination_>
-    [[nodiscard]] connection_result_t
-    connect(Source_ &&src_node_raw, Destination_ &&dst_node_raw, int32_t weight = 0,
-            std::string_view name = "unnamed edge") {
-        using Source = std::remove_cvref_t<Source_>;
-        using Destination = std::remove_cvref_t<Destination_>;
-        return connect < meta::indexForName<src_port_name, typename Source::output_ports>(),
-                meta::indexForName<dst_port_name, typename Destination::input_ports>() >
-                (std::forward<Source_>(src_node_raw),
-                        std::forward<Destination_>(
-                                dst_node_raw),
-                        weight, name);
+    // Just a dummy class that stores the graph and the source node and port
+    // to be able to split the connection into two separate calls
+    // connect(source) and .to(destination)
+    template <std::size_t src_port_index, typename Source>
+    struct source_connector {
+        graph& self;
+        Source& source;
+
+        source_connector(graph& _self, Source& _source) : self(_self), source(_source) {}
+
+        template <std::size_t dst_port_index, typename Destination>
+        [[nodiscard]] auto to(Destination& destination) {
+            return self.connect_impl<src_port_index, dst_port_index>(source, destination);
+        }
+
+        template <fixed_string dst_port_name, typename Destination>
+        [[nodiscard]] auto to(Destination& destination) {
+            return self.connect_impl<src_port_index, meta::indexForName<dst_port_name, typename Destination::input_ports>()>(source, destination);
+        }
+
+        source_connector(const source_connector&) = delete;
+        source_connector(source_connector&&) = delete;
+        source_connector& operator=(const source_connector&) = delete;
+        source_connector& operator=(source_connector&&) = delete;
+    };
+
+public:
+    template<std::size_t src_port_index, typename Source>
+    [[nodiscard]] auto connect(Source& source) {
+        return source_connector<src_port_index, Source>(*this, source);
+    }
+
+    template<fixed_string src_port_name, typename Source>
+    [[nodiscard]] auto connect(Source& source) {
+        return connect<meta::indexForName<src_port_name, typename Source::output_ports>(), Source>(source);
     }
 
     auto
