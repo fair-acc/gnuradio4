@@ -54,7 +54,7 @@ private:
     std::size_t _counter = 0;
 
 public:
-    fair::graph::node_ports_state
+    fair::graph::work_return_t
     work() {
         if (_counter < count) {
             _counter++;
@@ -63,9 +63,9 @@ public:
             data[0]            = value;
             writer.publish(token, 1);
 
-            return fair::graph::node_ports_state::success;
+            return fair::graph::work_return_t::OK;
         } else {
-            return fair::graph::node_ports_state::inputs_empty;
+            return fair::graph::work_return_t::DONE;
         }
     }
 };

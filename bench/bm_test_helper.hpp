@@ -25,7 +25,7 @@ public:
         return T{};
     }
 
-    fair::graph::node_ports_state
+    fair::graph::work_return_t
     work() {
         const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
         if (n_to_publish > 0) {
@@ -35,7 +35,7 @@ public:
             if constexpr (use_bulk_operation) {
                 std::size_t n_write = std::clamp(n_to_publish, 0UL, std::min(writer.available(), port.max_buffer_size()));
                 if (n_write == 0) {
-                    return fair::graph::node_ports_state::has_unprocessed_data;
+                    return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }
 
                 writer.publish( //
@@ -48,14 +48,14 @@ public:
             } else {
                 auto [data, token] = writer.get(1);
                 if (data.size() == 0) {
-                    return fair::graph::node_ports_state::error;
+                    return fair::graph::work_return_t::ERROR;
                 }
                 data[0] = process_one();
                 writer.publish(token, 1);
             }
-            return fair::graph::node_ports_state::success;
+            return fair::graph::work_return_t::OK;
         } else {
-            return fair::graph::node_ports_state::inputs_empty;
+            return fair::graph::work_return_t::DONE;
         }
     }
 };
