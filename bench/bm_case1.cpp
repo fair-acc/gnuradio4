@@ -274,7 +274,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         fg::graph           flow_graph;
         flow_graph.register_node(src);
         flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
@@ -294,8 +294,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(src);
         flow_graph.register_node(cpy);
         flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, cpy)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy, sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(cpy)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy).to<"in">(sink)));
         "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -319,13 +319,13 @@ inline const boost::ut::suite _runtime_tests = [] {
             flow_graph.register_node(cpy[i]);
 
             if (i == 0) {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, cpy[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(cpy[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy[i - 1], cpy[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy[i - 1]).to<"in">(cpy[i])));
             }
         }
 
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(cpy[cpy.size() - 1], sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy[cpy.size() - 1]).to <"in">(sink)));
 
         "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
@@ -393,10 +393,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(b2);
         flow_graph.register_node(b3);
         flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, b1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b1, b2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b2, b3)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(b3, sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(b1)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b1).to<"in">(b2)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b2).to<"in">(b3)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b3).to<"in">(sink)));
         "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -419,10 +419,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(mult2);
         flow_graph.register_node(add1);
         flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, mult1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult1, mult2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult2, add1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1, sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(mult1)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1).to<"in">(mult2)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
         "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -457,14 +457,14 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(src, mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(mult1[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1[i - 1], mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[i - 1]).to<"in">(mult1[i])));
             }
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult1[i], mult2[i])));
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(mult2[i], add1[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1[i]).to<"in">(mult2[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2[i]).to<"in">(add1[i])));
         }
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out", "in">(add1[add1.size() - 1], sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[add1.size() - 1]).to<"in">(sink)));
 
         "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
