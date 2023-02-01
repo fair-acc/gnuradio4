@@ -4,6 +4,7 @@
 #include <cassert>
 
 #include "graph.hpp"
+#include "merged_node.hpp"
 
 namespace fg = fair::graph;
 

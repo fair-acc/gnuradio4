@@ -52,7 +52,7 @@ public:
         return a;
     }
 
-    fair::graph::work_result
+    fair::graph::node_ports_state
     work() noexcept { // TODO - make this an alternate version to 'process_one'
         auto      &out_port   = output_port<"out">(this);
         auto      &in_port    = input_port<"in">(this);
@@ -62,9 +62,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
-            return fair::graph::work_result::inputs_empty;
+            return fair::graph::node_ports_state::inputs_empty;
         } else if (n_writable == 0) {
-            return fair::graph::work_result::writers_not_available;
+            return fair::graph::node_ports_state::writers_not_available;
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
 
@@ -83,9 +83,9 @@ public:
                     n_to_publish);
         }
         if (!reader.consume(n_to_publish)) {
-            return fair::graph::work_result::error;
+            return fair::graph::node_ports_state::error;
         }
-        return fair::graph::work_result::success;
+        return fair::graph::node_ports_state::success;
     }
 };
 
