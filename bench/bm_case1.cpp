@@ -276,10 +276,11 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(sink);
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+        auto token = flow_graph.init();
+
+        "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token = flow_graph.init();
             expect(token);
             flow_graph.work(token);
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
@@ -298,10 +299,12 @@ inline const boost::ut::suite _runtime_tests = [] {
         flow_graph.register_node(sink);
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(cpy)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy).to<"in">(sink)));
-        "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+
+        auto token = flow_graph.init();
+
+        "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token = flow_graph.init();
             expect(token);
             flow_graph.work(token);
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
@@ -329,12 +332,13 @@ inline const boost::ut::suite _runtime_tests = [] {
             }
         }
 
+        auto token = flow_graph.init();
+
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy[cpy.size() - 1]).to <"in">(sink)));
 
-        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token = flow_graph.init();
             expect(token);
             flow_graph.work(token);
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
@@ -403,10 +407,12 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b1).to<"in">(b2)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b2).to<"in">(b3)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b3).to<"in">(sink)));
-        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+
+        auto token = flow_graph.init();
+
+        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token = flow_graph.init();
             expect(token);
             flow_graph.work(token);
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
@@ -431,10 +437,12 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1).to<"in">(mult2)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
-        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+
+        auto token = flow_graph.init();
+
+        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token = flow_graph.init();
             expect(token);
             flow_graph.work(token);
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
@@ -476,10 +484,11 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[add1.size() - 1]).to<"in">(sink)));
 
-        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+        auto token = flow_graph.init();
+
+        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token = flow_graph.init();
             expect(token);
             flow_graph.work(token);
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
