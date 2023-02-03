@@ -3,7 +3,6 @@
 
 #include <circular_buffer.hpp> // localinclude
 #include <buffer.hpp> // localinclude
-#include <utils.hpp> // localinclude
 #include <typelist.hpp> // localinclude
 #include <port.hpp> // localinclude
 #include <node.hpp> // localinclude

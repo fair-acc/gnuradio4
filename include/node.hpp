@@ -5,7 +5,6 @@
 
 #include <typelist.hpp> // localinclude
 #include <port.hpp> // localinclude
-#include <utils.hpp> // localinclude
 
 #include <fmt/format.h>
 
