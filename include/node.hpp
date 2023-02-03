@@ -7,7 +7,6 @@
 #include <port.hpp> // localinclude
 #include <utils.hpp> // localinclude
 
-#include <vir/simd.h>
 #include <fmt/format.h>
 
 namespace fair::graph {
