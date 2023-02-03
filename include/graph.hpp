@@ -7,7 +7,6 @@
 #include <typelist.hpp> // localinclude
 #include <port.hpp> // localinclude
 #include <node.hpp> // localinclude
-#include <vir/simd.h> // localinclude
 
 #include <algorithm>
 #include <complex>
