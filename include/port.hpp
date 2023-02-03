@@ -5,8 +5,8 @@
 #include <complex>
 #include <span>
 
-#include <utils.hpp>
-#include <circular_buffer.hpp>
+#include <utils.hpp> // localinclude
+#include <circular_buffer.hpp> // localinclude
 
 namespace fair::graph {
 
