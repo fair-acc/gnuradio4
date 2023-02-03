@@ -3541,7 +3541,7 @@ template<typename CharT, std::size_t N>
 fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
 
 template<typename T>
-[[nodiscard]] constexpr std::string
+[[nodiscard]] std::string
 type_name() noexcept {
 #ifndef __EMSCRIPTEN__
     std::string type_name = typeid(T).name();
