@@ -1,8 +1,7 @@
 #ifndef GNURADIO_MERGED_NODE_HPP
 #define GNURADIO_MERGED_NODE_HPP
 
-#include <utils.hpp> // localinclude
-#include <node.hpp>
+#include <node.hpp> // localinclude
 
 namespace fair::graph {
 
