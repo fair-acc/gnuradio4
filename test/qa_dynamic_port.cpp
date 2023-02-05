@@ -124,29 +124,22 @@ const boost::ut::suite PortApiTests = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
 
-        scale<int, 2>            scaled;
-        adder<int>               added;
-        cout_sink<int>           out;
-
-        repeater_source<int, 42> answer;
-        repeater_source<int, 6>  number;
-
         // Nodes need to be alive for as long as the flow is
         graph flow;
 
         // Generators
-        flow.register_node(answer);
-        flow.register_node(number);
+        auto* answer = flow.make_node<repeater_source<int, 42>>();
+        auto* number = flow.make_node<repeater_source<int, 6>>();
 
-        flow.register_node(scaled);
-        flow.register_node(added);
-        flow.register_node(out);
+        auto* scaled = flow.make_node<scale<int, 2>>();
+        auto* added = flow.make_node<adder<int>>();
+        auto* out = flow.make_node<cout_sink<int>>();
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
+        expect(eq(connection_result_t::SUCCESS, connect<"value">(number).to<"original">(scaled)));
+        expect(eq(connection_result_t::SUCCESS, connect<"scaled">(scaled).to<"addend0">(added)));
+        expect(eq(connection_result_t::SUCCESS, connect<"value">(answer).to<"addend1">(added)));
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
+        expect(eq(connection_result_t::SUCCESS, connect<"sum">(added).to<"sink">(out)));
 
         auto token = flow.init();
         expect(token);

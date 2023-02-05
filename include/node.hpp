@@ -10,6 +10,8 @@
 
 namespace fair::graph {
 
+class graph;
+
 namespace stdx = vir::stdx;
 using fair::meta::fixed_string;
 
@@ -228,6 +230,7 @@ private:
     setting_map _exec_metrics{}; //  →  std::map<string, pmt> → fair scheduling, 'int' stand-in for pmtv
 
     friend class graph;
+    graph* _owning_graph = nullptr;
 
 public:
     auto &
