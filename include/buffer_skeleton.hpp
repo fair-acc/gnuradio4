@@ -2,7 +2,7 @@
 #define GNURADIO_BUFFER_SKELETON_HPP
 
 #ifndef GNURADIO_BUFFER2_H
-#include <buffer.hpp> // localinclude
+#include "buffer.hpp"
 #endif
 
 #include <cstdlib> // for malloc
