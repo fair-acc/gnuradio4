@@ -6,6 +6,7 @@
 #include "typelist.hpp"
 #include "port.hpp"
 #include "node.hpp"
+#include "merged_node.hpp"
 
 #include <algorithm>
 #include <complex>
