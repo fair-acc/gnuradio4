@@ -50,17 +50,11 @@ inputs_status(Self &self) noexcept {
                 }
             };
 
-            const auto availableInAll = std::apply(
+            return std::apply(
                     [&availableForPort] (auto&... input_port) {
                         return meta::safe_min(availableForPort(input_port)...);
                     },
                     input_ports(&self));
-
-            if (availableInAll < self.min_samples()) {
-                return 0LU;
-            } else {
-                return std::min(availableInAll, self.max_samples());
-            }
         } else {
             (void) self;
             return 1_UZ;
@@ -196,9 +190,6 @@ public:
     using work_strategy     = work_strategies::default_strategy;
     friend work_strategy;
 
-    using min_max_limits = typename meta::typelist<Arguments...>::template filter<traits::port::is_limits>;
-    static_assert(min_max_limits::size <= 1);
-
 private:
     using setting_map = std::map<std::string, int, std::less<>>;
     std::string _name{ std::string(fair::meta::type_name<Derived>()) };
@@ -304,24 +295,6 @@ public:
     [[nodiscard]] setting_map const &
     exec_metrics() const noexcept {
         return _exec_metrics;
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    min_samples() const noexcept {
-        if constexpr (min_max_limits::size == 1) {
-            return min_max_limits::template at<0>::min;
-        } else {
-            return 0;
-        }
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    max_samples() const noexcept {
-        if constexpr (min_max_limits::size == 1) {
-            return min_max_limits::template at<0>::max;
-        } else {
-            return std::numeric_limits<std::size_t>::max();
-        }
     }
 
     work_return_t

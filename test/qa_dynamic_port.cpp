@@ -20,7 +20,7 @@ public:
 #endif
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::limits<0, 1024>> {
+class scale : public fg::node<scale<T, Scale, R>> {
 public:
     fg::IN<T> original;
     fg::OUT<R> scaled;
@@ -34,7 +34,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::limits<0, 1024>> {
+class adder : public fg::node<adder<T>> {
 public:
     fg::IN<T> addend0;
     fg::IN<T> addend1;
@@ -49,7 +49,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::limits<0, 1024>> {
+class cout_sink : public fg::node<cout_sink<T>> {
 public:
     fg::IN<T> sink;
 
@@ -61,7 +61,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10_UZ>
-class repeater_source : public fg::node<repeater_source<T, val>, fg::limits<0, 1024>> {
+class repeater_source : public fg::node<repeater_source<T, val>> {
 public:
     fg::OUT<T> value;
     std::size_t _counter = 0;

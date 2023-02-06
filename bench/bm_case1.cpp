@@ -159,7 +159,7 @@ template<typename T>
 using add_SIMD = gen_operation_SIMD<T, '+'>;
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX, bool use_bulk_operation = false, bool use_memcopy = true>
-class copy : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>, fg::limits<N_MIN, N_MAX>> {
+class copy : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>> {
 public:
     fg::IN<T, N_MIN, N_MAX> in;
     fg::OUT<T, N_MIN, N_MAX> out;
@@ -226,7 +226,7 @@ namespace stdx = vir::stdx;
 
 template<typename From, typename To, std::size_t N_MIN = 0 /* SIMD size */, std::size_t N_MAX = N_MAX>
 class convert : public fg::node<convert<From, To, N_MIN, N_MAX>, fg::IN<From, N_MIN, N_MAX, "in">,
-                                fg::OUT<To, N_MIN, N_MAX, "out">, fg::limits<N_MIN, N_MAX>> {
+                                fg::OUT<To, N_MIN, N_MAX, "out">> {
     static_assert(stdx::is_simd_v<From> != stdx::is_simd_v<To>, "either input xor output must be SIMD capable");
     constexpr static std::size_t from_simd_size  = detail::simd_size<From>();
     constexpr static std::size_t to_simd_size = detail::simd_size<To>();

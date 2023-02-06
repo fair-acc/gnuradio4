@@ -29,12 +29,6 @@ template<typename T>
     requires(meta::is_typelist_v<T> and T::template all_of<has_fixed_info>)
 struct has_fixed_info_or_is_typelist<T> : std::true_type {};
 
-template<typename T>
-concept is_limits_v = requires { typename T::limits_tag; };
-
-template<typename T>
-using is_limits = std::integral_constant<bool, is_limits_v<T>>;
-
 template<typename Port>
 using type = typename Port::value_type;
 

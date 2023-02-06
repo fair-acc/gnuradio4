@@ -32,13 +32,6 @@ concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
                    { t.disconnect() } -> std::same_as<connection_result_t>;
                };
 
-template<std::size_t _min, std::size_t _max>
-struct limits {
-    using limits_tag                 = std::true_type;
-    static constexpr std::size_t min = _min;
-    static constexpr std::size_t max = _max;
-};
-
 
 template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
          std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent,

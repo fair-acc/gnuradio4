@@ -13,7 +13,7 @@ using namespace fair::literals;
 inline static std::size_t n_samples_produced = 0_UZ;
 
 template<typename T, std::size_t min = 0_UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
-class source : public fg::node<source<T, min, count>, fg::limits<min, count>> {
+class source : public fg::node<source<T, min, count>> {
 public:
     std::size_t _n_samples_max;
     fg::OUT<T> out;
@@ -66,7 +66,7 @@ public:
 inline static std::size_t n_samples_consumed = 0_UZ;
 
 template<typename T, std::size_t N_MIN = 0_UZ, std::size_t N_MAX = N_MAX>
-class sink : public fg::node<sink<T, N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+class sink : public fg::node<sink<T, N_MIN, N_MAX>> {
 public:
     fg::IN<T, N_MIN, N_MAX> in;
 
