@@ -1,5 +1,3 @@
-
-
 #include <fmt/ranges.h>
 
 #include "buffer.hpp"
@@ -128,12 +126,12 @@ const boost::ut::suite PortApiTests = [] {
         graph flow;
 
         // Generators
-        auto* answer = flow.make_node<repeater_source<int, 42>>();
-        auto* number = flow.make_node<repeater_source<int, 6>>();
+        auto& answer = flow.make_node<repeater_source<int, 42>>();
+        auto& number = flow.make_node<repeater_source<int, 6>>();
 
-        auto* scaled = flow.make_node<scale<int, 2>>();
-        auto* added = flow.make_node<adder<int>>();
-        auto* out = flow.make_node<cout_sink<int>>();
+        auto& scaled = flow.make_node<scale<int, 2>>();
+        auto& added = flow.make_node<adder<int>>();
+        auto& out = flow.make_node<cout_sink<int>>();
 
         expect(eq(connection_result_t::SUCCESS, connect<"value">(number).to<"original">(scaled)));
         expect(eq(connection_result_t::SUCCESS, connect<"scaled">(scaled).to<"addend0">(added)));

@@ -526,23 +526,23 @@ private:
     template <std::size_t src_port_index, typename Source>
     struct source_connector {
         graph* self;
-        Source* source;
+        Source& source;
 
-        source_connector(graph* _self, Source* _source) : self(_self), source(_source) {}
+        source_connector(graph* _self, Source& _source) : self(_self), source(_source) {}
 
         template <std::size_t dst_port_index, typename Destination>
-        [[nodiscard]] auto to(Destination* destination) {
-            if (source->_owning_graph != destination->_owning_graph) {
-                throw fmt::format("Source {} and destination {} do not belong to the same graph\n", source->name(), destination->name());
+        [[nodiscard]] auto to(Destination& destination) {
+            if (source._owning_graph != destination._owning_graph) {
+                throw fmt::format("Source {} and destination {} do not belong to the same graph\n", source.name(), destination.name());
             }
-            self->_connection_definitions.push_back([source = source, destination] (graph& _self) {
+            self->_connection_definitions.push_back([source = &source, destination = &destination] (graph& _self) {
                 return _self.connect_impl<src_port_index, dst_port_index>(*source, *destination);
             });
             return connection_result_t::SUCCESS;
         }
 
         template <fixed_string dst_port_name, typename Destination>
-        [[nodiscard]] auto to(Destination* destination) {
+        [[nodiscard]] auto to(Destination& destination) {
             return to<meta::indexForName<dst_port_name, typename Destination::input_ports>()>(destination);
         }
 
@@ -560,17 +560,17 @@ private:
     };
 
     template<typename Node>
-    static auto* owner_of_node(Node* node) {
-        return node->_owning_graph;
+    static auto* owner_of_node(Node& node) {
+        return node._owning_graph;
     }
 
     template<std::size_t src_port_index, typename Source>
     friend
-    auto connect(Source* source);
+    auto connect(Source& source);
 
     template<fixed_string src_port_name, typename Source>
     friend
-    auto connect(Source* source);
+    auto connect(Source& source);
 
 public:
     auto
@@ -579,13 +579,13 @@ public:
     }
 
     template<typename Node, typename... Args>
-    auto*
+    auto&
     make_node(Args&&... args) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         auto* result = static_cast<Node*>(new_node_ref->raw());
         result->_owning_graph = this;
-        return result;
+        return *result;
     }
 
     init_proof init() {
@@ -626,12 +626,12 @@ public:
 };
 
 template<std::size_t src_port_index, typename Source>
-[[nodiscard]] auto connect(Source* source) {
+[[nodiscard]] auto connect(Source& source) {
     return graph::source_connector<src_port_index, Source>(graph::owner_of_node(source), source);
 }
 
 template<fixed_string src_port_name, typename Source>
-[[nodiscard]] auto connect(Source* source) {
+[[nodiscard]] auto connect(Source& source) {
     return connect<meta::indexForName<src_port_name, typename Source::output_ports>(), Source>(source);
 }
 
