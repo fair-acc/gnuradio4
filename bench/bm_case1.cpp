@@ -13,27 +13,26 @@ namespace fg = fair::graph;
 inline constexpr std::size_t N_ITER = 10;
 inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
 
-template<typename T, int addend, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class add
-        : public fg::node<add<T, addend, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
-public:
-    template<fair::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr V
-    process_one(V a) const noexcept {
-        return a + addend;
-    }
-};
 
-template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-class multiply
-        : public fg::node<multiply<T, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+//
+// This defines a new node type that is parametrised only on the type
+// (single typename template parameter)
+//
+// It defines its ports as member variables, so it needs to be
+// enabled for reflection using the ENABLE_REFLECTION_FOR_TEMPLATE
+// macro as can be seen immediately after the class is defined.
+//
+template<typename T>
+class multiply : public fg::node<multiply<T>> {
     T _factor = static_cast<T>(1.0f);
-
 public:
+    fg::IN<T> in;
+    fg::OUT<T> out;
+
     multiply() = delete;
 
     explicit multiply(T factor, std::string name = fair::graph::this_source_location()) : _factor(
-            factor) { this->set_name(name); }
+                factor) { this->set_name(name); }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
@@ -41,10 +40,42 @@ public:
         return a * _factor;
     }
 };
+ENABLE_REFLECTION_FOR_TEMPLATE(multiply, in, out);
 
-template<typename T, char op, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
+
+//
+// This defines a new node type that is parametrised on several
+// template parameters.
+//
+// It defines its ports as member variables, so it needs to be
+// enabled for reflection using the ENABLE_REFLECTION_FOR_TEMPLATE_FULL
+// macro because it has several different template parameters.
+//
+template<typename T, int addend>
+class add : public fg::node<add<T, addend>> {
+public:
+    fg::IN<T> in;
+    fg::OUT<T> out;
+
+    template<fair::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr V
+    process_one(V a) const noexcept {
+        return a + addend;
+    }
+};
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, int addend), (add<T, addend>), in, out);
+
+
+//
+// This defines a new node type that which doesn't define ports
+// as member variables, but as template parameters to the fg::node
+// base class template.
+//
+// It doesn't need to be enabled for reflection.
+//
+template<typename T, char op>
 class gen_operation_SIMD
-        : public fg::node<gen_operation_SIMD<T, op, N_MIN, N_MAX>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+        : public fg::node<gen_operation_SIMD<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
     T _value = static_cast<T>(1.0f);
 
 public:
@@ -119,17 +150,20 @@ public:
         return fair::graph::work_return_t::OK;
     }
 };
+// no reflection needed because ports are defined via the fg::node<...> base class
 
-template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-using multiply_SIMD = gen_operation_SIMD<T, '*', N_MIN, N_MAX>;
+template<typename T>
+using multiply_SIMD = gen_operation_SIMD<T, '*'>;
 
-template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX>
-using add_SIMD = gen_operation_SIMD<T, '+', N_MIN, N_MAX>;
+template<typename T>
+using add_SIMD = gen_operation_SIMD<T, '+'>;
 
 template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX, bool use_bulk_operation = false, bool use_memcopy = true>
-class copy
-        : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>, fg::IN<T, "in", N_MIN, N_MAX>, fg::OUT<T, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+class copy : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>> {
 public:
+    fg::IN<T, N_MIN, N_MAX> in;
+    fg::OUT<T, N_MIN, N_MAX> out;
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr T
     process_one(V a) const noexcept {
@@ -174,7 +208,7 @@ public:
         return fair::graph::work_return_t::OK;
     }
 };
-
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t N_MIN, std::size_t N_MAX, bool use_bulk_operation, bool use_memcopy), (copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>), in, out);
 
 namespace detail {
     template<typename T>
@@ -191,8 +225,8 @@ namespace detail {
 namespace stdx = vir::stdx;
 
 template<typename From, typename To, std::size_t N_MIN = 0 /* SIMD size */, std::size_t N_MAX = N_MAX>
-class convert : public fg::node<convert<From, To, N_MIN, N_MAX>, fg::IN<From, "in", N_MIN, N_MAX>,
-                                fg::OUT<To, "out", N_MIN, N_MAX>, fg::limits<N_MIN, N_MAX>> {
+class convert : public fg::node<convert<From, To, N_MIN, N_MAX>, fg::IN<From, N_MIN, N_MAX, "in">,
+                                fg::OUT<To, N_MIN, N_MAX, "out">> {
     static_assert(stdx::is_simd_v<From> != stdx::is_simd_v<To>, "either input xor output must be SIMD capable");
     constexpr static std::size_t from_simd_size  = detail::simd_size<From>();
     constexpr static std::size_t to_simd_size = detail::simd_size<To>();
@@ -302,9 +336,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto merged_node = merge<"out", "in">(
-                merge<"out", "in">(test::source<float>(N_SAMPLES), test::cascade<10, copy<float>>(copy<float>())),
-                test::sink<float>());
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), test::cascade<10, copy<float>>(copy<float>())), test::sink<float>());
         "constexpr src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -402,8 +434,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto &sink = flow_graph.make_node<test::sink<float>>();
         auto &cpy = flow_graph.make_node<copy<float>>();
 
-        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(cpy)));
-        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(cpy).to<"in">(sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect(src, &test::source<float>::out).to<"in">(cpy)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(cpy).to(sink, &test::sink<float>::in)));
 
         "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
@@ -421,15 +453,16 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
         auto &sink = flow_graph.make_node<test::sink<float>>();
 
-        std::vector<copy<float, 0, N_MAX, true, true>*> cpy(10);
+        using copy = ::copy<float, 0, N_MAX, true, true>;
+        std::vector<copy*> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i] = std::addressof(flow_graph.make_node<copy<float, 0, N_MAX, true, true>>());
+            cpy[i] = std::addressof(flow_graph.make_node<copy>());
             cpy[i]->set_name(fmt::format("copy {} at {}", i, fair::graph::this_source_location()));
 
             if (i == 0) {
                 expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(*cpy[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*cpy[i - 1]).to<"in">(*cpy[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect(*cpy[i - 1], &copy::out).to(*cpy[i], &copy::in)));
             }
         }
 

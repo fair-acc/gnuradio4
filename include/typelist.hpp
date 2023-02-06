@@ -237,6 +237,9 @@ struct typelist {
     template<std::size_t I>
     using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
 
+    template <typename Head>
+    using prepend = typelist<Head, Ts...>;
+
     template<typename... Other>
     static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
 
@@ -284,7 +287,13 @@ struct typelist {
 };
 
 
+namespace detail {
+    template <template <typename...> typename OtherTypelist, typename... Args>
+    meta::typelist<Args...> to_typelist_helper(OtherTypelist<Args...>*);
+} // namespace detail
 
+template <typename OtherTypelist>
+using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist*>(nullptr)));
 
 } // namespace fair::meta
 
