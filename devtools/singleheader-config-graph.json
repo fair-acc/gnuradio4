@@ -1,0 +1,10 @@
+{
+	"project": "graph.hpp",
+	"target": "singleheader/graph.hpp",
+	"sources": [
+		"graph.hpp"
+	],
+	"include_paths": [
+		"."
+	]
+}

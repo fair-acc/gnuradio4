@@ -9,8 +9,8 @@
 #include <stdexcept>
 #include <vector>
 
-#include <wait_strategy.hpp> // localinclude
-#include <sequence.hpp> // localinclude
+#include "wait_strategy.hpp"
+#include "sequence.hpp"
 
 namespace gr {
 
