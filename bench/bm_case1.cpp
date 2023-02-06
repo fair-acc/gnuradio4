@@ -379,13 +379,11 @@ inline const boost::ut::suite _runtime_tests = [] {
     using namespace benchmark;
 
     {
-        test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &sink = flow_graph.make_node<test::sink<float>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(sink)));
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
@@ -399,16 +397,14 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
-        copy<float> cpy;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(cpy);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(cpy)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &sink = flow_graph.make_node<test::sink<float>>();
+        auto &cpy = flow_graph.make_node<copy<float>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(cpy)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(cpy).to<"in">(sink)));
+
         "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -421,26 +417,23 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(sink);
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &sink = flow_graph.make_node<test::sink<float>>();
 
-        std::vector<copy<float, 0, N_MAX, true, true>> cpy(10);
+        std::vector<copy<float, 0, N_MAX, true, true>*> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i].set_name(fmt::format("copy {} at {}", i, fair::graph::this_source_location()));
-            flow_graph.register_node(cpy[i]);
+            cpy[i] = std::addressof(flow_graph.make_node<copy<float, 0, N_MAX, true, true>>());
+            cpy[i]->set_name(fmt::format("copy {} at {}", i, fair::graph::this_source_location()));
 
             if (i == 0) {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(cpy[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(*cpy[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy[i - 1]).to<"in">(cpy[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*cpy[i - 1]).to<"in">(*cpy[i])));
             }
         }
 
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy[cpy.size() - 1]).to<"in">(sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
 
         "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
@@ -454,22 +447,18 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float, 0, 1024> src(N_SAMPLES);
-        copy<float, 0, 128> b1;
-        copy<float, 1024, 1024> b2;
-        copy<float, 32, 128> b3;
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(b1);
-        flow_graph.register_node(b2);
-        flow_graph.register_node(b3);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(b1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b1).to<"in">(b2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b2).to<"in">(b3)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b3).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float, 0, 1024>>(N_SAMPLES);
+        auto &b1 = flow_graph.make_node<copy<float, 0, 128>>();
+        auto &b2 = flow_graph.make_node<copy<float, 1024, 1024>>();
+        auto &b3 = flow_graph.make_node<copy<float, 32, 128>>();
+        auto &sink = flow_graph.make_node<test::sink<float>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(b1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(b1).to<"in">(b2)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(b2).to<"in">(b3)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(b3).to<"in">(sink)));
+
         "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(
                 N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
@@ -483,22 +472,18 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        multiply<float> mult1(2.0f);
-        multiply<float> mult2(0.5f);
-        add<float, -1> add1;
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(mult1);
-        flow_graph.register_node(mult2);
-        flow_graph.register_node(add1);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(mult1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1).to<"in">(mult2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &mult1 = flow_graph.make_node<multiply<float>>(2.0f);
+        auto &mult2 = flow_graph.make_node<multiply<float>>(0.5f);
+        auto &add1 = flow_graph.make_node<add<float, -1>>();
+        auto &sink = flow_graph.make_node<test::sink<float>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(mult1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(mult1).to<"in">(mult2)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(mult2).to<"in">(add1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(add1).to<"in">(sink)));
+
         "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
@@ -511,38 +496,29 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(sink);
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &sink = flow_graph.make_node<test::sink<float>>();
 
-        std::vector<multiply<float>> mult1;
-        std::vector<multiply<float>> mult2;
-        std::vector<add<float, -1>> add1;
+        std::vector<multiply<float>*> mult1;
+        std::vector<multiply<float>*> mult2;
+        std::vector<add<float, -1>*> add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(2.0f, fmt::format("mult1.{}", i));
-            mult2.emplace_back(0.5f, fmt::format("mult2.{}", i));
-            add1.emplace_back();
-        }
-
-        for (std::size_t i = 0; i < add1.size(); i++) {
-            flow_graph.register_node(mult1[i]);
-            flow_graph.register_node(mult2[i]);
-            flow_graph.register_node(add1[i]);
+            mult1.emplace_back(std::addressof(flow_graph.make_node<multiply<float>>(2.0f, fmt::format("mult1.{}", i))));
+            mult2.emplace_back(std::addressof(flow_graph.make_node<multiply<float>>(0.5f, fmt::format("mult2.{}", i))));
+            add1.emplace_back(std::addressof(flow_graph.make_node<add<float, -1>>()));
         }
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(*mult1[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[i - 1]).to<"in">(mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*add1[i - 1]).to<"in">(*mult1[i])));
             }
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1[i]).to<"in">(mult2[i])));
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2[i]).to<"in">(add1[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*mult1[i]).to<"in">(*mult2[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*mult2[i]).to<"in">(*add1[i])));
         }
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[add1.size() - 1]).to<"in">(sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
         auto token = flow_graph.init();
         expect(token);
@@ -557,22 +533,17 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        multiply_SIMD<float> mult1(2.0f);
-        multiply_SIMD<float> mult2(0.5f);
-        add_SIMD<float> add1(-1.0f);
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(mult1);
-        flow_graph.register_node(mult2);
-        flow_graph.register_node(add1);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(mult1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1).to<"in">(mult2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &mult1 = flow_graph.make_node<multiply_SIMD<float>>(2.0f);
+        auto &mult2 = flow_graph.make_node<multiply_SIMD<float>>(0.5f);
+        auto &add1 = flow_graph.make_node<add_SIMD<float>>(-1.0f);
+        auto &sink = flow_graph.make_node<test::sink<float>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(mult1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(mult1).to<"in">(mult2)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(mult2).to<"in">(add1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(add1).to<"in">(sink)));
 
         auto token = flow_graph.init();
         expect(token);
@@ -587,38 +558,29 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(sink);
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &sink = flow_graph.make_node<test::sink<float>>();
 
-        std::vector<multiply_SIMD<float>> mult1;
-        std::vector<multiply_SIMD<float>> mult2;
-        std::vector<add_SIMD<float>> add1;
+        std::vector<multiply_SIMD<float>*> mult1;
+        std::vector<multiply_SIMD<float>*> mult2;
+        std::vector<add_SIMD<float>*> add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(2.0f, fmt::format("mult1.{}", i));
-            mult2.emplace_back(0.5f, fmt::format("mult2.{}", i));
-            add1.emplace_back(-1.0f, fmt::format("add.{}", i));
-        }
-
-        for (std::size_t i = 0; i < add1.size(); i++) {
-            flow_graph.register_node(mult1[i]);
-            flow_graph.register_node(mult2[i]);
-            flow_graph.register_node(add1[i]);
+            mult1.emplace_back(std::addressof(flow_graph.make_node<multiply_SIMD<float>>(2.0f, fmt::format("mult1.{}", i))));
+            mult2.emplace_back(std::addressof(flow_graph.make_node<multiply_SIMD<float>>(0.5f, fmt::format("mult2.{}", i))));
+            add1.emplace_back(std::addressof(flow_graph.make_node<add_SIMD<float>>(-1.0f, fmt::format("add.{}", i))));
         }
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(*mult1[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[i - 1]).to<"in">(mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*add1[i - 1]).to<"in">(*mult1[i])));
             }
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1[i]).to<"in">(mult2[i])));
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2[i]).to<"in">(add1[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*mult1[i]).to<"in">(*mult2[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*mult2[i]).to<"in">(*add1[i])));
         }
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[add1.size() - 1]).to<"in">(sink)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
         auto token = flow_graph.init();
         expect(token);
@@ -634,28 +596,21 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         using namespace stdx;
-        test::source<float> src(N_SAMPLES);
-        convert<float, stdx::native_simd<float>> convert1;
-        multiply<stdx::native_simd<float>> mult1(2.0f);
-        multiply<stdx::native_simd<float>> mult2(0.5f);
-        add<stdx::native_simd<float>, -1> add1;
-        convert<stdx::native_simd<float>, float> convert2;
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(convert1);
-        flow_graph.register_node(mult1);
-        flow_graph.register_node(mult2);
-        flow_graph.register_node(add1);
-        flow_graph.register_node(convert2);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(convert1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(convert1).to<"in">(mult1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1).to<"in">(mult2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(convert2)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(convert2).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &convert1 = flow_graph.make_node<convert<float, stdx::native_simd<float>>>();
+        auto &mult1 = flow_graph.make_node<multiply<stdx::native_simd<float>>>(2.0f);
+        auto &mult2 = flow_graph.make_node<multiply<stdx::native_simd<float>>>(0.5f);
+        auto &add1 = flow_graph.make_node<add<stdx::native_simd<float>, -1>>();
+        auto &convert2 = flow_graph.make_node<convert<stdx::native_simd<float>, float>>();
+        auto &sink = flow_graph.make_node<test::sink<float>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(convert1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(convert1).to<"in">(mult1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(mult1).to<"in">(mult2)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(mult2).to<"in">(add1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(add1).to<"in">(convert2)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(convert2).to<"in">(sink)));
 
         fmt::print("start bm: {} - simd_size: {}\n", "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD-alt)",
                    ::detail::simd_size<stdx::native_simd<float>>());
@@ -671,45 +626,35 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        test::source<float> src(N_SAMPLES);
-        convert<float, stdx::native_simd<float>> convert1;
-        convert<stdx::native_simd<float>, float> convert2;
-        test::sink<float> sink;
-
         fg::graph flow_graph;
-        flow_graph.register_node(src);
-        flow_graph.register_node(convert1);
-        flow_graph.register_node(convert2);
-        flow_graph.register_node(sink);
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(convert1)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(convert2).to<"in">(sink)));
+        auto &src = flow_graph.make_node<test::source<float>>(N_SAMPLES);
+        auto &convert1 = flow_graph.make_node<convert<float, stdx::native_simd<float>>>();
+        auto &convert2 = flow_graph.make_node<convert<stdx::native_simd<float>, float>>();
+        auto &sink = flow_graph.make_node<test::sink<float>>();
 
-        std::vector<multiply<stdx::native_simd<float>>> mult1;
-        std::vector<multiply<stdx::native_simd<float>>> mult2;
-        std::vector<add<stdx::native_simd<float>, -1>> add1;
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(src).to<"in">(convert1)));
+        expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(convert2).to<"in">(sink)));
+
+        std::vector<multiply<stdx::native_simd<float>>*> mult1;
+        std::vector<multiply<stdx::native_simd<float>>*> mult2;
+        std::vector<add<stdx::native_simd<float>, -1>*> add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(2.0f, fmt::format("mult1.{}", i));
-            mult2.emplace_back(0.5f, fmt::format("mult2.{}", i));
-            add1.emplace_back();
-        }
-
-        for (std::size_t i = 0; i < add1.size(); i++) {
-            flow_graph.register_node(mult1[i]);
-            flow_graph.register_node(mult2[i]);
-            flow_graph.register_node(add1[i]);
+            mult1.emplace_back(std::addressof(flow_graph.make_node<multiply<stdx::native_simd<float>>>(2.0f, fmt::format("mult1.{}", i))));
+            mult2.emplace_back(std::addressof(flow_graph.make_node<multiply<stdx::native_simd<float>>>(0.5f, fmt::format("mult2.{}", i))));
+            add1.emplace_back(std::addressof(flow_graph.make_node<add<stdx::native_simd<float>, -1>>()));
         }
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(convert1).to<"in">(mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(convert1).to<"in">(*mult1[i])));
             } else {
-                expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1[i - 1]).to<"in">(mult1[i])));
+                expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*add1[i - 1]).to<"in">(*mult1[i])));
             }
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult1[i]).to<"in">(mult2[i])));
-            expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2[i]).to<"in">(add1[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*mult1[i]).to<"in">(*mult2[i])));
+            expect(eq(fg::connection_result_t::SUCCESS, connect<"out">(*mult2[i]).to<"in">(*add1[i])));
         }
         expect(eq(fg::connection_result_t::SUCCESS,
-                  flow_graph.connect<"out">(add1[add1.size() - 1]).to<"in">(convert2)));
+                  connect<"out">(*add1[add1.size() - 1]).to<"in">(convert2)));
 
         fmt::print("start bm: {} - simd_size: {}\n",
                    "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD alt)",
