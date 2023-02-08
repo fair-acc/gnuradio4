@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-#include <sequence.hpp> // localinclude
+#include "sequence.hpp"
 
 namespace gr {
 // clang-format off

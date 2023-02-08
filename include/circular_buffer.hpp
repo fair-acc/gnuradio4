@@ -47,10 +47,10 @@ static constexpr bool has_posix_mmap_interface = false;
 }
 #endif
 
-#include <claim_strategy.hpp> // localinclude
-#include <wait_strategy.hpp> // localinclude
-#include <sequence.hpp> // localinclude
-#include <buffer.hpp> // localinclude
+#include "claim_strategy.hpp"
+#include "wait_strategy.hpp"
+#include "sequence.hpp"
+#include "buffer.hpp"
 
 namespace gr {
 

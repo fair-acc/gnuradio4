@@ -4,12 +4,11 @@
 #include <cassert>
 
 #include "graph.hpp"
-#include "merged_node.hpp"
 
 namespace fg = fair::graph;
 
 template<typename T>
-class random_source : public fg::node<random_source<T>, fg::OUT<T, "random">> {
+class random_source : public fg::node<random_source<T>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "random">> {
 public:
     constexpr T
     process_one() {
@@ -18,7 +17,7 @@ public:
 };
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">> {
+class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "sink">> {
 public:
     void
     process_one(T value) {
@@ -27,7 +26,7 @@ public:
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">> {
+class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
 public:
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -37,7 +36,7 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">> {
+class adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
 public:
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -47,11 +46,11 @@ public:
 };
 
 template<typename T, std::size_t Count = 2>
-class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>> {
-    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>>;
+class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>> {
+    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>>;
 
 public:
-    using return_type = typename base::return_type;
+    using return_type = typename fg::traits::node::return_type<base>;
 
     [[nodiscard]] constexpr return_type
     process_one(T a) const noexcept {
@@ -62,7 +61,7 @@ public:
 
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
-class delay : public fg::node<delay<T, Depth>, fg::IN<T, "in">, fg::OUT<T, "out">> {
+class delay : public fg::node<delay<T, Depth>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "out">> {
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 

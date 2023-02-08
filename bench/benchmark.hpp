@@ -2,7 +2,7 @@
 #define GRAPH_PROTOTYPE_BENCHMARK_HPP
 
 #include <algorithm>
-#include <boost/ut.hpp> // localinclude
+#include <boost/ut.hpp>
 #include <chrono>
 #include <iostream>
 #include <map>

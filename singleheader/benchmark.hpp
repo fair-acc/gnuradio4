@@ -1,3 +1,8 @@
+#ifndef GRAPH_PROTOTYPE_BENCHMARK_HPP
+#define GRAPH_PROTOTYPE_BENCHMARK_HPP
+
+#include <algorithm>
+// #include <boost/ut.hpp>
 //
 // Copyright (c) 2019-2021 Kris Jusiak (kris at jusiak dot net)
 //
@@ -9,7 +14,7 @@
 export module boost.ut;
 export import std;
 #else
-#pragma once
+
 #endif
 
 #if __has_include(<iso646.h>)
@@ -2463,10 +2468,7 @@ using operators::operator/;
 using operators::operator>>;
 }  // namespace boost::inline ext::ut::inline v1_1_9
 #endif
-#ifndef GRAPH_PROTOTYPE_BENCHMARK_HPP
-#define GRAPH_PROTOTYPE_BENCHMARK_HPP
 
-#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <map>

@@ -1,403 +1,1740 @@
-#ifndef GNURADIO_NODE_HPP
-#define GNURADIO_NODE_HPP
+#ifndef GNURADIO_GRAPH_HPP
+#define GNURADIO_GRAPH_HPP
 
-#include <map>
+// #include "circular_buffer.hpp"
+#ifndef GNURADIO_CIRCULAR_BUFFER_HPP
+#define GNURADIO_CIRCULAR_BUFFER_HPP
 
+#if defined(_LIBCPP_VERSION) and _LIBCPP_VERSION < 16000
+#include <experimental/memory_resource>
 
-#include <vir/simd.h>
+namespace std::pmr {
+using memory_resource = std::experimental::pmr::memory_resource;
+template<typename T>
+using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
+} // namespace std::pmr
+#else
+#include <memory_resource>
+#endif
+#include <algorithm>
+#include <bit>
+#include <cassert> // to assert if compiled for debugging
+#include <functional>
+#include <numeric>
+#include <ranges>
+#include <span>
+
 #include <fmt/format.h>
 
-namespace fair::graph {
+// header for creating/opening or POSIX shared memory objects
+#include <cerrno>
+#include <fcntl.h>
+#if defined __has_include && not __EMSCRIPTEN__
+#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
-namespace stdx = vir::stdx;
-using fair::meta::fixed_string;
+namespace gr {
+static constexpr bool has_posix_mmap_interface = true;
+}
 
-enum class work_return_t {
-    ERROR = -100, /// error occurred in the work function
-    INSUFFICIENT_OUTPUT_ITEMS =
-        -3, /// work requires a larger output buffer to produce output
-    INSUFFICIENT_INPUT_ITEMS =
-        -2, /// work requires a larger input buffer to produce output
-    DONE =
-        -1, /// this block has completed its processing and the flowgraph should be done
-    OK = 0, /// work call was successful and return values in i/o structs are valid
-    CALLBACK_INITIATED =
-        1, /// rather than blocking in the work function, the block will call back to the
-           /// parent interface when it is ready to be called again
+#define HAS_POSIX_MAP_INTERFACE
+#else
+namespace gr {
+static constexpr bool has_posix_mmap_interface = false;
+}
+#endif
+#else // #if defined __has_include -- required for portability
+namespace gr {
+static constexpr bool has_posix_mmap_interface = false;
+}
+#endif
+
+// #include "claim_strategy.hpp"
+#ifndef GNURADIO_CLAIM_STRATEGY_HPP
+#define GNURADIO_CLAIM_STRATEGY_HPP
+
+#include <cassert>
+#include <concepts>
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <vector>
+
+// #include "wait_strategy.hpp"
+#ifndef GNURADIO_WAIT_STRATEGY_HPP
+#define GNURADIO_WAIT_STRATEGY_HPP
+
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+#include <concepts>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+// #include "sequence.hpp"
+#ifndef GNURADIO_SEQUENCE_HPP
+#define GNURADIO_SEQUENCE_HPP
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <ranges>
+#include <vector>
+
+namespace gr {
+
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
+static constexpr const std::size_t kCacheLine
+        = 64; // waiting for clang: std::hardware_destructive_interference_size
+static constexpr const std::int64_t kInitialCursorValue = -1L;
+
+/**
+ * Concurrent sequence class used for tracking the progress of the ring buffer and event
+ * processors. Support a number of concurrent operations including CAS and order writes.
+ * Also attempts to be more efficient with regards to false sharing by adding padding
+ * around the volatile field.
+ */
+// clang-format off
+class Sequence
+{
+    alignas(kCacheLine) std::atomic<std::int64_t> _fieldsValue{};
+
+public:
+    Sequence(const Sequence&) = delete;
+    Sequence(const Sequence&&) = delete;
+    void operator=(const Sequence&) = delete;
+    explicit Sequence(std::int64_t initialValue = kInitialCursorValue) noexcept
+        : _fieldsValue(initialValue)
+    {
+    }
+
+    [[nodiscard]] forceinline std::int64_t value() const noexcept
+    {
+        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
+    }
+
+    forceinline void setValue(const std::int64_t value) noexcept
+    {
+        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
+    }
+
+    [[nodiscard]] forceinline bool compareAndSet(std::int64_t expectedSequence,
+                                                 std::int64_t nextSequence) noexcept
+    {
+        // atomically set the value to the given updated value if the current value == the
+        // expected value (true, otherwise folse).
+        return std::atomic_compare_exchange_strong(
+            &_fieldsValue, &expectedSequence, nextSequence);
+    }
+
+    [[nodiscard]] forceinline std::int64_t incrementAndGet() noexcept
+    {
+        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
+    }
+
+    [[nodiscard]] forceinline std::int64_t addAndGet(std::int64_t value) noexcept
+    {
+        return std::atomic_fetch_add(&_fieldsValue, value) + value;
+    }
 };
 
-namespace work_strategies {
-template<typename Self>
-static auto
-inputs_status(Self &self) noexcept {
-    bool              at_least_one_input_has_data = false;
-    const std::size_t available_values_count      = [&self, &at_least_one_input_has_data]() {
-        if constexpr (Self::input_ports::size > 0) {
-            const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
-                const std::size_t available = port.reader().available();
-                if (available > 0LU) at_least_one_input_has_data = true;
-                if (available < port.min_buffer_size()) {
-                    return 0LU;
-                } else {
-                    return std::min(available, port.max_buffer_size());
-                }
-            };
+namespace detail {
+/**
+ * Get the minimum sequence from an array of Sequences.
+ *
+ * \param sequences sequences to compare.
+ * \param minimum an initial default minimum.  If the array is empty this value will
+ * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
+ */
+inline std::int64_t getMinimumSequence(
+    const std::vector<std::shared_ptr<Sequence>>& sequences,
+    std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
+{
+    if (sequences.empty()) {
+        return minimum;
+    }
+#if not defined(_LIBCPP_VERSION)
+    return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
+#else
+    std::vector<int64_t> v(sequences.size());
+    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
+    auto min = std::min(v.begin(), v.end());
+    return std::min(*min, minimum);
+#endif
+}
 
-            const auto availableInAll = std::apply(
-                    [&availableForPort] (auto&... input_port) {
-                        return meta::safe_min(availableForPort(input_port)...);
-                    },
-                    input_ports(&self));
+inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
+             const Sequence& cursor,
+             const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
+{
+    std::int64_t cursorSequence;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
-            if (availableInAll < self.min_samples()) {
-                return 0LU;
+    do {
+        currentSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+        updatedSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(currentSequences->size() + sequencesToAdd.size());
+
+#if not defined(_LIBCPP_VERSION)
+        std::ranges::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
+#else
+        std::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
+#endif
+
+        cursorSequence = cursor.value();
+
+        auto index = currentSequences->size();
+        for (auto&& sequence : sequencesToAdd) {
+            sequence->setValue(cursorSequence);
+            (*updatedSequences)[index] = sequence;
+            index++;
+        }
+    } while (!std::atomic_compare_exchange_weak(&sequences, &currentSequences, updatedSequences)); // xTODO: explicit memory order
+
+    cursorSequence = cursor.value();
+
+    for (auto&& sequence : sequencesToAdd) {
+        sequence->setValue(cursorSequence);
+    }
+}
+
+inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence)
+{
+    std::uint32_t numToRemove;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
+
+    do {
+        oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+#if not defined(_LIBCPP_VERSION)
+        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
+#else
+        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
+#endif
+        if (numToRemove == 0) {
+            break;
+        }
+
+        auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
+        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(
+            oldSize - numToRemove);
+
+        for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
+            const auto& testSequence = (*oldSequences)[i];
+            if (sequence != testSequence) {
+                (*newSequences)[pos] = testSequence;
+                pos++;
+            }
+        }
+    } while (!std::atomic_compare_exchange_weak(&sequences, &oldSequences, newSequences));
+
+    return numToRemove != 0;
+}
+
+// clang-format on
+
+} // namespace detail
+
+} // namespace gr
+
+#ifdef FMT_FORMAT_H_
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+
+template<>
+struct fmt::formatter<gr::Sequence> {
+    template<typename ParseContext>
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    auto
+    format(gr::Sequence const &value, FormatContext &ctx) {
+        return fmt::format_to(ctx.out(), "{}", value.value());
+    }
+};
+
+namespace gr {
+inline std::ostream &
+operator<<(std::ostream &os, const Sequence &v) {
+    return os << fmt::format("{}", v);
+}
+} // namespace gr
+
+#endif // FMT_FORMAT_H_
+
+#endif // GNURADIO_SEQUENCE_HPP
+
+
+namespace gr {
+// clang-format off
+/**
+ * Wait for the given sequence to be available.  It is possible for this method to return a value less than the sequence number supplied depending on the implementation of the WaitStrategy.
+ * A common use for this is to signal a timeout.Any EventProcessor that is using a WaitStrategy to get notifications about message becoming available should remember to handle this case.
+ * The BatchEventProcessor<T> explicitly handles this case and will signal a timeout if required.
+ *
+ * \param sequence sequence to be waited on.
+ * \param cursor Ring buffer cursor on which to wait.
+ * \param dependentSequence on which to wait.
+ * \param barrier barrier the IEventProcessor is waiting on.
+ * \returns the sequence that is available which may be greater than the requested sequence.
+ */
+template<typename T>
+inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
+};
+static_assert(!isWaitStrategy<int>);
+
+/**
+ * signal those waiting that the cursor has advanced.
+ */
+template<typename T>
+inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
+    { t.signalAllWhenBlocking() } -> std::same_as<void>;
+};
+static_assert(!hasSignalAllWhenBlocking<int>);
+
+template<typename T>
+concept WaitStrategy = isWaitStrategy<T>;
+
+
+
+/**
+ * Blocking strategy that uses a lock and condition variable for IEventProcessor's waiting on a barrier.
+ * This strategy should be used when performance and low-latency are not as important as CPU resource.
+ */
+class BlockingWaitStrategy {
+    std::recursive_mutex        _gate;
+    std::condition_variable_any _conditionVariable;
+
+public:
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+        if (cursor.value() < sequence) {
+            std::unique_lock uniqueLock(_gate);
+
+            while (cursor.value() < sequence) {
+                // optional: barrier check alert
+                _conditionVariable.wait(uniqueLock);
+            }
+        }
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+
+        return availableSequence;
+    }
+
+    void signalAllWhenBlocking() {
+        std::unique_lock uniqueLock(_gate);
+        _conditionVariable.notify_all();
+    }
+};
+static_assert(WaitStrategy<BlockingWaitStrategy>);
+
+/**
+ * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
+ * This strategy will use CPU resource to avoid syscalls which can introduce latency jitter.
+ * It is best used when threads can be bound to specific CPU cores.
+ */
+struct BusySpinWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<BusySpinWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
+
+/**
+ * Sleeping strategy that initially spins, then uses a std::this_thread::yield(), and eventually sleep. T
+ * his strategy is a good compromise between performance and CPU resource.
+ * Latency spikes can occur after quiet periods.
+ */
+class SleepingWaitStrategy {
+    static const std::int32_t _defaultRetries = 200;
+    std::int32_t              _retries        = 0;
+
+public:
+    explicit SleepingWaitStrategy(std::int32_t retries = _defaultRetries)
+        : _retries(retries) {
+    }
+
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        auto       counter    = _retries;
+        const auto waitMethod = [&counter]() {
+            // optional: barrier check alert
+
+            if (counter > 100) {
+                --counter;
+            } else if (counter > 0) {
+                --counter;
+                std::this_thread::yield();
             } else {
-                return std::min(availableInAll, self.max_samples());
+                std::this_thread::sleep_for(std::chrono::milliseconds(0));
+            }
+        };
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            waitMethod();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<SleepingWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
+
+struct TimeoutException : public std::runtime_error {
+    TimeoutException() : std::runtime_error("TimeoutException") {}
+};
+
+class TimeoutBlockingWaitStrategy {
+    using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
+    Clock::duration             _timeout;
+    std::recursive_mutex        _gate;
+    std::condition_variable_any _conditionVariable;
+
+public:
+    explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
+        : _timeout(timeout) {}
+
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
+
+        if (cursor.value() < sequence) {
+            std::unique_lock uniqueLock(_gate);
+
+            while (cursor.value() < sequence) {
+                // optional: barrier check alert
+
+                if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
+                    throw TimeoutException();
+                }
+            }
+        }
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+
+        return availableSequence;
+    }
+
+    void signalAllWhenBlocking() {
+        std::unique_lock uniqueLock(_gate);
+        _conditionVariable.notify_all();
+    }
+};
+static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
+static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
+
+/**
+ * Yielding strategy that uses a Thread.Yield() for IEventProcessors waiting on a barrier after an initially spinning.
+ * This strategy is a good compromise between performance and CPU resource without incurring significant latency spikes.
+ */
+class YieldingWaitStrategy {
+    const std::size_t _spinTries = 100;
+
+public:
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        auto       counter    = _spinTries;
+        const auto waitMethod = [&counter]() {
+            // optional: barrier check alert
+
+            if (counter == 0) {
+                std::this_thread::yield();
+            } else {
+                --counter;
+            }
+        };
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            waitMethod();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<YieldingWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
+
+struct NoWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
+        // wait for nothing
+        return sequence;
+    }
+};
+static_assert(WaitStrategy<NoWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
+
+
+/**
+ *
+ * SpinWait is meant to be used as a tool for waiting in situations where the thread is not allowed to block.
+ *
+ * In order to get the maximum performance, the implementation first spins for `YIELD_THRESHOLD` times, and then
+ * alternates between yielding, spinning and putting the thread to sleep, to allow other threads to be scheduled
+ * by the kernel to avoid potential CPU contention.
+ *
+ * The number of spins, yielding, and sleeping for either '0 ms' or '1 ms' is controlled by the NTTP constants
+ * @tparam YIELD_THRESHOLD
+ * @tparam SLEEP_0_EVERY_HOW_MANY_TIMES
+ * @tparam SLEEP_1_EVERY_HOW_MANY_TIMES
+ */
+template<std::int32_t YIELD_THRESHOLD = 10, std::int32_t SLEEP_0_EVERY_HOW_MANY_TIMES = 5, std::int32_t SLEEP_1_EVERY_HOW_MANY_TIMES = 20>
+class SpinWait {
+    using Clock         = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
+    std::int32_t _count = 0;
+    static void  spinWaitInternal(std::int32_t iterationCount) noexcept {
+        for (auto i = 0; i < iterationCount; i++) {
+            yieldProcessor();
+        }
+    }
+#ifndef __EMSCRIPTEN__
+    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
+#else
+    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+#endif
+
+public:
+    SpinWait() = default;
+
+    [[nodiscard]] std::int32_t count() const noexcept { return _count; }
+    [[nodiscard]] bool         nextSpinWillYield() const noexcept { return _count > YIELD_THRESHOLD; }
+
+    void                       spinOnce() {
+        if (nextSpinWillYield()) {
+            auto num = _count >= YIELD_THRESHOLD ? _count - 10 : _count;
+            if (num % SLEEP_1_EVERY_HOW_MANY_TIMES == SLEEP_1_EVERY_HOW_MANY_TIMES - 1) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } else {
+                if (num % SLEEP_0_EVERY_HOW_MANY_TIMES == SLEEP_0_EVERY_HOW_MANY_TIMES - 1) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(0));
+                } else {
+                    std::this_thread::yield();
+                }
             }
         } else {
-            (void) self;
-            return std::size_t{ 1 };
+            spinWaitInternal(4 << _count);
         }
-    }();
 
-    struct result {
-        bool at_least_one_input_has_data;
-       std::size_t available_values_count;
-    };
-
-    return result {
-        .at_least_one_input_has_data = at_least_one_input_has_data,
-        .available_values_count = available_values_count
-    };
-}
-
-template<typename Self>
-static auto
-write_to_outputs(Self& self, std::size_t available_values_count, auto& writers_tuple) {
-    if constexpr (Self::output_ports::size > 0) {
-        meta::tuple_for_each([available_values_count] (auto& output_port, auto& writer) {
-                output_port.writer().publish(writer.second, available_values_count);
-                },
-                output_ports(&self), writers_tuple);
+        if (_count == std::numeric_limits<std::int32_t>::max()) {
+            _count = YIELD_THRESHOLD;
+        } else {
+            ++_count;
+        }
     }
-}
 
-template<typename Self>
-static bool
-consume_readers(Self& self, std::size_t available_values_count) {
-    bool success = true;
-    if constexpr (Self::input_ports::size > 0) {
-        std::apply([available_values_count, &success] (auto&... input_port) {
-                ((success = success && input_port.reader().consume(available_values_count)), ...);
-            }, input_ports(&self));
-    }
-    return success;
-}
+    void reset() noexcept { _count = 0; }
 
-struct read_many_and_publish_many {
+    template<typename T>
+    requires std::is_nothrow_invocable_r_v<bool, T>
+    bool
+    spinUntil(const T &condition) const { return spinUntil(condition, -1); }
 
-    template<typename Self>
-    static work_return_t
-    work(Self &self) noexcept {
-        // Capturing structured bindings does not work in Clang...
-        auto inputs_status = work_strategies::inputs_status(self);
-
-        if (inputs_status.available_values_count == 0) {
-            return inputs_status.at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
+    template<typename T>
+    requires std::is_nothrow_invocable_r_v<bool, T>
+    bool
+    spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
+        if (millisecondsTimeout < -1) {
+            throw std::out_of_range("Timeout value is out of range");
         }
 
-        bool all_writers_available = std::apply([inputs_status](auto&... output_port) {
-                return ((output_port.writer().available() >= inputs_status.available_values_count) && ... && true);
-            }, output_ports(&self));
-
-        if (!all_writers_available) {
-            return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+        std::int64_t num = 0;
+        if (millisecondsTimeout != 0 && millisecondsTimeout != -1) {
+            num = getTickCount();
         }
 
-        auto input_spans = meta::tuple_transform([inputs_status](auto& input_port) {
-                return input_port.reader().get(inputs_status.available_values_count);
-            }, input_ports(&self));
+        SpinWait spinWait;
+        while (!condition()) {
+            if (millisecondsTimeout == 0) {
+                return false;
+            }
 
-        auto writers_tuple = meta::tuple_transform([inputs_status](auto& output_port) {
-                return output_port.writer().get(inputs_status.available_values_count);
-            }, output_ports(&self));
+            spinWait.spinOnce();
 
-        // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
-        // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags
-        // case 1b: N-in->N-out -> process_bulk(<ins...>, <outs...>) -> auto-handling of streaming tags
-        // case 2a: N-in->M-out -> process_bulk(<ins...>, <outs...>) N,M fixed -> aka. interpolator (M>N) or decimator (M<N)
-        // case 2b: N-in->M-out -> process_bulk(<{ins,tag-IO}...>, <{outs,tag-IO}...>) user-level tag handling
-        // case 3:  N-in->M-out -> work() N,M arbitrary -> used need to handle the full logic (e.g. PLL algo)
-        // case 4:  Python -> map to cases 1-3 and/or dedicated callback
-        // special cases:
-        // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
-        // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
-        for (std::size_t i = 0; i < inputs_status.available_values_count; ++i) {
-            auto results = std::apply([&self, &input_spans, i](auto&... input_span) {
-                    return meta::invoke_void_wrapped([&self]<typename... Args>(Args... args) { return self.process_one(std::forward<Args>(args)...); }, input_span[i]...);
-                }, input_spans);
-
-            if constexpr (std::is_same_v<decltype(results), meta::dummy_t>) {
-                // process_one returned void
-
-            } else if constexpr (requires { std::get<0>(results); }) {
-                static_assert(std::tuple_size_v<decltype(results)> == Self::output_ports::size);
-
-                meta::tuple_for_each(
-                        [i] (auto& writer, auto& result) {
-                            writer.first/*data*/[i] = std::move(result); },
-                        writers_tuple, results);
-
-            } else {
-                static_assert(Self::output_ports::size == 1);
-                std::get<0>(writers_tuple).first /*data*/[i] = std::move(results);
+            if (millisecondsTimeout != 1 && spinWait.nextSpinWillYield() && millisecondsTimeout <= (getTickCount() - num)) {
+                return false;
             }
         }
 
-        write_to_outputs(self, inputs_status.available_values_count, writers_tuple);
+        return true;
+    }
 
-        const bool success = consume_readers(self, inputs_status.available_values_count);
+    [[nodiscard]] static std::int64_t getTickCount() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
+};
 
-        if (!success) {
-            fmt::print("Node {} failed to consume {} values from inputs\n", self.name(), inputs_status.available_values_count);
+/**
+ * Spin strategy that uses a SpinWait for IEventProcessors waiting on a barrier.
+ * This strategy is a good compromise between performance and CPU resource.
+ * Latency spikes can occur after quiet periods.
+ */
+struct SpinWaitWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
+        std::int64_t availableSequence;
+
+        SpinWait     spinWait;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
+            // optional: barrier check alert
+            spinWait.spinOnce();
         }
 
-        return success ? work_return_t::OK : work_return_t::ERROR;
+        return availableSequence;
     }
 };
+static_assert(WaitStrategy<SpinWaitWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
 
-using default_strategy = read_many_and_publish_many;
-} // namespace work_strategies
+struct NO_SPIN_WAIT {};
 
-template<typename...>
-struct fixed_node_ports_data_helper;
+template<typename SPIN_WAIT = NO_SPIN_WAIT>
+class AtomicMutex {
+    std::atomic_flag _lock = ATOMIC_FLAG_INIT;
+    SPIN_WAIT        _spin_wait;
 
-template<meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-    requires InputPorts::template
-all_of<has_fixed_port_info> &&OutputPorts::template all_of<has_fixed_port_info> struct fixed_node_ports_data_helper<InputPorts, OutputPorts> {
-    using input_ports       = InputPorts;
-    using output_ports      = OutputPorts;
-
-    using input_port_types  = typename input_ports ::template transform<port_type>;
-    using output_port_types = typename output_ports ::template transform<port_type>;
-
-    using all_ports         = meta::concat<input_ports, output_ports>;
-};
-
-template<has_fixed_port_info_v... Ports>
-struct fixed_node_ports_data_helper<Ports...> {
-    using all_ports         = meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>;
-
-    using input_ports       = typename all_ports ::template filter<is_in_port>;
-    using output_ports      = typename all_ports ::template filter<is_out_port>;
-
-    using input_port_types  = typename input_ports ::template transform<port_type>;
-    using output_port_types = typename output_ports ::template transform<port_type>;
-};
-
-template<typename... Arguments>
-using fixed_node_ports_data = typename meta::typelist<Arguments...>::template filter<has_fixed_port_info_or_is_typelist>::template apply<fixed_node_ports_data_helper>;
-
-// Ports can either be a list of ports instances,
-// or two typelists containing port instances -- one for input
-// ports and one for output ports
-template<typename Derived, typename... Arguments>
-// class node: fixed_node_ports_data<Arguments...>::all_ports::tuple_type {
-class node : protected std::tuple<Arguments...> {
 public:
-    using fixed_ports_data  = fixed_node_ports_data<Arguments...>;
+    AtomicMutex()                    = default;
+    AtomicMutex(const AtomicMutex &) = delete;
+    AtomicMutex &operator=(const AtomicMutex &) = delete;
 
-    using all_ports         = typename fixed_ports_data::all_ports;
-    using input_ports       = typename fixed_ports_data::input_ports;
-    using output_ports      = typename fixed_ports_data::output_ports;
-    using input_port_types  = typename fixed_ports_data::input_port_types;
-    using output_port_types = typename fixed_ports_data::output_port_types;
+    //
+    void lock() {
+        while (_lock.test_and_set(std::memory_order_acquire)) {
+            if constexpr (requires { _spin_wait.spin_once(); }) {
+                _spin_wait.spin_once();
+            }
+        }
+        if constexpr (requires { _spin_wait.spin_once(); }) {
+            _spin_wait.reset();
+        }
+    }
+    void unlock() { _lock.clear(std::memory_order::release); }
+};
 
-    using return_type       = typename output_port_types::tuple_or_type;
-    using work_strategy       = work_strategies::default_strategy;
-    friend work_strategy;
 
-    using min_max_limits = typename meta::typelist<Arguments...>::template filter<is_limits>;
-    static_assert(min_max_limits::size <= 1);
+// clang-format on
+} // namespace gr
+
+
+#endif // GNURADIO_WAIT_STRATEGY_HPP
+
+// #include "sequence.hpp"
+
+
+namespace gr {
+
+struct NoCapacityException : public std::runtime_error {
+    NoCapacityException() : std::runtime_error("NoCapacityException"){};
+};
+
+// clang-format off
+
+template<typename T>
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
+        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
+    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
+    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
+    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
+    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
+    { t.publish(sequence) } -> std::same_as<void>;
+    { t.isAvailable(sequence) } -> std::same_as<bool>;
+    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
+};
+
+namespace claim_strategy::util {
+constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+}
+
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+class alignas(kCacheLine) SingleThreadedStrategy {
+    alignas(kCacheLine) const std::size_t _size;
+    alignas(kCacheLine) Sequence &_cursor;
+    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
+    alignas(kCacheLine) std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    alignas(kCacheLine) mutable std::int64_t _cachedValue{ kInitialCursorValue };
+
+public:
+    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
+        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
+    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
+    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
+    void operator=(const SingleThreadedStrategy &) = delete;
+
+    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
+        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
+            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
+            _cachedValue     = minSequence;
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
+        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
+
+        auto nextSequence = _nextValue + n_slots_to_claim;
+        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
+
+        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
+            _cursor.setValue(_nextValue);
+
+            SpinWait     spinWait;
+            std::int64_t minSequence;
+            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
+                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                    _waitStrategy.signalAllWhenBlocking();
+                }
+                spinWait.spinOnce();
+            }
+            _cachedValue = minSequence;
+        }
+        _nextValue = nextSequence;
+
+        return nextSequence;
+    }
+
+    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
+            throw NoCapacityException();
+        }
+
+        const auto nextSequence = _nextValue + n_slots_to_claim;
+        _nextValue              = nextSequence;
+
+        return nextSequence;
+    }
+
+    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
+        const auto produced = _nextValue;
+
+        return static_cast<std::int64_t>(_size) - (produced - consumed);
+    }
+
+    void publish(std::int64_t sequence) {
+        _cursor.setValue(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
+    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
+};
+static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+
+/**
+ * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
+ * Suitable for use for sequencing across multiple publisher threads.
+ * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
+ * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ */
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+class MultiThreadedStrategy {
+    alignas(kCacheLine) const std::size_t _size;
+    alignas(kCacheLine) Sequence &_cursor;
+    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
+    alignas(kCacheLine) std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
+    alignas(kCacheLine) std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
+    const std::int32_t _indexMask;
+    const std::int32_t _indexShift;
+
+public:
+    MultiThreadedStrategy() = delete;
+    explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
+        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
+        _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
+        for (std::size_t i = _size - 1; i != 0; i--) {
+            setAvailableBufferValue(i, -1);
+        }
+        setAvailableBufferValue(0, -1);
+    }
+    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
+    void               operator=(const MultiThreadedStrategy &) = delete;
+
+    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
+        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
+
+        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
+            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
+            _gatingSequenceCache->setValue(minSequence);
+
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        std::int64_t current;
+        std::int64_t next;
+
+        SpinWait     spinWait;
+        do {
+            current                           = _cursor.value();
+            next                              = current + n_slots_to_claim;
+
+            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
+            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
+
+            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
+                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
+
+                if (wrapPoint > gatingSequence) {
+                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                        _waitStrategy.signalAllWhenBlocking();
+                    }
+                    spinWait.spinOnce();
+                    continue;
+                }
+
+                _gatingSequenceCache->setValue(gatingSequence);
+            } else if (_cursor.compareAndSet(current, next)) {
+                break;
+            }
+        } while (true);
+
+        return next;
+    }
+
+    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        std::int64_t current;
+        std::int64_t next;
+
+        do {
+            current = _cursor.value();
+            next    = current + n_slots_to_claim;
+
+            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
+                throw NoCapacityException();
+            }
+        } while (!_cursor.compareAndSet(current, next));
+
+        return next;
+    }
+
+    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto produced = _cursor.value();
+        const auto consumed = detail::getMinimumSequence(dependents, produced);
+
+        return static_cast<std::int64_t>(_size) - (produced - consumed);
+    }
+
+    void publish(std::int64_t sequence) {
+        setAvailable(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
+        const auto index = calculateIndex(sequence);
+        const auto flag  = calculateAvailabilityFlag(sequence);
+
+        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
+    }
+
+    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
+        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
+            if (!isAvailable(sequence)) {
+                return sequence - 1;
+            }
+        }
+
+        return availableSequence;
+    }
 
 private:
-    using setting_map = std::map<std::string, int, std::less<>>;
-    std::string _name{ std::string(fair::meta::type_name<Derived>()) };
+    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
+    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & _indexMask); }
+};
+static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
+// clang-format on
 
-    setting_map _exec_metrics{}; //  →  std::map<string, pmt> → fair scheduling, 'int' stand-in for pmtv
+enum class ProducerType {
+    /**
+     * creates a buffer assuming a single producer-thread and multiple consumer
+     */
+    Single,
 
-    friend class graph;
+    /**
+     * creates a buffer assuming multiple producer-threads and multiple consumer
+     */
+    Multi
+};
 
-public:
-    auto &
-    self() {
-        return *static_cast<Derived *>(this);
+namespace detail {
+template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+struct producer_type;
+
+template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
+    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
+};
+template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
+    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
+};
+
+template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+
+} // namespace detail
+
+} // namespace gr
+
+
+#endif // GNURADIO_CLAIM_STRATEGY_HPP
+
+// #include "wait_strategy.hpp"
+
+// #include "sequence.hpp"
+
+// #include "buffer.hpp"
+#ifndef GNURADIO_BUFFER2_H
+#define GNURADIO_BUFFER2_H
+
+#include <bit>
+#include <cstdint>
+#include <type_traits>
+#include <concepts>
+#include <span>
+
+namespace gr {
+namespace util {
+template <typename T, typename...>
+struct first_template_arg_helper;
+
+template <template <typename...> class TemplateType,
+          typename ValueType,
+          typename... OtherTypes>
+struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
+    using value_type = ValueType;
+};
+
+template <typename T>
+constexpr auto* value_type_helper()
+{
+    if constexpr (requires { typename T::value_type; }) {
+        return static_cast<typename T::value_type*>(nullptr);
     }
-
-    const auto &
-    self() const {
-        return *static_cast<const Derived *>(this);
+    else {
+        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
     }
+}
 
-    [[nodiscard]] std::string_view
-    name() const noexcept {
-        return _name;
+template <typename T>
+using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
+
+template <typename... A>
+struct test_fallback {
+};
+
+template <typename, typename ValueType>
+struct test_value_type {
+    using value_type = ValueType;
+};
+
+static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
+static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
+static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
+static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
+
+} // namespace util
+
+// clang-format off
+// disable formatting until clang-format (v16) supporting concepts
+template<class T>
+concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
+    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
+    { t.consume(n_items) } -> std::same_as<bool>;
+    { t.position() }       -> std::same_as<std::int64_t>;
+    { t.available() }      -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class Fn, typename T, typename ...Args>
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+
+template<class T, typename ...Args>
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.get(n_items) } -> std::same_as<std::pair<std::span<util::value_type_t<T>>, std::pair<std::size_t, std::int64_t>>>;
+    { t.publish(token, n_items) } -> std::same_as<void>;
+    { t.available() }         -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class T, typename ...Args>
+concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
+    { T(min_size, args...) };
+    { t.size() }       -> std::same_as<std::size_t>;
+    { t.new_reader() } -> BufferReader;
+    { t.new_writer() } -> BufferWriter;
+};
+
+// compile-time unit-tests
+namespace test {
+template <typename T>
+struct non_compliant_class {
+};
+template <typename T, typename... Args>
+using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
+template <typename T, typename... Args>
+using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
+} // namespace test
+
+static_assert(!Buffer<test::non_compliant_class<int>>);
+static_assert(!BufferReader<test::non_compliant_class<int>>);
+static_assert(!BufferWriter<test::non_compliant_class<int>>);
+
+static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+// clang-format on
+} // namespace gr
+
+#endif // GNURADIO_BUFFER2_H
+
+
+namespace gr {
+
+namespace util {
+constexpr std::size_t
+round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
+    if (multiple == 0) {
+        return num_to_round;
     }
-
-    void
-    set_name(std::string name) noexcept {
-        _name = std::move(name);
+    const auto remainder = num_to_round % multiple;
+    if (remainder == 0) {
+        return num_to_round;
     }
+    return num_to_round + multiple - remainder;
+}
+} // namespace util
 
-    template<std::size_t Index, typename Self>
-    friend constexpr auto &
-    input_port(Self *self) noexcept;
+// clang-format off
+class double_mapped_memory_resource : public std::pmr::memory_resource {
+#ifdef HAS_POSIX_MAP_INTERFACE
+    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
 
-    template<std::size_t Index, typename Self>
-    friend constexpr auto &
-    output_port(Self *self) noexcept;
-
-    template<fixed_string Name, typename Self>
-    friend constexpr auto &
-    input_port(Self *self) noexcept;
-
-    template<fixed_string Name, typename Self>
-    friend constexpr auto &
-    output_port(Self *self) noexcept;
-
-    template<std::size_t N>
-    [[gnu::always_inline]] constexpr bool
-    process_batch_simd_epilogue(std::size_t n, auto out_ptr, auto... in_ptr) {
-        if constexpr (N == 0) return true;
-        else if (N <= n) {
-            using In0                    = meta::first_type<input_port_types>;
-            using V                      = stdx::resize_simd_t<N, stdx::native_simd<In0>>;
-            using Vs                     = meta::transform_types<meta::rebind_simd_helper<V>::template rebind, input_port_types>;
-            const std::tuple input_simds = Vs::template construct<meta::simd_load_ctor>(std::tuple{ in_ptr... });
-            const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
-            result.copy_to(out_ptr, stdx::element_aligned);
-            return process_batch_simd_epilogue<N / 2>(n, out_ptr + N, (in_ptr + N)...);
-        } else
-            return process_batch_simd_epilogue<N / 2>(n, out_ptr, in_ptr...);
-    }
-
-#ifdef NOT_YET_PORTED_AS_IT_IS_UNUSED
-    template<std::ranges::forward_range... Ins>
-        requires(std::ranges::sized_range<Ins> && ...) && input_port_types::template
-    are_equal<std::ranges::range_value_t<Ins>...> constexpr bool process_batch(port_data<return_type, 1024> &out, Ins &&...inputs) {
-        const auto       &in0 = std::get<0>(std::tie(inputs...));
-        const std::size_t n   = std::ranges::size(in0);
-        detail::precondition(((n == std::ranges::size(inputs)) && ...));
-        auto &&out_range = out.request_write(n);
-        // if SIMD makes sense (i.e. input and output ranges are contiguous and all types are
-        // vectorizable)
-        if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ... && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type> && detail::node_can_process_simd<Derived>
-                      && input_port_types ::template transform<stdx::native_simd>::template all_of<std::is_constructible>) {
-            using V       = detail::reduce_to_widest_simd<input_port_types>;
-            using Vs      = detail::transform_by_rebind_simd<V, input_port_types>;
-            std::size_t i = 0;
-            for (i = 0; i + V::size() <= n; i += V::size()) {
-                const std::tuple input_simds = Vs::template construct<detail::simd_load_ctor>(std::tuple{ (std::ranges::data(inputs) + i)... });
-                const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
-                result.copy_to(std::ranges::data(out_range) + i, stdx::element_aligned);
-            }
-
-            return process_batch_simd_epilogue<std::bit_ceil(V::size()) / 2>(n - i, std::ranges::data(out_range) + i, (std::ranges::data(inputs) + i)...);
-        } else { // no explicit SIMD
-            auto             out_it    = out_range.begin();
-            std::tuple       it_tuple  = { std::ranges::begin(inputs)... };
-            const std::tuple end_tuple = { std::ranges::end(inputs)... };
-            while (std::get<0>(it_tuple) != std::get<0>(end_tuple)) {
-                *out_it = std::apply([this](auto &...its) { return self().process_one((*its++)...); }, it_tuple);
-                ++out_it;
-            }
-            return true;
+        const std::size_t size = 2 * required_size;
+        if (size % 2LU != 0LU || size % static_cast<std::size_t>(getpagesize()) != 0LU) {
+            throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
+        const std::size_t size_half = size/2;
+
+        static std::size_t _counter;
+        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
+            return syscall(__NR_memfd_create, name, flags);
+        };
+        int shm_fd = static_cast<int>(memfd_create(0));
+        if (shm_fd < 0) {
+            throw std::runtime_error(fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        void* first_copy = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
+        if (first_copy == MAP_FAILED) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        // unmap the 2nd half
+        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        // map the first half into the now available hole where the
+        if (const void* second_copy = mmap(static_cast<char*> (first_copy) + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); second_copy == MAP_FAILED) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
+        return first_copy;
+}
+#else
+    [[nodiscard]] void* do_allocate(const std::size_t, std::size_t) override {
+        throw std::runtime_error("OS does not provide POSIX interface for mmap(...) and munmao(...)");
+        // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
     }
 #endif
 
-    [[nodiscard]] setting_map &
-    exec_metrics() noexcept {
-        return _exec_metrics;
-    }
 
-    [[nodiscard]] setting_map const &
-    exec_metrics() const noexcept {
-        return _exec_metrics;
-    }
+#ifdef HAS_POSIX_MAP_INTERFACE
+    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
 
-    [[nodiscard]] constexpr std::size_t
-    min_samples() const noexcept {
-        if constexpr (min_max_limits::size == 1) {
-            return min_max_limits::template at<0>::min;
-        } else {
-            return 0;
+        if (munmap(p, size) == -1) {
+            throw std::runtime_error(fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
         }
     }
+#else
+    void  do_deallocate(void*, std::size_t, size_t) override { }
+#endif
 
-    [[nodiscard]] constexpr std::size_t
-    max_samples() const noexcept {
-        if constexpr (min_max_limits::size == 1) {
-            return min_max_limits::template at<0>::max;
-        } else {
-            return std::numeric_limits<std::size_t>::max();
-        }
+    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
+
+public:
+    static inline double_mapped_memory_resource* defaultAllocator() {
+        static auto instance = double_mapped_memory_resource();
+        return &instance;
     }
 
-    work_return_t
-    work() noexcept {
-        return work_strategy::work(self());
+    template<typename T>
+    requires (std::has_single_bit(sizeof(T)))
+    static inline std::pmr::polymorphic_allocator<T> allocator()
+    {
+        return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
     }
 };
 
-template<std::size_t Index, typename Self>
-[[nodiscard]] constexpr auto &
-input_port(Self *self) noexcept {
-    return std::get<typename Self::input_ports::template at<Index>>(*self);
-}
 
-template<std::size_t Index, typename Self>
-[[nodiscard]] constexpr auto &
-output_port(Self *self) noexcept {
-    return std::get<typename Self::output_ports::template at<Index>>(*self);
-}
 
-template<fixed_string Name, typename Self>
-[[nodiscard]] constexpr auto &
-input_port(Self *self) noexcept {
-    constexpr int Index = meta::indexForName<Name, typename Self::input_ports>();
-    return std::get<typename Self::input_ports::template at<Index>>(*self);
-}
+/**
+ * @brief circular buffer implementation using double-mapped memory allocations
+ * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
+ * free bulk memory access. The buffer keeps a list of indices (using 'Sequence')
+ * to keep track of which parts can be tread-safely read and/or written
+ *
+ *                          wrap-around point
+ *                                 |
+ *                                 v
+ *  | buffer segment #1 (original) | buffer segment #2 (copy of #1) |
+ *  0                            SIZE                            2*SIZE
+ *                      writeIndex
+ *                          v
+ *  wrap-free write access  |<-  N_1 < SIZE   ->|
+ *
+ *  readIndex < writeIndex-N_2
+ *      v
+ *      |<- N_2 < SIZE ->|
+ *
+ * N.B N_AVAILABLE := (SIZE + writeIndex - readIndex ) % SIZE
+ *
+ * citation: <find appropriate first and educational reference>
+ *
+ * This implementation provides single- as well as multi-producer/consumer buffer
+ * combinations for thread-safe CPU-to-CPU data transfer (optionally) using either
+ * a) the POSIX mmaped(..)/munmapped(..) MMU interface, if available, and/or
+ * b) the guaranteed portable standard C/C++ (de-)allocators as a fall-back.
+ *
+ * for more details see
+ */
+template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
+requires (std::has_single_bit(sizeof(T)))
+class circular_buffer
+{
+    using Allocator         = std::pmr::polymorphic_allocator<T>;
+    using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
+    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
+    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
 
-template<fixed_string Name, typename Self>
-[[nodiscard]] constexpr auto &
-output_port(Self *self) noexcept {
-    constexpr int Index = meta::indexForName<Name, typename Self::output_ports>();
-    return std::get<typename Self::output_ports::template at<Index>>(*self);
-}
+    struct buffer_impl {
+        alignas(kCacheLine) Allocator                   _allocator{};
+        alignas(kCacheLine) const bool                  _is_mmap_allocated;
+        alignas(kCacheLine) const std::size_t           _size;
+        alignas(kCacheLine) std::vector<T, Allocator>   _data;
+        alignas(kCacheLine) Sequence                    _cursor;
+        alignas(kCacheLine) WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
+        alignas(kCacheLine) ClaimType                   _claim_strategy;
+        // list of dependent reader indices
+        alignas(kCacheLine) DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
 
-template<typename Self>
-[[nodiscard]] constexpr auto
-input_ports(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(input_port<Idx>(self)...);
+        buffer_impl() = delete;
+        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
+            _size(align_with_page_size(min_size, _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
+        }
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
+            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
+        }
+#else
+        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
+            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
+        }
+#endif
+
+        static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
+            // double-mmaped behaviour requires the different size/alloc strategy
+            // i.e. the second buffer half may not default-constructed as it's identical to the first one
+            // and would result in a double dealloc during the default destruction
+            return _is_mmap_allocated ? size : 2 * size;
+        }
+    };
+
+    template <typename U = T>
+    class buffer_writer {
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+
+        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        alignas(kCacheLine) bool                        _is_mmap_allocated;
+        alignas(kCacheLine) std::size_t                 _size;
+        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
+        alignas(kCacheLine) ClaimType*                  _claim_strategy;
+
+    public:
+        buffer_writer() = delete;
+        buffer_writer(std::shared_ptr<buffer_impl> buffer) :
+            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
+            _size(_buffer->_size), _data(std::addressof(_buffer->_data)), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer(buffer_writer&& other)
+            : _buffer(std::move(other._buffer))
+            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
+            , _size(_buffer->_size)
+            , _data(std::addressof(_buffer->_data))
+            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer& operator=(buffer_writer tmp) {
+            std::swap(_buffer, tmp._buffer);
+            _is_mmap_allocated = _buffer->_is_mmap_allocated;
+            _size = _buffer->_size;
+            _data = std::addressof(_buffer->_data);
+            _claim_strategy = std::addressof(_buffer->_claim_strategy);
+
+            return *this;
+        }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+
+        [[nodiscard]] constexpr auto get(std::size_t n_slots_to_claim) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
+            try {
+                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
+                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
+                return {{ &(*_data)[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
+            } catch (const NoCapacityException &) {
+                return { { /* empty span */ }, { 0, 0 }};
+            }
+        }
+
+        constexpr void publish(std::pair<std::size_t, std::int64_t> token, std::size_t n_produced) {
+            if (!_is_mmap_allocated) {
+                // mirror samples below/above the buffer's wrap-around point
+                const std::size_t index = token.first;
+                const size_t nFirstHalf = std::min(_size - index, n_produced);
+                const size_t nSecondHalf = n_produced  - nFirstHalf;
+
+                auto& data = *_data;
+                std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+            }
+            _claim_strategy->publish(token.second + n_produced); // points at first non-writable index
+        }
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
+                return;
+            }
+            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
+            translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
+        } // blocks until elements are available
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
+                return true;
+            }
+            try {
+                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
+                translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
+                return true;
+            } catch (const NoCapacityException &) {
+                return false;
+            }
+        }
+
+        [[nodiscard]] constexpr std::size_t available() const noexcept {
+            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
+        }
+
+        private:
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
+            try {
+                auto& data = *_data;
+                const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
+                std::span<U> writable_data(&data[index], n_slots_to_claim);
+                if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
+                } else {
+                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
+                }
+
+                if (!_is_mmap_allocated) {
+                    // mirror samples below/above the buffer's wrap-around point
+                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
+                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
+
+                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+                }
+                _claim_strategy->publish(publishSequence); // points at first non-writable index
+            } catch (const std::exception& e) {
+                throw e;
+            } catch (...) {
+                throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
+            }
+        }
+    };
+
+    template<typename U = T>
+    class buffer_reader
+    {
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+
+        alignas(kCacheLine) std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
+        alignas(kCacheLine) std::int64_t                _read_index_cached;
+        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        alignas(kCacheLine) std::size_t                 _size;
+        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
+
+    public:
+        buffer_reader() = delete;
+        buffer_reader(std::shared_ptr<buffer_impl> buffer) :
+            _buffer(buffer), _size(buffer->_size), _data(std::addressof(buffer->_data)) {
+            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
+            _read_index_cached = _read_index->value();
+        }
+        buffer_reader(buffer_reader&& other)
+            : _read_index(std::move(other._read_index))
+            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
+            , _buffer(other._buffer)
+            , _size(_buffer->_size)
+            , _data(std::addressof(_buffer->_data)) {
+        }
+        buffer_reader& operator=(buffer_reader tmp) noexcept {
+            std::swap(_read_index, tmp._read_index);
+            std::swap(_read_index_cached, tmp._read_index_cached);
+            std::swap(_buffer, tmp._buffer);
+            _size = _buffer->_size;
+            _data = std::addressof(_buffer->_data);
+            return *this;
+        };
+        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+
+        template <bool strict_check = true>
+        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
+            const auto& data = *_data;
+            if constexpr (strict_check) {
+                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
+                return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
+            }
+            const std::size_t n = n_requested > 0 ? n_requested : available();
+            return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
+        }
+
+        template <bool strict_check = true>
+        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
+            if constexpr (strict_check) {
+                if (n_elements <= 0) {
+                    return true;
+                }
+                if (n_elements > available()) {
+                    return false;
+                }
+            }
+            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
+            return true;
+        }
+
+        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
+
+        [[nodiscard]] constexpr std::size_t available() const noexcept {
+            return _buffer->_cursor.value() - _read_index_cached;
+        }
+    };
+
+    [[nodiscard]] constexpr static Allocator DefaultAllocator() {
+        if constexpr (has_posix_mmap_interface) {
+            return double_mapped_memory_resource::allocator<T>();
+        } else {
+            return Allocator();
+        }
     }
-    (std::make_index_sequence<Self::input_ports::size>());
-}
 
-template<typename Self>
-[[nodiscard]] constexpr auto
-output_ports(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(output_port<Idx>(self)...);
+    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
+    circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+
+public:
+    circular_buffer() = delete;
+    circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
+        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
+    ~circular_buffer() = default;
+
+    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
+    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
+    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
+
+    // implementation specific interface -- not part of public Buffer / production-code API
+    [[nodiscard]] auto n_readers()       { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] auto claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
+    [[nodiscard]] auto wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
+    [[nodiscard]] auto cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+
+};
+static_assert(Buffer<circular_buffer<int32_t>>);
+// clang-format on
+
+} // namespace gr
+
+#endif // GNURADIO_CIRCULAR_BUFFER_HPP
+
+// #include "buffer.hpp"
+
+// #include "typelist.hpp"
+#ifndef GNURADIO_TYPELIST_HPP
+#define GNURADIO_TYPELIST_HPP
+
+#include <bit>
+#include <concepts>
+#include <tuple>
+#include <type_traits>
+#include <string_view>
+#include <string>
+
+namespace fair::meta {
+
+template<typename... Ts>
+struct typelist;
+
+// concat ///////////////
+namespace detail {
+template<typename...>
+struct concat_impl;
+
+template<>
+struct concat_impl<> {
+    using type = typelist<>;
+};
+
+template<typename A>
+struct concat_impl<A> {
+    using type = typelist<A>;
+};
+
+template<typename... As>
+struct concat_impl<typelist<As...>> {
+    using type = typelist<As...>;
+};
+
+template<typename A, typename B>
+struct concat_impl<A, B> {
+    using type = typelist<A, B>;
+};
+
+template<typename... As, typename B>
+struct concat_impl<typelist<As...>, B> {
+    using type = typelist<As..., B>;
+};
+
+template<typename A, typename... Bs>
+struct concat_impl<A, typelist<Bs...>> {
+    using type = typelist<A, Bs...>;
+};
+
+template<typename... As, typename... Bs>
+struct concat_impl<typelist<As...>, typelist<Bs...>> {
+    using type = typelist<As..., Bs...>;
+};
+
+template<typename A, typename B, typename C>
+struct concat_impl<A, B, C> {
+    using type = typename concat_impl<typename concat_impl<A, B>::type, C>::type;
+};
+
+template<typename A, typename B, typename C, typename D, typename... More>
+struct concat_impl<A, B, C, D, More...> {
+    using type =
+            typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type,
+                                 typename concat_impl<More...>::type>::type;
+};
+} // namespace detail
+
+template<typename... Ts>
+using concat = typename detail::concat_impl<Ts...>::type;
+
+// split_at, left_of, right_of ////////////////
+namespace detail {
+template<unsigned N>
+struct splitter;
+
+template<>
+struct splitter<0> {
+    template<typename...>
+    using first = typelist<>;
+    template<typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<1> {
+    template<typename T0, typename...>
+    using first = typelist<T0>;
+    template<typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<2> {
+    template<typename T0, typename T1, typename...>
+    using first = typelist<T0, T1>;
+    template<typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<4> {
+    template<typename T0, typename T1, typename T2, typename T3, typename...>
+    using first = typelist<T0, T1, T2, T3>;
+    template<typename, typename, typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<8> {
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
+             typename T6, typename T7, typename...>
+    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7>;
+
+    template<typename, typename, typename, typename, typename, typename, typename, typename,
+             typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<16> {
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
+             typename T6, typename T7, typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15, typename...>
+    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
+
+    template<typename, typename, typename, typename, typename, typename, typename, typename, typename,
+             typename, typename, typename, typename, typename, typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<unsigned N>
+struct splitter {
+    static constexpr unsigned FirstSplit = std::has_single_bit(N) ? N / 2 : std::bit_floor(N);
+    using A                              = splitter<FirstSplit>;
+    using B                              = splitter<N - FirstSplit>;
+
+    template<typename... Ts>
+    using first = concat<typename A::template first<Ts...>,
+                         typename B::template first<typename A::template second<Ts...>>>;
+
+    template<typename... Ts>
+    using second = typename B::template second<typename A::template second<Ts...>>;
+};
+} // namespace detail
+
+template<unsigned N, typename List>
+struct split_at;
+
+template<unsigned N, typename... Ts>
+struct split_at<N, typelist<Ts...>> {
+    using first  = typename detail::splitter<N>::template first<Ts...>;
+    using second = typename detail::splitter<N>::template second<Ts...>;
+};
+
+template<std::size_t N, typename List>
+using left_of = typename split_at<N, List>::first;
+
+template<std::size_t N, typename List>
+using right_of = typename split_at<N + 1, List>::second;
+
+// remove_at /////////////
+template<std::size_t Idx, typename List>
+using remove_at = concat<left_of<Idx, List>, right_of<Idx, List>>;
+
+// first_type ////////////
+namespace detail {
+template<typename List>
+struct first_type_impl {};
+
+template<typename T0, typename... Ts>
+struct first_type_impl<typelist<T0, Ts...>> {
+    using type = T0;
+};
+} // namespace detail
+
+template<typename List>
+using first_type = typename detail::first_type_impl<List>::type;
+
+// transform_types ////////////
+namespace detail {
+template<template<typename> class Template, typename List>
+struct transform_types_impl;
+
+template<template<typename> class Template, typename... Ts>
+struct transform_types_impl<Template, typelist<Ts...>> {
+    using type = typelist<Template<Ts>...>;
+};
+} // namespace detail
+
+template<template<typename> class Template, typename List>
+using transform_types = typename detail::transform_types_impl<Template, List>::type;
+
+// transform_value_type
+template<typename T>
+using transform_value_type = typename T::value_type;
+
+// reduce ////////////////
+namespace detail {
+template<template<typename, typename> class Method, typename List>
+struct reduce_impl;
+
+template<template<typename, typename> class Method, typename T0>
+struct reduce_impl<Method, typelist<T0>> {
+    using type = T0;
+};
+
+template<template<typename, typename> class Method, typename T0, typename T1, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, Ts...>>
+    : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
+
+template<template<typename, typename> class Method, typename T0, typename T1, typename T2,
+         typename T3, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>>
+    : public reduce_impl<
+              Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {
+};
+} // namespace detail
+
+template<template<typename, typename> class Method, typename List>
+using reduce = typename detail::reduce_impl<Method, List>::type;
+
+// typelist /////////////////
+template<typename T>
+concept is_typelist_v = requires { typename T::typelist_tag; };
+
+template<typename... Ts>
+struct typelist {
+    using this_t = typelist<Ts...>;
+    using typelist_tag = std::true_type;
+
+    static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
+
+    template<template<typename...> class Other>
+    using apply = Other<Ts...>;
+
+    template<std::size_t I>
+    using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
+
+    template <typename Head>
+    using prepend = typelist<Head, Ts...>;
+
+    template<typename... Other>
+    static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
+
+    template<typename... Other>
+    static constexpr inline bool are_convertible_to = (std::convertible_to<Ts, Other> && ...);
+
+    template<typename... Other>
+    static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
+
+    template<typename F, typename Tup>
+        requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
+    static constexpr auto
+    construct(Tup &&args_tuple) {
+        return std::apply(
+                []<typename... Args>(Args &&...args) {
+                    return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...);
+                },
+                std::forward<Tup>(args_tuple));
     }
-    (std::make_index_sequence<Self::output_ports::size>());
-}
 
-} // namespace fair::graph
+    template<template<typename> typename Trafo>
+    using transform = meta::transform_types<Trafo, this_t>;
+
+    template<template<typename...> typename Pred>
+    constexpr static bool all_of = (Pred<Ts>::value && ...);
+
+    template<template<typename...> typename Pred>
+    constexpr static bool none_of = (!Pred<Ts>::value && ...);
+
+    template<template<typename...> typename Predicate>
+    using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
+
+    using tuple_type    = std::tuple<Ts...>;
+    using tuple_or_type = std::remove_pointer_t<decltype(
+            [] {
+                if constexpr (sizeof...(Ts) == 0) {
+                    return static_cast<void*>(nullptr);
+                } else if constexpr (sizeof...(Ts) == 1) {
+                    return static_cast<at<0>*>(nullptr);
+                } else {
+                    return static_cast<tuple_type*>(nullptr);
+                }
+            }())>;
+
+};
+
+
+namespace detail {
+    template <template <typename...> typename OtherTypelist, typename... Args>
+    meta::typelist<Args...> to_typelist_helper(OtherTypelist<Args...>*);
+} // namespace detail
+
+template <typename OtherTypelist>
+using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist*>(nullptr)));
+
+} // namespace fair::meta
 
 #endif // include guard
 
+// #include "port.hpp"
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
@@ -405,373 +1742,18 @@ output_ports(Self *self) noexcept {
 #include <complex>
 #include <span>
 
-#include <utils.hpp>
-#include <circular_buffer.hpp>
+// #include "utils.hpp"
+#ifndef GNURADIO_GRAPH_UTILS_HPP
+#define GNURADIO_GRAPH_UTILS_HPP
 
-namespace fair::graph {
+#include <functional>
+#include <iostream>
+#include <string>
+#include <string_view>
 
-using fair::meta::fixed_string;
+// #include "typelist.hpp"
 
-// #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
-using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> /*, ...*/>;
-
-enum class port_direction_t { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
-enum class connection_result_t { SUCCESS, FAILED };
-enum class port_type_t { STREAM, MESSAGE }; // TODO: Think of a better name
-enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
-
-template<class T>
-concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
-                   typename T::value_type;
-                   { t.pmt_type() } -> std::same_as<supported_type>;
-                   { t.type() } -> std::same_as<port_type_t>;
-                   { t.direction() } -> std::same_as<port_direction_t>;
-                   { t.name() } -> std::same_as<std::string_view>;
-                   { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
-                   { t.disconnect() } -> std::same_as<connection_result_t>;
-               };
-
-template<typename T>
-concept has_fixed_port_info_v = requires {
-                                    typename T::value_type;
-                                    { T::static_name() };
-                                    { T::direction() } -> std::same_as<port_direction_t>;
-                                    { T::type() } -> std::same_as<port_type_t>;
-                                };
-
-template<typename T>
-using has_fixed_port_info = std::integral_constant<bool, has_fixed_port_info_v<T>>;
-
-template<typename T>
-struct has_fixed_port_info_or_is_typelist : std::false_type {};
-
-template<typename T>
-    requires has_fixed_port_info_v<T>
-struct has_fixed_port_info_or_is_typelist<T> : std::true_type {};
-
-template<typename T>
-    requires(meta::is_typelist_v<T> and T::template all_of<has_fixed_port_info>)
-struct has_fixed_port_info_or_is_typelist<T> : std::true_type {};
-
-template<std::size_t _min, std::size_t _max>
-struct limits {
-    using limits_tag                 = std::true_type;
-    static constexpr std::size_t min = _min;
-    static constexpr std::size_t max = _max;
-};
-
-template<typename T>
-concept is_limits_v = requires { typename T::limits_tag; };
-
-static_assert(!is_limits_v<int>);
-static_assert(!is_limits_v<std::size_t>);
-static_assert(is_limits_v<limits<0, 1024>>);
-
-template<typename T>
-using is_limits = std::integral_constant<bool, is_limits_v<T>>;
-
-template<typename Port>
-using port_type = typename Port::value_type;
-
-template<typename Port>
-using is_in_port = std::integral_constant<bool, Port::direction() == port_direction_t::INPUT>;
-
-template<typename Port>
-concept InPort = is_in_port<Port>::value;
-
-template<typename Port>
-using is_out_port = std::integral_constant<bool, Port::direction() == port_direction_t::OUTPUT>;
-
-template<typename Port>
-concept OutPort = is_out_port<Port>::value;
-
-
-template<typename T, fixed_string PortName, port_type_t Porttype, port_direction_t PortDirection, // TODO: sort default arguments
-         std::size_t N_HISTORY = std::dynamic_extent, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, bool OPTIONAL = false,
-         gr::Buffer BufferType = gr::circular_buffer<T>>
-class port {
-public:
-    static_assert(PortDirection != port_direction_t::ANY, "ANY reserved for queries and not port direction declarations");
-
-    using value_type                = T;
-
-    static constexpr bool IS_INPUT  = PortDirection == port_direction_t::INPUT;
-    static constexpr bool IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
-
-    using port_tag                  = std::true_type;
-
-private:
-    using ReaderType          = decltype(std::declval<BufferType>().new_reader());
-    using WriterType          = decltype(std::declval<BufferType>().new_writer());
-    using IoType              = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
-
-    std::string  _name        = static_cast<std::string>(PortName);
-    std::int16_t _priority    = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t  _n_history   = N_HISTORY;
-    std::size_t  _min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
-    std::size_t  _max_samples = MAX_SAMPLES;
-    bool         _connected   = false;
-
-    IoType       _ioHandler   = new_io_handler();
-
-public:
-    [[nodiscard]] constexpr auto
-    new_io_handler() const noexcept {
-        if constexpr (IS_INPUT) {
-            return BufferType(65536).new_reader();
-        } else {
-            return BufferType(65536).new_writer();
-        }
-    }
-
-    [[nodiscard]] void *
-    writer_handler_internal() noexcept {
-        static_assert(IS_OUTPUT, "only to be used with output ports");
-        return static_cast<void *>(std::addressof(_ioHandler));
-    }
-
-    [[nodiscard]] bool
-    update_reader_internal(void *buffer_writer_handler_other) noexcept {
-        static_assert(IS_INPUT, "only to be used with input ports");
-
-        if (buffer_writer_handler_other == nullptr) {
-            return false;
-        }
-
-        // TODO: If we want to allow ports with different buffer types to be mixed
-        //       this will fail. We need to add a check that two ports that
-        //       connect to each other use the same buffer type
-        //       (std::any could be a viable approach)
-        auto typed_buffer_writer = static_cast<WriterType *>(buffer_writer_handler_other);
-        setBuffer(typed_buffer_writer->buffer());
-        return true;
-    }
-
-public:
-    port()             = default;
-
-    port(const port &) = delete;
-
-    auto
-    operator=(const port &)
-            = delete;
-
-    port(std::string port_name, std::int16_t priority = 0, std::size_t n_history = 0, std::size_t min_samples = 0U, std::size_t max_samples = SIZE_MAX) noexcept
-        : _name(std::move(port_name))
-        , _priority{ priority }
-        , _n_history(n_history)
-        , _min_samples(min_samples)
-        , _max_samples(max_samples) {
-        static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
-    }
-
-    constexpr port(port &&other) noexcept
-        : _name(std::move(other._name))
-        , _priority{ other._priority }
-        , _n_history(other._n_history)
-        , _min_samples(other._min_samples)
-        , _max_samples(other._max_samples) {}
-
-    constexpr port &
-    operator=(port &&other) {
-        port tmp(std::move(other));
-        std::swap(_name, tmp._name);
-        std::swap(_priority, tmp._priority);
-        std::swap(_n_history, tmp._n_history);
-        std::swap(_min_samples, tmp._min_samples);
-        std::swap(_max_samples, tmp._max_samples);
-        std::swap(_connected, tmp._connected);
-        std::swap(_ioHandler, tmp._ioHandler);
-        return *this;
-    }
-
-    [[nodiscard]] constexpr static port_type_t
-    type() noexcept {
-        return Porttype;
-    }
-
-    [[nodiscard]] constexpr static port_direction_t
-    direction() noexcept {
-        return PortDirection;
-    }
-
-    [[nodiscard]] constexpr static decltype(PortName)
-    static_name() noexcept
-        requires(!PortName.empty())
-    {
-        return PortName;
-    }
-
-    [[nodiscard]] constexpr supported_type
-    pmt_type() const noexcept {
-        return T();
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    name() const noexcept {
-        if constexpr (!PortName.empty()) {
-            return static_cast<std::string_view>(PortName);
-        } else {
-            return _name;
-        }
-    }
-
-    [[nodiscard]] constexpr static bool
-    is_optional() noexcept {
-        return OPTIONAL;
-    }
-
-    [[nodiscard]] constexpr std::int16_t
-    priority() const noexcept {
-        return _priority;
-    }
-
-    [[nodiscard]] constexpr static std::size_t
-    available() noexcept {
-        return 0;
-    } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
-
-    [[nodiscard]] constexpr std::size_t
-    n_history() const noexcept {
-        if constexpr (N_HISTORY == std::dynamic_extent) {
-            return _n_history;
-        } else {
-            return N_HISTORY;
-        }
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    min_buffer_size() const noexcept {
-        if constexpr (MIN_SAMPLES == std::dynamic_extent) {
-            return _min_samples;
-        } else {
-            return MIN_SAMPLES;
-        }
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    max_buffer_size() const noexcept {
-        if constexpr (MAX_SAMPLES == std::dynamic_extent) {
-            return _max_samples;
-        } else {
-            return MAX_SAMPLES;
-        }
-    }
-
-    [[nodiscard]] constexpr connection_result_t
-    resize_buffer(std::size_t min_size) noexcept {
-        if constexpr (IS_INPUT) {
-            return connection_result_t::SUCCESS;
-        } else {
-            try {
-                _ioHandler = BufferType(min_size).new_writer();
-            } catch (...) {
-                return connection_result_t::FAILED;
-            }
-        }
-        return connection_result_t::SUCCESS;
-    }
-
-    [[nodiscard]] BufferType
-    buffer() {
-        return _ioHandler.buffer();
-    }
-
-    void
-    setBuffer(gr::Buffer auto buffer) noexcept {
-        if constexpr (IS_INPUT) {
-            _ioHandler = std::move(buffer.new_reader());
-            _connected = true;
-        } else {
-            _ioHandler = std::move(buffer.new_writer());
-        }
-    }
-
-    [[nodiscard]] constexpr ReaderType &
-    reader() const noexcept {
-        static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] constexpr ReaderType &
-    reader() noexcept {
-        static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] constexpr WriterType &
-    writer() const noexcept {
-        static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] constexpr WriterType &
-    writer() noexcept {
-        static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] connection_result_t
-    disconnect() noexcept {
-        if (_connected == false) {
-            return connection_result_t::FAILED;
-        }
-        _ioHandler = new_io_handler();
-        _connected = false;
-        return connection_result_t::SUCCESS;
-    }
-
-    template<typename Other>
-    [[nodiscard]] connection_result_t
-    connect(Other &&other) {
-        static_assert(IS_OUTPUT && std::remove_cvref_t<Other>::IS_INPUT);
-        auto src_buffer = writer_handler_internal();
-        return std::forward<Other>(other).update_reader_internal(src_buffer) ? connection_result_t::SUCCESS
-                                                                             : connection_result_t::FAILED;
-    }
-
-    friend class dynamic_port;
-};
-
-
-namespace detail {
-template<typename T, auto>
-using just_t = T;
-
-template<typename T, std::size_t... Is>
-consteval fair::meta::typelist<just_t<T, Is>...>
-repeated_ports_impl(std::index_sequence<Is...>) {
-    return {};
-}
-} // namespace detail
-
-// TODO: Add port index to BaseName
-template<std::size_t Count, typename T, fixed_string BaseName, port_type_t Porttype, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
-         std::size_t MAX_SAMPLES = std::dynamic_extent>
-using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, Porttype, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
-
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
-using IN = port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
-using OUT = port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
-using IN_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, fixed_string PortName = "", std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
-using OUT_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
-
-static_assert(Port<IN<float, "in">>);
-static_assert(Port<decltype(IN<float>("in"))>);
-static_assert(Port<OUT<float, "out">>);
-static_assert(Port<IN_MSG<float, "in_msg">>);
-static_assert(Port<OUT_MSG<float, "out_msg">>);
-
-static_assert(IN<float, "in">::static_name() == fixed_string("in"));
-static_assert(requires { IN<float>("in").name(); });
-
-
-}
-
-#endif // include guard
+// #include "vir/simd.h"
 /*
     Copyright © 2022 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
                      Matthias Kretz <m.kretz@gsi.de>
@@ -3188,304 +4170,6 @@ namespace vir::stdx
 
 #endif
 #endif  // VIR_SIMD_H_
-#ifndef GNURADIO_TYPELIST_HPP
-#define GNURADIO_TYPELIST_HPP
-
-#include <bit>
-#include <concepts>
-#include <tuple>
-#include <type_traits>
-#include <string_view>
-#include <string>
-
-namespace fair::meta {
-
-template<typename... Ts>
-struct typelist;
-
-// concat ///////////////
-namespace detail {
-template<typename...>
-struct concat_impl;
-
-template<>
-struct concat_impl<> {
-    using type = typelist<>;
-};
-
-template<typename A>
-struct concat_impl<A> {
-    using type = typelist<A>;
-};
-
-template<typename... As>
-struct concat_impl<typelist<As...>> {
-    using type = typelist<As...>;
-};
-
-template<typename A, typename B>
-struct concat_impl<A, B> {
-    using type = typelist<A, B>;
-};
-
-template<typename... As, typename B>
-struct concat_impl<typelist<As...>, B> {
-    using type = typelist<As..., B>;
-};
-
-template<typename A, typename... Bs>
-struct concat_impl<A, typelist<Bs...>> {
-    using type = typelist<A, Bs...>;
-};
-
-template<typename... As, typename... Bs>
-struct concat_impl<typelist<As...>, typelist<Bs...>> {
-    using type = typelist<As..., Bs...>;
-};
-
-template<typename A, typename B, typename C>
-struct concat_impl<A, B, C> {
-    using type = typename concat_impl<typename concat_impl<A, B>::type, C>::type;
-};
-
-template<typename A, typename B, typename C, typename D, typename... More>
-struct concat_impl<A, B, C, D, More...> {
-    using type =
-            typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type,
-                                 typename concat_impl<More...>::type>::type;
-};
-} // namespace detail
-
-template<typename... Ts>
-using concat = typename detail::concat_impl<Ts...>::type;
-
-// split_at, left_of, right_of ////////////////
-namespace detail {
-template<unsigned N>
-struct splitter;
-
-template<>
-struct splitter<0> {
-    template<typename...>
-    using first = typelist<>;
-    template<typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<1> {
-    template<typename T0, typename...>
-    using first = typelist<T0>;
-    template<typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<2> {
-    template<typename T0, typename T1, typename...>
-    using first = typelist<T0, T1>;
-    template<typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<4> {
-    template<typename T0, typename T1, typename T2, typename T3, typename...>
-    using first = typelist<T0, T1, T2, T3>;
-    template<typename, typename, typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<8> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
-             typename T6, typename T7, typename...>
-    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7>;
-
-    template<typename, typename, typename, typename, typename, typename, typename, typename,
-             typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<16> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
-             typename T6, typename T7, typename T8, typename T9, typename T10, typename T11,
-             typename T12, typename T13, typename T14, typename T15, typename...>
-    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
-
-    template<typename, typename, typename, typename, typename, typename, typename, typename, typename,
-             typename, typename, typename, typename, typename, typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<unsigned N>
-struct splitter {
-    static constexpr unsigned FirstSplit = std::has_single_bit(N) ? N / 2 : std::bit_floor(N);
-    using A                              = splitter<FirstSplit>;
-    using B                              = splitter<N - FirstSplit>;
-
-    template<typename... Ts>
-    using first = concat<typename A::template first<Ts...>,
-                         typename B::template first<typename A::template second<Ts...>>>;
-
-    template<typename... Ts>
-    using second = typename B::template second<typename A::template second<Ts...>>;
-};
-} // namespace detail
-
-template<unsigned N, typename List>
-struct split_at;
-
-template<unsigned N, typename... Ts>
-struct split_at<N, typelist<Ts...>> {
-    using first  = typename detail::splitter<N>::template first<Ts...>;
-    using second = typename detail::splitter<N>::template second<Ts...>;
-};
-
-template<std::size_t N, typename List>
-using left_of = typename split_at<N, List>::first;
-
-template<std::size_t N, typename List>
-using right_of = typename split_at<N + 1, List>::second;
-
-// remove_at /////////////
-template<std::size_t Idx, typename List>
-using remove_at = concat<left_of<Idx, List>, right_of<Idx, List>>;
-
-// first_type ////////////
-namespace detail {
-template<typename List>
-struct first_type_impl {};
-
-template<typename T0, typename... Ts>
-struct first_type_impl<typelist<T0, Ts...>> {
-    using type = T0;
-};
-} // namespace detail
-
-template<typename List>
-using first_type = typename detail::first_type_impl<List>::type;
-
-// transform_types ////////////
-namespace detail {
-template<template<typename> class Template, typename List>
-struct transform_types_impl;
-
-template<template<typename> class Template, typename... Ts>
-struct transform_types_impl<Template, typelist<Ts...>> {
-    using type = typelist<Template<Ts>...>;
-};
-} // namespace detail
-
-template<template<typename> class Template, typename List>
-using transform_types = typename detail::transform_types_impl<Template, List>::type;
-
-// transform_value_type
-template<typename T>
-using transform_value_type = typename T::value_type;
-
-// reduce ////////////////
-namespace detail {
-template<template<typename, typename> class Method, typename List>
-struct reduce_impl;
-
-template<template<typename, typename> class Method, typename T0>
-struct reduce_impl<Method, typelist<T0>> {
-    using type = T0;
-};
-
-template<template<typename, typename> class Method, typename T0, typename T1, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, Ts...>>
-    : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
-
-template<template<typename, typename> class Method, typename T0, typename T1, typename T2,
-         typename T3, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>>
-    : public reduce_impl<
-              Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {
-};
-} // namespace detail
-
-template<template<typename, typename> class Method, typename List>
-using reduce = typename detail::reduce_impl<Method, List>::type;
-
-// typelist /////////////////
-template<typename T>
-concept is_typelist_v = requires { typename T::typelist_tag; };
-
-template<typename... Ts>
-struct typelist {
-    using this_t = typelist<Ts...>;
-    using typelist_tag = std::true_type;
-
-    static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
-
-    template<template<typename...> class Other>
-    using apply = Other<Ts...>;
-
-    template<std::size_t I>
-    using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
-
-    template<typename... Other>
-    static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
-
-    template<typename... Other>
-    static constexpr inline bool are_convertible_to = (std::convertible_to<Ts, Other> && ...);
-
-    template<typename... Other>
-    static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
-
-    template<typename F, typename Tup>
-        requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
-    static constexpr auto
-    construct(Tup &&args_tuple) {
-        return std::apply(
-                []<typename... Args>(Args &&...args) {
-                    return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...);
-                },
-                std::forward<Tup>(args_tuple));
-    }
-
-    template<template<typename> typename Trafo>
-    using transform = meta::transform_types<Trafo, this_t>;
-
-    template<template<typename...> typename Pred>
-    constexpr static bool all_of = (Pred<Ts>::value && ...);
-
-    template<template<typename...> typename Pred>
-    constexpr static bool none_of = (!Pred<Ts>::value && ...);
-
-    template<template<typename...> typename Predicate>
-    using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
-
-    using tuple_type    = std::tuple<Ts...>;
-    using tuple_or_type = std::remove_pointer_t<decltype(
-            [] {
-                if constexpr (sizeof...(Ts) == 0) {
-                    return static_cast<void*>(nullptr);
-                } else if constexpr (sizeof...(Ts) == 1) {
-                    return static_cast<at<0>*>(nullptr);
-                } else {
-                    return static_cast<tuple_type*>(nullptr);
-                }
-            }())>;
-
-};
-
-
-
-
-} // namespace fair::meta
-
-#endif // include guard
-#ifndef GNURADIO_GRAPH_UTILS_HPP
-#define GNURADIO_GRAPH_UTILS_HPP
-
-#include <functional>
-#include <iostream>
-#include <string>
-#include <string_view>
 
 
 #ifndef __EMSCRIPTEN__
@@ -3494,7 +4178,17 @@ struct typelist {
 #include <typeinfo>
 #endif
 
+namespace fair::literals {
+    // C++23 has literal suffixes for std::size_t, but we are not
+    // in C++23 just yet
+    constexpr std::size_t operator"" _UZ(unsigned long long n) {
+        return static_cast<std::size_t>(n);
+    }
+}
+
 namespace fair::meta {
+
+using namespace fair::literals;
 
 template<typename... Ts>
 struct print_types;
@@ -3564,6 +4258,8 @@ template<class... T>
 constexpr bool always_false = false;
 
 struct dummy_t {};
+
+constexpr std::size_t invalid_index = -1_UZ;
 
 template<typename F, typename... Args>
 auto
@@ -3653,47 +4349,6 @@ using transform_by_rebind_simd = meta::transform_types<rebind_simd_helper<V>::te
 template<typename List>
 using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
 
-template<typename Node>
-concept source_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
-                          {
-                              [](Node &n, auto &inputs) {
-                                  if constexpr (Node::input_port_types::size > 0) {
-                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
-                                      (n, inputs, std::make_index_sequence<Node::input_port_types::size>());
-                                  } else {
-                                      return n.process_one();
-                                  }
-                              }(node, inputs)
-                              } -> std::same_as<typename Node::return_type>;
-                      };
-
-template<typename Node>
-concept sink_node = requires(Node &node, typename Node::input_port_types::tuple_type const &inputs) {
-                        {
-                            [](Node &n, auto &inputs) {
-                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
-                                    if constexpr (Node::output_port_types::size > 0) {
-                                        auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
-                                    } else {
-                                        n_inside.process_one(std::get<Is>(tup)...);
-                                    }
-                                }
-                                (n, inputs, std::make_index_sequence<Node::input_port_types::size>());
-                            }(node, inputs)
-                        };
-                    };
-
-template<typename Node>
-concept any_node = source_node<Node> || sink_node<Node>;
-
-template<typename Node>
-concept node_can_process_simd = any_node<Node> && requires(Node &n, typename transform_to_widest_simd<typename Node::input_port_types>::template apply<std::tuple> const &inputs) {
-                                                      {
-                                                          []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)->decltype(n.process_one(std::get<Is>(tup)...)) { return {}; }
-                                                          (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
-                                                          } -> any_simd<typename Node::return_type>;
-                                                  };
-
 template<fixed_string Name, typename PortList>
 consteval int
 indexForName() {
@@ -3777,1421 +4432,1038 @@ static_assert(std::is_same_v<dummy_t, type_transform<std::vector, dummy_t>>);
 } // namespace fair::meta
 
 #endif // include guard
-#ifndef GNURADIO_BUFFER2_H
-#define GNURADIO_BUFFER2_H
 
-#include <bit>
-#include <cstdint>
-#include <type_traits>
-#include <concepts>
-#include <span>
+// #include "circular_buffer.hpp"
 
-namespace gr {
-namespace util {
-template <typename T, typename...>
-struct first_template_arg_helper;
 
-template <template <typename...> class TemplateType,
-          typename ValueType,
-          typename... OtherTypes>
-struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
-    using value_type = ValueType;
-};
+namespace fair::graph {
 
-template <typename T>
-constexpr auto* value_type_helper()
-{
-    if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type*>(nullptr);
-    }
-    else {
-        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
-    }
-}
+using fair::meta::fixed_string;
+using namespace fair::literals;
 
-template <typename T>
-using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
+// #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
+using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> /*, ...*/>;
 
-template <typename... A>
-struct test_fallback {
-};
+enum class port_direction_t { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
+enum class connection_result_t { SUCCESS, FAILED };
+enum class port_type_t { STREAM, MESSAGE }; // TODO: Think of a better name
+enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
 
-template <typename, typename ValueType>
-struct test_value_type {
-    using value_type = ValueType;
-};
-
-static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
-static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
-static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
-static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
-
-} // namespace util
-
-// clang-format off
-// disable formatting until clang-format (v16) supporting concepts
 template<class T>
-concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
-    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
-    { t.consume(n_items) } -> std::same_as<bool>;
-    { t.position() }       -> std::same_as<std::int64_t>;
-    { t.available() }      -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
+concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
+                   typename T::value_type;
+                   { t.pmt_type() } -> std::same_as<supported_type>;
+                   { t.type() } -> std::same_as<port_type_t>;
+                   { t.direction() } -> std::same_as<port_direction_t>;
+                   { t.name() } -> std::same_as<std::string_view>;
+                   { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
+                   { t.disconnect() } -> std::same_as<connection_result_t>;
+               };
 
-template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
 
-template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
-    { t.get(n_items) } -> std::same_as<std::pair<std::span<util::value_type_t<T>>, std::pair<std::size_t, std::int64_t>>>;
-    { t.publish(token, n_items) } -> std::same_as<void>;
-    { t.available() }         -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
-
-template<class T, typename ...Args>
-concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
-    { T(min_size, args...) };
-    { t.size() }       -> std::same_as<std::size_t>;
-    { t.new_reader() } -> BufferReader;
-    { t.new_writer() } -> BufferWriter;
-};
-
-// compile-time unit-tests
-namespace test {
-template <typename T>
-struct non_compliant_class {
-};
-template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
-template <typename T, typename... Args>
-using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
-} // namespace test
-
-static_assert(!Buffer<test::non_compliant_class<int>>);
-static_assert(!BufferReader<test::non_compliant_class<int>>);
-static_assert(!BufferWriter<test::non_compliant_class<int>>);
-
-static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-// clang-format on
-} // namespace gr
-
-#endif // GNURADIO_BUFFER2_H
-#ifndef GNURADIO_SEQUENCE_HPP
-#define GNURADIO_SEQUENCE_HPP
-
-#include <algorithm>
-#include <atomic>
-#include <cstdint>
-#include <limits>
-#include <memory>
-#include <ranges>
-#include <vector>
-
-namespace gr {
-
-#ifndef forceinline
-// use this for hot-spots only <-> may bloat code size, not fit into cache and
-// consequently slow down execution
-#define forceinline inline __attribute__((always_inline))
-#endif
-
-static constexpr const std::size_t kCacheLine
-        = 64; // waiting for clang: std::hardware_destructive_interference_size
-static constexpr const std::int64_t kInitialCursorValue = -1L;
-
-/**
- * Concurrent sequence class used for tracking the progress of the ring buffer and event
- * processors. Support a number of concurrent operations including CAS and order writes.
- * Also attempts to be more efficient with regards to false sharing by adding padding
- * around the volatile field.
- */
-// clang-format off
-class Sequence
-{
-    alignas(kCacheLine) std::atomic<std::int64_t> _fieldsValue{};
-
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
+         std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent,
+         gr::Buffer BufferType = gr::circular_buffer<T>>
+class port {
 public:
-    Sequence(const Sequence&) = delete;
-    Sequence(const Sequence&&) = delete;
-    void operator=(const Sequence&) = delete;
-    explicit Sequence(std::int64_t initialValue = kInitialCursorValue) noexcept
-        : _fieldsValue(initialValue)
-    {
-    }
+    static_assert(PortDirection != port_direction_t::ANY, "ANY reserved for queries and not port direction declarations");
 
-    [[nodiscard]] forceinline std::int64_t value() const noexcept
-    {
-        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
-    }
+    using value_type                = T;
 
-    forceinline void setValue(const std::int64_t value) noexcept
-    {
-        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
-    }
+    static constexpr bool IS_INPUT  = PortDirection == port_direction_t::INPUT;
+    static constexpr bool IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
 
-    [[nodiscard]] forceinline bool compareAndSet(std::int64_t expectedSequence,
-                                                 std::int64_t nextSequence) noexcept
-    {
-        // atomically set the value to the given updated value if the current value == the
-        // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(
-            &_fieldsValue, &expectedSequence, nextSequence);
-    }
+    using port_tag                  = std::true_type;
 
-    [[nodiscard]] forceinline std::int64_t incrementAndGet() noexcept
-    {
-        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
-    }
-
-    [[nodiscard]] forceinline std::int64_t addAndGet(std::int64_t value) noexcept
-    {
-        return std::atomic_fetch_add(&_fieldsValue, value) + value;
-    }
-};
-
-namespace detail {
-/**
- * Get the minimum sequence from an array of Sequences.
- *
- * \param sequences sequences to compare.
- * \param minimum an initial default minimum.  If the array is empty this value will
- * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
- */
-inline std::int64_t getMinimumSequence(
-    const std::vector<std::shared_ptr<Sequence>>& sequences,
-    std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
-{
-    if (sequences.empty()) {
-        return minimum;
-    }
-#if not defined(_LIBCPP_VERSION)
-    return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
-#else
-    std::vector<int64_t> v(sequences.size());
-    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
-    auto min = std::min(v.begin(), v.end());
-    return std::min(*min, minimum);
-#endif
-}
-
-inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
-             const Sequence& cursor,
-             const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
-{
-    std::int64_t cursorSequence;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
-
-    do {
-        currentSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
-        updatedSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(currentSequences->size() + sequencesToAdd.size());
-
-#if not defined(_LIBCPP_VERSION)
-        std::ranges::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
-#else
-        std::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
-#endif
-
-        cursorSequence = cursor.value();
-
-        auto index = currentSequences->size();
-        for (auto&& sequence : sequencesToAdd) {
-            sequence->setValue(cursorSequence);
-            (*updatedSequences)[index] = sequence;
-            index++;
-        }
-    } while (!std::atomic_compare_exchange_weak(&sequences, &currentSequences, updatedSequences)); // xTODO: explicit memory order
-
-    cursorSequence = cursor.value();
-
-    for (auto&& sequence : sequencesToAdd) {
-        sequence->setValue(cursorSequence);
-    }
-}
-
-inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence)
-{
-    std::uint32_t numToRemove;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
-
-    do {
-        oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
-#if not defined(_LIBCPP_VERSION)
-        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
-#else
-        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
-#endif
-        if (numToRemove == 0) {
-            break;
-        }
-
-        auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
-        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(
-            oldSize - numToRemove);
-
-        for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto& testSequence = (*oldSequences)[i];
-            if (sequence != testSequence) {
-                (*newSequences)[pos] = testSequence;
-                pos++;
-            }
-        }
-    } while (!std::atomic_compare_exchange_weak(&sequences, &oldSequences, newSequences));
-
-    return numToRemove != 0;
-}
-
-// clang-format on
-
-} // namespace detail
-
-} // namespace gr
-
-#ifdef FMT_FORMAT_H_
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-
-template<>
-struct fmt::formatter<gr::Sequence> {
-    template<typename ParseContext>
-    constexpr auto
-    parse(ParseContext &ctx) {
-        return ctx.begin();
-    }
-
-    template<typename FormatContext>
-    auto
-    format(gr::Sequence const &value, FormatContext &ctx) {
-        return fmt::format_to(ctx.out(), "{}", value.value());
-    }
-};
-
-namespace gr {
-inline std::ostream &
-operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v);
-}
-} // namespace gr
-
-#endif // FMT_FORMAT_H_
-
-#endif // GNURADIO_SEQUENCE_HPP
-#ifndef GNURADIO_WAIT_STRATEGY_HPP
-#define GNURADIO_WAIT_STRATEGY_HPP
-
-#include <condition_variable>
-#include <atomic>
-#include <chrono>
-#include <concepts>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <thread>
-#include <vector>
-
-
-namespace gr {
-// clang-format off
-/**
- * Wait for the given sequence to be available.  It is possible for this method to return a value less than the sequence number supplied depending on the implementation of the WaitStrategy.
- * A common use for this is to signal a timeout.Any EventProcessor that is using a WaitStrategy to get notifications about message becoming available should remember to handle this case.
- * The BatchEventProcessor<T> explicitly handles this case and will signal a timeout if required.
- *
- * \param sequence sequence to be waited on.
- * \param cursor Ring buffer cursor on which to wait.
- * \param dependentSequence on which to wait.
- * \param barrier barrier the IEventProcessor is waiting on.
- * \returns the sequence that is available which may be greater than the requested sequence.
- */
-template<typename T>
-inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
-};
-static_assert(!isWaitStrategy<int>);
-
-/**
- * signal those waiting that the cursor has advanced.
- */
-template<typename T>
-inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
-    { t.signalAllWhenBlocking() } -> std::same_as<void>;
-};
-static_assert(!hasSignalAllWhenBlocking<int>);
-
-template<typename T>
-concept WaitStrategy = isWaitStrategy<T>;
-
-
-
-/**
- * Blocking strategy that uses a lock and condition variable for IEventProcessor's waiting on a barrier.
- * This strategy should be used when performance and low-latency are not as important as CPU resource.
- */
-class BlockingWaitStrategy {
-    std::recursive_mutex        _gate;
-    std::condition_variable_any _conditionVariable;
-
-public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        if (cursor.value() < sequence) {
-            std::unique_lock uniqueLock(_gate);
-
-            while (cursor.value() < sequence) {
-                // optional: barrier check alert
-                _conditionVariable.wait(uniqueLock);
-            }
-        }
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-
-        return availableSequence;
-    }
-
-    void signalAllWhenBlocking() {
-        std::unique_lock uniqueLock(_gate);
-        _conditionVariable.notify_all();
-    }
-};
-static_assert(WaitStrategy<BlockingWaitStrategy>);
-
-/**
- * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
- * This strategy will use CPU resource to avoid syscalls which can introduce latency jitter.
- * It is best used when threads can be bound to specific CPU cores.
- */
-struct BusySpinWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<BusySpinWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
-
-/**
- * Sleeping strategy that initially spins, then uses a std::this_thread::yield(), and eventually sleep. T
- * his strategy is a good compromise between performance and CPU resource.
- * Latency spikes can occur after quiet periods.
- */
-class SleepingWaitStrategy {
-    static const std::int32_t _defaultRetries = 200;
-    std::int32_t              _retries        = 0;
-
-public:
-    explicit SleepingWaitStrategy(std::int32_t retries = _defaultRetries)
-        : _retries(retries) {
-    }
-
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        auto       counter    = _retries;
-        const auto waitMethod = [&counter]() {
-            // optional: barrier check alert
-
-            if (counter > 100) {
-                --counter;
-            } else if (counter > 0) {
-                --counter;
-                std::this_thread::yield();
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(0));
-            }
-        };
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            waitMethod();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<SleepingWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
-
-struct TimeoutException : public std::runtime_error {
-    TimeoutException() : std::runtime_error("TimeoutException") {}
-};
-
-class TimeoutBlockingWaitStrategy {
-    using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
-    Clock::duration             _timeout;
-    std::recursive_mutex        _gate;
-    std::condition_variable_any _conditionVariable;
-
-public:
-    explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
-        : _timeout(timeout) {}
-
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
-
-        if (cursor.value() < sequence) {
-            std::unique_lock uniqueLock(_gate);
-
-            while (cursor.value() < sequence) {
-                // optional: barrier check alert
-
-                if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
-                    throw TimeoutException();
-                }
-            }
-        }
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-
-        return availableSequence;
-    }
-
-    void signalAllWhenBlocking() {
-        std::unique_lock uniqueLock(_gate);
-        _conditionVariable.notify_all();
-    }
-};
-static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
-static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
-
-/**
- * Yielding strategy that uses a Thread.Yield() for IEventProcessors waiting on a barrier after an initially spinning.
- * This strategy is a good compromise between performance and CPU resource without incurring significant latency spikes.
- */
-class YieldingWaitStrategy {
-    const std::size_t _spinTries = 100;
-
-public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        auto       counter    = _spinTries;
-        const auto waitMethod = [&counter]() {
-            // optional: barrier check alert
-
-            if (counter == 0) {
-                std::this_thread::yield();
-            } else {
-                --counter;
-            }
-        };
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            waitMethod();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<YieldingWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
-
-struct NoWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
-        // wait for nothing
-        return sequence;
-    }
-};
-static_assert(WaitStrategy<NoWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
-
-
-/**
- *
- * SpinWait is meant to be used as a tool for waiting in situations where the thread is not allowed to block.
- *
- * In order to get the maximum performance, the implementation first spins for `YIELD_THRESHOLD` times, and then
- * alternates between yielding, spinning and putting the thread to sleep, to allow other threads to be scheduled
- * by the kernel to avoid potential CPU contention.
- *
- * The number of spins, yielding, and sleeping for either '0 ms' or '1 ms' is controlled by the NTTP constants
- * @tparam YIELD_THRESHOLD
- * @tparam SLEEP_0_EVERY_HOW_MANY_TIMES
- * @tparam SLEEP_1_EVERY_HOW_MANY_TIMES
- */
-template<std::int32_t YIELD_THRESHOLD = 10, std::int32_t SLEEP_0_EVERY_HOW_MANY_TIMES = 5, std::int32_t SLEEP_1_EVERY_HOW_MANY_TIMES = 20>
-class SpinWait {
-    using Clock         = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
-    std::int32_t _count = 0;
-    static void  spinWaitInternal(std::int32_t iterationCount) noexcept {
-        for (auto i = 0; i < iterationCount; i++) {
-            yieldProcessor();
-        }
-    }
-#ifndef __EMSCRIPTEN__
-    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
-#else
-    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-#endif
-
-public:
-    SpinWait() = default;
-
-    [[nodiscard]] std::int32_t count() const noexcept { return _count; }
-    [[nodiscard]] bool         nextSpinWillYield() const noexcept { return _count > YIELD_THRESHOLD; }
-
-    void                       spinOnce() {
-        if (nextSpinWillYield()) {
-            auto num = _count >= YIELD_THRESHOLD ? _count - 10 : _count;
-            if (num % SLEEP_1_EVERY_HOW_MANY_TIMES == SLEEP_1_EVERY_HOW_MANY_TIMES - 1) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            } else {
-                if (num % SLEEP_0_EVERY_HOW_MANY_TIMES == SLEEP_0_EVERY_HOW_MANY_TIMES - 1) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(0));
-                } else {
-                    std::this_thread::yield();
-                }
-            }
-        } else {
-            spinWaitInternal(4 << _count);
-        }
-
-        if (_count == std::numeric_limits<std::int32_t>::max()) {
-            _count = YIELD_THRESHOLD;
-        } else {
-            ++_count;
-        }
-    }
-
-    void reset() noexcept { _count = 0; }
-
-    template<typename T>
-    requires std::is_nothrow_invocable_r_v<bool, T>
-    bool
-    spinUntil(const T &condition) const { return spinUntil(condition, -1); }
-
-    template<typename T>
-    requires std::is_nothrow_invocable_r_v<bool, T>
-    bool
-    spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
-        if (millisecondsTimeout < -1) {
-            throw std::out_of_range("Timeout value is out of range");
-        }
-
-        std::int64_t num = 0;
-        if (millisecondsTimeout != 0 && millisecondsTimeout != -1) {
-            num = getTickCount();
-        }
-
-        SpinWait spinWait;
-        while (!condition()) {
-            if (millisecondsTimeout == 0) {
-                return false;
-            }
-
-            spinWait.spinOnce();
-
-            if (millisecondsTimeout != 1 && spinWait.nextSpinWillYield() && millisecondsTimeout <= (getTickCount() - num)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    [[nodiscard]] static std::int64_t getTickCount() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
-};
-
-/**
- * Spin strategy that uses a SpinWait for IEventProcessors waiting on a barrier.
- * This strategy is a good compromise between performance and CPU resource.
- * Latency spikes can occur after quiet periods.
- */
-struct SpinWaitWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
-        std::int64_t availableSequence;
-
-        SpinWait     spinWait;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
-            // optional: barrier check alert
-            spinWait.spinOnce();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<SpinWaitWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
-
-struct NO_SPIN_WAIT {};
-
-template<typename SPIN_WAIT = NO_SPIN_WAIT>
-class AtomicMutex {
-    std::atomic_flag _lock = ATOMIC_FLAG_INIT;
-    SPIN_WAIT        _spin_wait;
-
-public:
-    AtomicMutex()                    = default;
-    AtomicMutex(const AtomicMutex &) = delete;
-    AtomicMutex &operator=(const AtomicMutex &) = delete;
-
-    //
-    void lock() {
-        while (_lock.test_and_set(std::memory_order_acquire)) {
-            if constexpr (requires { _spin_wait.spin_once(); }) {
-                _spin_wait.spin_once();
-            }
-        }
-        if constexpr (requires { _spin_wait.spin_once(); }) {
-            _spin_wait.reset();
-        }
-    }
-    void unlock() { _lock.clear(std::memory_order::release); }
-};
-
-
-// clang-format on
-} // namespace gr
-
-
-#endif // GNURADIO_WAIT_STRATEGY_HPP
-#ifndef GNURADIO_CLAIM_STRATEGY_HPP
-#define GNURADIO_CLAIM_STRATEGY_HPP
-
-#include <cassert>
-#include <concepts>
-#include <cstdint>
-#include <memory>
-#include <span>
-#include <stdexcept>
-#include <vector>
-
-
-namespace gr {
-
-struct NoCapacityException : public std::runtime_error {
-    NoCapacityException() : std::runtime_error("NoCapacityException"){};
-};
-
-// clang-format off
-
-template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
-        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
-    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
-    { t.publish(sequence) } -> std::same_as<void>;
-    { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
-};
-
-namespace claim_strategy::util {
-constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-}
-
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class alignas(kCacheLine) SingleThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    alignas(kCacheLine) mutable std::int64_t _cachedValue{ kInitialCursorValue };
-
-public:
-    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
-    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
-    void operator=(const SingleThreadedStrategy &) = delete;
-
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
-        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
-            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
-            _cachedValue     = minSequence;
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
-
-        auto nextSequence = _nextValue + n_slots_to_claim;
-        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
-
-        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            _cursor.setValue(_nextValue);
-
-            SpinWait     spinWait;
-            std::int64_t minSequence;
-            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
-                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                    _waitStrategy.signalAllWhenBlocking();
-                }
-                spinWait.spinOnce();
-            }
-            _cachedValue = minSequence;
-        }
-        _nextValue = nextSequence;
-
-        return nextSequence;
-    }
-
-    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
-            throw NoCapacityException();
-        }
-
-        const auto nextSequence = _nextValue + n_slots_to_claim;
-        _nextValue              = nextSequence;
-
-        return nextSequence;
-    }
-
-    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
-        const auto produced = _nextValue;
-
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
-    }
-
-    void publish(std::int64_t sequence) {
-        _cursor.setValue(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
-};
-static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
-
-/**
- * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
- * Suitable for use for sequencing across multiple publisher threads.
- * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
- * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
- */
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class MultiThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-    alignas(kCacheLine) std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    const std::int32_t _indexMask;
-    const std::int32_t _indexShift;
-
-public:
-    MultiThreadedStrategy() = delete;
-    explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
-        _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
-        for (std::size_t i = _size - 1; i != 0; i--) {
-            setAvailableBufferValue(i, -1);
-        }
-        setAvailableBufferValue(0, -1);
-    }
-    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
-    void               operator=(const MultiThreadedStrategy &) = delete;
-
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
-
-        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
-            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
-            _gatingSequenceCache->setValue(minSequence);
-
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        std::int64_t current;
-        std::int64_t next;
-
-        SpinWait     spinWait;
-        do {
-            current                           = _cursor.value();
-            next                              = current + n_slots_to_claim;
-
-            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
-            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
-
-            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
-
-                if (wrapPoint > gatingSequence) {
-                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                        _waitStrategy.signalAllWhenBlocking();
-                    }
-                    spinWait.spinOnce();
-                    continue;
-                }
-
-                _gatingSequenceCache->setValue(gatingSequence);
-            } else if (_cursor.compareAndSet(current, next)) {
-                break;
-            }
-        } while (true);
-
-        return next;
-    }
-
-    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        std::int64_t current;
-        std::int64_t next;
-
-        do {
-            current = _cursor.value();
-            next    = current + n_slots_to_claim;
-
-            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
-                throw NoCapacityException();
-            }
-        } while (!_cursor.compareAndSet(current, next));
-
-        return next;
-    }
-
-    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto produced = _cursor.value();
-        const auto consumed = detail::getMinimumSequence(dependents, produced);
-
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
-    }
-
-    void publish(std::int64_t sequence) {
-        setAvailable(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
-        const auto index = calculateIndex(sequence);
-        const auto flag  = calculateAvailabilityFlag(sequence);
-
-        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
-    }
-
-    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
-        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
-            if (!isAvailable(sequence)) {
-                return sequence - 1;
-            }
-        }
-
-        return availableSequence;
-    }
+    template <fixed_string NewName>
+    using with_name = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
 
 private:
-    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & _indexMask); }
-};
-static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
-// clang-format on
+    using ReaderType          = decltype(std::declval<BufferType>().new_reader());
+    using WriterType          = decltype(std::declval<BufferType>().new_writer());
+    using IoType              = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
 
-enum class ProducerType {
-    /**
-     * creates a buffer assuming a single producer-thread and multiple consumer
-     */
-    Single,
+    std::string  _name        = static_cast<std::string>(PortName);
+    std::int16_t _priority    = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t  _min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
+    std::size_t  _max_samples = MAX_SAMPLES;
+    bool         _connected   = false;
 
-    /**
-     * creates a buffer assuming multiple producer-threads and multiple consumer
-     */
-    Multi
+    IoType       _ioHandler   = new_io_handler();
+
+public:
+    [[nodiscard]] constexpr auto
+    new_io_handler() const noexcept {
+        if constexpr (IS_INPUT) {
+            return BufferType(65536).new_reader();
+        } else {
+            return BufferType(65536).new_writer();
+        }
+    }
+
+    [[nodiscard]] void *
+    writer_handler_internal() noexcept {
+        static_assert(IS_OUTPUT, "only to be used with output ports");
+        return static_cast<void *>(std::addressof(_ioHandler));
+    }
+
+    [[nodiscard]] bool
+    update_reader_internal(void *buffer_writer_handler_other) noexcept {
+        static_assert(IS_INPUT, "only to be used with input ports");
+
+        if (buffer_writer_handler_other == nullptr) {
+            return false;
+        }
+
+        // TODO: If we want to allow ports with different buffer types to be mixed
+        //       this will fail. We need to add a check that two ports that
+        //       connect to each other use the same buffer type
+        //       (std::any could be a viable approach)
+        auto typed_buffer_writer = static_cast<WriterType *>(buffer_writer_handler_other);
+        setBuffer(typed_buffer_writer->buffer());
+        return true;
+    }
+
+public:
+    port()             = default;
+
+    port(const port &) = delete;
+
+    auto
+    operator=(const port &)
+            = delete;
+
+    port(std::string port_name, std::int16_t priority = 0, std::size_t min_samples = 0_UZ, std::size_t max_samples = SIZE_MAX) noexcept
+        : _name(std::move(port_name))
+        , _priority{ priority }
+        , _min_samples(min_samples)
+        , _max_samples(max_samples) {
+        static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
+    }
+
+    constexpr port(port &&other) noexcept
+        : _name(std::move(other._name))
+        , _priority{ other._priority }
+        , _min_samples(other._min_samples)
+        , _max_samples(other._max_samples) {}
+
+    constexpr port &
+    operator=(port &&other) {
+        port tmp(std::move(other));
+        std::swap(_name, tmp._name);
+        std::swap(_priority, tmp._priority);
+        std::swap(_min_samples, tmp._min_samples);
+        std::swap(_max_samples, tmp._max_samples);
+        std::swap(_connected, tmp._connected);
+        std::swap(_ioHandler, tmp._ioHandler);
+        return *this;
+    }
+
+    [[nodiscard]] constexpr static port_type_t
+    type() noexcept {
+        return PortType;
+    }
+
+    [[nodiscard]] constexpr static port_direction_t
+    direction() noexcept {
+        return PortDirection;
+    }
+
+    [[nodiscard]] constexpr static decltype(PortName)
+    static_name() noexcept
+        requires(!PortName.empty())
+    {
+        return PortName;
+    }
+
+    [[nodiscard]] constexpr supported_type
+    pmt_type() const noexcept {
+        return T();
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    name() const noexcept {
+        if constexpr (!PortName.empty()) {
+            return static_cast<std::string_view>(PortName);
+        } else {
+            return _name;
+        }
+    }
+
+    [[nodiscard]] constexpr std::int16_t
+    priority() const noexcept {
+        return _priority;
+    }
+
+    [[nodiscard]] constexpr static std::size_t
+    available() noexcept {
+        return 0;
+    } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
+
+    [[nodiscard]] constexpr std::size_t
+    min_buffer_size() const noexcept {
+        if constexpr (MIN_SAMPLES == std::dynamic_extent) {
+            return _min_samples;
+        } else {
+            return MIN_SAMPLES;
+        }
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    max_buffer_size() const noexcept {
+        if constexpr (MAX_SAMPLES == std::dynamic_extent) {
+            return _max_samples;
+        } else {
+            return MAX_SAMPLES;
+        }
+    }
+
+    [[nodiscard]] constexpr connection_result_t
+    resize_buffer(std::size_t min_size) noexcept {
+        if constexpr (IS_INPUT) {
+            return connection_result_t::SUCCESS;
+        } else {
+            try {
+                _ioHandler = BufferType(min_size).new_writer();
+            } catch (...) {
+                return connection_result_t::FAILED;
+            }
+        }
+        return connection_result_t::SUCCESS;
+    }
+
+    [[nodiscard]] BufferType
+    buffer() {
+        return _ioHandler.buffer();
+    }
+
+    void
+    setBuffer(gr::Buffer auto buffer) noexcept {
+        if constexpr (IS_INPUT) {
+            _ioHandler = std::move(buffer.new_reader());
+            _connected = true;
+        } else {
+            _ioHandler = std::move(buffer.new_writer());
+        }
+    }
+
+    [[nodiscard]] constexpr ReaderType &
+    reader() const noexcept {
+        static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr ReaderType &
+    reader() noexcept {
+        static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr WriterType &
+    writer() const noexcept {
+        static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr WriterType &
+    writer() noexcept {
+        static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] connection_result_t
+    disconnect() noexcept {
+        if (_connected == false) {
+            return connection_result_t::FAILED;
+        }
+        _ioHandler = new_io_handler();
+        _connected = false;
+        return connection_result_t::SUCCESS;
+    }
+
+    template<typename Other>
+    [[nodiscard]] connection_result_t
+    connect(Other &&other) {
+        static_assert(IS_OUTPUT && std::remove_cvref_t<Other>::IS_INPUT);
+        auto src_buffer = writer_handler_internal();
+        return std::forward<Other>(other).update_reader_internal(src_buffer) ? connection_result_t::SUCCESS
+                                                                             : connection_result_t::FAILED;
+    }
+
+    friend class dynamic_port;
 };
+
 
 namespace detail {
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-struct producer_type;
+template<typename T, auto>
+using just_t = T;
 
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
-    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
-};
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
-    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
-};
+template<typename T, std::size_t... Is>
+consteval fair::meta::typelist<just_t<T, Is>...>
+repeated_ports_impl(std::index_sequence<Is...>) {
+    return {};
+}
+} // namespace detail
 
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+// TODO: Add port index to BaseName
+template<std::size_t Count, typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
+         std::size_t MAX_SAMPLES = std::dynamic_extent>
+using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
+
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using IN = port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using OUT = port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using IN_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using OUT_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
+
+static_assert(Port<IN<float>>);
+static_assert(Port<decltype(IN<float>())>);
+static_assert(Port<OUT<float>>);
+static_assert(Port<IN_MSG<float>>);
+static_assert(Port<OUT_MSG<float>>);
+
+static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
+static_assert(requires { IN<float>("in").name(); });
+
+static_assert(OUT_MSG<float, 0, 0, "out_msg">::static_name() == fixed_string("out_msg"));
+static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
+static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
+
+}
+
+#endif // include guard
+
+// #include "node.hpp"
+#ifndef GNURADIO_NODE_HPP
+#define GNURADIO_NODE_HPP
+
+#include <map>
+
+// #include <typelist.hpp>
+ // localinclude
+// #include <port.hpp>
+ // localinclude
+// #include <utils.hpp>
+ // localinclude
+// #include <node_traits.hpp>
+#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
+#define GNURADIO_NODE_NODE_TRAITS_HPP
+
+#include <refl.hpp>
+
+// #include <port.hpp>
+ // localinclude
+// #include <port_traits.hpp>
+#ifndef GNURADIO_NODE_PORT_TRAITS_HPP
+#define GNURADIO_NODE_PORT_TRAITS_HPP
+
+// #include "port.hpp"
+
+#include <refl.hpp>
+// #include <utils.hpp>
+ // localinclude
+
+namespace fair::graph::traits::port {
+
+template<typename T>
+concept has_fixed_info_v = requires {
+                                    typename T::value_type;
+                                    { T::static_name() };
+                                    { T::direction() } -> std::same_as<port_direction_t>;
+                                    { T::type() } -> std::same_as<port_type_t>;
+                                };
+
+template<typename T>
+using has_fixed_info = std::integral_constant<bool, has_fixed_info_v<T>>;
+
+template<typename T>
+struct has_fixed_info_or_is_typelist : std::false_type {};
+
+template<typename T>
+    requires has_fixed_info_v<T>
+struct has_fixed_info_or_is_typelist<T> : std::true_type {};
+
+template<typename T>
+    requires(meta::is_typelist_v<T> and T::template all_of<has_fixed_info>)
+struct has_fixed_info_or_is_typelist<T> : std::true_type {};
+
+template<typename Port>
+using type = typename Port::value_type;
+
+template<typename Port>
+using is_input = std::integral_constant<bool, Port::direction() == port_direction_t::INPUT>;
+
+template<typename Port>
+concept is_input_v = is_input<Port>::value;
+
+template<typename Port>
+using is_output = std::integral_constant<bool, Port::direction() == port_direction_t::OUTPUT>;
+
+template<typename Port>
+concept is_output_v = is_output<Port>::value;
+
+template <typename Type>
+concept is_port_v = is_output_v<Type> || is_input_v<Type>;
+
+} // namespace port
+
+#endif // include guard
+ // localinclude
+// #include <utils.hpp>
+ // localinclude
+
+namespace fair::graph::traits::node {
+
+namespace detail {
+    template <typename FieldDescriptor>
+    using member_type = typename FieldDescriptor::value_type;
+
+    template <typename Type>
+    using is_port = std::integral_constant<bool, port::is_port_v<Type>>;
+
+    template <typename Port>
+    constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
+
+    template <typename Port>
+    using is_port_descriptor = std::integral_constant<bool, is_port_descriptor_v<Port>>;
+
+    template <typename PortDescriptor>
+    using member_to_named_port = typename PortDescriptor::value_type::template with_name<fixed_string(refl::descriptor::get_name(PortDescriptor()).data)>;
+
+    template<typename Node>
+    struct member_ports_detector {
+        static constexpr bool value = false;
+    };
+
+    template<class T, typename ValueType = std::remove_cvref_t<T>>
+    concept Reflectable = refl::is_reflectable<ValueType>();
+
+    template<Reflectable Node>
+    struct member_ports_detector<Node> {
+        using member_ports =
+                    typename meta::to_typelist<refl::descriptor::member_list<Node>>
+                        ::template filter<is_port_descriptor>
+                        ::template transform<member_to_named_port>;
+
+        static constexpr bool value = member_ports::size != 0;
+    };
+
+    template<typename Node>
+    using port_name = typename Node::static_name();
+
+    template<typename RequestedType>
+    struct member_descriptor_has_type {
+        template <typename Descriptor>
+        using matches = std::is_same<RequestedType, member_to_named_port<Descriptor>>;
+    };
+
+
 
 } // namespace detail
 
-} // namespace gr
+template<typename...>
+struct fixed_node_ports_data_helper;
 
+// This specialization defines node attributes when the node is created
+// with two type lists - one list for input and one for output ports
+template<typename Node, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
+    requires InputPorts::template all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info>
+struct fixed_node_ports_data_helper<Node, InputPorts, OutputPorts> {
+    using member_ports_detector = std::false_type;
 
-#endif // GNURADIO_CLAIM_STRATEGY_HPP
-#ifndef GNURADIO_CIRCULAR_BUFFER_HPP
-#define GNURADIO_CIRCULAR_BUFFER_HPP
+    // using member_ports_detector = detail::member_ports_detector<Node>;
 
-#if defined(_LIBCPP_VERSION) and _LIBCPP_VERSION < 16000
-#include <experimental/memory_resource>
+    using input_ports       = InputPorts;
+    using output_ports      = OutputPorts;
 
-namespace std::pmr {
-using memory_resource = std::experimental::pmr::memory_resource;
-template<typename T>
-using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
-} // namespace std::pmr
-#else
-#include <memory_resource>
-#endif
-#include <algorithm>
-#include <bit>
-#include <cassert> // to assert if compiled for debugging
-#include <functional>
-#include <numeric>
-#include <ranges>
-#include <span>
+    using input_port_types  = typename input_ports ::template transform<port::type>;
+    using output_port_types = typename output_ports ::template transform<port::type>;
 
-#include <fmt/format.h>
+    using all_ports         = meta::concat<input_ports, output_ports>;
+};
 
-// header for creating/opening or POSIX shared memory objects
-#include <cerrno>
-#include <fcntl.h>
-#if defined __has_include && not __EMSCRIPTEN__
-#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+// This specialization defines node attributes when the node is created
+// with a list of ports as template arguments
+template<typename Node, port::has_fixed_info_v... Ports>
+struct fixed_node_ports_data_helper<Node, Ports...> {
+    using member_ports_detector = detail::member_ports_detector<Node>;
 
-namespace gr {
-static constexpr bool has_posix_mmap_interface = true;
-}
+    using all_ports = std::remove_pointer_t<
+        decltype([] {
+            if constexpr (member_ports_detector::value) {
+                return static_cast<typename member_ports_detector::member_ports*>(nullptr);
+            } else {
+                return static_cast<typename meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>*>(nullptr);
+            }
+        }())>;
 
-#define HAS_POSIX_MAP_INTERFACE
-#else
-namespace gr {
-static constexpr bool has_posix_mmap_interface = false;
-}
-#endif
-#else // #if defined __has_include -- required for portability
-namespace gr {
-static constexpr bool has_posix_mmap_interface = false;
-}
-#endif
+    using input_ports       = typename all_ports ::template filter<port::is_input>;
+    using output_ports      = typename all_ports ::template filter<port::is_output>;
 
-
-namespace gr {
-
-namespace util {
-constexpr std::size_t
-round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
-    if (multiple == 0) {
-        return num_to_round;
-    }
-    const auto remainder = num_to_round % multiple;
-    if (remainder == 0) {
-        return num_to_round;
-    }
-    return num_to_round + multiple - remainder;
-}
-} // namespace util
+    using input_port_types  = typename input_ports ::template transform<port::type>;
+    using output_port_types = typename output_ports ::template transform<port::type>;
+};
 
 // clang-format off
-class double_mapped_memory_resource : public std::pmr::memory_resource {
-#ifdef HAS_POSIX_MAP_INTERFACE
-    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
-
-        const std::size_t size = 2 * required_size;
-        if (size % 2LU != 0LU || size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
-        }
-        const std::size_t size_half = size/2;
-
-        static std::size_t _counter;
-        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
-        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
-            return syscall(__NR_memfd_create, name, flags);
-        };
-        int shm_fd = static_cast<int>(memfd_create(0));
-        if (shm_fd < 0) {
-            throw std::runtime_error(fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        void* first_copy = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
-        if (first_copy == MAP_FAILED) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        // unmap the 2nd half
-        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        // map the first half into the now available hole where the
-        if (const void* second_copy = mmap(static_cast<char*> (first_copy) + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); second_copy == MAP_FAILED) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
-        return first_copy;
-}
-#else
-    [[nodiscard]] void* do_allocate(const std::size_t, std::size_t) override {
-        throw std::runtime_error("OS does not provide POSIX interface for mmap(...) and munmao(...)");
-        // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
-    }
-#endif
-
-
-#ifdef HAS_POSIX_MAP_INTERFACE
-    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
-
-        if (munmap(p, size) == -1) {
-            throw std::runtime_error(fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
-        }
-    }
-#else
-    void  do_deallocate(void*, std::size_t, size_t) override { }
-#endif
-
-    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
-
-public:
-    static inline double_mapped_memory_resource* defaultAllocator() {
-        static auto instance = double_mapped_memory_resource();
-        return &instance;
-    }
-
-    template<typename T>
-    requires (std::has_single_bit(sizeof(T)))
-    static inline std::pmr::polymorphic_allocator<T> allocator()
-    {
-        return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
-    }
-};
-
-
-
-/**
- * @brief circular buffer implementation using double-mapped memory allocations
- * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
- * free bulk memory access. The buffer keeps a list of indices (using 'Sequence')
- * to keep track of which parts can be tread-safely read and/or written
- *
- *                          wrap-around point
- *                                 |
- *                                 v
- *  | buffer segment #1 (original) | buffer segment #2 (copy of #1) |
- *  0                            SIZE                            2*SIZE
- *                      writeIndex
- *                          v
- *  wrap-free write access  |<-  N_1 < SIZE   ->|
- *
- *  readIndex < writeIndex-N_2
- *      v
- *      |<- N_2 < SIZE ->|
- *
- * N.B N_AVAILABLE := (SIZE + writeIndex - readIndex ) % SIZE
- *
- * citation: <find appropriate first and educational reference>
- *
- * This implementation provides single- as well as multi-producer/consumer buffer
- * combinations for thread-safe CPU-to-CPU data transfer (optionally) using either
- * a) the POSIX mmaped(..)/munmapped(..) MMU interface, if available, and/or
- * b) the guaranteed portable standard C/C++ (de-)allocators as a fall-back.
- *
- * for more details see
- */
-template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-requires (std::has_single_bit(sizeof(T)))
-class circular_buffer
-{
-    using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
-    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
-    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
-
-    struct buffer_impl {
-        alignas(kCacheLine) Allocator                   _allocator{};
-        alignas(kCacheLine) const bool                  _is_mmap_allocated;
-        alignas(kCacheLine) const std::size_t           _size;
-        alignas(kCacheLine) std::vector<T, Allocator>   _data;
-        alignas(kCacheLine) Sequence                    _cursor;
-        alignas(kCacheLine) WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
-        alignas(kCacheLine) ClaimType                   _claim_strategy;
-        // list of dependent reader indices
-        alignas(kCacheLine) DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
-
-        buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
-            _size(align_with_page_size(min_size, _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
-        }
-
-#ifdef HAS_POSIX_MAP_INTERFACE
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
-            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
-        }
-#else
-        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
-            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
-        }
-#endif
-
-        static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
-            // double-mmaped behaviour requires the different size/alloc strategy
-            // i.e. the second buffer half may not default-constructed as it's identical to the first one
-            // and would result in a double dealloc during the default destruction
-            return _is_mmap_allocated ? size : 2 * size;
-        }
-    };
-
-    template <typename U = T>
-    class buffer_writer {
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-
-        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) bool                        _is_mmap_allocated;
-        alignas(kCacheLine) std::size_t                 _size;
-        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
-        alignas(kCacheLine) ClaimType*                  _claim_strategy;
-
-    public:
-        buffer_writer() = delete;
-        buffer_writer(std::shared_ptr<buffer_impl> buffer) :
-            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
-            _size(_buffer->_size), _data(std::addressof(_buffer->_data)), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer(buffer_writer&& other)
-            : _buffer(std::move(other._buffer))
-            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
-            , _size(_buffer->_size)
-            , _data(std::addressof(_buffer->_data))
-            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer& operator=(buffer_writer tmp) {
-            std::swap(_buffer, tmp._buffer);
-            _is_mmap_allocated = _buffer->_is_mmap_allocated;
-            _size = _buffer->_size;
-            _data = std::addressof(_buffer->_data);
-            _claim_strategy = std::addressof(_buffer->_claim_strategy);
-
-            return *this;
-        }
-
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
-
-        [[nodiscard]] constexpr auto get(std::size_t n_slots_to_claim) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
-            try {
-                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
-                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
-                return {{ &(*_data)[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
-            } catch (const NoCapacityException &) {
-                return { { /* empty span */ }, { 0, 0 }};
-            }
-        }
-
-        constexpr void publish(std::pair<std::size_t, std::int64_t> token, std::size_t n_produced) {
-            if (!_is_mmap_allocated) {
-                // mirror samples below/above the buffer's wrap-around point
-                const std::size_t index = token.first;
-                const size_t nFirstHalf = std::min(_size - index, n_produced);
-                const size_t nSecondHalf = n_produced  - nFirstHalf;
-
-                auto& data = *_data;
-                std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
-            }
-            _claim_strategy->publish(token.second + n_produced); // points at first non-writable index
-        }
-
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
-                return;
-            }
-            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
-            translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-        } // blocks until elements are available
-
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
-                return true;
-            }
-            try {
-                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
-                translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-                return true;
-            } catch (const NoCapacityException &) {
-                return false;
-            }
-        }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
-        }
-
-        private:
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
-            try {
-                auto& data = *_data;
-                const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
-                std::span<U> writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
-                } else {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
-                }
-
-                if (!_is_mmap_allocated) {
-                    // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
-                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
-
-                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
-                }
-                _claim_strategy->publish(publishSequence); // points at first non-writable index
-            } catch (const std::exception& e) {
-                throw e;
-            } catch (...) {
-                throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
-            }
-        }
-    };
-
-    template<typename U = T>
-    class buffer_reader
-    {
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-
-        alignas(kCacheLine) std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        alignas(kCacheLine) std::int64_t                _read_index_cached;
-        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) std::size_t                 _size;
-        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
-
-    public:
-        buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) :
-            _buffer(buffer), _size(buffer->_size), _data(std::addressof(buffer->_data)) {
-            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
-            _read_index_cached = _read_index->value();
-        }
-        buffer_reader(buffer_reader&& other)
-            : _read_index(std::move(other._read_index))
-            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
-            , _buffer(other._buffer)
-            , _size(_buffer->_size)
-            , _data(std::addressof(_buffer->_data)) {
-        }
-        buffer_reader& operator=(buffer_reader tmp) noexcept {
-            std::swap(_read_index, tmp._read_index);
-            std::swap(_read_index_cached, tmp._read_index_cached);
-            std::swap(_buffer, tmp._buffer);
-            _size = _buffer->_size;
-            _data = std::addressof(_buffer->_data);
-            return *this;
-        };
-        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
-
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
-            const auto& data = *_data;
-            if constexpr (strict_check) {
-                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
-            }
-            const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
-        }
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
-            if constexpr (strict_check) {
-                if (n_elements <= 0) {
-                    return true;
-                }
-                if (n_elements > available()) {
-                    return false;
-                }
-            }
-            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
-            return true;
-        }
-
-        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _buffer->_cursor.value() - _read_index_cached;
-        }
-    };
-
-    [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface) {
-            return double_mapped_memory_resource::allocator<T>();
-        } else {
-            return Allocator();
-        }
-    }
-
-    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
-
-public:
-    circular_buffer() = delete;
-    circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
-        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
-    ~circular_buffer() = default;
-
-    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
-    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
-    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
-
-    // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] auto n_readers()       { return _shared_buffer_ptr->_read_indices->size(); }
-    [[nodiscard]] auto claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
-    [[nodiscard]] auto wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] auto cursor_sequence() { return _shared_buffer_ptr->_cursor; }
-
-};
-static_assert(Buffer<circular_buffer<int32_t>>);
+template<typename Node,
+         typename Derived = typename Node::derived_t,
+         typename ArgumentList = typename Node::node_template_parameters>
+using fixed_node_ports_data =
+    typename ArgumentList::template filter<port::has_fixed_info_or_is_typelist>
+                         ::template prepend<Node>
+                         ::template apply<fixed_node_ports_data_helper>;
 // clang-format on
 
-} // namespace gr
+template<typename Node>
+using all_ports = typename fixed_node_ports_data<Node>::all_ports;
 
-#endif // GNURADIO_CIRCULAR_BUFFER_HPP
-#ifndef GNURADIO_GRAPH_HPP
-#define GNURADIO_GRAPH_HPP
+template<typename Node>
+using input_ports = typename fixed_node_ports_data<Node>::input_ports;
+
+template<typename Node>
+using output_ports = typename fixed_node_ports_data<Node>::output_ports;
+
+template<typename Node>
+using input_port_types = typename fixed_node_ports_data<Node>::input_port_types;
+
+template<typename Node>
+using output_port_types = typename fixed_node_ports_data<Node>::output_port_types;
+
+template<typename Node>
+using return_type = typename output_port_types<Node>::tuple_or_type;
+
+template<typename Node>
+using input_port_names = typename input_ports<Node>::template transform<detail::port_name>;
+
+template<typename Node>
+using output_port_names = typename output_ports<Node>::template transform<detail::port_name>;
+
+template<typename Node>
+constexpr bool node_defines_ports_as_member_variables = fixed_node_ports_data<Node>::member_ports_detector::value;
+
+template<typename Node, typename PortType>
+using get_port_member_descriptor =
+    typename meta::to_typelist<refl::descriptor::member_list<Node>>
+        ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
+
+} // namespace node
+
+#endif // include guard
+ // localinclude
+
+#include <fmt/format.h>
+#include <refl.hpp>
+
+namespace fair::graph {
+
+class graph;
+using namespace fair::literals;
+
+namespace stdx = vir::stdx;
+using fair::meta::fixed_string;
+
+enum class work_return_t {
+    ERROR = -100, /// error occurred in the work function
+    INSUFFICIENT_OUTPUT_ITEMS =
+        -3, /// work requires a larger output buffer to produce output
+    INSUFFICIENT_INPUT_ITEMS =
+        -2, /// work requires a larger input buffer to produce output
+    DONE =
+        -1, /// this block has completed its processing and the flowgraph should be done
+    OK = 0, /// work call was successful and return values in i/o structs are valid
+    CALLBACK_INITIATED =
+        1, /// rather than blocking in the work function, the block will call back to the
+           /// parent interface when it is ready to be called again
+};
+
+namespace work_strategies {
+template<typename Self>
+static auto
+inputs_status(Self &self) noexcept {
+    bool              at_least_one_input_has_data = false;
+    const std::size_t available_values_count      = [&self, &at_least_one_input_has_data]() {
+        if constexpr (traits::node::input_ports<Self>::size > 0) {
+            const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
+                const std::size_t available = port.reader().available();
+                if (available > 0LU) at_least_one_input_has_data = true;
+                if (available < port.min_buffer_size()) {
+                    return 0LU;
+                } else {
+                    return std::min(available, port.max_buffer_size());
+                }
+            };
+
+            return std::apply(
+                    [&availableForPort] (auto&... input_port) {
+                        return meta::safe_min(availableForPort(input_port)...);
+                    },
+                    input_ports(&self));
+        } else {
+            (void) self;
+            return 1_UZ;
+        }
+    }();
+
+    struct result {
+        bool at_least_one_input_has_data;
+       std::size_t available_values_count;
+    };
+
+    return result {
+        .at_least_one_input_has_data = at_least_one_input_has_data,
+        .available_values_count = available_values_count
+    };
+}
+
+template<typename Self>
+static auto
+write_to_outputs(Self& self, std::size_t available_values_count, auto& writers_tuple) {
+    if constexpr (traits::node::output_ports<Self>::size > 0) {
+        meta::tuple_for_each([available_values_count] (auto& output_port, auto& writer) {
+                output_port.writer().publish(writer.second, available_values_count);
+                },
+                output_ports(&self), writers_tuple);
+    }
+}
+
+template<typename Self>
+static bool
+consume_readers(Self& self, std::size_t available_values_count) {
+    bool success = true;
+    if constexpr (traits::node::input_ports<Self>::size > 0) {
+        std::apply([available_values_count, &success] (auto&... input_port) {
+                ((success = success && input_port.reader().consume(available_values_count)), ...);
+            }, input_ports(&self));
+    }
+    return success;
+}
+
+struct read_many_and_publish_many {
+
+    template<typename Self>
+    static work_return_t
+    work(Self &self) noexcept {
+        // Capturing structured bindings does not work in Clang...
+        auto inputs_status = work_strategies::inputs_status(self);
+
+        if (inputs_status.available_values_count == 0) {
+            return inputs_status.at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
+        }
+
+        bool all_writers_available = std::apply([inputs_status](auto&... output_port) {
+                return ((output_port.writer().available() >= inputs_status.available_values_count) && ... && true);
+            }, output_ports(&self));
+
+        if (!all_writers_available) {
+            return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+        }
+
+        auto input_spans = meta::tuple_transform([inputs_status](auto& input_port) {
+                return input_port.reader().get(inputs_status.available_values_count);
+            }, input_ports(&self));
+
+        auto writers_tuple = meta::tuple_transform([inputs_status](auto& output_port) {
+                return output_port.writer().get(inputs_status.available_values_count);
+            }, output_ports(&self));
+
+        // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
+        // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags
+        // case 1b: N-in->N-out -> process_bulk(<ins...>, <outs...>) -> auto-handling of streaming tags
+        // case 2a: N-in->M-out -> process_bulk(<ins...>, <outs...>) N,M fixed -> aka. interpolator (M>N) or decimator (M<N)
+        // case 2b: N-in->M-out -> process_bulk(<{ins,tag-IO}...>, <{outs,tag-IO}...>) user-level tag handling
+        // case 3:  N-in->M-out -> work() N,M arbitrary -> used need to handle the full logic (e.g. PLL algo)
+        // case 4:  Python -> map to cases 1-3 and/or dedicated callback
+        // special cases:
+        // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
+        // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
+        for (std::size_t i = 0; i < inputs_status.available_values_count; ++i) {
+            auto results = std::apply([&self, &input_spans, i](auto&... input_span) {
+                    return meta::invoke_void_wrapped([&self]<typename... Args>(Args... args) { return self.process_one(std::forward<Args>(args)...); }, input_span[i]...);
+                }, input_spans);
+
+            if constexpr (std::is_same_v<decltype(results), meta::dummy_t>) {
+                // process_one returned void
+
+            } else if constexpr (requires { std::get<0>(results); }) {
+                static_assert(std::tuple_size_v<decltype(results)> == traits::node::output_ports<Self>::size);
+
+                meta::tuple_for_each(
+                        [i] (auto& writer, auto& result) {
+                            writer.first/*data*/[i] = std::move(result); },
+                        writers_tuple, results);
+
+            } else {
+                static_assert(traits::node::output_ports<Self>::size == 1);
+                std::get<0>(writers_tuple).first /*data*/[i] = std::move(results);
+            }
+        }
+
+        write_to_outputs(self, inputs_status.available_values_count, writers_tuple);
+
+        const bool success = consume_readers(self, inputs_status.available_values_count);
+
+        if (!success) {
+            fmt::print("Node {} failed to consume {} values from inputs\n", self.name(), inputs_status.available_values_count);
+        }
+
+        return success ? work_return_t::OK : work_return_t::ERROR;
+    }
+};
+
+using default_strategy = read_many_and_publish_many;
+} // namespace work_strategies
+
+template<typename Node>
+concept node_can_process_simd = requires(Node &n, typename meta::transform_to_widest_simd<typename Node::input_port_types>::template apply<std::tuple> const &inputs) {
+    {
+        []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)->decltype(n.process_one(std::get<Is>(tup)...)) { return {}; }
+        (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
+    } -> meta::any_simd<typename Node::return_type>;
+};
+
+// Ports can either be a list of ports instances,
+// or two typelists containing port instances -- one for input
+// ports and one for output ports
+template<typename Derived, typename... Arguments>
+class node : protected std::tuple<Arguments...> {
+public:
+    using derived_t = Derived;
+    using node_template_parameters = meta::typelist<Arguments...>;
+
+    using work_strategy     = work_strategies::default_strategy;
+    friend work_strategy;
+
+private:
+    using setting_map = std::map<std::string, int, std::less<>>;
+    std::string _name{ std::string(fair::meta::type_name<Derived>()) };
+
+    setting_map _exec_metrics{}; //  →  std::map<string, pmt> → fair scheduling, 'int' stand-in for pmtv
+
+    friend class graph;
+    graph* _owning_graph = nullptr;
+
+public:
+    auto &
+    self() {
+        return *static_cast<Derived *>(this);
+    }
+
+    const auto &
+    self() const {
+        return *static_cast<const Derived *>(this);
+    }
+
+    [[nodiscard]] std::string_view
+    name() const noexcept {
+        return _name;
+    }
+
+    void
+    set_name(std::string name) noexcept {
+        _name = std::move(name);
+    }
+
+    template<std::size_t Index, typename Self>
+    friend constexpr auto &
+    input_port(Self *self) noexcept;
+
+    template<std::size_t Index, typename Self>
+    friend constexpr auto &
+    output_port(Self *self) noexcept;
+
+    template<fixed_string Name, typename Self>
+    friend constexpr auto &
+    input_port(Self *self) noexcept;
+
+    template<fixed_string Name, typename Self>
+    friend constexpr auto &
+    output_port(Self *self) noexcept;
+
+    template<std::size_t N>
+    [[gnu::always_inline]] constexpr bool
+    process_batch_simd_epilogue(std::size_t n, auto out_ptr, auto... in_ptr) {
+        if constexpr (N == 0) return true;
+        else if (N <= n) {
+            using In0                    = meta::first_type<traits::node::input_port_types<Derived>>;
+            using V                      = stdx::resize_simd_t<N, stdx::native_simd<In0>>;
+            using Vs                     = meta::transform_types<meta::rebind_simd_helper<V>::template rebind, traits::node::input_port_types<Derived>>;
+            const std::tuple input_simds = Vs::template construct<meta::simd_load_ctor>(std::tuple{ in_ptr... });
+            const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
+            result.copy_to(out_ptr, stdx::element_aligned);
+            return process_batch_simd_epilogue<N / 2>(n, out_ptr + N, (in_ptr + N)...);
+        } else
+            return process_batch_simd_epilogue<N / 2>(n, out_ptr, in_ptr...);
+    }
+
+#ifdef NOT_YET_PORTED_AS_IT_IS_UNUSED
+    template<std::ranges::forward_range... Ins>
+        requires(std::ranges::sized_range<Ins> && ...) && input_port_types::template
+    are_equal<std::ranges::range_value_t<Ins>...> constexpr bool process_batch(port_data<return_type, 1024> &out, Ins &&...inputs) {
+        const auto       &in0 = std::get<0>(std::tie(inputs...));
+        const std::size_t n   = std::ranges::size(in0);
+        detail::precondition(((n == std::ranges::size(inputs)) && ...));
+        auto &&out_range = out.request_write(n);
+        // if SIMD makes sense (i.e. input and output ranges are contiguous and all types are
+        // vectorizable)
+        if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ... && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type> && detail::node_can_process_simd<Derived>
+                      && input_port_types ::template transform<stdx::native_simd>::template all_of<std::is_constructible>) {
+            using V       = detail::reduce_to_widest_simd<input_port_types>;
+            using Vs      = detail::transform_by_rebind_simd<V, input_port_types>;
+            std::size_t i = 0;
+            for (i = 0; i + V::size() <= n; i += V::size()) {
+                const std::tuple input_simds = Vs::template construct<detail::simd_load_ctor>(std::tuple{ (std::ranges::data(inputs) + i)... });
+                const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
+                result.copy_to(std::ranges::data(out_range) + i, stdx::element_aligned);
+            }
+
+            return process_batch_simd_epilogue<std::bit_ceil(V::size()) / 2>(n - i, std::ranges::data(out_range) + i, (std::ranges::data(inputs) + i)...);
+        } else { // no explicit SIMD
+            auto             out_it    = out_range.begin();
+            std::tuple       it_tuple  = { std::ranges::begin(inputs)... };
+            const std::tuple end_tuple = { std::ranges::end(inputs)... };
+            while (std::get<0>(it_tuple) != std::get<0>(end_tuple)) {
+                *out_it = std::apply([this](auto &...its) { return self().process_one((*its++)...); }, it_tuple);
+                ++out_it;
+            }
+            return true;
+        }
+    }
+#endif
+
+    [[nodiscard]] setting_map &
+    exec_metrics() noexcept {
+        return _exec_metrics;
+    }
+
+    [[nodiscard]] setting_map const &
+    exec_metrics() const noexcept {
+        return _exec_metrics;
+    }
+
+    work_return_t
+    work() noexcept {
+        return work_strategy::work(self());
+    }
+};
+
+template<std::size_t Index, typename Self>
+[[nodiscard]] constexpr auto &
+input_port(Self *self) noexcept {
+    using requested_port_type = typename traits::node::input_ports<Self>::template at<Index>;
+    if constexpr (traits::node::node_defines_ports_as_member_variables<Self>) {
+        using member_descriptor = traits::node::get_port_member_descriptor<Self, requested_port_type>;
+        return member_descriptor()(*self);
+    } else {
+        return std::get<requested_port_type>(*self);
+    }
+}
+
+template<std::size_t Index, typename Self>
+[[nodiscard]] constexpr auto &
+output_port(Self *self) noexcept {
+    using requested_port_type = typename traits::node::output_ports<Self>::template at<Index>;
+    if constexpr (traits::node::node_defines_ports_as_member_variables<Self>) {
+        using member_descriptor = traits::node::get_port_member_descriptor<Self, requested_port_type>;
+        return member_descriptor()(*self);
+    } else {
+        return std::get<requested_port_type>(*self);
+    }
+}
+
+template<fixed_string Name, typename Self>
+[[nodiscard]] constexpr auto &
+input_port(Self *self) noexcept {
+    constexpr int Index = meta::indexForName<Name, traits::node::input_ports<Self>>();
+    return input_port<Index, Self>(self);
+}
+
+template<fixed_string Name, typename Self>
+[[nodiscard]] constexpr auto &
+output_port(Self *self) noexcept {
+    constexpr int Index = meta::indexForName<Name, traits::node::output_ports<Self>>();
+    return output_port<Index, Self>(self);
+}
+
+template<typename Self>
+[[nodiscard]] constexpr auto
+input_ports(Self *self) noexcept {
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::tie(input_port<Idx>(self)...);
+    }
+    (std::make_index_sequence<traits::node::input_ports<Self>::size>());
+}
+
+template<typename Self>
+[[nodiscard]] constexpr auto
+output_ports(Self *self) noexcept {
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::tie(output_port<Idx>(self)...);
+    }
+    (std::make_index_sequence<traits::node::output_ports<Self>::size>());
+}
+
+template<typename Node>
+concept source_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
+                          {
+                              [](Node &n, auto &inputs) {
+                                  constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
+                                  if constexpr (port_count > 0) {
+                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
+                                      (n, inputs, std::make_index_sequence<port_count>());
+                                  } else {
+                                      return n.process_one();
+                                  }
+                              }(node, inputs)
+                              } -> std::same_as<typename traits::node::return_type<Node>>;
+                      };
+
+template<typename Node>
+concept sink_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
+                        {
+                            [](Node &n, auto &inputs) {
+                                constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
+                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
+                                    if constexpr (port_count > 0) {
+                                        auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
+                                    } else {
+                                        n_inside.process_one(std::get<Is>(tup)...);
+                                    }
+                                }
+                                (n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
+                            }(node, inputs)
+                        };
+                    };
+
+template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
+class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
+                                meta::concat<meta::remove_at<OutId, typename traits::node::output_ports<Left>>, typename traits::node::output_ports<Right>>> {
+private:
+    // copy-paste from above, keep in sync
+    using base = node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
+                      meta::concat<meta::remove_at<OutId, typename traits::node::output_ports<Left>>, typename traits::node::output_ports<Right>>>;
+
+    Left  left;
+    Right right;
+
+    template<std::size_t I>
+    [[gnu::always_inline]] constexpr auto
+    apply_left(auto &&input_tuple) {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.process_one(std::get<Is>(input_tuple)...); }
+        (std::make_index_sequence<I>());
+    }
+
+    template<std::size_t I, std::size_t J>
+    [[gnu::always_inline]] constexpr auto
+    apply_right(auto &&input_tuple, auto &&tmp) {
+        return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
+            constexpr std::size_t first_offset  = traits::node::input_port_types<Left>::size;
+            constexpr std::size_t second_offset = traits::node::input_port_types<Left>::size + sizeof...(Is);
+            static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
+            return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp), std::get<second_offset + Js>(input_tuple)...);
+        }
+        (std::make_index_sequence<I>(), std::make_index_sequence<J>());
+    }
+
+public:
+    using input_port_types  = typename traits::node::input_port_types<base>;
+    using output_port_types = typename traits::node::output_port_types<base>;
+    using return_type       = typename traits::node::return_type<base>;
+
+    [[gnu::always_inline]] constexpr merged_node(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+
+    template<meta::any_simd... Ts>
+        requires meta::vectorizable<return_type> && input_port_types::template
+    are_equal<typename std::remove_cvref_t<Ts>::value_type...> && node_can_process_simd<Left>
+            && node_can_process_simd<Right> constexpr stdx::rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
+              process_one(Ts... inputs) {
+        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+    }
+
+    template<typename... Ts>
+    // In order to have nicer error messages, this is checked in the function body
+    // requires input_port_types::template are_equal<std::remove_cvref_t<Ts>...>
+    constexpr return_type
+    process_one(Ts &&...inputs) {
+        if constexpr (!input_port_types::template are_equal<std::remove_cvref_t<Ts>...>) {
+            meta::print_types<decltype(this), input_port_types, std::remove_cvref_t<Ts>...> error{};
+        }
+
+        if constexpr (traits::node::output_port_types<Left>::size == 1) { // only the result from the right node needs to be returned
+            return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                                                                                 apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+
+        } else {
+            // left produces a tuple
+            auto left_out  = apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
+
+            if constexpr (traits::node::output_port_types<Left>::size == 2 && traits::node::output_port_types<Right>::size == 1) {
+                return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
+
+            } else if constexpr (traits::node::output_port_types<Left>::size == 2) {
+                return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
+
+            } else if constexpr (traits::node::output_port_types<Right>::size == 1) {
+                return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
+                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out));
+                }
+                (std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>());
+
+            } else {
+                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) {
+                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...));
+                }
+                (std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
+            }
+        }
+    }
+};
+
+template<std::size_t OutId, std::size_t InId, source_node A, sink_node B>
+[[gnu::always_inline]] constexpr auto
+merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
+    if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+        fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+                                typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+
+                                fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                                typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+    }
+    return { std::forward<A>(a), std::forward<B>(b) };
+}
+
+template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
+[[gnu::always_inline]] constexpr auto
+merge(A &&a, B &&b) {
+    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+    static_assert(OutId != -1);
+    static_assert(InId != -1);
+    static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+                  "Port types do not match");
+    return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
+}
+
+
+#define ENABLE_REFLECTION(TypeName, ...) \
+    REFL_TYPE(TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+#define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
+    REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
+    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
+
+} // namespace fair::graph
+
+#endif // include guard
 
 
 #include <algorithm>
@@ -5216,6 +5488,8 @@ static_assert(Buffer<circular_buffer<int32_t>>);
 #endif
 
 namespace fair::graph {
+
+using namespace fair::literals;
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
@@ -5535,45 +5809,53 @@ private:
         work() = 0;
 
         virtual void *
-        raw() const
+        raw()
                 = 0;
     };
 
     template<typename T>
-    class reference_node_wrapper final : public node_model {
+    class node_wrapper final : public node_model {
     private:
-        T *_node;
+        static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
+        T _node;
 
         auto &
         data() {
-            return *_node;
+            return _node;
         }
 
         const auto &
         data() const {
-            return *_node;
+            return _node;
         }
 
     public:
-        reference_node_wrapper(const reference_node_wrapper &other) = delete;
+        node_wrapper(const node_wrapper &other) = delete;
 
-        reference_node_wrapper &
-        operator=(const reference_node_wrapper &other)
+        node_wrapper &
+        operator=(const node_wrapper &other)
                 = delete;
 
-        reference_node_wrapper(reference_node_wrapper &&other) : _node(std::exchange(other._node, nullptr)) {}
+        node_wrapper(node_wrapper &&other) : _node(std::exchange(other._node, nullptr)) {}
 
-        reference_node_wrapper &
-        operator=(reference_node_wrapper &&other) {
+        node_wrapper &
+        operator=(node_wrapper &&other) {
             auto tmp = std::move(other);
             std::swap(_node, tmp._node);
             return *this;
         }
 
-        ~reference_node_wrapper() override = default;
+        ~node_wrapper() override = default;
 
-        template<typename In>
-        reference_node_wrapper(In &&node) : _node(std::forward<In>(node)) {}
+        node_wrapper() {}
+
+        template<typename Arg>
+            requires (!std::is_same_v<std::remove_cvref_t<Arg>, T>)
+        node_wrapper(Arg&& arg) : _node(std::forward<Arg>(arg)) {}
+
+        template<typename ...Args>
+            requires (sizeof...(Args) > 1)
+        node_wrapper(Args&&... args) : _node{std::forward<Args>(args)...} {}
 
         work_return_t
         work() override {
@@ -5586,8 +5868,8 @@ private:
         }
 
         void *
-        raw() const override {
-            return _node;
+        raw() override {
+            return std::addressof(_node);
         }
     };
 
@@ -5595,8 +5877,8 @@ private:
     public:
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
-        std::unique_ptr<node_model> _src_node;
-        std::unique_ptr<node_model> _dst_node;
+        node_model* _src_node;
+        node_model* _dst_node;
         std::size_t                 _src_port_index;
         std::size_t                 _dst_port_index;
         int32_t                     _weight;
@@ -5618,50 +5900,14 @@ private:
         operator=(edge &&) noexcept
                 = default;
 
-        edge(std::unique_ptr<node_model> src_node, std::size_t src_port_index, std::unique_ptr<node_model> dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
-            : _src_node(std::move(src_node))
-            , _dst_node(std::move(dst_node))
+        edge(node_model* src_node, std::size_t src_port_index, node_model* dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
+            : _src_node(src_node)
+            , _dst_node(dst_node)
             , _src_port_index(src_port_index)
             , _dst_port_index(dst_port_index)
             , _weight(weight)
             , _name(name) {
-            // if (!_src_node->port<OUTPUT>(_src_port_index)) {
-            //     throw fmt::format("source node '{}' has not output port id {}", std::string() /* _src_node->name() */, _src_port_index);
-            // }
-            // if (!_dst_node->port<INPUT>(_dst_port_index)) {
-            //     throw fmt::format("destination node '{}' has not output port id {}", std::string() /*_dst_node->name()*/, _dst_port_index);
-            // }
-            // const dynamic_port& src_port = *_src_node->port<OUTPUT>(_src_port_index).value();
-            // const dynamic_port& dst_port = *_dst_node->port<INPUT>(_dst_port_index).value();
-            // if (src_port.pmt_type().index() != dst_port.pmt_type().index()) {
-            //     throw fmt::format("edge({}::{}<{}> -> {}::{}<{}>, weight: {}, name:\"{}\") incompatible to type id='{}'",
-            //         std::string() /*_src_node->name()*/, std::string() /*src_port.name()*/, src_port.pmt_type().index(),
-            //         std::string() /*_dst_node->name()*/, std::string() /*dst_port.name()*/, dst_port.pmt_type().index(),
-            //         _weight, _name, dst_port.pmt_type().index());
-            // }
         }
-
-        // edge(std::shared_ptr<node_model> src_node, std::string_view src_port_name, std::shared_ptr<node_model> dst_node, std::string_view dst_port_name, int32_t weight, std::string_view name) :
-        //         _src_node(src_node), _dst_node(dst_node), _weight(weight), _name(name) {
-        //     const auto src_id = _src_node->port_index<OUTPUT>(src_port_name);
-        //     const auto dst_id = _dst_node->port_index<INPUT>(dst_port_name);
-        //     if (!src_id) {
-        //         throw std::invalid_argument(fmt::format("source node '{}' has not output port '{}'", std::string() /*_src_node->name()*/, src_port_name));
-        //     }
-        //     if (!dst_id) {
-        //         throw fmt::format("destination node '{}' has not output port '{}'", std::string() /*_dst_node->name()*/, dst_port_name);
-        //     }
-        //     _src_port_index = src_id.value();
-        //     _dst_port_index = dst_id.value();
-        //     const dynamic_port& src_port = *src_node->port<OUTPUT>(_src_port_index).value();
-        //     const dynamic_port& dst_port = *dst_node->port<INPUT>(_dst_port_index).value();
-        //     if (src_port.pmt_type().index() != dst_port.pmt_type().index()) {
-        //         throw fmt::format("edge({}::{}<{}> -> {}::{}<{}>, weight: {}, name:\"{}\") incompatible to type id='{}'",
-        //                           std::string() /*_src_node->name()*/, src_port.name(), src_port.pmt_type().index(),
-        //                           std::string() /*_dst_node->name()*/, dst_port.name(), dst_port.pmt_type().index(),
-        //                           _weight, _name, dst_port.pmt_type().index());
-        //     }
-        // }
 
         [[nodiscard]] constexpr int32_t
         weight() const noexcept {
@@ -5692,18 +5938,13 @@ private:
     std::vector<edge>                        _edges;
     std::vector<std::unique_ptr<node_model>> _nodes;
 
-    template<std::size_t src_port_index, std::size_t dst_port_index, typename Source_, typename Destination_>
+    template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
-    connect_impl(Source_ &src_node_raw, Destination_ &dst_node_raw, int32_t weight = 0,
-            std::string_view name = "unnamed edge") {
-        using Source = std::remove_cvref_t<Source_>;
-        using Destination = std::remove_cvref_t<Destination_>;
+    connect_impl(Source &src_node_raw, SourcePort& source_port, Destination &dst_node_raw, DestinationPort& destination_port,
+            int32_t weight = 0, std::string_view name = "unnamed edge") {
         static_assert(
-                std::is_same_v<typename Source::output_port_types::template at<src_port_index>, typename Destination::input_port_types::template at<dst_port_index>>,
+                std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>,
                 "The source port type needs to match the sink port type");
-
-        OutPort auto &source_port = output_port<src_port_index>(&src_node_raw);
-        InPort auto &destination_port = input_port<dst_port_index>(&dst_node_raw);
 
         if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) {
             return registered_node->raw() == std::addressof(src_node_raw);
@@ -5716,37 +5957,76 @@ private:
 
         auto result = source_port.connect(destination_port);
         if (result == connection_result_t::SUCCESS) {
-            std::unique_ptr<node_model> src_node = std::make_unique<reference_node_wrapper<Source>>(std::addressof(src_node_raw));
-            std::unique_ptr<node_model> dst_node = std::make_unique<reference_node_wrapper<Destination>>(std::addressof(dst_node_raw));
-            _edges.emplace_back(std::move(src_node), src_port_index, std::move(dst_node), src_port_index, weight, name);
+            auto find_wrapper = [this] (auto* node) {
+                auto it = std::find_if(_nodes.begin(), _nodes.end(), [node] (auto& wrapper) {
+                        return wrapper->raw() == node;
+                    });
+                if (it == _nodes.end()) {
+                    throw fmt::format("This node {} does not belong to this graph\n", node->name());
+                }
+                return it->get();
+            };
+            auto* src_node = find_wrapper(&src_node_raw);
+            auto* dst_node = find_wrapper(&dst_node_raw);
+            _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, weight, name);
         }
 
         return result;
     }
 
-    std::vector<std::function<connection_result_t(graph&)>> _connection_definitions;
+    std::vector<std::function<connection_result_t()>> _connection_definitions;
 
     // Just a dummy class that stores the graph and the source node and port
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
-    template <std::size_t src_port_index, typename Source>
+    template <typename Source, typename Port, std::size_t src_port_index = 1_UZ>
     struct source_connector {
         graph& self;
         Source& source;
+        Port& port;
 
-        source_connector(graph& _self, Source& _source) : self(_self), source(_source) {}
+        source_connector(graph& _self, Source& _source, Port& _port) : self(_self), source(_source), port(_port) {}
 
-        template <std::size_t dst_port_index, typename Destination>
-        [[nodiscard]] auto to(Destination& destination) {
-            self._connection_definitions.push_back([source = &source, &destination] (graph& _self) {
-                return _self.connect_impl<src_port_index, dst_port_index>(*source, destination);
+    private:
+        template <typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
+        [[nodiscard]] constexpr auto to(Destination& destination, DestinationPort& destination_port) {
+            if (source._owning_graph != destination._owning_graph) {
+                throw fmt::format("Source {} and destination {} do not belong to the same graph\n", source.name(), destination.name());
+            }
+            self._connection_definitions.push_back([self = &self, source = &source, source_port = &port, destination = &destination, destination_port = &destination_port] () {
+                return self->connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
             });
             return connection_result_t::SUCCESS;
         }
 
+    public:
+        template <typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
+        [[nodiscard]] constexpr auto to(Destination& destination, DestinationPort Destination::* member_ptr) {
+            return to<Destination, DestinationPort, dst_port_index>(destination, std::invoke(member_ptr, destination));
+        }
+
+        template <std::size_t dst_port_index, typename Destination>
+        [[nodiscard]] constexpr auto to(Destination& destination) {
+            auto &destination_port = input_port<dst_port_index>(&destination);
+            return to<Destination, std::remove_cvref_t<decltype(destination_port)>, dst_port_index>(destination, destination_port);
+        }
+
         template <fixed_string dst_port_name, typename Destination>
-        [[nodiscard]] auto to(Destination& destination) {
-            return to<meta::indexForName<dst_port_name, typename Destination::input_ports>()>(destination);
+        [[nodiscard]] constexpr auto to(Destination& destination) {
+            using destination_input_ports = typename traits::node::input_ports<Destination>;
+            constexpr std::size_t dst_port_index = meta::indexForName<dst_port_name, destination_input_ports>();
+            if constexpr (dst_port_index == meta::invalid_index) {
+                meta::print_types<
+                    meta::message_type<"There is no input port with the specified name in this destination node">,
+                    Destination,
+                    meta::message_type<dst_port_name>,
+                    meta::message_type<"These are the known names:">,
+                    traits::node::input_port_names<Destination>,
+                    meta::message_type<"Full ports info:">,
+                    destination_input_ports
+                        > port_not_found_error{};
+            }
+            return to<dst_port_index, Destination>(destination);
         }
 
         source_connector(const source_connector&) = delete;
@@ -5762,34 +6042,46 @@ private:
         operator bool() const { return success; }
     };
 
-public:
-    template<std::size_t src_port_index, typename Source>
-    [[nodiscard]] auto connect(Source& source) {
-        return source_connector<src_port_index, Source>(*this, source);
+    template<typename Node>
+    static auto* owner_of_node(Node& node) {
+        return node._owning_graph;
     }
+
+    template<std::size_t src_port_index, typename Source>
+    friend
+    auto connect(Source& source);
 
     template<fixed_string src_port_name, typename Source>
-    [[nodiscard]] auto connect(Source& source) {
-        return connect<meta::indexForName<src_port_name, typename Source::output_ports>(), Source>(source);
-    }
+    friend
+    auto connect(Source& source);
 
+    template<typename Source, typename Port>
+    friend
+    auto connect(Source& source, Port Source::* member_ptr);
+
+public:
     auto
     edges_count() const {
         return _edges.size();
     }
 
-    template<typename Node>
-    void
-    register_node(Node &node) {
+    template<typename Node, typename... Args>
+    auto&
+    make_node(Args&&... args) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
-        _nodes.push_back(std::make_unique<reference_node_wrapper<Node>>(std::addressof(node)));
+        auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
+        auto* result = static_cast<Node*>(new_node_ref->raw());
+        result->_owning_graph = this;
+        return *result;
     }
 
     init_proof init() {
-        return init_proof(
-            std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [this] (auto& connection_definition) {
-                return connection_definition(*this) == connection_result_t::SUCCESS;
+        auto result = init_proof(
+            std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [] (auto& connection_definition) {
+                return connection_definition() == connection_result_t::SUCCESS;
             }));
+        _connection_definitions.clear();
+        return result;
     }
 
     work_return_t
@@ -5821,6 +6113,35 @@ public:
         return work_return_t::DONE;
     }
 };
+
+template<std::size_t src_port_index, typename Source>
+[[nodiscard]] auto connect(Source& source) {
+    auto &port = output_port<src_port_index>(&source);
+    return graph::source_connector<Source, std::remove_cvref_t<decltype(port)>, src_port_index>(*graph::owner_of_node(source), source, port);
+}
+
+template<fixed_string src_port_name, typename Source>
+[[nodiscard]] auto connect(Source& source) {
+    using source_output_ports = typename traits::node::output_ports<Source>;
+    constexpr std::size_t src_port_index = meta::indexForName<src_port_name, source_output_ports>();
+    if constexpr (src_port_index == meta::invalid_index) {
+        meta::print_types<
+            meta::message_type<"There is no output port with the specified name in this source node">,
+            Source,
+            meta::message_type<src_port_name>,
+            meta::message_type<"These are the known names:">,
+            traits::node::output_port_names<Source>,
+            meta::message_type<"Full ports info:">,
+            source_output_ports
+                > port_not_found_error{};
+    }
+    return connect<src_port_index, Source>(source);
+}
+
+template<typename Source, typename Port>
+[[nodiscard]] auto connect(Source& source, Port Source::* member_ptr) {
+    return graph::source_connector<Source, Port>(*graph::owner_of_node(source), source, std::invoke(member_ptr, source));
+}
 
 // TODO: add nicer enum formatter
 inline std::ostream &

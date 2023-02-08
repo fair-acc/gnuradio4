@@ -1,13 +1,11 @@
 #ifndef GNURADIO_GRAPH_HPP
 #define GNURADIO_GRAPH_HPP
 
-#include <circular_buffer.hpp> // localinclude
-#include <buffer.hpp> // localinclude
-#include <utils.hpp> // localinclude
-#include <typelist.hpp> // localinclude
-#include <port.hpp> // localinclude
-#include <node.hpp> // localinclude
-#include <vir/simd.h> // localinclude
+#include "circular_buffer.hpp"
+#include "buffer.hpp"
+#include "typelist.hpp"
+#include "port.hpp"
+#include "node.hpp"
 
 #include <algorithm>
 #include <complex>
@@ -31,6 +29,8 @@
 #endif
 
 namespace fair::graph {
+
+using namespace fair::literals;
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
@@ -350,45 +350,53 @@ private:
         work() = 0;
 
         virtual void *
-        raw() const
+        raw()
                 = 0;
     };
 
     template<typename T>
-    class reference_node_wrapper final : public node_model {
+    class node_wrapper final : public node_model {
     private:
-        T *_node;
+        static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
+        T _node;
 
         auto &
         data() {
-            return *_node;
+            return _node;
         }
 
         const auto &
         data() const {
-            return *_node;
+            return _node;
         }
 
     public:
-        reference_node_wrapper(const reference_node_wrapper &other) = delete;
+        node_wrapper(const node_wrapper &other) = delete;
 
-        reference_node_wrapper &
-        operator=(const reference_node_wrapper &other)
+        node_wrapper &
+        operator=(const node_wrapper &other)
                 = delete;
 
-        reference_node_wrapper(reference_node_wrapper &&other) : _node(std::exchange(other._node, nullptr)) {}
+        node_wrapper(node_wrapper &&other) : _node(std::exchange(other._node, nullptr)) {}
 
-        reference_node_wrapper &
-        operator=(reference_node_wrapper &&other) {
+        node_wrapper &
+        operator=(node_wrapper &&other) {
             auto tmp = std::move(other);
             std::swap(_node, tmp._node);
             return *this;
         }
 
-        ~reference_node_wrapper() override = default;
+        ~node_wrapper() override = default;
 
-        template<typename In>
-        reference_node_wrapper(In &&node) : _node(std::forward<In>(node)) {}
+        node_wrapper() {}
+
+        template<typename Arg>
+            requires (!std::is_same_v<std::remove_cvref_t<Arg>, T>)
+        node_wrapper(Arg&& arg) : _node(std::forward<Arg>(arg)) {}
+
+        template<typename ...Args>
+            requires (sizeof...(Args) > 1)
+        node_wrapper(Args&&... args) : _node{std::forward<Args>(args)...} {}
 
         work_return_t
         work() override {
@@ -401,8 +409,8 @@ private:
         }
 
         void *
-        raw() const override {
-            return _node;
+        raw() override {
+            return std::addressof(_node);
         }
     };
 
@@ -410,8 +418,8 @@ private:
     public:
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
-        std::unique_ptr<node_model> _src_node;
-        std::unique_ptr<node_model> _dst_node;
+        node_model* _src_node;
+        node_model* _dst_node;
         std::size_t                 _src_port_index;
         std::size_t                 _dst_port_index;
         int32_t                     _weight;
@@ -433,50 +441,14 @@ private:
         operator=(edge &&) noexcept
                 = default;
 
-        edge(std::unique_ptr<node_model> src_node, std::size_t src_port_index, std::unique_ptr<node_model> dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
-            : _src_node(std::move(src_node))
-            , _dst_node(std::move(dst_node))
+        edge(node_model* src_node, std::size_t src_port_index, node_model* dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
+            : _src_node(src_node)
+            , _dst_node(dst_node)
             , _src_port_index(src_port_index)
             , _dst_port_index(dst_port_index)
             , _weight(weight)
             , _name(name) {
-            // if (!_src_node->port<OUTPUT>(_src_port_index)) {
-            //     throw fmt::format("source node '{}' has not output port id {}", std::string() /* _src_node->name() */, _src_port_index);
-            // }
-            // if (!_dst_node->port<INPUT>(_dst_port_index)) {
-            //     throw fmt::format("destination node '{}' has not output port id {}", std::string() /*_dst_node->name()*/, _dst_port_index);
-            // }
-            // const dynamic_port& src_port = *_src_node->port<OUTPUT>(_src_port_index).value();
-            // const dynamic_port& dst_port = *_dst_node->port<INPUT>(_dst_port_index).value();
-            // if (src_port.pmt_type().index() != dst_port.pmt_type().index()) {
-            //     throw fmt::format("edge({}::{}<{}> -> {}::{}<{}>, weight: {}, name:\"{}\") incompatible to type id='{}'",
-            //         std::string() /*_src_node->name()*/, std::string() /*src_port.name()*/, src_port.pmt_type().index(),
-            //         std::string() /*_dst_node->name()*/, std::string() /*dst_port.name()*/, dst_port.pmt_type().index(),
-            //         _weight, _name, dst_port.pmt_type().index());
-            // }
         }
-
-        // edge(std::shared_ptr<node_model> src_node, std::string_view src_port_name, std::shared_ptr<node_model> dst_node, std::string_view dst_port_name, int32_t weight, std::string_view name) :
-        //         _src_node(src_node), _dst_node(dst_node), _weight(weight), _name(name) {
-        //     const auto src_id = _src_node->port_index<OUTPUT>(src_port_name);
-        //     const auto dst_id = _dst_node->port_index<INPUT>(dst_port_name);
-        //     if (!src_id) {
-        //         throw std::invalid_argument(fmt::format("source node '{}' has not output port '{}'", std::string() /*_src_node->name()*/, src_port_name));
-        //     }
-        //     if (!dst_id) {
-        //         throw fmt::format("destination node '{}' has not output port '{}'", std::string() /*_dst_node->name()*/, dst_port_name);
-        //     }
-        //     _src_port_index = src_id.value();
-        //     _dst_port_index = dst_id.value();
-        //     const dynamic_port& src_port = *src_node->port<OUTPUT>(_src_port_index).value();
-        //     const dynamic_port& dst_port = *dst_node->port<INPUT>(_dst_port_index).value();
-        //     if (src_port.pmt_type().index() != dst_port.pmt_type().index()) {
-        //         throw fmt::format("edge({}::{}<{}> -> {}::{}<{}>, weight: {}, name:\"{}\") incompatible to type id='{}'",
-        //                           std::string() /*_src_node->name()*/, src_port.name(), src_port.pmt_type().index(),
-        //                           std::string() /*_dst_node->name()*/, dst_port.name(), dst_port.pmt_type().index(),
-        //                           _weight, _name, dst_port.pmt_type().index());
-        //     }
-        // }
 
         [[nodiscard]] constexpr int32_t
         weight() const noexcept {
@@ -507,18 +479,13 @@ private:
     std::vector<edge>                        _edges;
     std::vector<std::unique_ptr<node_model>> _nodes;
 
-    template<std::size_t src_port_index, std::size_t dst_port_index, typename Source_, typename Destination_>
+    template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
-    connect_impl(Source_ &src_node_raw, Destination_ &dst_node_raw, int32_t weight = 0,
-            std::string_view name = "unnamed edge") {
-        using Source = std::remove_cvref_t<Source_>;
-        using Destination = std::remove_cvref_t<Destination_>;
+    connect_impl(Source &src_node_raw, SourcePort& source_port, Destination &dst_node_raw, DestinationPort& destination_port,
+            int32_t weight = 0, std::string_view name = "unnamed edge") {
         static_assert(
-                std::is_same_v<typename Source::output_port_types::template at<src_port_index>, typename Destination::input_port_types::template at<dst_port_index>>,
+                std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>,
                 "The source port type needs to match the sink port type");
-
-        OutPort auto &source_port = output_port<src_port_index>(&src_node_raw);
-        InPort auto &destination_port = input_port<dst_port_index>(&dst_node_raw);
 
         if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) {
             return registered_node->raw() == std::addressof(src_node_raw);
@@ -531,37 +498,76 @@ private:
 
         auto result = source_port.connect(destination_port);
         if (result == connection_result_t::SUCCESS) {
-            std::unique_ptr<node_model> src_node = std::make_unique<reference_node_wrapper<Source>>(std::addressof(src_node_raw));
-            std::unique_ptr<node_model> dst_node = std::make_unique<reference_node_wrapper<Destination>>(std::addressof(dst_node_raw));
-            _edges.emplace_back(std::move(src_node), src_port_index, std::move(dst_node), src_port_index, weight, name);
+            auto find_wrapper = [this] (auto* node) {
+                auto it = std::find_if(_nodes.begin(), _nodes.end(), [node] (auto& wrapper) {
+                        return wrapper->raw() == node;
+                    });
+                if (it == _nodes.end()) {
+                    throw fmt::format("This node {} does not belong to this graph\n", node->name());
+                }
+                return it->get();
+            };
+            auto* src_node = find_wrapper(&src_node_raw);
+            auto* dst_node = find_wrapper(&dst_node_raw);
+            _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, weight, name);
         }
 
         return result;
     }
 
-    std::vector<std::function<connection_result_t(graph&)>> _connection_definitions;
+    std::vector<std::function<connection_result_t()>> _connection_definitions;
 
     // Just a dummy class that stores the graph and the source node and port
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
-    template <std::size_t src_port_index, typename Source>
+    template <typename Source, typename Port, std::size_t src_port_index = 1_UZ>
     struct source_connector {
         graph& self;
         Source& source;
+        Port& port;
 
-        source_connector(graph& _self, Source& _source) : self(_self), source(_source) {}
+        source_connector(graph& _self, Source& _source, Port& _port) : self(_self), source(_source), port(_port) {}
 
-        template <std::size_t dst_port_index, typename Destination>
-        [[nodiscard]] auto to(Destination& destination) {
-            self._connection_definitions.push_back([source = &source, &destination] (graph& _self) {
-                return _self.connect_impl<src_port_index, dst_port_index>(*source, destination);
+    private:
+        template <typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
+        [[nodiscard]] constexpr auto to(Destination& destination, DestinationPort& destination_port) {
+            if (source._owning_graph != destination._owning_graph) {
+                throw fmt::format("Source {} and destination {} do not belong to the same graph\n", source.name(), destination.name());
+            }
+            self._connection_definitions.push_back([self = &self, source = &source, source_port = &port, destination = &destination, destination_port = &destination_port] () {
+                return self->connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
             });
             return connection_result_t::SUCCESS;
         }
 
+    public:
+        template <typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
+        [[nodiscard]] constexpr auto to(Destination& destination, DestinationPort Destination::* member_ptr) {
+            return to<Destination, DestinationPort, dst_port_index>(destination, std::invoke(member_ptr, destination));
+        }
+
+        template <std::size_t dst_port_index, typename Destination>
+        [[nodiscard]] constexpr auto to(Destination& destination) {
+            auto &destination_port = input_port<dst_port_index>(&destination);
+            return to<Destination, std::remove_cvref_t<decltype(destination_port)>, dst_port_index>(destination, destination_port);
+        }
+
         template <fixed_string dst_port_name, typename Destination>
-        [[nodiscard]] auto to(Destination& destination) {
-            return to<meta::indexForName<dst_port_name, typename Destination::input_ports>()>(destination);
+        [[nodiscard]] constexpr auto to(Destination& destination) {
+            using destination_input_ports = typename traits::node::input_ports<Destination>;
+            constexpr std::size_t dst_port_index = meta::indexForName<dst_port_name, destination_input_ports>();
+            if constexpr (dst_port_index == meta::invalid_index) {
+                meta::print_types<
+                    meta::message_type<"There is no input port with the specified name in this destination node">,
+                    Destination,
+                    meta::message_type<dst_port_name>,
+                    meta::message_type<"These are the known names:">,
+                    traits::node::input_port_names<Destination>,
+                    meta::message_type<"Full ports info:">,
+                    destination_input_ports
+                        > port_not_found_error{};
+            }
+            return to<dst_port_index, Destination>(destination);
         }
 
         source_connector(const source_connector&) = delete;
@@ -577,34 +583,46 @@ private:
         operator bool() const { return success; }
     };
 
-public:
-    template<std::size_t src_port_index, typename Source>
-    [[nodiscard]] auto connect(Source& source) {
-        return source_connector<src_port_index, Source>(*this, source);
+    template<typename Node>
+    static auto* owner_of_node(Node& node) {
+        return node._owning_graph;
     }
+
+    template<std::size_t src_port_index, typename Source>
+    friend
+    auto connect(Source& source);
 
     template<fixed_string src_port_name, typename Source>
-    [[nodiscard]] auto connect(Source& source) {
-        return connect<meta::indexForName<src_port_name, typename Source::output_ports>(), Source>(source);
-    }
+    friend
+    auto connect(Source& source);
 
+    template<typename Source, typename Port>
+    friend
+    auto connect(Source& source, Port Source::* member_ptr);
+
+public:
     auto
     edges_count() const {
         return _edges.size();
     }
 
-    template<typename Node>
-    void
-    register_node(Node &node) {
+    template<typename Node, typename... Args>
+    auto&
+    make_node(Args&&... args) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
-        _nodes.push_back(std::make_unique<reference_node_wrapper<Node>>(std::addressof(node)));
+        auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
+        auto* result = static_cast<Node*>(new_node_ref->raw());
+        result->_owning_graph = this;
+        return *result;
     }
 
     init_proof init() {
-        return init_proof(
-            std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [this] (auto& connection_definition) {
-                return connection_definition(*this) == connection_result_t::SUCCESS;
+        auto result = init_proof(
+            std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [] (auto& connection_definition) {
+                return connection_definition() == connection_result_t::SUCCESS;
             }));
+        _connection_definitions.clear();
+        return result;
     }
 
     work_return_t
@@ -636,6 +654,35 @@ public:
         return work_return_t::DONE;
     }
 };
+
+template<std::size_t src_port_index, typename Source>
+[[nodiscard]] auto connect(Source& source) {
+    auto &port = output_port<src_port_index>(&source);
+    return graph::source_connector<Source, std::remove_cvref_t<decltype(port)>, src_port_index>(*graph::owner_of_node(source), source, port);
+}
+
+template<fixed_string src_port_name, typename Source>
+[[nodiscard]] auto connect(Source& source) {
+    using source_output_ports = typename traits::node::output_ports<Source>;
+    constexpr std::size_t src_port_index = meta::indexForName<src_port_name, source_output_ports>();
+    if constexpr (src_port_index == meta::invalid_index) {
+        meta::print_types<
+            meta::message_type<"There is no output port with the specified name in this source node">,
+            Source,
+            meta::message_type<src_port_name>,
+            meta::message_type<"These are the known names:">,
+            traits::node::output_port_names<Source>,
+            meta::message_type<"Full ports info:">,
+            source_output_ports
+                > port_not_found_error{};
+    }
+    return connect<src_port_index, Source>(source);
+}
+
+template<typename Source, typename Port>
+[[nodiscard]] auto connect(Source& source, Port Source::* member_ptr) {
+    return graph::source_connector<Source, Port>(*graph::owner_of_node(source), source, std::invoke(member_ptr, source));
+}
 
 // TODO: add nicer enum formatter
 inline std::ostream &

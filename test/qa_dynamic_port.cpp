@@ -1,7 +1,6 @@
-
-
 #include <fmt/ranges.h>
 
+#include "utils.hpp"
 #include "buffer.hpp"
 #include "graph.hpp"
 #include "refl.hpp"
@@ -11,6 +10,7 @@
 namespace fg = fair::graph;
 
 using namespace std::string_literals;
+using namespace fair::literals;
 
 #ifdef ENABLE_DYNAMIC_PORTS
 class dynamic_node : public fg::node<dynamic_node> {
@@ -20,47 +20,59 @@ public:
 #endif
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, "original">, fg::OUT<R, "scaled">, fg::limits<0, 1024>> {
+class scale : public fg::node<scale<T, Scale, R>> {
 public:
+    fg::IN<T> original;
+    fg::OUT<R> scaled;
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
         return a * Scale;
     }
 };
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::IN<T, "addend0">, fg::IN<T, "addend1">, fg::OUT<R, "sum">, fg::limits<0, 1024>> {
+class adder : public fg::node<adder<T>> {
 public:
+    fg::IN<T> addend0;
+    fg::IN<T> addend1;
+    fg::OUT<T> sum;
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
         return a + b;
     }
 };
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, "sink">, fg::limits<0, 1024>> {
+class cout_sink : public fg::node<cout_sink<T>> {
 public:
+    fg::IN<T> sink;
+
     void
     process_one(T value) {
         fmt::print("Sinking a value: {}\n", value);
     }
 };
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
-template<typename T, T value, std::size_t count = 10>
-class repeater_source : public fg::node<repeater_source<T, value>, fg::OUT<T, "value">, fg::limits<0, 1024>> {
-private:
+template<typename T, T val, std::size_t count = 10_UZ>
+class repeater_source : public fg::node<repeater_source<T, val>> {
+public:
+    fg::OUT<T> value;
     std::size_t _counter = 0;
 
-public:
     fair::graph::work_return_t
     work() {
         if (_counter < count) {
             _counter++;
             auto &writer       = output_port<"value">(this).writer();
             auto [data, token] = writer.get(1);
-            data[0]            = value;
+            data[0]            = val;
             writer.publish(token, 1);
 
             return fair::graph::work_return_t::OK;
@@ -69,6 +81,7 @@ public:
         }
     }
 };
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
     using namespace boost::ut;
@@ -76,27 +89,27 @@ const boost::ut::suite PortApiTests = [] {
     using namespace fair::graph;
 
     "PortApi"_test = [] {
-        static_assert(Port<IN<float, "in">>);
+        static_assert(Port<IN<float, 0, 0, "in">>);
         static_assert(Port<decltype(IN<float>("in"))>);
-        static_assert(Port<OUT<float, "out">>);
-        static_assert(Port<IN_MSG<float, "in_msg">>);
-        static_assert(Port<OUT_MSG<float, "out_msg">>);
+        static_assert(Port<OUT<float, 0, 0, "out">>);
+        static_assert(Port<IN_MSG<float, 0, 0, "in_msg">>);
+        static_assert(Port<OUT_MSG<float, 0, 0, "out_msg">>);
 
-        static_assert(IN<float, "in">::static_name() == fixed_string("in"));
+        static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
         static_assert(requires { IN<float>("in").name(); });
     };
 
     "PortBufferApi"_test = [] {
-        OUT<float, "out0"> output_port;
+        OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out0"> output_port;
         BufferWriter auto &writer = output_port.writer();
-        expect(ge(writer.available(), std::size_t{ 32 }));
+        expect(ge(writer.available(), 32_UZ));
 
-        IN<float, "int0">        input_port;
+        IN<float, 0, std::numeric_limits<std::size_t>::max(), "int0">        input_port;
         const BufferReader auto &reader = input_port.reader();
-        expect(eq(reader.available(), std::size_t{ 0 }));
+        expect(eq(reader.available(), 0_UZ));
         input_port.setBuffer(output_port.buffer());
 
-        expect(eq(output_port.buffer().n_readers(), std::size_t{ 1 }));
+        expect(eq(output_port.buffer().n_readers(), 1_UZ));
 
         int  offset = 1;
         auto lambda = [&offset](auto &w) {
@@ -105,48 +118,41 @@ const boost::ut::suite PortApiTests = [] {
             offset += w.size();
         };
 
-        expect(writer.try_publish(lambda, std::size_t{ 32 }));
+        expect(writer.try_publish(lambda, 32_UZ));
     };
 
     "RuntimePortApi"_test = [] {
         // declare in block
-        OUT<float, "out">         out;
-        IN<float, "in">           in;
+        OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out">         out;
+        IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">           in;
         std::vector<dynamic_port> port_list;
 
         port_list.emplace_back(out);
         port_list.emplace_back(in);
 
-        expect(eq(port_list.size(), std::size_t{ 2 }));
+        expect(eq(port_list.size(), 2_UZ));
     };
 
     "ConnectionApi"_test = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
 
-        scale<int, 2>            scaled;
-        adder<int>               added;
-        cout_sink<int>           out;
-
-        repeater_source<int, 42> answer;
-        repeater_source<int, 6>  number;
-
         // Nodes need to be alive for as long as the flow is
         graph flow;
 
         // Generators
-        flow.register_node(answer);
-        flow.register_node(number);
+        auto& answer = flow.make_node<repeater_source<int, 42>>();
+        auto& number = flow.make_node<repeater_source<int, 6>>();
 
-        flow.register_node(scaled);
-        flow.register_node(added);
-        flow.register_node(out);
+        auto& scaled = flow.make_node<scale<int, 2>>();
+        auto& added = flow.make_node<adder<int>>();
+        auto& out = flow.make_node<cout_sink<int>>();
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
+        expect(eq(connection_result_t::SUCCESS, connect<"value">(number).to<"original">(scaled)));
+        expect(eq(connection_result_t::SUCCESS, connect<"scaled">(scaled).to<"addend0">(added)));
+        expect(eq(connection_result_t::SUCCESS, connect<"value">(answer).to<"addend1">(added)));
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
+        expect(eq(connection_result_t::SUCCESS, connect<"sum">(added).to<"sink">(out)));
 
         auto token = flow.init();
         expect(token);

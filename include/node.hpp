@@ -6,11 +6,15 @@
 #include <typelist.hpp> // localinclude
 #include <port.hpp> // localinclude
 #include <utils.hpp> // localinclude
+#include <node_traits.hpp> // localinclude
 
-#include <vir/simd.h>
 #include <fmt/format.h>
+#include <refl.hpp>
 
 namespace fair::graph {
+
+class graph;
+using namespace fair::literals;
 
 namespace stdx = vir::stdx;
 using fair::meta::fixed_string;
@@ -35,7 +39,7 @@ static auto
 inputs_status(Self &self) noexcept {
     bool              at_least_one_input_has_data = false;
     const std::size_t available_values_count      = [&self, &at_least_one_input_has_data]() {
-        if constexpr (Self::input_ports::size > 0) {
+        if constexpr (traits::node::input_ports<Self>::size > 0) {
             const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
                 const std::size_t available = port.reader().available();
                 if (available > 0LU) at_least_one_input_has_data = true;
@@ -46,20 +50,14 @@ inputs_status(Self &self) noexcept {
                 }
             };
 
-            const auto availableInAll = std::apply(
+            return std::apply(
                     [&availableForPort] (auto&... input_port) {
                         return meta::safe_min(availableForPort(input_port)...);
                     },
                     input_ports(&self));
-
-            if (availableInAll < self.min_samples()) {
-                return 0LU;
-            } else {
-                return std::min(availableInAll, self.max_samples());
-            }
         } else {
             (void) self;
-            return std::size_t{ 1 };
+            return 1_UZ;
         }
     }();
 
@@ -77,7 +75,7 @@ inputs_status(Self &self) noexcept {
 template<typename Self>
 static auto
 write_to_outputs(Self& self, std::size_t available_values_count, auto& writers_tuple) {
-    if constexpr (Self::output_ports::size > 0) {
+    if constexpr (traits::node::output_ports<Self>::size > 0) {
         meta::tuple_for_each([available_values_count] (auto& output_port, auto& writer) {
                 output_port.writer().publish(writer.second, available_values_count);
                 },
@@ -89,7 +87,7 @@ template<typename Self>
 static bool
 consume_readers(Self& self, std::size_t available_values_count) {
     bool success = true;
-    if constexpr (Self::input_ports::size > 0) {
+    if constexpr (traits::node::input_ports<Self>::size > 0) {
         std::apply([available_values_count, &success] (auto&... input_port) {
                 ((success = success && input_port.reader().consume(available_values_count)), ...);
             }, input_ports(&self));
@@ -144,7 +142,7 @@ struct read_many_and_publish_many {
                 // process_one returned void
 
             } else if constexpr (requires { std::get<0>(results); }) {
-                static_assert(std::tuple_size_v<decltype(results)> == Self::output_ports::size);
+                static_assert(std::tuple_size_v<decltype(results)> == traits::node::output_ports<Self>::size);
 
                 meta::tuple_for_each(
                         [i] (auto& writer, auto& result) {
@@ -152,7 +150,7 @@ struct read_many_and_publish_many {
                         writers_tuple, results);
 
             } else {
-                static_assert(Self::output_ports::size == 1);
+                static_assert(traits::node::output_ports<Self>::size == 1);
                 std::get<0>(writers_tuple).first /*data*/[i] = std::move(results);
             }
         }
@@ -172,56 +170,25 @@ struct read_many_and_publish_many {
 using default_strategy = read_many_and_publish_many;
 } // namespace work_strategies
 
-template<typename...>
-struct fixed_node_ports_data_helper;
-
-template<meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-    requires InputPorts::template
-all_of<has_fixed_port_info> &&OutputPorts::template all_of<has_fixed_port_info> struct fixed_node_ports_data_helper<InputPorts, OutputPorts> {
-    using input_ports       = InputPorts;
-    using output_ports      = OutputPorts;
-
-    using input_port_types  = typename input_ports ::template transform<port_type>;
-    using output_port_types = typename output_ports ::template transform<port_type>;
-
-    using all_ports         = meta::concat<input_ports, output_ports>;
+template<typename Node>
+concept node_can_process_simd = requires(Node &n, typename meta::transform_to_widest_simd<typename Node::input_port_types>::template apply<std::tuple> const &inputs) {
+    {
+        []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)->decltype(n.process_one(std::get<Is>(tup)...)) { return {}; }
+        (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
+    } -> meta::any_simd<typename Node::return_type>;
 };
-
-template<has_fixed_port_info_v... Ports>
-struct fixed_node_ports_data_helper<Ports...> {
-    using all_ports         = meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>;
-
-    using input_ports       = typename all_ports ::template filter<is_in_port>;
-    using output_ports      = typename all_ports ::template filter<is_out_port>;
-
-    using input_port_types  = typename input_ports ::template transform<port_type>;
-    using output_port_types = typename output_ports ::template transform<port_type>;
-};
-
-template<typename... Arguments>
-using fixed_node_ports_data = typename meta::typelist<Arguments...>::template filter<has_fixed_port_info_or_is_typelist>::template apply<fixed_node_ports_data_helper>;
 
 // Ports can either be a list of ports instances,
 // or two typelists containing port instances -- one for input
 // ports and one for output ports
 template<typename Derived, typename... Arguments>
-// class node: fixed_node_ports_data<Arguments...>::all_ports::tuple_type {
 class node : protected std::tuple<Arguments...> {
 public:
-    using fixed_ports_data  = fixed_node_ports_data<Arguments...>;
+    using derived_t = Derived;
+    using node_template_parameters = meta::typelist<Arguments...>;
 
-    using all_ports         = typename fixed_ports_data::all_ports;
-    using input_ports       = typename fixed_ports_data::input_ports;
-    using output_ports      = typename fixed_ports_data::output_ports;
-    using input_port_types  = typename fixed_ports_data::input_port_types;
-    using output_port_types = typename fixed_ports_data::output_port_types;
-
-    using return_type       = typename output_port_types::tuple_or_type;
-    using work_strategy       = work_strategies::default_strategy;
+    using work_strategy     = work_strategies::default_strategy;
     friend work_strategy;
-
-    using min_max_limits = typename meta::typelist<Arguments...>::template filter<is_limits>;
-    static_assert(min_max_limits::size <= 1);
 
 private:
     using setting_map = std::map<std::string, int, std::less<>>;
@@ -230,6 +197,7 @@ private:
     setting_map _exec_metrics{}; //  →  std::map<string, pmt> → fair scheduling, 'int' stand-in for pmtv
 
     friend class graph;
+    graph* _owning_graph = nullptr;
 
 public:
     auto &
@@ -273,9 +241,9 @@ public:
     process_batch_simd_epilogue(std::size_t n, auto out_ptr, auto... in_ptr) {
         if constexpr (N == 0) return true;
         else if (N <= n) {
-            using In0                    = meta::first_type<input_port_types>;
+            using In0                    = meta::first_type<traits::node::input_port_types<Derived>>;
             using V                      = stdx::resize_simd_t<N, stdx::native_simd<In0>>;
-            using Vs                     = meta::transform_types<meta::rebind_simd_helper<V>::template rebind, input_port_types>;
+            using Vs                     = meta::transform_types<meta::rebind_simd_helper<V>::template rebind, traits::node::input_port_types<Derived>>;
             const std::tuple input_simds = Vs::template construct<meta::simd_load_ctor>(std::tuple{ in_ptr... });
             const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
             result.copy_to(out_ptr, stdx::element_aligned);
@@ -329,24 +297,6 @@ public:
         return _exec_metrics;
     }
 
-    [[nodiscard]] constexpr std::size_t
-    min_samples() const noexcept {
-        if constexpr (min_max_limits::size == 1) {
-            return min_max_limits::template at<0>::min;
-        } else {
-            return 0;
-        }
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    max_samples() const noexcept {
-        if constexpr (min_max_limits::size == 1) {
-            return min_max_limits::template at<0>::max;
-        } else {
-            return std::numeric_limits<std::size_t>::max();
-        }
-    }
-
     work_return_t
     work() noexcept {
         return work_strategy::work(self());
@@ -356,27 +306,39 @@ public:
 template<std::size_t Index, typename Self>
 [[nodiscard]] constexpr auto &
 input_port(Self *self) noexcept {
-    return std::get<typename Self::input_ports::template at<Index>>(*self);
+    using requested_port_type = typename traits::node::input_ports<Self>::template at<Index>;
+    if constexpr (traits::node::node_defines_ports_as_member_variables<Self>) {
+        using member_descriptor = traits::node::get_port_member_descriptor<Self, requested_port_type>;
+        return member_descriptor()(*self);
+    } else {
+        return std::get<requested_port_type>(*self);
+    }
 }
 
 template<std::size_t Index, typename Self>
 [[nodiscard]] constexpr auto &
 output_port(Self *self) noexcept {
-    return std::get<typename Self::output_ports::template at<Index>>(*self);
+    using requested_port_type = typename traits::node::output_ports<Self>::template at<Index>;
+    if constexpr (traits::node::node_defines_ports_as_member_variables<Self>) {
+        using member_descriptor = traits::node::get_port_member_descriptor<Self, requested_port_type>;
+        return member_descriptor()(*self);
+    } else {
+        return std::get<requested_port_type>(*self);
+    }
 }
 
 template<fixed_string Name, typename Self>
 [[nodiscard]] constexpr auto &
 input_port(Self *self) noexcept {
-    constexpr int Index = meta::indexForName<Name, typename Self::input_ports>();
-    return std::get<typename Self::input_ports::template at<Index>>(*self);
+    constexpr int Index = meta::indexForName<Name, traits::node::input_ports<Self>>();
+    return input_port<Index, Self>(self);
 }
 
 template<fixed_string Name, typename Self>
 [[nodiscard]] constexpr auto &
 output_port(Self *self) noexcept {
-    constexpr int Index = meta::indexForName<Name, typename Self::output_ports>();
-    return std::get<typename Self::output_ports::template at<Index>>(*self);
+    constexpr int Index = meta::indexForName<Name, traits::node::output_ports<Self>>();
+    return output_port<Index, Self>(self);
 }
 
 template<typename Self>
@@ -385,7 +347,7 @@ input_ports(Self *self) noexcept {
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
         return std::tie(input_port<Idx>(self)...);
     }
-    (std::make_index_sequence<Self::input_ports::size>());
+    (std::make_index_sequence<traits::node::input_ports<Self>::size>());
 }
 
 template<typename Self>
@@ -394,10 +356,165 @@ output_ports(Self *self) noexcept {
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
         return std::tie(output_port<Idx>(self)...);
     }
-    (std::make_index_sequence<Self::output_ports::size>());
+    (std::make_index_sequence<traits::node::output_ports<Self>::size>());
 }
+
+template<typename Node>
+concept source_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
+                          {
+                              [](Node &n, auto &inputs) {
+                                  constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
+                                  if constexpr (port_count > 0) {
+                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
+                                      (n, inputs, std::make_index_sequence<port_count>());
+                                  } else {
+                                      return n.process_one();
+                                  }
+                              }(node, inputs)
+                              } -> std::same_as<typename traits::node::return_type<Node>>;
+                      };
+
+template<typename Node>
+concept sink_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
+                        {
+                            [](Node &n, auto &inputs) {
+                                constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
+                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
+                                    if constexpr (port_count > 0) {
+                                        auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
+                                    } else {
+                                        n_inside.process_one(std::get<Is>(tup)...);
+                                    }
+                                }
+                                (n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
+                            }(node, inputs)
+                        };
+                    };
+
+template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
+class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
+                                meta::concat<meta::remove_at<OutId, typename traits::node::output_ports<Left>>, typename traits::node::output_ports<Right>>> {
+private:
+    // copy-paste from above, keep in sync
+    using base = node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
+                      meta::concat<meta::remove_at<OutId, typename traits::node::output_ports<Left>>, typename traits::node::output_ports<Right>>>;
+
+    Left  left;
+    Right right;
+
+    template<std::size_t I>
+    [[gnu::always_inline]] constexpr auto
+    apply_left(auto &&input_tuple) {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.process_one(std::get<Is>(input_tuple)...); }
+        (std::make_index_sequence<I>());
+    }
+
+    template<std::size_t I, std::size_t J>
+    [[gnu::always_inline]] constexpr auto
+    apply_right(auto &&input_tuple, auto &&tmp) {
+        return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
+            constexpr std::size_t first_offset  = traits::node::input_port_types<Left>::size;
+            constexpr std::size_t second_offset = traits::node::input_port_types<Left>::size + sizeof...(Is);
+            static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
+            return right.process_one(std::get<first_offset + Is>(input_tuple)..., std::move(tmp), std::get<second_offset + Js>(input_tuple)...);
+        }
+        (std::make_index_sequence<I>(), std::make_index_sequence<J>());
+    }
+
+public:
+    using input_port_types  = typename traits::node::input_port_types<base>;
+    using output_port_types = typename traits::node::output_port_types<base>;
+    using return_type       = typename traits::node::return_type<base>;
+
+    [[gnu::always_inline]] constexpr merged_node(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+
+    template<meta::any_simd... Ts>
+        requires meta::vectorizable<return_type> && input_port_types::template
+    are_equal<typename std::remove_cvref_t<Ts>::value_type...> && node_can_process_simd<Left>
+            && node_can_process_simd<Right> constexpr stdx::rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
+              process_one(Ts... inputs) {
+        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+    }
+
+    template<typename... Ts>
+    // In order to have nicer error messages, this is checked in the function body
+    // requires input_port_types::template are_equal<std::remove_cvref_t<Ts>...>
+    constexpr return_type
+    process_one(Ts &&...inputs) {
+        if constexpr (!input_port_types::template are_equal<std::remove_cvref_t<Ts>...>) {
+            meta::print_types<decltype(this), input_port_types, std::remove_cvref_t<Ts>...> error{};
+        }
+
+        if constexpr (traits::node::output_port_types<Left>::size == 1) { // only the result from the right node needs to be returned
+            return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                                                                                 apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+
+        } else {
+            // left produces a tuple
+            auto left_out  = apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
+
+            if constexpr (traits::node::output_port_types<Left>::size == 2 && traits::node::output_port_types<Right>::size == 1) {
+                return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
+
+            } else if constexpr (traits::node::output_port_types<Left>::size == 2) {
+                return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
+
+            } else if constexpr (traits::node::output_port_types<Right>::size == 1) {
+                return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
+                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out));
+                }
+                (std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>());
+
+            } else {
+                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) {
+                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...));
+                }
+                (std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
+            }
+        }
+    }
+};
+
+template<std::size_t OutId, std::size_t InId, source_node A, sink_node B>
+[[gnu::always_inline]] constexpr auto
+merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
+    if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+        fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+                                typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+
+                                fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                                typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+    }
+    return { std::forward<A>(a), std::forward<B>(b) };
+}
+
+template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
+[[gnu::always_inline]] constexpr auto
+merge(A &&a, B &&b) {
+    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+    static_assert(OutId != -1);
+    static_assert(InId != -1);
+    static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+                  "Port types do not match");
+    return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
+}
+
+
+#define ENABLE_REFLECTION(TypeName, ...) \
+    REFL_TYPE(TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+#define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
+    REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
+    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
 
 } // namespace fair::graph
 
 #endif // include guard
-

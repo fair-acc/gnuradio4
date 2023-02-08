@@ -35,18 +35,11 @@ jobs:
     - name: create single-header
       shell: bash
       run: |
+        wget https://raw.githubusercontent.com/edlund/amalgamate/c91f07eea1133aa184f652b8f1398eaf03586208/amalgamate.py
         mkdir -p singleheader
-        # merge headers by precompiling toplevel headers to get list of included headers, filter for only lines with local headers, reverse the list to get deepest deps first
-        # then concat all headers and filter out local includes (quoted includes and bracket includes with `// localinclude` comment) and write to single header file
-        echo "== Headers for graph =="
-        gcc -Iinclude -Ibuild/_deps/fmt-src/include -std=c++20 -H include/graph.hpp 2>&1 | tee include/graph.hpp.deps || true
-        cat $(cat include/graph.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | grep -v "fmt-src" | tac) include/graph.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/graph.hpp
-        rm include/graph.hpp.* # remove generated precompiled header
-        echo "== Headers for benchmark =="
-        gcc -Iinclude -Ibuild/_deps/ut-src/include -Ibuild/_deps/fmt-src/include -std=c++20 -H bench/benchmark.hpp 2>&1 | tee bench/benchmark.hpp.deps || true
-        cat $(cat bench/benchmark.hpp.deps | grep "^[\.][\.]* [^/]" | sed -e "s%^[\.]* %%" | grep -v "fmt-src" | tac) bench/benchmark.hpp | grep -v "#include \"" | grep -v "#include <.* // localinclude" > singleheader/benchmark.hpp
-        rm bench/benchmark.hpp.* # remove generated precompiled header
-      
+        python3 amalgamate.py -c devtools/singleheader-config-graph.json -s include/ -v yes
+        python3 amalgamate.py -c devtools/singleheader-config-bench.json -s bench/ -v yes
+
     - name: upload to branch # keeping history of single-header branch
       run: |
         git config --global user.name "single header generator"
