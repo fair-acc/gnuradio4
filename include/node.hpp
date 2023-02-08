@@ -513,7 +513,7 @@ merge(A &&a, B &&b) {
     REFL_END
 
 #define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
-    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (Type<T>), __VA_ARGS__)
+    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
 
 } // namespace fair::graph
 

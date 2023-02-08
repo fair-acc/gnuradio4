@@ -15,11 +15,11 @@ inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
 
 
 //
-// This defines a new node type that is parametrised only on the type
-// (single typename template parameter)
+// This defines a new node type that has only type template parameters.
 //
 // It defines its ports as member variables, so it needs to be
-// enabled for reflection using the ENABLE_REFLECTION_FOR_TEMPLATE
+// enabled for reflection. Since it has no non-type template parameters,
+// this can be achieved using the ENABLE_REFLECTION_FOR_TEMPLATE
 // macro as can be seen immediately after the class is defined.
 //
 template<typename T>
@@ -35,7 +35,7 @@ public:
                 factor) { this->set_name(name); }
 
     template<fair::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr V
+    [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
         return a * _factor;
     }
@@ -44,12 +44,41 @@ ENABLE_REFLECTION_FOR_TEMPLATE(multiply, in, out);
 
 
 //
-// This defines a new node type that is parametrised on several
-// template parameters.
+// This defines a new node type that has only type template parameters.
 //
 // It defines its ports as member variables, so it needs to be
+// enabled for reflection. Since it has no non-type template parameters,
+// this can be achieved using the ENABLE_REFLECTION_FOR_TEMPLATE
+// macro as can be seen immediately after the class is defined.
+//
+template<typename T, typename R = T>
+class converting_multiply : public fg::node<converting_multiply<T, R>> {
+    T _factor = static_cast<T>(1.0f);
+public:
+    fg::IN<T> in;
+    fg::OUT<R> out;
+
+    converting_multiply() = delete;
+
+    explicit converting_multiply(T factor, std::string name = fair::graph::this_source_location()) : _factor(
+                factor) { this->set_name(name); }
+
+    template<fair::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a) const noexcept {
+        return static_cast<R>(a * _factor);
+    }
+};
+ENABLE_REFLECTION_FOR_TEMPLATE(converting_multiply, in, out);
+
+
+//
+// This defines a new node type that is parametrised on several
+// template parameters, some of which are non-type template parameters.
+//
+// It defines its ports as member variables. It needs to be
 // enabled for reflection using the ENABLE_REFLECTION_FOR_TEMPLATE_FULL
-// macro because it has several different template parameters.
+// macro because it contains non-type template parameters.
 //
 template<typename T, int addend>
 class add : public fg::node<add<T, addend>> {
@@ -368,8 +397,24 @@ inline const boost::ut::suite _constexpr_bm = [] {
 
     {
         auto gen_mult_block_float = [] {
-            return merge<"out", "in">(multiply<float>(2.0f), merge<"out", "in">(multiply<float>(0.5f),
-                                                                                add<float, -1>()));
+            return merge<"out", "in">(multiply<float>(2.0f), merge<"out", "in">(multiply<float>(0.5f), add<float, -1>()));
+        };
+        auto merged_node = merge<"out", "in">(
+                merge<"out", "in">(test::source<float>(N_SAMPLES), gen_mult_block_float()), test::sink<float>());
+        "constexpr src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
+            test::n_samples_produced = 0LU;
+            test::n_samples_consumed = 0LU;
+            for (std::size_t i = 0; i < N_SAMPLES; i++) {
+                merged_node.process_one();
+            }
+            expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough samples";
+            expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough samples";
+        };
+    }
+
+    {
+        auto gen_mult_block_float = [] {
+            return merge<"out", "in">(converting_multiply<float, double>(2.0f), merge<"out", "in">(converting_multiply<double, float>(0.5f), add<float, -1>()));
         };
         auto merged_node = merge<"out", "in">(
                 merge<"out", "in">(test::source<float>(N_SAMPLES), gen_mult_block_float()), test::sink<float>());
