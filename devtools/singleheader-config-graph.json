@@ -5,6 +5,7 @@
 		"graph.hpp"
 	],
 	"include_paths": [
-		"."
+		".",
+		"../build/_deps/refl-cpp-src/include"
 	]
 }
