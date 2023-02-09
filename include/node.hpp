@@ -56,7 +56,7 @@ inputs_status(Self &self) noexcept {
                     },
                     input_ports(&self));
         } else {
-            (void) self;
+
             return 1_UZ;
         }
     }();
@@ -133,7 +133,41 @@ struct read_many_and_publish_many {
         // special cases:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
-        for (std::size_t i = 0; i < inputs_status.available_values_count; ++i) {
+
+        std::size_t i = 0_UZ;
+        using input_types = traits::node::input_port_types<Self>;
+        using output_types = traits::node::output_port_types<Self>;
+
+        // Loop for SIMD-enabled processing
+        if constexpr (output_types::template all_of<meta::vectorizable>
+                      && traits::node::can_process_simd<Self>) {
+
+            using Vec = meta::reduce_to_widest_simd<input_types>;
+
+            constexpr auto simd_size = Vec::size();
+            for (; i + simd_size <= inputs_status.available_values_count; i += simd_size) {
+                const auto input_simds = meta::tuple_transform(
+                        [i] <typename Span>(const Span& one_span) {
+                            return stdx::rebind_simd_t<typename Span::value_type, Vec>(one_span.data() + i, stdx::element_aligned);
+                        }, input_spans);
+
+                const stdx::simd results = std::apply([&self](auto... args) { return self.process_one(args...); }, input_simds);
+
+                if constexpr (requires { std::get<0>(results); }) {
+                    meta::tuple_for_each(
+                            [i] (auto& writer, auto& result) {
+                                result.copy_to(writer.first/*data*/.data() + i, stdx::element_aligned);
+                            },
+                            writers_tuple, results);
+                } else {
+                    static_assert(traits::node::output_ports<Self>::size == 1);
+                    results.copy_to(std::get<0>(writers_tuple).first/*data*/.data() + i, stdx::element_aligned);
+                }
+            }
+        }
+
+        // Continues from the last index processed by SIMD loop
+        for (; i < inputs_status.available_values_count; ++i) {
             auto results = std::apply([&self, &input_spans, i](auto&... input_span) {
                     return meta::invoke_void_wrapped([&self]<typename... Args>(Args... args) { return self.process_one(std::forward<Args>(args)...); }, input_span[i]...);
                 }, input_spans);
@@ -142,6 +176,7 @@ struct read_many_and_publish_many {
                 // process_one returned void
 
             } else if constexpr (requires { std::get<0>(results); }) {
+                // several outputs, results is a tuple
                 static_assert(std::tuple_size_v<decltype(results)> == traits::node::output_ports<Self>::size);
 
                 meta::tuple_for_each(
@@ -150,6 +185,7 @@ struct read_many_and_publish_many {
                         writers_tuple, results);
 
             } else {
+                // one output, result is a normal value
                 static_assert(traits::node::output_ports<Self>::size == 1);
                 std::get<0>(writers_tuple).first /*data*/[i] = std::move(results);
             }
@@ -169,14 +205,6 @@ struct read_many_and_publish_many {
 
 using default_strategy = read_many_and_publish_many;
 } // namespace work_strategies
-
-template<typename Node>
-concept node_can_process_simd = requires(Node &n, typename meta::transform_to_widest_simd<typename Node::input_port_types>::template apply<std::tuple> const &inputs) {
-    {
-        []<std::size_t... Is>(Node & n, auto const &tup, std::index_sequence<Is...>)->decltype(n.process_one(std::get<Is>(tup)...)) { return {}; }
-        (n, inputs, std::make_index_sequence<Node::input_port_types::size>())
-    } -> meta::any_simd<typename Node::return_type>;
-};
 
 // Ports can either be a list of ports instances,
 // or two typelists containing port instances -- one for input
@@ -235,57 +263,6 @@ public:
     template<fixed_string Name, typename Self>
     friend constexpr auto &
     output_port(Self *self) noexcept;
-
-    template<std::size_t N>
-    [[gnu::always_inline]] constexpr bool
-    process_batch_simd_epilogue(std::size_t n, auto out_ptr, auto... in_ptr) {
-        if constexpr (N == 0) return true;
-        else if (N <= n) {
-            using In0                    = meta::first_type<traits::node::input_port_types<Derived>>;
-            using V                      = stdx::resize_simd_t<N, stdx::native_simd<In0>>;
-            using Vs                     = meta::transform_types<meta::rebind_simd_helper<V>::template rebind, traits::node::input_port_types<Derived>>;
-            const std::tuple input_simds = Vs::template construct<meta::simd_load_ctor>(std::tuple{ in_ptr... });
-            const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
-            result.copy_to(out_ptr, stdx::element_aligned);
-            return process_batch_simd_epilogue<N / 2>(n, out_ptr + N, (in_ptr + N)...);
-        } else
-            return process_batch_simd_epilogue<N / 2>(n, out_ptr, in_ptr...);
-    }
-
-#ifdef NOT_YET_PORTED_AS_IT_IS_UNUSED
-    template<std::ranges::forward_range... Ins>
-        requires(std::ranges::sized_range<Ins> && ...) && input_port_types::template
-    are_equal<std::ranges::range_value_t<Ins>...> constexpr bool process_batch(port_data<return_type, 1024> &out, Ins &&...inputs) {
-        const auto       &in0 = std::get<0>(std::tie(inputs...));
-        const std::size_t n   = std::ranges::size(in0);
-        detail::precondition(((n == std::ranges::size(inputs)) && ...));
-        auto &&out_range = out.request_write(n);
-        // if SIMD makes sense (i.e. input and output ranges are contiguous and all types are
-        // vectorizable)
-        if constexpr ((std::ranges::contiguous_range<decltype(out_range)> && ... && std::ranges::contiguous_range<Ins>) &&detail::vectorizable<return_type> && detail::node_can_process_simd<Derived>
-                      && input_port_types ::template transform<stdx::native_simd>::template all_of<std::is_constructible>) {
-            using V       = detail::reduce_to_widest_simd<input_port_types>;
-            using Vs      = detail::transform_by_rebind_simd<V, input_port_types>;
-            std::size_t i = 0;
-            for (i = 0; i + V::size() <= n; i += V::size()) {
-                const std::tuple input_simds = Vs::template construct<detail::simd_load_ctor>(std::tuple{ (std::ranges::data(inputs) + i)... });
-                const stdx::simd result      = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
-                result.copy_to(std::ranges::data(out_range) + i, stdx::element_aligned);
-            }
-
-            return process_batch_simd_epilogue<std::bit_ceil(V::size()) / 2>(n - i, std::ranges::data(out_range) + i, (std::ranges::data(inputs) + i)...);
-        } else { // no explicit SIMD
-            auto             out_it    = out_range.begin();
-            std::tuple       it_tuple  = { std::ranges::begin(inputs)... };
-            const std::tuple end_tuple = { std::ranges::end(inputs)... };
-            while (std::get<0>(it_tuple) != std::get<0>(end_tuple)) {
-                *out_it = std::apply([this](auto &...its) { return self().process_one((*its++)...); }, it_tuple);
-                ++out_it;
-            }
-            return true;
-        }
-    }
-#endif
 
     [[nodiscard]] setting_map &
     exec_metrics() noexcept {
@@ -429,9 +406,9 @@ public:
     [[gnu::always_inline]] constexpr merged_node(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
     template<meta::any_simd... Ts>
-        requires meta::vectorizable<return_type> && input_port_types::template
-    are_equal<typename std::remove_cvref_t<Ts>::value_type...> && node_can_process_simd<Left>
-            && node_can_process_simd<Right> constexpr stdx::rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
+        requires meta::vectorizable_v<return_type> && input_port_types::template
+    are_equal<typename std::remove_cvref_t<Ts>::value_type...> && traits::node::can_process_simd<Left>
+            && traits::node::can_process_simd<Right> constexpr stdx::rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
               process_one(Ts... inputs) {
         return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
     }
