@@ -5,7 +5,10 @@
 #include <functional>
 
 #include "bm_test_helper.hpp"
+
 #include <graph.hpp>
+#include <node_traits.hpp>
+
 #include <vir/simd.h>
 
 namespace fg = fair::graph;
@@ -41,6 +44,7 @@ public:
     }
 };
 ENABLE_REFLECTION_FOR_TEMPLATE(multiply, in, out);
+static_assert(fg::traits::node::can_process_simd<multiply<float>>);
 
 
 //
@@ -63,13 +67,13 @@ public:
     explicit converting_multiply(T factor, std::string name = fair::graph::this_source_location()) : _factor(
                 factor) { this->set_name(name); }
 
-    template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(V a) const noexcept {
+    process_one(T a) const noexcept {
         return static_cast<R>(a * _factor);
     }
 };
 ENABLE_REFLECTION_FOR_TEMPLATE(converting_multiply, in, out);
+static_assert(!fg::traits::node::can_process_simd<converting_multiply<float, double>>);
 
 
 //
@@ -93,6 +97,7 @@ public:
     }
 };
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, int addend), (add<T, addend>), in, out);
+static_assert(fg::traits::node::can_process_simd<add<float, 1>>);
 
 
 //
@@ -180,6 +185,10 @@ public:
     }
 };
 // no reflection needed because ports are defined via the fg::node<...> base class
+
+// gen_operation_SIMD has built-in SIMD-enabled work function, that means
+// we don't see it as a SIMD-enabled node as we can not do simd<simd<something>>
+static_assert(not fg::traits::node::can_process_simd<gen_operation_SIMD<float, '*'>>);
 
 template<typename T>
 using multiply_SIMD = gen_operation_SIMD<T, '*'>;
@@ -398,23 +407,6 @@ inline const boost::ut::suite _constexpr_bm = [] {
     {
         auto gen_mult_block_float = [] {
             return merge<"out", "in">(multiply<float>(2.0f), merge<"out", "in">(multiply<float>(0.5f), add<float, -1>()));
-        };
-        auto merged_node = merge<"out", "in">(
-                merge<"out", "in">(test::source<float>(N_SAMPLES), gen_mult_block_float()), test::sink<float>());
-        "constexpr src->mult(2.0)->mult(0.5)->add(-1)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
-            test::n_samples_produced = 0LU;
-            test::n_samples_consumed = 0LU;
-            for (std::size_t i = 0; i < N_SAMPLES; i++) {
-                merged_node.process_one();
-            }
-            expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough samples";
-            expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough samples";
-        };
-    }
-
-    {
-        auto gen_mult_block_float = [] {
-            return merge<"out", "in">(converting_multiply<float, double>(2.0f), merge<"out", "in">(converting_multiply<double, float>(0.5f), add<float, -1>()));
         };
         auto merged_node = merge<"out", "in">(
                 merge<"out", "in">(test::source<float>(N_SAMPLES), gen_mult_block_float()), test::sink<float>());

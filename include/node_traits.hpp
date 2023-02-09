@@ -7,6 +7,8 @@
 #include <port_traits.hpp> // localinclude
 #include <utils.hpp> // localinclude
 
+#include <vir/simd.h>
+
 namespace fair::graph::traits::node {
 
 namespace detail {
@@ -140,6 +142,20 @@ template<typename Node, typename PortType>
 using get_port_member_descriptor =
     typename meta::to_typelist<refl::descriptor::member_list<Node>>
         ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
+
+template<typename Node>
+concept can_process_simd =
+    traits::node::input_port_types<Node>::size() > 0 &&
+    not vir::stdx::is_simd_v<typename traits::node::input_port_types<Node>::safe_head> &&
+    traits::node::input_port_types<Node>::template all_same<> &&
+    traits::node::output_ports<Node>::size() > 0 &&
+    requires (Node& node,
+              typename traits::node::input_port_types<Node>::template transform<vir::stdx::native_simd>::template apply<std::tuple>& input_simds) {
+        {
+            []<std::size_t... Is>(Node &node, auto const &input, std::index_sequence<Is...>) -> decltype(node.process_one(std::get<Is>(input)...)) { return {}; }
+            (node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
+        };
+    };
 
 } // namespace node
 
