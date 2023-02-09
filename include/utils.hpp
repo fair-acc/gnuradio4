@@ -153,7 +153,10 @@ template<typename V, typename T>
 concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
 
 template<typename T>
-concept vectorizable = std::constructible_from<stdx::simd<T>>;
+concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
+
+template<typename T>
+using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
 
 template<typename A, typename B>
 struct wider_native_simd_size : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
@@ -245,7 +248,7 @@ auto tuple_for_each(Function&& function, Tuple&& tuple, Tuples&&... tuples)
             function(std::get<I>(tuple), std::get<I>(tuples)...);
         };
         ((callFunction.template operator()<Idx>(), ...));
-    }(std::make_index_sequence<std::tuple_size_v<Tuple>>());
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
@@ -257,7 +260,7 @@ auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
             return function(std::get<I>(tuple), std::get<I>(tuples)...);
         };
         return std::make_tuple(callFunction.template operator()<Idx>()...);
-    }(std::make_index_sequence<std::tuple_size_v<Tuple>>());
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 

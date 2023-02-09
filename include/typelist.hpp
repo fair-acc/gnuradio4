@@ -269,6 +269,18 @@ struct typelist {
     template<template<typename...> typename Pred>
     constexpr static bool none_of = (!Pred<Ts>::value && ...);
 
+    using safe_head = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) > 0) {
+            return static_cast<this_t::at<0>*>(nullptr);
+        } else {
+            return static_cast<void*>(nullptr);
+        }
+    }())>;
+
+    template<typename Matcher = typename this_t::safe_head>
+    constexpr static bool all_same =
+        ((std::is_same_v<Matcher, Ts> && ...));
+
     template<template<typename...> typename Predicate>
     using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
 
