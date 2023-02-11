@@ -360,16 +360,6 @@ private:
         static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
         T _node;
 
-        auto &
-        data() {
-            return _node;
-        }
-
-        const auto &
-        data() const {
-            return _node;
-        }
-
     public:
         node_wrapper(const node_wrapper &other) = delete;
 
@@ -398,14 +388,14 @@ private:
             requires (sizeof...(Args) > 1)
         node_wrapper(Args&&... args) : _node{std::forward<Args>(args)...} {}
 
-        work_return_t
+        constexpr work_return_t
         work() override {
-            return data().work();
+            return _node.work();
         }
 
         std::string_view
         name() const override {
-            return data().name();
+            return _node.name();
         }
 
         void *
