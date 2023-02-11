@@ -13,7 +13,6 @@
 
 namespace fair::graph {
 
-class graph;
 using namespace fair::literals;
 
 namespace stdx = vir::stdx;
@@ -102,8 +101,6 @@ private:
     using setting_map = std::map<std::string, int, std::less<>>;
     std::string _name{ std::string(fair::meta::type_name<Derived>()) };
 
-    setting_map _exec_metrics{}; //  →  std::map<string, pmt> → fair scheduling, 'int' stand-in for pmtv
-
 public:
     auto &
     self() {
@@ -140,16 +137,6 @@ public:
     template<fixed_string Name, typename Self>
     friend constexpr auto &
     output_port(Self *self) noexcept;
-
-    [[nodiscard]] setting_map &
-    exec_metrics() noexcept {
-        return _exec_metrics;
-    }
-
-    [[nodiscard]] setting_map const &
-    exec_metrics() const noexcept {
-        return _exec_metrics;
-    }
 
     // This function is a template and static to provide easier
     // transition to C++23's deducing this later
