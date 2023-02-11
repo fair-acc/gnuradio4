@@ -6,12 +6,14 @@ algorithms, notably required node structures, scheduling interfaces, and partial
 [directed acyclic](https://en.wikipedia.org/wiki/Directed_acyclic_graph) as well as 
 [cyclic graphs](https://en.wikipedia.org/wiki/Feedback_arc_set) (aka. feedback loops).  
 
-The expressed goal is to guide the low-level API design and functionality for the upcoming 
+The expressed goal is to guide the low-level API design and functionality for the upcoming
 [GNU Radio 4.0](https://github.com/gnuradio/gnuradio/tree/dev-4.0) release.
 
-A [single header version](https://raw.githubusercontent.com/fair-acc/graph-prototype/single-header/singleheader/graph.hpp) is provided in the `singleheader/`subdirectory of the single-header branch.
-If you want to locally regenerate the single header file, just follow the [CI step](https://github.com/fair-acc/graph-prototype/blob/main/.github/workflows/single-header.yml#L38-L41).
-It can be used on [compiler-explorer](https://compiler-explorer.com/z/fc9G1vhT1) with `-sdt=c++20 -O3` compiler options.
+A [single header version](https://raw.githubusercontent.com/fair-acc/graph-prototype/single-header/singleheader/graph.hpp)
+is provided in the `singleheader/`subdirectory of the single-header branch.
+If you want to locally regenerate the single header file, just follow
+the [CI step](https://github.com/fair-acc/graph-prototype/blob/main/.github/workflows/single-header.yml#L38-L41).
+It can be used on [compiler-explorer](https://compiler-explorer.com/z/zcx49YP53) with `-sdt=c++20 -O3` compiler options.
 
 ## Copyright & License
 Copyright (C) 2018-2022 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
