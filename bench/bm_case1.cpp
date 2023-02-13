@@ -51,6 +51,57 @@ using divide = math_op<T, '/'>;
 
 static_assert(fg::traits::node::can_process_simd<multiply<float>>);
 
+template<typename T, char op>
+class math_bulk_op : public fg::node<math_bulk_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
+    T _factor = static_cast<T>(1.0f);
+
+public:
+    math_bulk_op() = delete;
+
+    explicit math_bulk_op(T factor, std::string name = fair::graph::this_source_location()) : _factor(factor) { this->set_name(name); }
+
+    template<fair::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    process_one(V a) const noexcept {
+        if constexpr (op == '*') {
+            return a * _factor;
+        } else if constexpr (op == '/') {
+            return a / _factor;
+        } else if constexpr (op == '+') {
+            return a + _factor;
+        } else if constexpr (op == '-') {
+            return a - _factor;
+        } else {
+            static_assert(fair::meta::always_false<T>, "unknown op");
+        }
+    }
+
+    [[nodiscard]] constexpr fg::work_return_t
+    process_bulk(std::span<const T> input, std::span<T> output) const noexcept {
+        // classic for-loop
+        for (std::size_t i = 0; i < input.size(); i++) {
+            output[i] = process_one(input[i]);
+        }
+
+        // C++17 algorithms
+        // std::transform(input.begin(), input.end(), output.begin(), [this](const T& elem) { return process_one(elem);});
+
+        // C++20 ranges
+        // std::ranges::transform(input, output.begin(), [this](const T& elem) { return process_one(elem); });
+
+        return fg::work_return_t::OK;
+    }
+};
+
+template<typename T>
+using multiply_bulk = math_bulk_op<T, '*'>;
+template<typename T>
+using divide_bulk = math_bulk_op<T, '/'>;
+template<typename T>
+using add_bulk = math_bulk_op<T, '+'>;
+template<typename T>
+using sub_bulk = math_bulk_op<T, '-'>;
+
 //
 // This defines a new node type that has only type template parameters.
 //
@@ -724,6 +775,63 @@ inline const boost::ut::suite _simd_tests = [] {
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
     }
+};
+
+inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
+    using namespace boost::ut;
+    using namespace benchmark;
+
+    constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
+        fg::graph flow_graph;
+        auto     &src  = flow_graph.make_node<test::source<T>>(N_SAMPLES);
+        auto     &mult = flow_graph.make_node<multiply<T>>(factor);
+        auto     &div  = flow_graph.make_node<divide<T>>(factor);
+        auto     &add1 = flow_graph.make_node<add<T, -1>>();
+        auto     &sink = flow_graph.make_node<test::sink<T>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).template to<"in">(mult)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult).template to<"in">(div)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(div).template to<"in">(add1)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).template to<"in">(sink)));
+
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+            test::n_samples_produced = 0LU;
+            test::n_samples_consumed = 0LU;
+            auto token               = flow_graph.init();
+            expect(token);
+            flow_graph.work(token);
+            expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
+            expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
+        };
+    };
+    templated_cascaded_test(static_cast<float>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - float single");
+    templated_cascaded_test(static_cast<int>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - int single");
+
+    constexpr auto templated_cascaded_test_bulk = []<typename T>(T factor, const char *test_name) {
+        fg::graph flow_graph;
+        auto     &src  = flow_graph.make_node<test::source<T>>(N_SAMPLES);
+        auto     &mult = flow_graph.make_node<multiply_bulk<T>>(factor);
+        auto     &div  = flow_graph.make_node<divide_bulk<T>>(factor);
+        auto     &add1 = flow_graph.make_node<add_bulk<T>>(-1);
+        auto     &sink = flow_graph.make_node<test::sink<T>>();
+
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).template to<"in">(mult)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult).template to<"in">(div)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(div).template to<"in">(add1)));
+        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).template to<"in">(sink)));
+
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+            test::n_samples_produced = 0LU;
+            test::n_samples_consumed = 0LU;
+            auto token               = flow_graph.init();
+            expect(token);
+            flow_graph.work(token);
+            expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
+            expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
+        };
+    };
+    templated_cascaded_test_bulk(static_cast<float>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - float bulk");
+    templated_cascaded_test_bulk(static_cast<int>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - int bulk");
 };
 
 int

@@ -157,7 +157,7 @@ The following defaults are defined for one of the two 'user_defined_block' block
   ```
   The number, type, and ordering of input and arguments of `process_one(..)` are defined by the port definitions.
 * **case 1b** - non-decimating N-in->N-out mechanic providing bulk access to the input/output data and automatic
-  handling of streaming tags and settings changes (to-be-completed):
+  handling of streaming tags and settings changes:
   ```cpp
   template<typename T, typename R>
   struct user_defined_block : node<user_defined_block, IN<T, 0, N_MAX, "in">, OUT<R, 0, N_MAX, "out">> {
@@ -173,8 +173,7 @@ The following defaults are defined for one of the two 'user_defined_block' block
   N) (to-be-implemented)
 * **case 2b**: N-in->M-out -> process_bulk(<{ins,tag-IO}...>, <{outs,tag-IO}...>) user-level tag handling (
   to-be-implemented)
-* **case 3** -- generic `work()` function providing access to the full logic and capable of handling any N-in->M-out
-  cases:
+* **case 3** -- generic `work()` providing full access/logic capable of handling any N-in->M-out tag-handling case:
   ```cpp
   // ...
   [[nodiscard]] constexpr work_return_t work() const noexcept {

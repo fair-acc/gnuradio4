@@ -131,7 +131,7 @@ output_ports(Self *self) noexcept {
  * @endcode
  * The number, type, and ordering of input and arguments of `process_one(..)` are defined by the port definitions.
  * <li> <b>case 1b</b> - non-decimating N-in->N-out mechanic providing bulk access to the input/output data and automatic
- * handling of streaming tags and settings changes (to-be-completed):
+ * handling of streaming tags and settings changes:
  * @code
  *  [[nodiscard]] constexpr auto process_bulk(std::span<const T> input, std::span<R> output) const noexcept {
  *      std::ranges::copy(input, output | std::views::transform([a = this->_factor](T x) { return static_cast<R>(x * a); }));
@@ -139,7 +139,7 @@ output_ports(Self *self) noexcept {
  * @endcode
  * <li> <b>case 2a</b>: N-in->M-out -> process_bulk(<ins...>, <outs...>) N,M fixed -> aka. interpolator (M>N) or decimator (M<N) (to-be-done)
  * <li> <b>case 2b</b>: N-in->M-out -> process_bulk(<{ins,tag-IO}...>, <{outs,tag-IO}...>) user-level tag handling (to-be-done)
- * <li> <b>case 3</b> - generic `work()` function providing access to the full logic and capable of handling any N-in->M-out cases:
+ * <li> <b>case 3</b> -- generic `work()` providing full access/logic capable of handling any N-in->M-out tag-handling case:
  * @code
  * [[nodiscard]] constexpr work_return_t work() const noexcept {
  *     auto &out_port = output_port<"out">(this);
@@ -329,6 +329,15 @@ public:
         std::size_t i = 0_UZ;
         using input_types = traits::node::input_port_types<Derived>;
         using output_types = traits::node::output_port_types<Derived>;
+
+        if constexpr (requires { &Derived::process_bulk;  }) {
+            const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
+                                        std::tuple_cat(input_spans, meta::tuple_transform([](const auto &span) { return span.first; }, writers_tuple)));
+
+            write_to_outputs(self(), inputs_status.available_values_count, writers_tuple);
+            const bool success = consume_readers(self(), inputs_status.available_values_count);
+            return success ? ret : work_return_t::ERROR;
+        }
 
         // Loop for SIMD-enabled processing
         if constexpr (output_types::template all_of<meta::vectorizable>
