@@ -9857,9 +9857,95 @@ output_ports(Self *self) noexcept {
     (std::make_index_sequence<traits::node::output_ports<Self>::size>());
 }
 
-// Ports can either be a list of ports instances,
-// or two typelists containing port instances -- one for input
-// ports and one for output ports
+/**
+ * @brief The 'node<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
+ * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
+ * As the base class for all user-defined nodes, it implements common convenience functions and a default public API
+ * through the Curiously-Recurring-Template-Pattern (CRTP). For example:
+ * @code
+ * struct user_defined_block : node<user_defined_block> {
+ *   IN<float> in;
+ *   OUT<float> out;
+ *   // implement one of the possible work or abstracted functions
+ * };
+ * ENABLE_REFLECTION(user_defined_block, in, out);
+ * @endcode
+ * The macro `ENABLE_REFLECTION` since it relies on a template specialisation needs to be declared on the global scope.
+ *
+ * As an alternative definition that does not require the 'ENABLE_REFLECTION' macro and that also supports arbitrary
+ * types for input 'T' and for the return 'R':
+ * @code
+ * template<typename T, typename R>
+ * struct user_defined_block : node<user_defined_block, IN<T, 0, N_MAX, "in">, OUT<R, 0, N_MAX, "out">> {
+ *   // implement one of the possible work or abstracted functions
+ * };
+ * @endcode
+ * This implementation provides efficient compile-time static polymorphism (i.e. access to the ports, settings, etc. does
+ * not require virtual functions or inheritance, which can have performance penalties in high-performance computing contexts).
+ * Note: The template parameter '<Derived>' can be dropped once C++23's 'deducing this' is widely supported by compilers.
+ *
+ * The 'node<Derived>' implementation provides simple defaults for users who want to focus on generic signal-processing
+ * algorithms and don't need full flexibility (and complexity) of using the generic `work_return_t work() {...}`.
+ * The following defaults are defined for one of the two 'user_defined_block' block definitions (WIP):
+ * <ul>
+ * <li> <b>case 1a</b> - non-decimating N-in->N-out mechanic and automatic handling of streaming tags and settings changes:
+ * @code
+ *  fg::IN<T> in;
+ *  fg::OUT<R> out;
+ *  T _factor = T{1.0};
+ *
+ *  [[nodiscard]] constexpr auto process_one(T a) const noexcept {
+ *      return static_cast<R>(a * _factor);
+ *  }
+ * @endcode
+ * The number, type, and ordering of input and arguments of `process_one(..)` are defined by the port definitions.
+ * <li> <b>case 1b</b> - non-decimating N-in->N-out mechanic providing bulk access to the input/output data and automatic
+ * handling of streaming tags and settings changes (to-be-completed):
+ * @code
+ *  [[nodiscard]] constexpr auto process_bulk(std::span<const T> input, std::span<R> output) const noexcept {
+ *      std::ranges::copy(input, output | std::views::transform([a = this->_factor](T x) { return static_cast<R>(x * a); }));
+ *  }
+ * @endcode
+ * <li> <b>case 2a</b>: N-in->M-out -> process_bulk(<ins...>, <outs...>) N,M fixed -> aka. interpolator (M>N) or decimator (M<N) (to-be-done)
+ * <li> <b>case 2b</b>: N-in->M-out -> process_bulk(<{ins,tag-IO}...>, <{outs,tag-IO}...>) user-level tag handling (to-be-done)
+ * <li> <b>case 3</b> - generic `work()` function providing access to the full logic and capable of handling any N-in->M-out cases:
+ * @code
+ * [[nodiscard]] constexpr work_return_t work() const noexcept {
+ *     auto &out_port = output_port<"out">(this);
+ *     auto &in_port = input_port<"in">(this);
+ *
+ *     auto &reader = in_port.reader();
+ *     auto &writer = out_port.writer();
+ *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
+ *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
+ *     if (n_readable == 0) {
+ *         return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+ *     } else if (n_writable == 0) {
+ *         return fair::graph::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+ *     }
+ *     const std::size_t n_to_publish = std::min(n_readable, n_writable); // N.B. here enforcing N_input == N_output
+ *
+ *     writer.publish([&reader, n_to_publish, this](std::span<T> output) {
+ *         const auto input = reader.get(n_to_publish);
+ *         for (; i < n_to_publish; i++) {
+ *             output[i] = input[i] * value;
+ *         }
+ *     }, n_to_publish);
+ *
+ *     if (!reader.consume(n_to_publish)) {
+ *         return fair::graph::work_return_t::ERROR;
+ *     }
+ *     return fair::graph::work_return_t::OK;
+ * }
+ * @endcode
+ * <li> <b>case 4</b>:  Python -> map to cases 1-3 and/or dedicated callback (to-be-implemented)
+ * <li> <b>special cases<b>: (to-be-implemented)
+ *     * case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
+ *     * case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
+ * <ul>
+ * @tparam Derived the user-defined block CRTP: https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
+ * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
+ */
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
 public:
@@ -10217,42 +10303,196 @@ public:
     }
 };
 
+/**
+ * This methods can merge simple blocks that are defined via a single `auto process_one(..)` producing a
+ * new `merged` node, bypassing the dynamic run-time buffers.
+ * Since the merged node can be highly optimised during compile-time, it's execution performance is usually orders
+ * of magnitude more efficient than executing a cascade of the same constituent blocks. See the benchmarks for details.
+ * This function uses the connect-by-port-ID API.
+ *
+ * Example:
+ * @code
+ * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
+ * auto merged = merge_by_index<0, 0>(scale<int, -1>(), merge_by_index<0, 0>(scale<int, 2>(), adder<int>()));
+ *
+ * // execute graph
+ * std::array<int, 4> a = { 1, 2, 3, 4 };
+ * std::array<int, 4> b = { 10, 10, 10, 10 };
+ *
+ * int                r = 0;
+ * for (std::size_t i = 0; i < 4; ++i) {
+ *     r += merged.process_one(a[i], b[i]);
+ * }
+ * @endcode
+ */
 template<std::size_t OutId, std::size_t InId, source_node A, sink_node B>
 [[gnu::always_inline]] constexpr auto
 merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
-    if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-        fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
-                                typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+        if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+            fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+                    typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                                fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
-                                typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
-    }
-    return { std::forward<A>(a), std::forward<B>(b) };
+                    fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                    typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+        }
+        return { std::forward<A>(a), std::forward<B>(b) };
 }
 
+/**
+ * This methods can merge simple blocks that are defined via a single `auto process_one(..)` producing a
+ * new `merged` node, bypassing the dynamic run-time buffers.
+ * Since the merged node can be highly optimised during compile-time, it's execution performance is usually orders
+ * of magnitude more efficient than executing a cascade of the same constituent blocks. See the benchmarks for details.
+ * This function uses the connect-by-port-name API.
+ *
+ * Example:
+ * @code
+ * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> output
+ * auto merged = merge<"scaled", "addend1">(scale<int, 2>(), adder<int>());
+ *
+ * // execute graph
+ * std::array<int, 4> a = { 1, 2, 3, 4 };
+ * std::array<int, 4> b = { 10, 10, 10, 10 };
+ *
+ * int                r = 0;
+ * for (std::size_t i = 0; i < 4; ++i) {
+ *     r += merged.process_one(a[i], b[i]);
+ * }
+ * @endcode
+ */
 template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
 [[gnu::always_inline]] constexpr auto
 merge(A &&a, B &&b) {
-    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
-    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
-    static_assert(OutId != -1);
-    static_assert(InId != -1);
-    static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
-                  "Port types do not match");
-    return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
+        constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+        constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+        static_assert(OutId != -1);
+        static_assert(InId != -1);
+        static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+                      "Port types do not match");
+        return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
 
+/**
+ *
+ *                                |￣￣￣￣￣￣￣￣￣￣￣￣￣￣|
+ *                                |     !!!Horray!!!      |
+ *                                |      you made it!     |
+ *                                |                       |
+ *                                |        Warning!       |
+ *                                |  Beneath are dragons! |
+ *                                |＿＿＿＿＿＿＿＿＿＿＿＿＿＿|
+ *                                    (\__/)  ||
+ *                                    (•ㅅ•)  ||
+ *                                    /  　  づ
+ * ******************************************************************************************************************
+ *
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⡧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡱⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠊⠶⣂⣠⢠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡑⡑⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⣼⡾⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠂⠑⡳⠀⣀⠠⠤⠠⡀⠀⠀⠀⠀⠀⢿⣿⣿⣿⣿⣷⣤⡀⡄⠚⢸⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠁⠁⠀⠀⠀⠙⡕⠀⠀⠀⠀⢻⣿⣿⣿⣿⢿⢧⡭⣶⣿⣿⣿⣷⣶⣶⣤⡀⣀⢄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠪⠤⡠⣙⣿⡿⡫⠉⣿⣭⡞⣿⣿⣿⣿⣿⣿⣿⣷⠂⠨⣌⠚⡴⠂⠤⣀⢀⡂⢢⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠀⠁⠀⠀⠈⢩⣿⢿⣿⣿⡋⣿⣿⣧⣀⠛⠛⠟⢿⢹⣿⣷⣶⣶⣤⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣦⣾⠿⣷⣯⣿⣿⣿⢤⣿⣿⣿⣶⣶⣤⣭⣒⣕⡁⠛⠛⠂⠝⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣞⣿⣾⣿⣿⠿⠿⠿⣅⡐⣶⣿⣿⣿⣿⣿⣿⣿⡏⣿⣿⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⣀⠅⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⣿⣿⣿⣿⣷⣿⣶⣿⣿⣿⣿⣿⡿⣿⣿⣷⢿⣿⡄⠀⠛⠂⠀⠀⠀⠀⠀⠀⠀⠀⢀⢤⠀⠀⠀⢀⠠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠜⢠⢁⡁⠒⡈⠐⠒⠒⠛⠊
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⢀⣕⢂⣬⣶⠒⠠⠀⣿⣿⠉⣿⡇⣿⣿⢻⣿⣿⣿⣿⣿⣿⣿⣿⣷⠙⠛⡄⠀⠀⠀⠀⠀⠄⣀⢤⣴⣶⣶⡶⣿⣾⣿⣶⣶⣿⣶⣶⡂⡔⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⣸⢃⣼⠫⢓⠬⠤⠄⠶⠒⠀
+ *    ⠀⠀⠀⠀⠀⠀⠴⠂⣼⣿⡄⣿⠁⣴⣷⠾⠁⠉⠛⠏⣿⠛⠿⣷⡍⣿⣿⢿⣿⣿⣿⣈⠛⡄⠀⠀⠀⠀⠀⣀⡼⣶⣿⣷⣿⣿⣯⣿⢷⣟⣿⡻⣿⣯⣿⣿⣿⣿⣾⣖⠒⠤⠀⠀⠀⠀⠀⠀⣤⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⠀⡀⣿⠁⠁⣒⢒⡠⡀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣿⣿⠛⣀⡤⢱⠀⠀⠀⠉⠃⠀⠈⣳⣿⡿⣿⠿⣿⠟⠀⠀⣀⣤⠀⠀⠁⣬⣿⣿⣿⣿⣿⣟⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣿⣿⡿⠮⡂⠀⣀⠀⢀⣼⠏⡖⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠢⠂⣞⡿⠰⠠⢀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⣿⡿⠛⠛⠛⠃⠀⠀⠀⠀⠀⢀⣴⣿⣿⣿⣿⣿⡫⡱⠀⣾⠁⣀⠀⢴⣾⣿⣿⣷⣿⣿⣿⣿⣿⠟⠛⠉⠉⠁⢀⣉⡙⠛⣿⣿⣿⣿⣿⣯⣿⣿⣶⣧⣶⣟⣁⣾⠁⠀⠀⠀⠀⠀⣰⠃⣶⣷⣶⣶⣶⣶⣈⡄⢀⠒⣤⣶⣿⠁⡉⢒⠁⠑⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⠋⠙⣿⣿⣶⣄⠀⠀⠀⠀⠀⣴⣿⣿⢿⣿⣿⣿⠟⠀⢀⣾⣁⠀⠄⣴⣿⣿⣷⣿⣿⣿⣿⠟⠁⠀⠀⠀⢀⠀⣿⠉⢿⣿⢙⣐⡈⠻⣿⣿⣿⣿⣿⣿⣿⣿⣭⢩⠂⠀⠀⠀⣀⠀⡠⣵⣯⣷⣗⣿⣿⣽⣽⣿⣯⣿⣿⠯⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠃⣒⢿⡏⠀⠀⠈⠛⣽⡽⠿⣿⣿⣿⣿⣿⣿⣿⣯⣿⣿⣤⣷⠿⣯⠟⢠⣢⣿⢿⣿⣿⣿⣽⣿⠟⠀⠀⠀⠀⠀⠀⠋⣦⣍⣻⣮⣿⣿⠋⠀⠀⡴⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⣶⣥⣬⣿⣿⣿⣿⣿⠿⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣏⣶⣤⣿⢿⣿⣿⣿⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⢺⠋⠋⠉⠛⣿⣿⣯⢿⢿⣿⣯⣿⡿⢻⣿⣿⣽⢷⢿⣿⠿⣯⣿⣿⣿⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠻⣿⣿⣍⠙⣿⣿⣿⣿⣿⣿⢿⣿⣽⣿⣿⢿⣿⣿⣿⣷⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣆⡀⠁⠙⣿⣿⣧⡀⠛⣿⣿⣿⢿⣿⣿⣿⣿⣿⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⢻⣄⠙⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣌⠝⠋⠀⠀⠉⠉⠉⠛⠁⠀⠀⠙⢿⣟⣟⣿⠛⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⢿⣿⣿⣿⣿⣿⣿⠿⣟⣿⣭⠤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠤⣤⡘⣿⣯⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠤⣤⠴⣒⣀⣄⠀⠀⣿⡿⣿⡻⣿⣧⣿⣿⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣶⣥⣈⢿⣦⣿⣿⠃⠀⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣟⠀⠛⣿⣦⣸⣿⠁⢀⣤⣿⣿⢿⣿⢿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢧⣁⣉⣭⣿⣿⠿⠛⠛⠛⠛⣹⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡞⡻⣿⣷⣶⣿⣿⣿⣾⣿⣿⣽⡿⠟⠋⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡈⢋⣴⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠛⢶⢷⣿⡿⠛⠛⠛⢿⣦⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠈⠊⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢄⠀⠀⠀⠀⠀⠀⠉⠛⡿⠿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *
+ * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp
+ * The are basically needed to do a struct member-field introspections, to support
+ *   a) compile-time serialiser generation between std::map<std::string, pmt::pmtv> <-> user-defined settings structs
+ *   b) allow for block ports being defined a member fields rather than as NTTPs of the node<T, ...> template
 
+ * Their use is limited to the namespace scope where the block is defined (i.e. not across .so boundaries) and will be
+ * supplanted once the compile-time reflection language feature is merged with the C++ standard, e.g.
+ * Matúš Chochlík, Axel Naumann, David Sankel: Static reflection, P0194R3, ISO/IEC JTC1 SC22 WG21
+ *    https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0194r3.html
+ *
+ *  These macros need to be defined in a global scope due to relying on template specialisation that cannot be done in
+ *  any other namespace than the one they were declared -- for illustration see, for example:
+ *  https://github.com/veselink1/refl-cpp/issues/59
+ *  https://compiler-explorer.com/z/MG7fxzK4j
+ *
+ *  For practical purposes, the macro can be defined either at the end of the struct declaring namespace or the specific
+ *  namespace exited/re-enteres such as
+ *  @code
+ *  namespace private::library {
+ *     struct my_struct {
+ *         int field_a;
+ *         std::string field_b;
+ *     };
+ *  }
+ *  ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
+ *  namespace private::library {
+ *   // ...
+ *  @endcode
+ *
+ *  And please, if you want to accelerator the compile-time reflection process, please give your support and shout-out
+ *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
+ */
+
+
+/**
+ * This macro can be used for simple non-templated structs and classes, e.g.
+ * @code
+ * struct my_struct {
+ *     int field_a;
+ *      std::string field_b;
+ * };
+ * ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
+ */
 #define ENABLE_REFLECTION(TypeName, ...) \
     REFL_TYPE(TypeName __VA_OPT__(, )) \
     REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
     REFL_END
 
+/**
+ * This macro can be used for arbitrary templated structs and classes, that depend
+ * on mixed typename and NTTP parameters
+ * @code
+ * template<typename T, std::size_t size>
+ * struct custom_struct {
+ *     T field_a;
+ *     T field_b;
+ *
+ *     [[nodiscard]] constexpr std::size_t size() const noexcept { return size; }
+ * };
+ * ENABLE_REFLECTION_FOR_TEMPLATE_FULL(typename T, std::size_t size), (custom_struct<T, size>), field_a, field_a);
+ */
 #define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
     REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
     REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
     REFL_END
 
+/**
+ * This macro can be used for simple templated structs and classes, that depend
+ * only on pure typename-template lists
+ * @code
+ * template<typename T>
+ * struct my_templated_struct {
+ *     T field_a;
+ *     T field_b;
+ * };
+ * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
+ */
 #define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
     ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
 
