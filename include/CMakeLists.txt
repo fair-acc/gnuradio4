@@ -1,10 +1,10 @@
 # setup header only library
-add_library(core INTERFACE)
-target_include_directories(core INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include/>)
-target_link_libraries(core INTERFACE refl-cpp::refl-cpp)
+add_library(graph-prototype INTERFACE)
+target_include_directories(graph-prototype INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include/>)
+target_link_libraries(graph-prototype INTERFACE refl-cpp::refl-cpp)
 
 install(
-        TARGETS core
+        TARGETS graph-prototype
         EXPORT graphTargets
         PUBLIC_HEADER DESTINATION include/
 )

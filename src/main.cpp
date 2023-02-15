@@ -3,7 +3,7 @@
 
 #include <cassert>
 
-#include "graph.hpp"
+#include <graph.hpp>
 
 namespace fg = fair::graph;
 
