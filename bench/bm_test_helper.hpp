@@ -25,7 +25,9 @@ public:
     [[nodiscard]] constexpr T
     process_one() const noexcept {
         n_samples_produced++;
-        return T{};
+        T x{};
+        benchmark::do_not_optimize(x);
+        return x;
     }
 
     fair::graph::work_return_t

@@ -2502,25 +2502,37 @@ namespace benchmark {
 
 #if defined(__GNUC__) or defined(__clang__) and not defined(_LIBCPP_VERSION)
 
+#if defined(__x86_64__) or defined(__i686__)
+#define SIMD_REG "x,"
+#else
+#define SIMD_REG
+#endif
+
     template<typename T>
     void
     do_not_optimize(T const &val) {
-        // NOLINTNEXTLINE(hicpp-no-assembler)
-        asm volatile("" : : "r,m"(val) : "memory");
+        if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
+            // NOLINTNEXTLINE(hicpp-no-assembler)
+            asm volatile("" ::SIMD_REG "m"(val));
+        } else {
+            // NOLINTNEXTLINE(hicpp-no-assembler)
+            asm volatile("" ::"g,m"(val));
+        }
     }
 
     template<typename T>
     void
     do_not_optimize(T &val) {
-#if defined(__clang__)
-        // NOLINTNEXTLINE(hicpp-no-assembler)
-        asm volatile("" : "+r,m"(val) : : "memory");
-#else
-        // NOLINTNEXTLINE(hicpp-no-assembler)
-        asm volatile("" : "+m,r"(val) : : "memory");
-#endif
+        if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
+            // NOLINTNEXTLINE(hicpp-no-assembler)
+            asm volatile("" : "+" SIMD_REG "g,m"(val));
+        } else {
+            // NOLINTNEXTLINE(hicpp-no-assembler)
+            asm volatile("" : "+g,m"(val));
+        }
     }
 
+#undef SIMD_REG
 #else
 #pragma optimize("", off)
 
