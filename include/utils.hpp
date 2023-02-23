@@ -94,25 +94,7 @@ struct message_type {};
 template<class... T>
 constexpr bool always_false = false;
 
-struct dummy_t {};
-
 constexpr std::size_t invalid_index = -1_UZ;
-
-template<typename F, typename... Args>
-auto
-invoke_void_wrapped(F &&f, Args &&...args) {
-    if constexpr (std::is_same_v<void, std::invoke_result_t<F, Args...>>) {
-        std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-        return dummy_t{};
-    } else {
-        return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-    }
-}
-
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([] {})), dummy_t>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([] { return 42; })), int>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([](int) {}, 42)), dummy_t>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([](int i) { return i; }, 42)), int>);
 
 #if HAVE_SOURCE_LOCATION
 [[gnu::always_inline]] inline void
@@ -220,10 +202,6 @@ type_transform_impl(T *);
 template<template<typename...> typename Mapper>
 void *
 type_transform_impl(void *);
-
-template<template<typename...> typename Mapper>
-fair::meta::dummy_t *
-type_transform_impl(fair::meta::dummy_t *);
 } // namespace detail
 
 template<template<typename...> typename Mapper, typename T>
@@ -267,7 +245,6 @@ auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
 static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
-static_assert(std::is_same_v<dummy_t, type_transform<std::vector, dummy_t>>);
 
 } // namespace fair::meta
 
