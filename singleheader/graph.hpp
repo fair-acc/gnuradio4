@@ -4269,25 +4269,7 @@ struct message_type {};
 template<class... T>
 constexpr bool always_false = false;
 
-struct dummy_t {};
-
 constexpr std::size_t invalid_index = -1_UZ;
-
-template<typename F, typename... Args>
-auto
-invoke_void_wrapped(F &&f, Args &&...args) {
-    if constexpr (std::is_same_v<void, std::invoke_result_t<F, Args...>>) {
-        std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-        return dummy_t{};
-    } else {
-        return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-    }
-}
-
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([] {})), dummy_t>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([] { return 42; })), int>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([](int) {}, 42)), dummy_t>);
-static_assert(std::is_same_v<decltype(invoke_void_wrapped([](int i) { return i; }, 42)), int>);
 
 #if HAVE_SOURCE_LOCATION
 [[gnu::always_inline]] inline void
@@ -4395,10 +4377,6 @@ type_transform_impl(T *);
 template<template<typename...> typename Mapper>
 void *
 type_transform_impl(void *);
-
-template<template<typename...> typename Mapper>
-fair::meta::dummy_t *
-type_transform_impl(fair::meta::dummy_t *);
 } // namespace detail
 
 template<template<typename...> typename Mapper, typename T>
@@ -4442,7 +4420,6 @@ auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
 static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
-static_assert(std::is_same_v<dummy_t, type_transform<std::vector, dummy_t>>);
 
 } // namespace fair::meta
 
@@ -10059,6 +10036,20 @@ public:
         return success;
     }
 
+    template <typename... Ts>
+    constexpr auto
+    invoke_process_one(Ts&&... inputs)
+    {
+        if constexpr (traits::node::output_ports<Derived>::size == 0) {
+            self().process_one(std::forward<Ts>(inputs)...);
+            return std::tuple{};
+        } else if constexpr (traits::node::output_ports<Derived>::size == 1) {
+            return std::tuple{self().process_one(std::forward<Ts>(inputs)...)};
+        } else {
+            return self().process_one(std::forward<Ts>(inputs)...);
+        }
+    }
+
     work_return_t
     work() noexcept {
         // Capturing structured bindings does not work in Clang...
@@ -10116,53 +10107,25 @@ public:
 
             constexpr auto simd_size = Vec::size();
             for (; i + simd_size <= inputs_status.available_values_count; i += simd_size) {
-                const auto input_simds = meta::tuple_transform(
-                        [i] <typename Span>(const Span& one_span) {
-                            return stdx::rebind_simd_t<typename Span::value_type, Vec>(one_span.data() + i, stdx::element_aligned);
-                        }, input_spans);
-
-                const stdx::simd results = std::apply([this](auto... args) { return self().process_one(args...); }, input_simds);
-
-                if constexpr (requires { std::get<0>(results); }) {
-                    meta::tuple_for_each(
-                            [i] (auto& writer, auto& result) {
-                                result.copy_to(writer.first/*data*/.data() + i, stdx::element_aligned);
-                            },
-                            writers_tuple, results);
-                } else {
-                    static_assert(traits::node::output_ports<Derived>::size == 1);
-                    results.copy_to(std::get<0>(writers_tuple).first/*data*/.data() + i, stdx::element_aligned);
-                }
+                const auto results = std::apply(
+                        [&]<typename... Ts>(Ts const &...inputs) {
+                            return invoke_process_one(Vec(inputs.data() + i, stdx::element_aligned)...);
+                        },
+                        input_spans);
+                meta::tuple_for_each(
+                        [i](auto &writer, auto &result) {
+                            result.copy_to(writer.first /*data*/.data() + i, stdx::element_aligned);
+                        },
+                        writers_tuple, results);
             }
         }
 
         // Continues from the last index processed by SIMD loop
         for (; i < inputs_status.available_values_count; ++i) {
-            const auto results = std::apply([this, &input_spans, i](auto &... input_span) noexcept {
-                return meta::invoke_void_wrapped([this]<typename... Args>(Args &&... args) {
-                    return self().process_one(std::forward<Args>(args)...);
-                }, input_span[i]...);
-            }, input_spans);
-
-            using result_t = std::decay_t<decltype(results)>;
-            if constexpr (std::is_same_v<result_t, meta::dummy_t>) {
-                // process_one returned void
-
-            } else if constexpr (requires { std::get<0>(results); }) {
-                // several outputs, results is a tuple
-                static_assert(std::tuple_size_v<result_t> == traits::node::output_ports<Derived>::size);
-
-                meta::tuple_for_each(
-                        [i](auto &writer, auto &result) {
-                            writer.first/*data*/[i] = std::move(result);
-                        },
-                        writers_tuple, results);
-
-            } else {
-                // one output, result is a normal value
-                static_assert(traits::node::output_ports<Derived>::size == 1);
-                std::get<0>(writers_tuple).first /*data*/[i] = std::move(results);
-            }
+            const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
+                                            input_spans);
+            meta::tuple_for_each([i](auto &writer, auto &result) { writer.first /*data*/[i] = std::move(result); },
+                                 writers_tuple, results);
         }
 
         write_to_outputs(self(), inputs_status.available_values_count, writers_tuple);
