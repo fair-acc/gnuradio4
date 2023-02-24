@@ -22,6 +22,11 @@ public:
 
     source(std::size_t n_samples) : _n_samples_max(n_samples) {}
 
+    friend constexpr std::size_t
+    available_samples(const source &self) noexcept {
+        return self._n_samples_max - n_samples_produced;
+    }
+
     [[nodiscard]] constexpr T
     process_one() const noexcept {
         n_samples_produced++;

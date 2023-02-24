@@ -219,7 +219,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr ReaderType &
+    [[nodiscard]] constexpr const ReaderType &
     reader() const noexcept {
         static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
         return _ioHandler;
@@ -231,7 +231,7 @@ public:
         return _ioHandler;
     }
 
-    [[nodiscard]] constexpr WriterType &
+    [[nodiscard]] constexpr const WriterType &
     writer() const noexcept {
         static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
         return _ioHandler;
