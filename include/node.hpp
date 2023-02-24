@@ -478,14 +478,11 @@ public:
     }
 
     template<typename... Ts>
-    // In order to have nicer error messages, this is checked in the function body
-    // requires input_port_types::template are_equal<std::remove_cvref_t<Ts>...>
+    // Nicer error messages for the following would be good, but not at the expense of breaking
+    // can_process_simd.
+        requires(input_port_types::template are_equal<std::remove_cvref_t<Ts>...>)
     constexpr return_type
     process_one(Ts &&...inputs) {
-        if constexpr (!input_port_types::template are_equal<std::remove_cvref_t<Ts>...>) {
-            meta::print_types<decltype(this), input_port_types, std::remove_cvref_t<Ts>...> error{};
-        }
-
         if constexpr (traits::node::output_port_types<Left>::size == 1) { // only the result from the right node needs to be returned
             return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
                                                                                  apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
@@ -597,6 +594,24 @@ merge(A &&a, B &&b) {
                       "Port types do not match");
         return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
+
+namespace test
+{
+struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
+    public:
+        template<meta::t_or_simd<float> V>
+        constexpr V
+        process_one(const V &a) const noexcept {
+            return a;
+        }
+};
+
+static_assert(traits::node::input_port_types<copy>::size() == 1);
+static_assert(std::same_as<traits::node::return_type<copy>, float>);
+static_assert(traits::node::can_process_simd<copy>);
+static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+}
+
 
 /**
  *
