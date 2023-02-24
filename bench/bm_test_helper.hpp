@@ -26,7 +26,7 @@ public:
     process_one() const noexcept {
         n_samples_produced++;
         T x{};
-        benchmark::do_not_optimize(x);
+        benchmark::force_to_memory(x);
         return x;
     }
 
@@ -75,8 +75,12 @@ public:
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
-        n_samples_consumed++;
-        benchmark::do_not_optimize(a);
+        if constexpr (fair::meta::any_simd<V>) {
+            n_samples_consumed += V::size();
+        } else {
+            n_samples_consumed++;
+        }
+        benchmark::force_store(a);
     }
 };
 

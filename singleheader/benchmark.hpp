@@ -2492,7 +2492,7 @@ using operators::operator>>;
 
 namespace benchmark {
 #if defined(__GNUC__) || defined(__clang__)
-#define BENCHMARK_ALWAYS_INLINE __attribute__((always_inline))
+#define BENCHMARK_ALWAYS_INLINE [[gnu::always_inline]] inline
 #elif defined(_MSC_VER) && !defined(__clang__)
 #define BENCHMARK_ALWAYS_INLINE __forceinline
 #define __func__ __FUNCTION__
@@ -2500,50 +2500,100 @@ namespace benchmark {
 #define BENCHMARK_ALWAYS_INLINE
 #endif
 
-#if defined(__GNUC__) or defined(__clang__) and not defined(_LIBCPP_VERSION)
-
 #if defined(__x86_64__) or defined(__i686__)
 #define SIMD_REG "x,"
 #else
 #define SIMD_REG
 #endif
 
-    template<typename T>
-    void
-    do_not_optimize(T const &val) {
-        if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
-            // NOLINTNEXTLINE(hicpp-no-assembler)
-            asm volatile("" ::SIMD_REG "m"(val));
-        } else {
-            // NOLINTNEXTLINE(hicpp-no-assembler)
-            asm volatile("" ::"g,m"(val));
-        }
+/**
+ * Tell the compiler that all arguments to this function are read and modified in the most
+ * efficient way possible. This may force a value to memory, but generally tries to avoid doing so.
+ */
+template<typename T, typename... Ts>
+BENCHMARK_ALWAYS_INLINE void
+fake_modify(T &x, Ts &...more) {
+#ifdef __GNUC__
+    // GNU compatible compilers need to support this part
+    if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
+        // NOLINTNEXTLINE(hicpp-no-assembler)
+        asm volatile("" : "+" SIMD_REG "g,m"(x));
+    } else {
+        // NOLINTNEXTLINE(hicpp-no-assembler)
+        asm volatile("" : "+g,m"(x));
     }
+#else
+    const volatile T y = x;
+    x = y;
+#endif
+    if constexpr (sizeof...(Ts) > 0) {
+        fake_modify(more...);
+    }
+}
 
-    template<typename T>
-    void
-    do_not_optimize(T &val) {
-        if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
-            // NOLINTNEXTLINE(hicpp-no-assembler)
-            asm volatile("" : "+" SIMD_REG "g,m"(val));
-        } else {
-            // NOLINTNEXTLINE(hicpp-no-assembler)
-            asm volatile("" : "+g,m"(val));
-        }
+/**
+ * Tell the compiler that all arguments to this function are read in the most efficient way
+ * possible. This may force a value to memory, but generally tries to avoid doing so.
+ */
+template<typename T, typename... Ts>
+BENCHMARK_ALWAYS_INLINE void
+fake_read(const T &x, const Ts &...more) {
+#ifdef __GNUC__
+    // GNU compatible compilers need to support this part
+    if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
+        // NOLINTNEXTLINE(hicpp-no-assembler)
+        asm volatile("" ::SIMD_REG "g,m"(x));
+    } else {
+        // NOLINTNEXTLINE(hicpp-no-assembler)
+        asm volatile("" ::"g,m"(x));
     }
+#else
+    const volatile T y = x;
+#endif
+    if constexpr (sizeof...(Ts) > 0) {
+        fake_read(more...);
+    }
+}
+
+/**
+ * Tell the compiler that all arguments to this function must be stored to memory (stack) and
+ * reloaded before reading.
+ */
+template<typename T, typename... Ts>
+BENCHMARK_ALWAYS_INLINE void
+force_to_memory(T &x, Ts &...more) {
+#ifdef __GNUC__
+    // GNU compatible compilers need to support this part
+    // NOLINTNEXTLINE(hicpp-no-assembler)
+    asm volatile("" : "+m"(x));
+#else
+    const volatile T y = x;
+    x = y;
+#endif
+    if constexpr (sizeof...(Ts) > 0) {
+        force_to_memory(more...);
+    }
+}
+
+/**
+ * Tell the compiler that all arguments to this function must be stored to memory (stack).
+ */
+template<typename T, typename... Ts>
+BENCHMARK_ALWAYS_INLINE void
+force_store(const T &x, const Ts &...more) {
+#ifdef __GNUC__
+    // GNU compatible compilers need to support this part
+    // NOLINTNEXTLINE(hicpp-no-assembler)
+    asm volatile("" ::"m"(x));
+#else
+    const volatile T y = x;
+#endif
+    if constexpr (sizeof...(Ts) > 0) {
+        force_store(more...);
+    }
+}
 
 #undef SIMD_REG
-#else
-#pragma optimize("", off)
-
-    template<class T>
-    void
-    do_not_optimize(T &&t) {
-        reinterpret_cast<char volatile &>(t) = reinterpret_cast<char const volatile &>(t);
-    }
-
-#pragma optimize("", on)
-#endif
 
     struct perf_sub_metric {
         uint64_t misses{0};
