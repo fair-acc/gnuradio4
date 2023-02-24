@@ -10,3 +10,9 @@ endfunction()
 
 add_benchmark(bm_case0)
 add_benchmark(bm_case1)
+
+add_executable(bm_case1_nosimd bm_case1.cpp)
+target_compile_options(bm_case1_nosimd PRIVATE -Wall -march=native -DDISABLE_SIMD=1)
+target_link_options(bm_case1_nosimd PRIVATE -Wall -march=native)
+target_link_libraries(bm_case1_nosimd PRIVATE graph-prototype refl-cpp fmt ut)
+set_project_warnings(bm_case1_nosimd)
