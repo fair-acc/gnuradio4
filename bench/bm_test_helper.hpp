@@ -26,7 +26,7 @@ public:
     process_one() const noexcept {
         n_samples_produced++;
         T x{};
-        benchmark::do_not_optimize(x);
+        benchmark::force_to_memory(x);
         return x;
     }
 
@@ -80,7 +80,7 @@ public:
         } else {
             n_samples_consumed++;
         }
-        benchmark::do_not_optimize(a);
+        benchmark::force_store(a);
     }
 };
 

@@ -9,23 +9,23 @@ const boost::ut::suite global_benchmarks = [] {
     "string creation2"_benchmark = [] {
         std::string created_string;
         created_string = "hello";
-        do_not_optimize(created_string);
+        force_to_memory(created_string);
     };
 
     "string creation3"_benchmark = [] {
         std::string created_string = "hello";
-        do_not_optimize(created_string);
+        force_to_memory(created_string);
     };
 
     "string creation4"_benchmark.repeat<10'000>() = [] {
         std::string created_string = "hello";
-        do_not_optimize(created_string);
+        force_to_memory(created_string);
     };
 
     "failing bm"_benchmark = [] {
         std::string created_string;
         created_string = "hello";
-        do_not_optimize(created_string);
+        force_to_memory(created_string);
         throw std::invalid_argument("fails here on purpose");
     };
 #if not defined(_LIBCPP_VERSION)
@@ -61,6 +61,6 @@ int main() {
 
     "string creation1"_benchmark = [] {
         std::string created_string{"hello"};
-        do_not_optimize(created_string);
+        force_to_memory(created_string);
     };
 }
