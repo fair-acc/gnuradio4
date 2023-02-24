@@ -27,6 +27,14 @@ public:
         return self._n_samples_max - n_samples_produced;
     }
 
+    [[nodiscard]] constexpr auto
+    process_one_simd(auto N) const noexcept -> fair::meta::simdize<T, decltype(N)::value> {
+        n_samples_produced += N;
+        fair::meta::simdize<T, N> x {};
+        benchmark::force_to_memory(x);
+        return x;
+    }
+
     [[nodiscard]] constexpr T
     process_one() const noexcept {
         n_samples_produced++;

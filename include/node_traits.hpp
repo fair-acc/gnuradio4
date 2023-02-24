@@ -143,19 +143,38 @@ using get_port_member_descriptor =
     typename meta::to_typelist<refl::descriptor::member_list<Node>>
         ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
 
+namespace detail {
+template<std::size_t... Is>
+auto
+can_process_simd_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>)
+        -> decltype(node.process_one(std::get<Is>(input)...));
+}
+
+/* A node "can process simd" if its `process_one` function takes at least one argument and all
+ * arguments can be simdized types of the actual port data types.
+ *
+ * The node can be a sink (no output ports).
+ * The requirement of at least one function argument disallows sources.
+ *
+ * There is another (unnamed) concept for source nodes: Source nodes can implement
+ * `process_one_simd(integral_constant)`, which returns SIMD object(s) of width N.
+ */
 template<typename Node>
-concept can_process_simd =
-    traits::node::input_port_types<Node>::size() > 0 &&
-    not vir::stdx::is_simd_v<typename traits::node::input_port_types<Node>::safe_head> &&
-    traits::node::input_port_types<Node>::template all_same<> &&
-    traits::node::output_ports<Node>::size() > 0 &&
-    requires (Node& node,
-              typename traits::node::input_port_types<Node>::template transform<vir::stdx::native_simd>::template apply<std::tuple>& input_simds) {
-        {
-            []<std::size_t... Is>(Node &node, auto const &input, std::index_sequence<Is...>) -> decltype(node.process_one(std::get<Is>(input)...)) { return {}; }
-            (node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
-        };
-    };
+concept can_process_simd
+        =
+#if DISABLE_SIMD
+        false;
+#else
+        traits::node::input_port_types<Node>::size() > 0
+       && requires(Node &node,
+                   const meta::simdize<typename traits::node::input_port_types<Node>::template apply<std::tuple>>
+                           &input_simds) {
+              {
+                  detail::can_process_simd_invoke_test(
+                          node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
+              };
+          };
+#endif
 
 } // namespace node
 
