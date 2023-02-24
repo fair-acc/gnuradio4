@@ -47,6 +47,22 @@ concept is_output_v = is_output<Port>::value;
 template <typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
+template<typename... Ports>
+struct min_samples : std::integral_constant<std::size_t, std::max({ min_samples<Ports>::value... })> {};
+
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
+         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
+struct min_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
+    : std::integral_constant<std::size_t, MIN_SAMPLES> {};
+
+template<typename... Ports>
+struct max_samples : std::integral_constant<std::size_t, std::min({ max_samples<Ports>::value... })> {};
+
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
+         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
+struct max_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
+    : std::integral_constant<std::size_t, MAX_SAMPLES> {};
+
 } // namespace port
 
 #endif // include guard
