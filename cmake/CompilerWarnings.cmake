@@ -48,6 +48,7 @@ function(set_project_warnings project_name)
       -Wdouble-promotion # warn if float is implicit promoted to double
       -Wformat=2 # warn on security issues around functions that format output (ie printf)
       -Wno-unknown-pragmas # ignore IDE, GCC/CLANG specific pragmas
+      -Wimplicit-fallthrough # Warns when case statements fall-through.
   )
 
   if(WARNINGS_AS_ERRORS)
@@ -57,7 +58,6 @@ function(set_project_warnings project_name)
 
   set(GCC_WARNINGS
       ${CLANG_WARNINGS}
-      -Wno-unknown-pragmas # disable warning since clang-tidy suppression pragmas -- while necessary -- are unknown to gcc
       -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
       -Wduplicated-cond # warn if if / else chain has duplicated conditions
       -Wduplicated-branches # warn if if / else branches have duplicated code
