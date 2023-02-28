@@ -157,6 +157,20 @@ namespace vir::stdx
     template <class T>
       inline constexpr bool is_vectorizable_v = is_vectorizable<T>::value;
 
+    template <class T, typename = void>
+      struct only_vectorizable
+      {
+        only_vectorizable() = delete;
+        only_vectorizable(const only_vectorizable&) = delete;
+        only_vectorizable(only_vectorizable&&) = delete;
+        ~only_vectorizable() = delete;
+      };
+
+    template <class T>
+      struct only_vectorizable<T, std::enable_if_t<is_vectorizable_v<T>>>
+      {
+      };
+
     // Deduces to a vectorizable type
     template <typename T, typename = std::enable_if_t<is_vectorizable_v<T>>>
       using Vectorizable = T;
@@ -321,10 +335,20 @@ namespace vir::stdx
 
   // fwd decls //
   template <class T, class A = simd_abi::compatible<T>>
-    class simd;
+    class simd
+    {
+      simd() = delete;
+      simd(const simd&) = delete;
+      ~simd() = delete;
+    };
 
   template <class T, class A = simd_abi::compatible<T>>
-    class simd_mask;
+    class simd_mask
+    {
+      simd_mask() = delete;
+      simd_mask(const simd_mask&) = delete;
+      ~simd_mask() = delete;
+    };
 
   // aliases //
   template <class T>
@@ -460,6 +484,7 @@ namespace vir::stdx
   // simd_mask (scalar)
   template <class T>
     class simd_mask<detail::Vectorizable<T>, simd_abi::scalar>
+    : public detail::only_vectorizable<T>
     {
       bool data;
 
@@ -591,6 +616,7 @@ namespace vir::stdx
   // simd_mask (fixed_size)
   template <class T, int N>
     class simd_mask<detail::Vectorizable<T>, simd_abi::fixed_size<N>>
+    : public detail::only_vectorizable<T>
     {
     private:
       template <typename V, int M, size_t Parts>
@@ -1061,7 +1087,7 @@ namespace vir::stdx
   // simd (scalar)
   template <class T>
     class simd<T, simd_abi::scalar>
-    : public scalar_simd_int_base<T>
+    : public scalar_simd_int_base<T>, public detail::only_vectorizable<T>
     {
       friend class scalar_simd_int_base<T>;
 
@@ -1344,7 +1370,7 @@ namespace vir::stdx
   // simd (fixed_size)
   template <class T, int N>
     class simd<T, simd_abi::fixed_size<N>>
-    : public fixed_simd_int_base<T, N>
+    : public fixed_simd_int_base<T, N>, public detail::only_vectorizable<T>
     {
     private:
       friend class fixed_simd_int_base<T, N>;
