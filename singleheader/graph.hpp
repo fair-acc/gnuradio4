@@ -4639,7 +4639,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr ReaderType &
+    [[nodiscard]] constexpr const ReaderType &
     reader() const noexcept {
         static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
         return _ioHandler;
@@ -4651,7 +4651,7 @@ public:
         return _ioHandler;
     }
 
-    [[nodiscard]] constexpr WriterType &
+    [[nodiscard]] constexpr const WriterType &
     writer() const noexcept {
         static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
         return _ioHandler;
@@ -9590,6 +9590,22 @@ concept is_output_v = is_output<Port>::value;
 template <typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
+template<typename... Ports>
+struct min_samples : std::integral_constant<std::size_t, std::max({ min_samples<Ports>::value... })> {};
+
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
+         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
+struct min_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
+    : std::integral_constant<std::size_t, MIN_SAMPLES> {};
+
+template<typename... Ports>
+struct max_samples : std::integral_constant<std::size_t, std::min({ max_samples<Ports>::value... })> {};
+
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
+         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
+struct max_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
+    : std::integral_constant<std::size_t, MAX_SAMPLES> {};
+
 } // namespace port
 
 #endif // include guard
@@ -9943,6 +9959,21 @@ private:
         return *static_cast<const Derived *>(this);
     }
 
+protected:
+    constexpr bool
+    enough_samples_for_output_ports(std::size_t n) {
+        return std::apply([n](const auto &...port) noexcept {
+                   return ((n >= port.min_buffer_size()) && ... && true);
+               }, output_ports(&self()));
+    }
+
+    constexpr bool
+    space_available_on_output_ports(std::size_t n) {
+        return std::apply([n](const auto &...port) noexcept {
+                   return ((n <= port.writer().available()) && ... && true);
+               }, output_ports(&self()));
+    }
+
 public:
     [[nodiscard]] std::string_view
     name() const noexcept {
@@ -9975,28 +10006,23 @@ public:
     template<typename Self>
     [[nodiscard]] constexpr auto static
     inputs_status(Self &self) noexcept {
+        static_assert(traits::node::input_ports<Derived>::size > 0,
+                      "A source node has no inputs, therefore no inputs status.");
         bool at_least_one_input_has_data = false;
-        const std::size_t available_values_count = [&self, &at_least_one_input_has_data]() {
-            if constexpr (traits::node::input_ports<Derived>::size > 0) {
-                const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
-                    const std::size_t available = port.reader().available();
-                    if (available > 0LU) at_least_one_input_has_data = true;
-                    if (available < port.min_buffer_size()) {
-                        return 0LU;
-                    } else {
-                        return std::min(available, port.max_buffer_size());
-                    }
-                };
-
-                return std::apply(
-                        [&availableForPort] (auto&... input_port) {
-                            return meta::safe_min(availableForPort(input_port)...);
-                        },
-                        input_ports(&self));
+        const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
+            const std::size_t available = port.reader().available();
+            if (available > 0_UZ) at_least_one_input_has_data = true;
+            if (available < port.min_buffer_size()) {
+                return 0_UZ;
             } else {
-                return 1_UZ;
+                return std::min(available, port.max_buffer_size());
             }
-        }();
+        };
+
+        const std::size_t available_values_count
+                = std::apply([&availableForPort](
+                                     auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
+                             input_ports(&self));
 
         struct result {
             bool at_least_one_input_has_data;
@@ -10052,27 +10078,65 @@ public:
 
     work_return_t
     work() noexcept {
-        // Capturing structured bindings does not work in Clang...
-        const auto inputs_status = self().inputs_status(self());
+        using input_types = traits::node::input_port_types<Derived>;
+        using output_types = traits::node::output_port_types<Derived>;
 
-        if (inputs_status.available_values_count == 0) {
-            return inputs_status.at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
+        constexpr bool is_source_node = input_types::size == 0;
+        constexpr bool is_sink_node = output_types::size == 0;
+
+        std::size_t samples_to_process = 0;
+        if constexpr (is_source_node) {
+            if constexpr (requires(const Derived &d) {
+                              { available_samples(d) } -> std::same_as<std::size_t>;
+                          }) {
+                // the (source) node wants to determine the number of samples to process
+                samples_to_process = available_samples(self());
+                if (not enough_samples_for_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                }
+                if (not space_available_on_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                }
+            } else if constexpr (is_sink_node) {
+                // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
+                // buffer size would be if the node were not merged)
+                constexpr std::size_t chunk_size = Derived::merged_work_chunk_size();
+                static_assert(
+                        chunk_size != std::dynamic_extent && chunk_size > 0,
+                        "At least one internal port must define a maximum number of samples or the non-member/hidden "
+                        "friend function `available_samples(const NodeType&)` must be defined.");
+                samples_to_process = chunk_size;
+            } else {
+                // derive value from output buffer size
+                samples_to_process = std::apply([&](const auto &...ports) {
+                                         return std::min({ ports.writer().available()..., ports.max_buffer_size()... });
+                                     }, output_ports(&self()));
+                if (not enough_samples_for_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                }
+                // space_available_on_output_ports is true by construction of samples_to_process
+            }
+        } else {
+            // Capturing structured bindings does not work in Clang...
+            const auto [at_least_one_input_has_data, available_values_count] = self().inputs_status(self());
+            if (available_values_count == 0) {
+                return at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
+            }
+            samples_to_process = available_values_count;
+            if (not enough_samples_for_output_ports(samples_to_process)) {
+                return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+            }
+            if (not space_available_on_output_ports(samples_to_process)) {
+                return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+            }
         }
 
-        const bool all_writers_available = std::apply([inputs_status](auto &... output_port) noexcept {
-            return ((output_port.writer().available() >= inputs_status.available_values_count) && ... && true);
-        }, output_ports(&self()));
-
-        if (!all_writers_available) {
-            return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
-        }
-
-        const auto input_spans = meta::tuple_transform([inputs_status](auto &input_port) noexcept {
-            return input_port.reader().get(inputs_status.available_values_count);
+        const auto input_spans = meta::tuple_transform([samples_to_process](auto &input_port) noexcept {
+            return input_port.reader().get(samples_to_process);
         }, input_ports(&self()));
 
-        const auto writers_tuple = meta::tuple_transform([inputs_status](auto &output_port) noexcept {
-            return output_port.writer().get(inputs_status.available_values_count);
+        const auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept {
+            return output_port.writer().get(samples_to_process);
         }, output_ports(&self()));
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
@@ -10087,15 +10151,13 @@ public:
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
         std::size_t i = 0_UZ;
-        using input_types = traits::node::input_port_types<Derived>;
-        using output_types = traits::node::output_port_types<Derived>;
 
         if constexpr (requires { &Derived::process_bulk;  }) {
             const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
                                         std::tuple_cat(input_spans, meta::tuple_transform([](const auto &span) { return span.first; }, writers_tuple)));
 
-            write_to_outputs(self(), inputs_status.available_values_count, writers_tuple);
-            const bool success = consume_readers(self(), inputs_status.available_values_count);
+            write_to_outputs(self(), samples_to_process, writers_tuple);
+            const bool success = consume_readers(self(), samples_to_process);
             return success ? ret : work_return_t::ERROR;
         }
 
@@ -10106,7 +10168,7 @@ public:
             using Vec = meta::reduce_to_widest_simd<input_types>;
 
             constexpr auto simd_size = Vec::size();
-            for (; i + simd_size <= inputs_status.available_values_count; i += simd_size) {
+            for (; i + simd_size <= samples_to_process; i += simd_size) {
                 const auto results = std::apply(
                         [&]<typename... Ts>(Ts const &...inputs) {
                             return invoke_process_one(Vec(inputs.data() + i, stdx::element_aligned)...);
@@ -10121,20 +10183,20 @@ public:
         }
 
         // Continues from the last index processed by SIMD loop
-        for (; i < inputs_status.available_values_count; ++i) {
+        for (; i < samples_to_process; ++i) {
             const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
                                             input_spans);
             meta::tuple_for_each([i](auto &writer, auto &result) { writer.first /*data*/[i] = std::move(result); },
                                  writers_tuple, results);
         }
 
-        write_to_outputs(self(), inputs_status.available_values_count, writers_tuple);
+        write_to_outputs(self(), samples_to_process, writers_tuple);
 
-        const bool success = consume_readers(self(), inputs_status.available_values_count);
+        const bool success = consume_readers(self(), samples_to_process);
 
 #ifdef _DEBUG
         if (!success) {
-            fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), inputs_status.available_values_count);
+            fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
         }
 #endif
 
@@ -10185,6 +10247,37 @@ private:
     Left  left;
     Right right;
 
+    // merged_work_chunk_size, that's what friends are for
+    friend base;
+    template<source_node, sink_node, std::size_t, std::size_t>
+    friend class merged_node;
+
+    // returns the minimum of all internal max_samples port template parameters
+    static constexpr std::size_t
+    merged_work_chunk_size() noexcept {
+        constexpr std::size_t left_size = []() {
+            if constexpr (requires {
+                              { Left::merged_work_chunk_size() } -> std::same_as<std::size_t>;
+                          }) {
+                return Left::merged_work_chunk_size();
+            } else {
+                return std::dynamic_extent;
+            }
+        }();
+        constexpr std::size_t right_size = []() {
+            if constexpr (requires {
+                              { Right::merged_work_chunk_size() } -> std::same_as<std::size_t>;
+                          }) {
+                return Right::merged_work_chunk_size();
+            } else {
+                return std::dynamic_extent;
+            }
+        }();
+        return std::min({ traits::node::input_ports<Right>::template apply<traits::port::max_samples>::value,
+                          traits::node::output_ports<Left>::template apply<traits::port::max_samples>::value, left_size,
+                          right_size });
+    }
+
     template<std::size_t I>
     [[gnu::always_inline]] constexpr auto
     apply_left(auto &&input_tuple) noexcept {
@@ -10214,6 +10307,16 @@ public:
     using return_type       = typename traits::node::return_type<base>;
 
     [[gnu::always_inline]] constexpr merged_node(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+
+    // if the left node (source) implements available_samples (a customization point), then pass the call through
+    friend constexpr std::size_t
+    available_samples(const merged_node &self) noexcept
+        requires requires(const Left &l) {
+            { available_samples(l) } -> std::same_as<std::size_t>;
+        }
+    {
+        return available_samples(self.left);
+    }
 
     template<meta::any_simd... Ts>
         requires meta::vectorizable_v<return_type> && input_port_types::template
