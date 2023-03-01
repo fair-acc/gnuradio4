@@ -9,4 +9,7 @@ cmake = import('cmake')
 libreflcpp = cmake.subproject('refl-cpp')
 reflcpp_dep = libreflcpp.dependency('refl-cpp')
 
-subdir('bench')
+if (get_option('enable_testing'))
+  subdir('test')
+  subdir('bench')
+endif
