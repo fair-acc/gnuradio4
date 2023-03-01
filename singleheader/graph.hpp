@@ -1760,6 +1760,7 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 
 #include <functional>
 #include <iostream>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -1792,7 +1793,7 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 #error "simd requires C++17 or later"
 #endif
 
-#if __has_include (<experimental/simd>) && !defined VIR_DISABLE_STDX_SIMD
+#if __has_include (<experimental/simd>) && !defined VIR_DISABLE_STDX_SIMD && !defined __clang__
 #include <experimental/simd>
 #endif
 
@@ -1924,6 +1925,20 @@ namespace vir::stdx
 
     template <class T>
       inline constexpr bool is_vectorizable_v = is_vectorizable<T>::value;
+
+    template <class T, typename = void>
+      struct only_vectorizable
+      {
+        only_vectorizable() = delete;
+        only_vectorizable(const only_vectorizable&) = delete;
+        only_vectorizable(only_vectorizable&&) = delete;
+        ~only_vectorizable() = delete;
+      };
+
+    template <class T>
+      struct only_vectorizable<T, std::enable_if_t<is_vectorizable_v<T>>>
+      {
+      };
 
     // Deduces to a vectorizable type
     template <typename T, typename = std::enable_if_t<is_vectorizable_v<T>>>
@@ -2089,10 +2104,20 @@ namespace vir::stdx
 
   // fwd decls //
   template <class T, class A = simd_abi::compatible<T>>
-    class simd;
+    class simd
+    {
+      simd() = delete;
+      simd(const simd&) = delete;
+      ~simd() = delete;
+    };
 
   template <class T, class A = simd_abi::compatible<T>>
-    class simd_mask;
+    class simd_mask
+    {
+      simd_mask() = delete;
+      simd_mask(const simd_mask&) = delete;
+      ~simd_mask() = delete;
+    };
 
   // aliases //
   template <class T>
@@ -2228,6 +2253,7 @@ namespace vir::stdx
   // simd_mask (scalar)
   template <class T>
     class simd_mask<detail::Vectorizable<T>, simd_abi::scalar>
+    : public detail::only_vectorizable<T>
     {
       bool data;
 
@@ -2359,6 +2385,7 @@ namespace vir::stdx
   // simd_mask (fixed_size)
   template <class T, int N>
     class simd_mask<detail::Vectorizable<T>, simd_abi::fixed_size<N>>
+    : public detail::only_vectorizable<T>
     {
     private:
       template <typename V, int M, size_t Parts>
@@ -2829,7 +2856,7 @@ namespace vir::stdx
   // simd (scalar)
   template <class T>
     class simd<T, simd_abi::scalar>
-    : public scalar_simd_int_base<T>
+    : public scalar_simd_int_base<T>, public detail::only_vectorizable<T>
     {
       friend class scalar_simd_int_base<T>;
 
@@ -3112,7 +3139,7 @@ namespace vir::stdx
   // simd (fixed_size)
   template <class T, int N>
     class simd<T, simd_abi::fixed_size<N>>
-    : public fixed_simd_int_base<T, N>
+    : public fixed_simd_int_base<T, N>, public detail::only_vectorizable<T>
     {
     private:
       friend class fixed_simd_int_base<T, N>;
@@ -4190,6 +4217,10 @@ namespace vir::stdx
 #include <typeinfo>
 #endif
 
+#ifndef DISABLE_SIMD
+#define DISABLE_SIMD 0
+#endif
+
 namespace fair::literals {
     // C++23 has literal suffixes for std::size_t, but we are not
     // in C++23 just yet
@@ -4301,6 +4332,25 @@ precondition(bool cond) {
 }
 #endif
 
+/**
+ * T is tuple-like if it implements std::tuple_size, std::tuple_element, and std::get.
+ * Tuples with size 0 are excluded.
+ */
+template<typename T>
+concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
+    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+};
+
+static_assert(!tuple_like<int>);
+static_assert(!tuple_like<std::tuple<>>);
+static_assert(tuple_like<std::tuple<int>>);
+static_assert(tuple_like<std::tuple<int&>>);
+static_assert(tuple_like<std::tuple<const int&>>);
+static_assert(tuple_like<std::tuple<const int>>);
+static_assert(!tuple_like<std::array<int, 0>>);
+static_assert(tuple_like<std::array<int, 2>>);
+static_assert(tuple_like<std::pair<int, short>>);
+
 namespace stdx = vir::stdx;
 
 template<typename V, typename T = void>
@@ -4314,6 +4364,79 @@ concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
 
 template<typename T>
 using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
+
+/**
+ * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
+ * tuple-like of stdx::simd (recursively). The latter requires that the SIMD width is homogeneous.
+ * If T is not a simd (or tuple thereof), value is 0.
+ */
+template<typename T>
+struct simdize_size : std::integral_constant<std::size_t, 0> {};
+
+template<typename T, typename A>
+struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
+
+template<tuple_like Tup>
+struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
+    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value)
+                && ...);
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+};
+
+template<typename T>
+inline constexpr std::size_t simdize_size_v = simdize_size<T>::value;
+
+namespace detail {
+/**
+ * Shortcut to determine the stdx::simd specialization with the most efficient ABI tag for the
+ * requested element type T and width N.
+ */
+template<typename T, std::size_t N>
+using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
+
+template<typename T, std::size_t N>
+struct simdize_impl;
+
+template<vectorizable_v T, std::size_t N>
+requires requires { typename stdx::native_simd<T>; }
+struct simdize_impl<T, N> {
+    using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
+};
+
+template<std::size_t N>
+struct simdize_impl<std::tuple<>, N> {
+    using type = std::tuple<>;
+};
+
+template<tuple_like Tup, std::size_t N>
+    requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
+struct simdize_impl<Tup, N> {
+    static inline constexpr std::size_t size = N > 0 ? N : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... });
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>());
+
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>)
+                                  -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
+        return {};
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+};
+} // namespace detail
+
+/**
+ * Meta-function that turns a vectorizable type or a tuple-like (recursively) of vectorizable types
+ * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
+ * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
+ * stdx::native_simd<U>::size() determines the resulting SIMD width.
+ */
+template<typename T, std::size_t N = 0>
+using simdize = typename detail::simdize_impl<T, N>::type;
+
+static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
+                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>,
+                                                 detail::deduced_simd<double, stdx::native_simd<short>::size()>>,
+                                      stdx::native_simd<short>,
+                                      std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<typename A, typename B>
 struct wider_native_simd_size : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
@@ -9750,19 +9873,38 @@ using get_port_member_descriptor =
     typename meta::to_typelist<refl::descriptor::member_list<Node>>
         ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
 
+namespace detail {
+template<std::size_t... Is>
+auto
+can_process_simd_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>)
+        -> decltype(node.process_one(std::get<Is>(input)...));
+}
+
+/* A node "can process simd" if its `process_one` function takes at least one argument and all
+ * arguments can be simdized types of the actual port data types.
+ *
+ * The node can be a sink (no output ports).
+ * The requirement of at least one function argument disallows sources.
+ *
+ * There is another (unnamed) concept for source nodes: Source nodes can implement
+ * `process_one_simd(integral_constant)`, which returns SIMD object(s) of width N.
+ */
 template<typename Node>
-concept can_process_simd =
-    traits::node::input_port_types<Node>::size() > 0 &&
-    not vir::stdx::is_simd_v<typename traits::node::input_port_types<Node>::safe_head> &&
-    traits::node::input_port_types<Node>::template all_same<> &&
-    traits::node::output_ports<Node>::size() > 0 &&
-    requires (Node& node,
-              typename traits::node::input_port_types<Node>::template transform<vir::stdx::native_simd>::template apply<std::tuple>& input_simds) {
-        {
-            []<std::size_t... Is>(Node &node, auto const &input, std::index_sequence<Is...>) -> decltype(node.process_one(std::get<Is>(input)...)) { return {}; }
-            (node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
-        };
-    };
+concept can_process_simd
+        =
+#if DISABLE_SIMD
+        false;
+#else
+        traits::node::input_port_types<Node>::size() > 0
+       && requires(Node &node,
+                   const meta::simdize<typename traits::node::input_port_types<Node>::template apply<std::tuple>>
+                           &input_simds) {
+              {
+                  detail::can_process_simd_invoke_test(
+                          node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
+              };
+          };
+#endif
 
 } // namespace node
 
@@ -9779,6 +9921,26 @@ using namespace fair::literals;
 
 namespace stdx = vir::stdx;
 using fair::meta::fixed_string;
+
+template<typename F>
+constexpr void
+simd_epilogue(auto width, F &&fun) {
+    static_assert(std::has_single_bit(+width));
+    auto w2 = std::integral_constant<std::size_t, width / 2>{};
+    if constexpr (w2 > 0) {
+        fun(w2);
+        simd_epilogue(w2, std::forward<F>(fun));
+    }
+}
+
+template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
+constexpr auto
+simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto offset, auto &&fun, Flag f = {}) {
+    using Tup = meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...);
+    }(std::make_index_sequence<sizeof...(Ts)>());
+}
 
 enum class work_return_t {
     ERROR = -100, /// error occurred in the work function
@@ -10076,6 +10238,23 @@ public:
         }
     }
 
+    template<typename... Ts>
+    constexpr auto
+    invoke_process_one_simd(auto width, Ts &&...input_simds) {
+        if constexpr (sizeof...(Ts) == 0) {
+            if constexpr (traits::node::output_ports<Derived>::size == 0) {
+                self().process_one_simd(width);
+                return std::tuple{};
+            } else if constexpr (traits::node::output_ports<Derived>::size == 1) {
+                return std::tuple{ self().process_one_simd(width) };
+            } else {
+                return self().process_one_simd(width);
+            }
+        } else {
+            return invoke_process_one(std::forward<Ts>(input_simds)...);
+        }
+    }
+
     work_return_t
     work() noexcept {
         using input_types = traits::node::input_port_types<Derived>;
@@ -10150,8 +10329,6 @@ public:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
-        std::size_t i = 0_UZ;
-
         if constexpr (requires { &Derived::process_bulk;  }) {
             const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
                                         std::tuple_cat(input_spans, meta::tuple_transform([](const auto &span) { return span.first; }, writers_tuple)));
@@ -10161,33 +10338,51 @@ public:
             return success ? ret : work_return_t::ERROR;
         }
 
-        // Loop for SIMD-enabled processing
-        if constexpr (output_types::template all_of<meta::vectorizable>
-                      && traits::node::can_process_simd<Derived>) {
+        using input_simd_types = meta::simdize<typename input_types::template apply<std::tuple>>;
+        using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
 
-            using Vec = meta::reduce_to_widest_simd<input_types>;
+        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0
+                                                 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
+                                                 : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>),
+                                                            meta::simdize_size_v<input_simd_types> * 4))> width{};
 
-            constexpr auto simd_size = Vec::size();
-            for (; i + simd_size <= samples_to_process; i += simd_size) {
-                const auto results = std::apply(
-                        [&]<typename... Ts>(Ts const &...inputs) {
-                            return invoke_process_one(Vec(inputs.data() + i, stdx::element_aligned)...);
-                        },
-                        input_spans);
+        if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0)
+                      and ((is_source_node and requires(Derived &d) {
+                               { d.process_one_simd(width) };
+                           }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+            // SIMD loop
+            std::size_t i = 0;
+            for (; i + width <= samples_to_process; i += width) {
+                const auto results = simdize_tuple_load_and_apply(width, input_spans, i, [&](auto &&...input_simds) {
+                    return invoke_process_one_simd(width, input_simds...);
+                });
                 meta::tuple_for_each(
                         [i](auto &writer, auto &result) {
                             result.copy_to(writer.first /*data*/.data() + i, stdx::element_aligned);
                         },
                         writers_tuple, results);
             }
-        }
-
-        // Continues from the last index processed by SIMD loop
-        for (; i < samples_to_process; ++i) {
-            const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
-                                            input_spans);
-            meta::tuple_for_each([i](auto &writer, auto &result) { writer.first /*data*/[i] = std::move(result); },
-                                 writers_tuple, results);
+            simd_epilogue(width, [&](auto w) {
+                if (i + w <= samples_to_process) {
+                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) {
+                        return invoke_process_one_simd(w, input_simds...);
+                    });
+                    meta::tuple_for_each(
+                            [i](auto &writer, auto &result) {
+                                result.copy_to(writer.first /*data*/.data() + i, stdx::element_aligned);
+                            },
+                            writers_tuple, results);
+                    i += w;
+                }
+            });
+        } else {
+            // Non-SIMD loop
+            for (std::size_t i = 0; i < samples_to_process; ++i) {
+                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
+                                                input_spans);
+                meta::tuple_for_each([i](auto &writer, auto &result) { writer.first /*data*/[i] = std::move(result); },
+                                     writers_tuple, results);
+            }
         }
 
         write_to_outputs(self(), samples_to_process, writers_tuple);
@@ -10279,7 +10474,7 @@ private:
     }
 
     template<std::size_t I>
-    [[gnu::always_inline]] constexpr auto
+    constexpr auto
     apply_left(auto &&input_tuple) noexcept {
         return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             return left.process_one(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...);
@@ -10288,7 +10483,7 @@ private:
     }
 
     template<std::size_t I, std::size_t J>
-    [[gnu::always_inline]] constexpr auto
+    constexpr auto
     apply_right(auto &&input_tuple, auto &&tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
             constexpr std::size_t first_offset = traits::node::input_port_types<Left>::size;
@@ -10306,7 +10501,7 @@ public:
     using output_port_types = typename traits::node::output_port_types<base>;
     using return_type       = typename traits::node::return_type<base>;
 
-    [[gnu::always_inline]] constexpr merged_node(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+    constexpr merged_node(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
     // if the left node (source) implements available_samples (a customization point), then pass the call through
     friend constexpr std::size_t
@@ -10319,11 +10514,32 @@ public:
     }
 
     template<meta::any_simd... Ts>
-        requires meta::vectorizable_v<return_type> && input_port_types::template
-    are_equal<typename std::remove_cvref_t<Ts>::value_type...> && traits::node::can_process_simd<Left>
-            && traits::node::can_process_simd<Right> constexpr stdx::rebind_simd_t<return_type, meta::first_type<meta::typelist<std::remove_cvref_t<Ts>...>>>
-              process_one(Ts... inputs) {
-        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+        requires traits::node::can_process_simd<Left> && traits::node::can_process_simd<Right>
+    constexpr meta::simdize<return_type, meta::simdize_size_v<std::tuple<Ts...>>>
+    process_one(const Ts &...inputs) {
+        static_assert(traits::node::output_port_types<Left>::size == 1,
+                      "TODO: SIMD for multiple output ports not implemented yet");
+        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(
+                std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+    }
+
+    constexpr auto
+    process_one_simd(auto N)
+        requires traits::node::can_process_simd<Right>
+    {
+        if constexpr (requires(Left &l) {
+                          { l.process_one_simd(N) };
+                      }) {
+            return right.process_one(left.process_one_simd(N));
+        } else {
+            using LeftResult = typename traits::node::return_type<Left>;
+            using V = meta::simdize<LeftResult, N>;
+            alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
+            for (std::size_t i = 0; i < V::size(); ++i) {
+                tmp[i] = left.process_one();
+            }
+            return right.process_one(V(tmp, stdx::vector_aligned));
+        }
     }
 
     template<typename... Ts>
@@ -10332,7 +10548,11 @@ public:
         requires(input_port_types::template are_equal<std::remove_cvref_t<Ts>...>)
     constexpr return_type
     process_one(Ts &&...inputs) {
-        if constexpr (traits::node::output_port_types<Left>::size == 1) { // only the result from the right node needs to be returned
+        // if (sizeof...(Ts) == 0) we could call `return process_one_simd(integral_constant<size_t, width>)`. But if
+        // the caller expects to process *one* sample (no inputs for the caller to explicitly
+        // request simd), and we process more, we risk inconsistencies.
+        if constexpr (traits::node::output_port_types<Left>::size == 1) {
+            // only the result from the right node needs to be returned
             return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
                                                                                  apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
@@ -10369,7 +10589,7 @@ public:
         }
     } // end:: process_one
 
-    [[gnu::always_inline]] work_return_t
+    work_return_t
     work() noexcept {
         return base::work();
     }
@@ -10398,7 +10618,7 @@ public:
  * @endcode
  */
 template<std::size_t OutId, std::size_t InId, source_node A, sink_node B>
-[[gnu::always_inline]] constexpr auto
+constexpr auto
 merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
         if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
             fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
@@ -10433,7 +10653,7 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
  * @endcode
  */
 template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
-[[gnu::always_inline]] constexpr auto
+constexpr auto
 merge(A &&a, B &&b) {
         constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
         constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
@@ -10444,6 +10664,7 @@ merge(A &&a, B &&b) {
         return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
 
+#if !DISABLE_SIMD
 namespace test
 {
 struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
@@ -10460,6 +10681,7 @@ static_assert(std::same_as<traits::node::return_type<copy>, float>);
 static_assert(traits::node::can_process_simd<copy>);
 static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
 }
+#endif
 
 
 /**

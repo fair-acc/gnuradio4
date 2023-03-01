@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <iostream>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -13,6 +14,10 @@
 #include <cxxabi.h>
 #include <iostream>
 #include <typeinfo>
+#endif
+
+#ifndef DISABLE_SIMD
+#define DISABLE_SIMD 0
 #endif
 
 namespace fair::literals {
@@ -126,6 +131,25 @@ precondition(bool cond) {
 }
 #endif
 
+/**
+ * T is tuple-like if it implements std::tuple_size, std::tuple_element, and std::get.
+ * Tuples with size 0 are excluded.
+ */
+template<typename T>
+concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
+    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+};
+
+static_assert(!tuple_like<int>);
+static_assert(!tuple_like<std::tuple<>>);
+static_assert(tuple_like<std::tuple<int>>);
+static_assert(tuple_like<std::tuple<int&>>);
+static_assert(tuple_like<std::tuple<const int&>>);
+static_assert(tuple_like<std::tuple<const int>>);
+static_assert(!tuple_like<std::array<int, 0>>);
+static_assert(tuple_like<std::array<int, 2>>);
+static_assert(tuple_like<std::pair<int, short>>);
+
 namespace stdx = vir::stdx;
 
 template<typename V, typename T = void>
@@ -139,6 +163,79 @@ concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
 
 template<typename T>
 using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
+
+/**
+ * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
+ * tuple-like of stdx::simd (recursively). The latter requires that the SIMD width is homogeneous.
+ * If T is not a simd (or tuple thereof), value is 0.
+ */
+template<typename T>
+struct simdize_size : std::integral_constant<std::size_t, 0> {};
+
+template<typename T, typename A>
+struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
+
+template<tuple_like Tup>
+struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
+    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value)
+                && ...);
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+};
+
+template<typename T>
+inline constexpr std::size_t simdize_size_v = simdize_size<T>::value;
+
+namespace detail {
+/**
+ * Shortcut to determine the stdx::simd specialization with the most efficient ABI tag for the
+ * requested element type T and width N.
+ */
+template<typename T, std::size_t N>
+using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
+
+template<typename T, std::size_t N>
+struct simdize_impl;
+
+template<vectorizable_v T, std::size_t N>
+requires requires { typename stdx::native_simd<T>; }
+struct simdize_impl<T, N> {
+    using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
+};
+
+template<std::size_t N>
+struct simdize_impl<std::tuple<>, N> {
+    using type = std::tuple<>;
+};
+
+template<tuple_like Tup, std::size_t N>
+    requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
+struct simdize_impl<Tup, N> {
+    static inline constexpr std::size_t size = N > 0 ? N : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr {
+        return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... });
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>());
+
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>)
+                                  -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
+        return {};
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+};
+} // namespace detail
+
+/**
+ * Meta-function that turns a vectorizable type or a tuple-like (recursively) of vectorizable types
+ * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
+ * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
+ * stdx::native_simd<U>::size() determines the resulting SIMD width.
+ */
+template<typename T, std::size_t N = 0>
+using simdize = typename detail::simdize_impl<T, N>::type;
+
+static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
+                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>,
+                                                 detail::deduced_simd<double, stdx::native_simd<short>::size()>>,
+                                      stdx::native_simd<short>,
+                                      std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<typename A, typename B>
 struct wider_native_simd_size : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
