@@ -449,11 +449,11 @@ public:
             // SIMD loop
             std::size_t i = 0;
             for (; i + width <= samples_to_process; i += width) {
-                const auto results = simdize_tuple_load_and_apply(width, input_spans, i, [&](auto &&...input_simds) {
+                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) {
                     return invoke_process_one_simd(width, input_simds...);
                 });
                 meta::tuple_for_each(
-                        [i](auto &writer, auto &result) {
+                        [i](auto &writer, const auto &result) {
                             result.copy_to(writer.first /*data*/.data() + i, stdx::element_aligned);
                         },
                         writers_tuple, results);
