@@ -192,15 +192,15 @@ class circular_buffer
     using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
 
     struct buffer_impl {
-        alignas(kCacheLine) Allocator                   _allocator{};
-        alignas(kCacheLine) const bool                  _is_mmap_allocated;
-        alignas(kCacheLine) const std::size_t           _size;
-        alignas(kCacheLine) std::vector<T, Allocator>   _data;
-        alignas(kCacheLine) Sequence                    _cursor;
-        alignas(kCacheLine) WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
-        alignas(kCacheLine) ClaimType                   _claim_strategy;
+        Sequence                    _cursor;
+        Allocator                   _allocator{};
+        const bool                  _is_mmap_allocated;
+        const std::size_t           _size;
+        std::vector<T, Allocator>   _data;
+        WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
+        ClaimType                   _claim_strategy;
         // list of dependent reader indices
-        alignas(kCacheLine) DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
+        DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
 
         buffer_impl() = delete;
         buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
@@ -229,11 +229,11 @@ class circular_buffer
     class buffer_writer {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
-        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) bool                        _is_mmap_allocated;
-        alignas(kCacheLine) std::size_t                 _size;
-        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
-        alignas(kCacheLine) ClaimType*                  _claim_strategy;
+        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        bool                        _is_mmap_allocated;
+        std::size_t                 _size;
+        std::vector<U, Allocator>*  _data;
+        ClaimType*                  _claim_strategy;
 
     public:
         buffer_writer() = delete;
@@ -344,11 +344,11 @@ class circular_buffer
     {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
-        alignas(kCacheLine) std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        alignas(kCacheLine) std::int64_t                _read_index_cached;
-        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) std::size_t                 _size;
-        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
+        std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
+        std::int64_t                _read_index_cached;
+        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        std::size_t                 _size;
+        std::vector<U, Allocator>*  _data;
 
     public:
         buffer_reader() = delete;
