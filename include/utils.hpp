@@ -319,10 +319,9 @@ auto tuple_for_each(Function&& function, Tuple&& tuple, Tuples&&... tuples)
 {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        auto callFunction = [&function, &tuple, &tuples...]<std::size_t I>() {
+        (([&function, &tuple, &tuples...](auto I) {
             function(std::get<I>(tuple), std::get<I>(tuples)...);
-        };
-        ((callFunction.template operator()<Idx>(), ...));
+        }(std::integral_constant<std::size_t, Idx>{}), ...));
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
@@ -331,10 +330,9 @@ auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
 {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        auto callFunction = [&function, &tuple, &tuples...]<std::size_t I>() {
-            return function(std::get<I>(tuple), std::get<I>(tuples)...);
-        };
-        return std::make_tuple(callFunction.template operator()<Idx>()...);
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
+                   return function(std::get<I>(tuple), std::get<I>(tuples)...);
+               }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
