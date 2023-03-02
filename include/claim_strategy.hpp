@@ -11,6 +11,7 @@
 
 #include "wait_strategy.hpp"
 #include "sequence.hpp"
+#include "utils.hpp"
 
 namespace gr {
 
@@ -125,8 +126,11 @@ static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
  * Suitable for use for sequencing across multiple publisher threads.
  * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
  * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ *
+ * The size argument (compile-time and run-time) must be a power-of-2 value.
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
 class alignas(hardware_constructive_interference_size) MultiThreadedStrategy {
     const std::size_t _size;
     Sequence &_cursor;
@@ -141,6 +145,7 @@ public:
     explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
         : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
         _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
+        fair::meta::precondition(std::has_single_bit(buffer_size));
         for (std::size_t i = _size - 1; i != 0; i--) {
             setAvailableBufferValue(i, -1);
         }
