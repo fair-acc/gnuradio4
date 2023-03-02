@@ -17,8 +17,13 @@ namespace gr {
 #define forceinline inline __attribute__((always_inline))
 #endif
 
-static constexpr const std::size_t kCacheLine
-        = 64; // waiting for clang: std::hardware_destructive_interference_size
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_destructive_interference_size;
+using std::hardware_constructive_interference_size;
+#else
+inline constexpr std::size_t hardware_destructive_interference_size = 64;
+inline constexpr std::size_t hardware_constructive_interference_size = 64;
+#endif
 static constexpr const std::int64_t kInitialCursorValue = -1L;
 
 /**
@@ -30,7 +35,7 @@ static constexpr const std::int64_t kInitialCursorValue = -1L;
 // clang-format off
 class Sequence
 {
-    alignas(kCacheLine) std::atomic<std::int64_t> _fieldsValue{};
+    alignas(hardware_destructive_interference_size) std::atomic<std::int64_t> _fieldsValue{};
 
 public:
     Sequence(const Sequence&) = delete;
