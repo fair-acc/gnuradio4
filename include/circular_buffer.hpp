@@ -74,7 +74,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
 
         const std::size_t size = 2 * required_size;
-        if (size % 2LU != 0LU || size % static_cast<std::size_t>(getpagesize()) != 0LU) {
+        if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
             throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
         const std::size_t size_half = size/2;
