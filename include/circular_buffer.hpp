@@ -106,10 +106,19 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
             throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
-        // map the first half into the now available hole where the
-        if (const void* second_copy = mmap(static_cast<char*> (first_copy) + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); second_copy == MAP_FAILED) {
+        // Map the first half into the now available hole.
+        // Note that the second_copy_addr mmap argument is only a hint and mmap might place the
+        // mapping somewhere else: "If addr is not NULL, then the kernel takes it as  a hint about
+        // where to place the mapping". The returned pointer therefore must equal second_copy_addr
+        // for our contiguous mapping to work as intended.
+        void* second_copy_addr = static_cast<char*> (first_copy) + size_half;
+        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); result != second_copy_addr) {
             close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+            if (result == MAP_FAILED) {
+                throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+            } else {
+                throw std::runtime_error(fmt::format("{} - failed mmap for second copy: mismatching address", buffer_name));
+            }
         }
 
         close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
