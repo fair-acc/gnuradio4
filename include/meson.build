@@ -1,3 +1,6 @@
+
+graph_dep = declare_dependency(include_directories: '.', dependencies : [fmt_dep, reflcpp_dep])
+
 header_files = [
     'vir/detail.h',
     'vir/simd_bit.h',
@@ -20,4 +23,4 @@ header_files = [
     'utils.hpp',
     'wait_strategy.hpp'
 ]
-install_headers(header_files, subdir : 'graph-prototype')
+install_headers(header_files, subdir : 'graph-prototype', preserve_path: true)
