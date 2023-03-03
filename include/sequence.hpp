@@ -88,17 +88,15 @@ inline std::int64_t getMinimumSequence(
     const std::vector<std::shared_ptr<Sequence>>& sequences,
     std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
 {
-    if (sequences.empty()) {
-        return minimum;
+    // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
+    // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
+    for (const auto& s : sequences) {
+        const std::int64_t v = s->value();
+        if (v < minimum) {
+            minimum = v;
+        }
     }
-#if not defined(_LIBCPP_VERSION)
-    return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
-#else
-    std::vector<int64_t> v(sequences.size());
-    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
-    auto min = std::min(v.begin(), v.end());
-    return std::min(*min, minimum);
-#endif
+    return minimum;
 }
 
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
