@@ -8,6 +8,7 @@ function(add_benchmark BM_NAME)
     set_project_warnings(${BM_NAME})
 endfunction()
 
+add_benchmark(bm_buffer)
 add_benchmark(bm_case0)
 add_benchmark(bm_case1)
 
