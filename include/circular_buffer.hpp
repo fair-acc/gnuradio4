@@ -206,7 +206,7 @@ class circular_buffer
         Sequence                    _cursor;
         Allocator                   _allocator{};
         const bool                  _is_mmap_allocated;
-        const size_type             _size;
+        const size_type             _size; // pre-condition: std::has_single_bit(_size)
         std::vector<T, Allocator>   _data;
         WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
         ClaimType                   _claim_strategy;
@@ -215,7 +215,7 @@ class circular_buffer
 
         buffer_impl() = delete;
         buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
-            _size(align_with_page_size(min_size, _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
+            _size(align_with_page_size(std::bit_ceil(min_size), _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
         }
 
 #ifdef HAS_POSIX_MAP_INTERFACE
@@ -357,7 +357,13 @@ class circular_buffer
         std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
         std::int64_t                _read_index_cached;
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        size_type                   _size;
+        size_type                   _size; // pre-condition: std::has_single_bit(_size)
+
+        std::size_t
+        buffer_index() const noexcept {
+            const auto bitmask = _size - 1;
+            return static_cast<std::size_t>(_read_index_cached & bitmask);
+        }
 
     public:
         buffer_reader() = delete;
@@ -388,10 +394,10 @@ class circular_buffer
             const auto& data = _buffer->_data;
             if constexpr (strict_check) {
                 const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
+                return { &data[buffer_index()], n };
             }
             const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
+            return { &data[buffer_index()], n };
         }
 
         template <bool strict_check = true>
