@@ -4438,37 +4438,6 @@ static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, st
                                       stdx::native_simd<short>,
                                       std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
-template<typename A, typename B>
-struct wider_native_simd_size : std::conditional<(stdx::native_simd<A>::size() > stdx::native_simd<B>::size()), A, B> {};
-
-template<typename A>
-struct wider_native_simd_size<A, A> {
-    using type = A;
-};
-
-template<typename V>
-struct rebind_simd_helper {
-    template<typename T>
-    using rebind = stdx::rebind_simd_t<T, V>;
-};
-
-struct simd_load_ctor {
-    template<any_simd W>
-    static constexpr W
-    apply(typename W::value_type const *ptr) {
-        return W(ptr, stdx::element_aligned);
-    }
-};
-
-template<typename List>
-using reduce_to_widest_simd = stdx::native_simd<meta::reduce<wider_native_simd_size, List>>;
-
-template<typename V, typename List>
-using transform_by_rebind_simd = meta::transform_types<rebind_simd_helper<V>::template rebind, List>;
-
-template<typename List>
-using transform_to_widest_simd = transform_by_rebind_simd<reduce_to_widest_simd<List>, List>;
-
 template<fixed_string Name, typename PortList>
 consteval int
 indexForName() {
