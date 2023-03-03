@@ -201,10 +201,12 @@ class circular_buffer
     using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
 
     struct buffer_impl {
+        using size_type = std::int32_t;
+
         Sequence                    _cursor;
         Allocator                   _allocator{};
         const bool                  _is_mmap_allocated;
-        const std::size_t           _size;
+        const size_type             _size;
         std::vector<T, Allocator>   _data;
         WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
         ClaimType                   _claim_strategy;
@@ -237,10 +239,11 @@ class circular_buffer
     template <typename U = T>
     class buffer_writer {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using size_type = typename buffer_impl::size_type;
 
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         bool                        _is_mmap_allocated;
-        std::size_t                 _size;
+        size_type                   _size;
         ClaimType*                  _claim_strategy;
 
     public:
@@ -349,11 +352,12 @@ class circular_buffer
     class buffer_reader
     {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using size_type = typename buffer_impl::size_type;
 
         std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
         std::int64_t                _read_index_cached;
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        std::size_t                 _size;
+        size_type                   _size;
 
     public:
         buffer_reader() = delete;
