@@ -4442,6 +4442,10 @@ template<fixed_string Name, typename PortList>
 consteval int
 indexForName() {
     auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
+        constexpr int n_matches = ((PortList::template at<Ids>::static_name() == Name) + ...);
+        static_assert(n_matches <= 1, "Multiple ports with that name were found. The name must be unique. You can "
+                                      "still use a port index instead.");
+        static_assert(n_matches == 1, "No port with the given name exists.");
         int result = -1;
         ((PortList::template at<Ids>::static_name() == Name ? (result = Ids) : 0), ...);
         return result;
