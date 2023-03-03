@@ -241,25 +241,22 @@ class circular_buffer
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         bool                        _is_mmap_allocated;
         std::size_t                 _size;
-        std::vector<U, Allocator>*  _data;
         ClaimType*                  _claim_strategy;
 
     public:
         buffer_writer() = delete;
         buffer_writer(std::shared_ptr<buffer_impl> buffer) :
             _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
-            _size(_buffer->_size), _data(std::addressof(_buffer->_data)), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+            _size(_buffer->_size), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
         buffer_writer(buffer_writer&& other)
             : _buffer(std::move(other._buffer))
             , _is_mmap_allocated(_buffer->_is_mmap_allocated)
             , _size(_buffer->_size)
-            , _data(std::addressof(_buffer->_data))
             , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
         buffer_writer& operator=(buffer_writer tmp) {
             std::swap(_buffer, tmp._buffer);
             _is_mmap_allocated = _buffer->_is_mmap_allocated;
             _size = _buffer->_size;
-            _data = std::addressof(_buffer->_data);
             _claim_strategy = std::addressof(_buffer->_claim_strategy);
 
             return *this;
@@ -271,7 +268,7 @@ class circular_buffer
             try {
                 const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
                 const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
-                return {{ &(*_data)[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
+                return {{ &_buffer->_data[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
             } catch (const NoCapacityException &) {
                 return { { /* empty span */ }, { 0, 0 }};
             }
@@ -284,7 +281,7 @@ class circular_buffer
                 const size_t nFirstHalf = std::min(_size - index, n_produced);
                 const size_t nSecondHalf = n_produced  - nFirstHalf;
 
-                auto& data = *_data;
+                auto& data = _buffer->_data;
                 std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
                 std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
             }
@@ -322,7 +319,7 @@ class circular_buffer
         template <typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
             try {
-                auto& data = *_data;
+                auto& data = _buffer->_data;
                 const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
                 std::span<U> writable_data(&data[index], n_slots_to_claim);
                 if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
@@ -357,12 +354,11 @@ class circular_buffer
         std::int64_t                _read_index_cached;
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         std::size_t                 _size;
-        std::vector<U, Allocator>*  _data;
 
     public:
         buffer_reader() = delete;
         buffer_reader(std::shared_ptr<buffer_impl> buffer) :
-            _buffer(buffer), _size(buffer->_size), _data(std::addressof(buffer->_data)) {
+            _buffer(buffer), _size(buffer->_size) {
             gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
             _read_index_cached = _read_index->value();
         }
@@ -370,15 +366,13 @@ class circular_buffer
             : _read_index(std::move(other._read_index))
             , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
             , _buffer(other._buffer)
-            , _size(_buffer->_size)
-            , _data(std::addressof(_buffer->_data)) {
+            , _size(_buffer->_size) {
         }
         buffer_reader& operator=(buffer_reader tmp) noexcept {
             std::swap(_read_index, tmp._read_index);
             std::swap(_read_index_cached, tmp._read_index_cached);
             std::swap(_buffer, tmp._buffer);
             _size = _buffer->_size;
-            _data = std::addressof(_buffer->_data);
             return *this;
         };
         ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
@@ -387,7 +381,7 @@ class circular_buffer
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
-            const auto& data = *_data;
+            const auto& data = _buffer->_data;
             if constexpr (strict_check) {
                 const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
                 return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
