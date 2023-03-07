@@ -489,6 +489,12 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
             return _data.emplace_back(std::string(name), ResultMap()).second;
         }
 
+        static void
+        add_separator() noexcept {
+            std::lock_guard guard(_lock);
+            _data.emplace_back(std::string{}, ResultMap{});
+        }
+
         [[nodiscard]] static constexpr Data const &
         data() noexcept {
             return _data;
@@ -965,6 +971,14 @@ namespace cfg {
                     }
                     fmt::print("┐\n");
                     first_row = false;
+                } else if (test_name.empty() and result_map.empty()) {
+                    fmt::print("├{1:─^{0}}", name_max_size + 2UL, "");
+                    fmt::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
+                    for (auto const &[metric_key, max_width] : metric_keys) {
+                        fmt::print("┼{1:─^{0}}", max_width + 2UL, "");
+                    }
+                    fmt::print("┤\n");
+                    continue;
                 }
                 fmt::print("│ {1:<{0}} ", name_max_size, test_name);
                 if (result_map.size() == 0) {
