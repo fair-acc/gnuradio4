@@ -129,6 +129,9 @@ inline const boost::ut::suite _buffer_tests = [] {
 
     for (BufferStrategy strategy : { BufferStrategy::posix, BufferStrategy::portable }) {
         for (int veclen : {1, 1024}) {
+            if (not(strategy == BufferStrategy::posix and veclen == 1)) {
+                benchmark::results::add_separator();
+            }
             for (int nP = 1; nP <= 4; nP *= 2) {
                 for (int nR = 1; nR <= 4; nR *= 2) {
                     const std::size_t size = std::max(4096, veclen) * nR * 10;
