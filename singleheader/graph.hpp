@@ -97,8 +97,13 @@ namespace gr {
 #define forceinline inline __attribute__((always_inline))
 #endif
 
-static constexpr const std::size_t kCacheLine
-        = 64; // waiting for clang: std::hardware_destructive_interference_size
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_destructive_interference_size;
+using std::hardware_constructive_interference_size;
+#else
+inline constexpr std::size_t hardware_destructive_interference_size = 64;
+inline constexpr std::size_t hardware_constructive_interference_size = 64;
+#endif
 static constexpr const std::int64_t kInitialCursorValue = -1L;
 
 /**
@@ -110,7 +115,7 @@ static constexpr const std::int64_t kInitialCursorValue = -1L;
 // clang-format off
 class Sequence
 {
-    alignas(kCacheLine) std::atomic<std::int64_t> _fieldsValue{};
+    alignas(hardware_destructive_interference_size) std::atomic<std::int64_t> _fieldsValue{};
 
 public:
     Sequence(const Sequence&) = delete;
@@ -163,17 +168,15 @@ inline std::int64_t getMinimumSequence(
     const std::vector<std::shared_ptr<Sequence>>& sequences,
     std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
 {
-    if (sequences.empty()) {
-        return minimum;
+    // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
+    // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
+    for (const auto& s : sequences) {
+        const std::int64_t v = s->value();
+        if (v < minimum) {
+            minimum = v;
+        }
     }
-#if not defined(_LIBCPP_VERSION)
-    return std::min(minimum, std::ranges::min(sequences, std::less{}, [](const auto &sequence) noexcept { return sequence->value(); })->value());
-#else
-    std::vector<int64_t> v(sequences.size());
-    std::transform(sequences.cbegin(), sequences.cend(), v.begin(), [](auto val) { return val->value(); });
-    auto min = std::min(v.begin(), v.end());
-    return std::min(*min, minimum);
-#endif
+    return minimum;
 }
 
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
@@ -643,794 +646,15 @@ public:
 
 // #include "sequence.hpp"
 
-
-namespace gr {
-
-struct NoCapacityException : public std::runtime_error {
-    NoCapacityException() : std::runtime_error("NoCapacityException"){};
-};
-
-// clang-format off
-
-template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
-        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
-    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
-    { t.publish(sequence) } -> std::same_as<void>;
-    { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
-};
-
-namespace claim_strategy::util {
-constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-}
-
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class alignas(kCacheLine) SingleThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    alignas(kCacheLine) mutable std::int64_t _cachedValue{ kInitialCursorValue };
-
-public:
-    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
-    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
-    void operator=(const SingleThreadedStrategy &) = delete;
-
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
-        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
-            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
-            _cachedValue     = minSequence;
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
-
-        auto nextSequence = _nextValue + n_slots_to_claim;
-        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
-
-        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            _cursor.setValue(_nextValue);
-
-            SpinWait     spinWait;
-            std::int64_t minSequence;
-            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
-                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                    _waitStrategy.signalAllWhenBlocking();
-                }
-                spinWait.spinOnce();
-            }
-            _cachedValue = minSequence;
-        }
-        _nextValue = nextSequence;
-
-        return nextSequence;
-    }
-
-    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
-            throw NoCapacityException();
-        }
-
-        const auto nextSequence = _nextValue + n_slots_to_claim;
-        _nextValue              = nextSequence;
-
-        return nextSequence;
-    }
-
-    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
-        const auto produced = _nextValue;
-
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
-    }
-
-    void publish(std::int64_t sequence) {
-        _cursor.setValue(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
-};
-static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
-
-/**
- * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
- * Suitable for use for sequencing across multiple publisher threads.
- * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
- * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
- */
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class MultiThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-    alignas(kCacheLine) std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    const std::int32_t _indexMask;
-    const std::int32_t _indexShift;
-
-public:
-    MultiThreadedStrategy() = delete;
-    explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
-        _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
-        for (std::size_t i = _size - 1; i != 0; i--) {
-            setAvailableBufferValue(i, -1);
-        }
-        setAvailableBufferValue(0, -1);
-    }
-    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
-    void               operator=(const MultiThreadedStrategy &) = delete;
-
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
-
-        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
-            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
-            _gatingSequenceCache->setValue(minSequence);
-
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        std::int64_t current;
-        std::int64_t next;
-
-        SpinWait     spinWait;
-        do {
-            current                           = _cursor.value();
-            next                              = current + n_slots_to_claim;
-
-            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
-            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
-
-            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
-
-                if (wrapPoint > gatingSequence) {
-                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                        _waitStrategy.signalAllWhenBlocking();
-                    }
-                    spinWait.spinOnce();
-                    continue;
-                }
-
-                _gatingSequenceCache->setValue(gatingSequence);
-            } else if (_cursor.compareAndSet(current, next)) {
-                break;
-            }
-        } while (true);
-
-        return next;
-    }
-
-    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        std::int64_t current;
-        std::int64_t next;
-
-        do {
-            current = _cursor.value();
-            next    = current + n_slots_to_claim;
-
-            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
-                throw NoCapacityException();
-            }
-        } while (!_cursor.compareAndSet(current, next));
-
-        return next;
-    }
-
-    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto produced = _cursor.value();
-        const auto consumed = detail::getMinimumSequence(dependents, produced);
-
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
-    }
-
-    void publish(std::int64_t sequence) {
-        setAvailable(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
-        const auto index = calculateIndex(sequence);
-        const auto flag  = calculateAvailabilityFlag(sequence);
-
-        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
-    }
-
-    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
-        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
-            if (!isAvailable(sequence)) {
-                return sequence - 1;
-            }
-        }
-
-        return availableSequence;
-    }
-
-private:
-    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & _indexMask); }
-};
-static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
-// clang-format on
-
-enum class ProducerType {
-    /**
-     * creates a buffer assuming a single producer-thread and multiple consumer
-     */
-    Single,
-
-    /**
-     * creates a buffer assuming multiple producer-threads and multiple consumer
-     */
-    Multi
-};
-
-namespace detail {
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-struct producer_type;
-
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
-    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
-};
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
-    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
-};
-
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
-
-} // namespace detail
-
-} // namespace gr
-
-
-#endif // GNURADIO_CLAIM_STRATEGY_HPP
-
-// #include "wait_strategy.hpp"
-
-// #include "sequence.hpp"
-
-// #include "buffer.hpp"
-#ifndef GNURADIO_BUFFER2_H
-#define GNURADIO_BUFFER2_H
-
-#include <bit>
-#include <cstdint>
-#include <type_traits>
-#include <concepts>
-#include <span>
-
-namespace gr {
-namespace util {
-template <typename T, typename...>
-struct first_template_arg_helper;
-
-template <template <typename...> class TemplateType,
-          typename ValueType,
-          typename... OtherTypes>
-struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
-    using value_type = ValueType;
-};
-
-template <typename T>
-constexpr auto* value_type_helper()
-{
-    if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type*>(nullptr);
-    }
-    else {
-        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
-    }
-}
-
-template <typename T>
-using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
-
-template <typename... A>
-struct test_fallback {
-};
-
-template <typename, typename ValueType>
-struct test_value_type {
-    using value_type = ValueType;
-};
-
-static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
-static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
-static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
-static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
-
-} // namespace util
-
-// clang-format off
-// disable formatting until clang-format (v16) supporting concepts
-template<class T>
-concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
-    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
-    { t.consume(n_items) } -> std::same_as<bool>;
-    { t.position() }       -> std::same_as<std::int64_t>;
-    { t.available() }      -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
-
-template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
-
-template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
-    { t.get(n_items) } -> std::same_as<std::pair<std::span<util::value_type_t<T>>, std::pair<std::size_t, std::int64_t>>>;
-    { t.publish(token, n_items) } -> std::same_as<void>;
-    { t.available() }         -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
-
-template<class T, typename ...Args>
-concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
-    { T(min_size, args...) };
-    { t.size() }       -> std::same_as<std::size_t>;
-    { t.new_reader() } -> BufferReader;
-    { t.new_writer() } -> BufferWriter;
-};
-
-// compile-time unit-tests
-namespace test {
-template <typename T>
-struct non_compliant_class {
-};
-template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
-template <typename T, typename... Args>
-using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
-} // namespace test
-
-static_assert(!Buffer<test::non_compliant_class<int>>);
-static_assert(!BufferReader<test::non_compliant_class<int>>);
-static_assert(!BufferWriter<test::non_compliant_class<int>>);
-
-static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-// clang-format on
-} // namespace gr
-
-#endif // GNURADIO_BUFFER2_H
-
-
-namespace gr {
-
-namespace util {
-constexpr std::size_t
-round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
-    if (multiple == 0) {
-        return num_to_round;
-    }
-    const auto remainder = num_to_round % multiple;
-    if (remainder == 0) {
-        return num_to_round;
-    }
-    return num_to_round + multiple - remainder;
-}
-} // namespace util
-
-// clang-format off
-class double_mapped_memory_resource : public std::pmr::memory_resource {
-#ifdef HAS_POSIX_MAP_INTERFACE
-    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
-
-        const std::size_t size = 2 * required_size;
-        if (size % 2LU != 0LU || size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
-        }
-        const std::size_t size_half = size/2;
-
-        static std::size_t _counter;
-        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
-        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
-            return syscall(__NR_memfd_create, name, flags);
-        };
-        int shm_fd = static_cast<int>(memfd_create(0));
-        if (shm_fd < 0) {
-            throw std::runtime_error(fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        void* first_copy = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
-        if (first_copy == MAP_FAILED) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        // unmap the 2nd half
-        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        // map the first half into the now available hole where the
-        if (const void* second_copy = mmap(static_cast<char*> (first_copy) + size_half, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); second_copy == MAP_FAILED) {
-            close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
-        return first_copy;
-}
-#else
-    [[nodiscard]] void* do_allocate(const std::size_t, std::size_t) override {
-        throw std::runtime_error("OS does not provide POSIX interface for mmap(...) and munmao(...)");
-        // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
-    }
-#endif
-
-
-#ifdef HAS_POSIX_MAP_INTERFACE
-    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
-
-        if (munmap(p, size) == -1) {
-            throw std::runtime_error(fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
-        }
-    }
-#else
-    void  do_deallocate(void*, std::size_t, size_t) override { }
-#endif
-
-    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
-
-public:
-    static inline double_mapped_memory_resource* defaultAllocator() {
-        static auto instance = double_mapped_memory_resource();
-        return &instance;
-    }
-
-    template<typename T>
-    requires (std::has_single_bit(sizeof(T)))
-    static inline std::pmr::polymorphic_allocator<T> allocator()
-    {
-        return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
-    }
-};
-
-
-
-/**
- * @brief circular buffer implementation using double-mapped memory allocations
- * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
- * free bulk memory access. The buffer keeps a list of indices (using 'Sequence')
- * to keep track of which parts can be tread-safely read and/or written
- *
- *                          wrap-around point
- *                                 |
- *                                 v
- *  | buffer segment #1 (original) | buffer segment #2 (copy of #1) |
- *  0                            SIZE                            2*SIZE
- *                      writeIndex
- *                          v
- *  wrap-free write access  |<-  N_1 < SIZE   ->|
- *
- *  readIndex < writeIndex-N_2
- *      v
- *      |<- N_2 < SIZE ->|
- *
- * N.B N_AVAILABLE := (SIZE + writeIndex - readIndex ) % SIZE
- *
- * citation: <find appropriate first and educational reference>
- *
- * This implementation provides single- as well as multi-producer/consumer buffer
- * combinations for thread-safe CPU-to-CPU data transfer (optionally) using either
- * a) the POSIX mmaped(..)/munmapped(..) MMU interface, if available, and/or
- * b) the guaranteed portable standard C/C++ (de-)allocators as a fall-back.
- *
- * for more details see
- */
-template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-requires (std::has_single_bit(sizeof(T)))
-class circular_buffer
-{
-    using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
-    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
-    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
-
-    struct buffer_impl {
-        alignas(kCacheLine) Allocator                   _allocator{};
-        alignas(kCacheLine) const bool                  _is_mmap_allocated;
-        alignas(kCacheLine) const std::size_t           _size;
-        alignas(kCacheLine) std::vector<T, Allocator>   _data;
-        alignas(kCacheLine) Sequence                    _cursor;
-        alignas(kCacheLine) WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
-        alignas(kCacheLine) ClaimType                   _claim_strategy;
-        // list of dependent reader indices
-        alignas(kCacheLine) DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
-
-        buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
-            _size(align_with_page_size(min_size, _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
-        }
-
-#ifdef HAS_POSIX_MAP_INTERFACE
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
-            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
-        }
-#else
-        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
-            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
-        }
-#endif
-
-        static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
-            // double-mmaped behaviour requires the different size/alloc strategy
-            // i.e. the second buffer half may not default-constructed as it's identical to the first one
-            // and would result in a double dealloc during the default destruction
-            return _is_mmap_allocated ? size : 2 * size;
-        }
-    };
-
-    template <typename U = T>
-    class buffer_writer {
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-
-        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) bool                        _is_mmap_allocated;
-        alignas(kCacheLine) std::size_t                 _size;
-        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
-        alignas(kCacheLine) ClaimType*                  _claim_strategy;
-
-    public:
-        buffer_writer() = delete;
-        buffer_writer(std::shared_ptr<buffer_impl> buffer) :
-            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
-            _size(_buffer->_size), _data(std::addressof(_buffer->_data)), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer(buffer_writer&& other)
-            : _buffer(std::move(other._buffer))
-            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
-            , _size(_buffer->_size)
-            , _data(std::addressof(_buffer->_data))
-            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer& operator=(buffer_writer tmp) {
-            std::swap(_buffer, tmp._buffer);
-            _is_mmap_allocated = _buffer->_is_mmap_allocated;
-            _size = _buffer->_size;
-            _data = std::addressof(_buffer->_data);
-            _claim_strategy = std::addressof(_buffer->_claim_strategy);
-
-            return *this;
-        }
-
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
-
-        [[nodiscard]] constexpr auto get(std::size_t n_slots_to_claim) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
-            try {
-                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
-                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
-                return {{ &(*_data)[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
-            } catch (const NoCapacityException &) {
-                return { { /* empty span */ }, { 0, 0 }};
-            }
-        }
-
-        constexpr void publish(std::pair<std::size_t, std::int64_t> token, std::size_t n_produced) {
-            if (!_is_mmap_allocated) {
-                // mirror samples below/above the buffer's wrap-around point
-                const std::size_t index = token.first;
-                const size_t nFirstHalf = std::min(_size - index, n_produced);
-                const size_t nSecondHalf = n_produced  - nFirstHalf;
-
-                auto& data = *_data;
-                std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
-            }
-            _claim_strategy->publish(token.second + n_produced); // points at first non-writable index
-        }
-
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
-                return;
-            }
-            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
-            translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-        } // blocks until elements are available
-
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
-                return true;
-            }
-            try {
-                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
-                translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-                return true;
-            } catch (const NoCapacityException &) {
-                return false;
-            }
-        }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
-        }
-
-        private:
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
-            try {
-                auto& data = *_data;
-                const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
-                std::span<U> writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
-                } else {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
-                }
-
-                if (!_is_mmap_allocated) {
-                    // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
-                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
-
-                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
-                }
-                _claim_strategy->publish(publishSequence); // points at first non-writable index
-            } catch (const std::exception& e) {
-                throw e;
-            } catch (...) {
-                throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
-            }
-        }
-    };
-
-    template<typename U = T>
-    class buffer_reader
-    {
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-
-        alignas(kCacheLine) std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        alignas(kCacheLine) std::int64_t                _read_index_cached;
-        alignas(kCacheLine) BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        alignas(kCacheLine) std::size_t                 _size;
-        alignas(kCacheLine) std::vector<U, Allocator>*  _data;
-
-    public:
-        buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) :
-            _buffer(buffer), _size(buffer->_size), _data(std::addressof(buffer->_data)) {
-            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
-            _read_index_cached = _read_index->value();
-        }
-        buffer_reader(buffer_reader&& other)
-            : _read_index(std::move(other._read_index))
-            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
-            , _buffer(other._buffer)
-            , _size(_buffer->_size)
-            , _data(std::addressof(_buffer->_data)) {
-        }
-        buffer_reader& operator=(buffer_reader tmp) noexcept {
-            std::swap(_read_index, tmp._read_index);
-            std::swap(_read_index_cached, tmp._read_index_cached);
-            std::swap(_buffer, tmp._buffer);
-            _size = _buffer->_size;
-            _data = std::addressof(_buffer->_data);
-            return *this;
-        };
-        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
-
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
-            const auto& data = *_data;
-            if constexpr (strict_check) {
-                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
-            }
-            const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &data[static_cast<std::uint64_t>(_read_index_cached) % _size], n };
-        }
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
-            if constexpr (strict_check) {
-                if (n_elements <= 0) {
-                    return true;
-                }
-                if (n_elements > available()) {
-                    return false;
-                }
-            }
-            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
-            return true;
-        }
-
-        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _buffer->_cursor.value() - _read_index_cached;
-        }
-    };
-
-    [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface) {
-            return double_mapped_memory_resource::allocator<T>();
-        } else {
-            return Allocator();
-        }
-    }
-
-    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
-
-public:
-    circular_buffer() = delete;
-    circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
-        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
-    ~circular_buffer() = default;
-
-    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
-    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
-    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
-
-    // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] auto n_readers()       { return _shared_buffer_ptr->_read_indices->size(); }
-    [[nodiscard]] auto claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
-    [[nodiscard]] auto wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] auto cursor_sequence() { return _shared_buffer_ptr->_cursor; }
-
-};
-static_assert(Buffer<circular_buffer<int32_t>>);
-// clang-format on
-
-} // namespace gr
-
-#endif // GNURADIO_CIRCULAR_BUFFER_HPP
-
-// #include "buffer.hpp"
+// #include "utils.hpp"
+#ifndef GNURADIO_GRAPH_UTILS_HPP
+#define GNURADIO_GRAPH_UTILS_HPP
+
+#include <functional>
+#include <iostream>
+#include <ranges>
+#include <string>
+#include <string_view>
 
 // #include "typelist.hpp"
 #ifndef GNURADIO_TYPELIST_HPP
@@ -1745,26 +969,6 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 } // namespace fair::meta
 
 #endif // include guard
-
-// #include "port.hpp"
-#ifndef GNURADIO_PORT_HPP
-#define GNURADIO_PORT_HPP
-
-#include <variant>
-#include <complex>
-#include <span>
-
-// #include "utils.hpp"
-#ifndef GNURADIO_GRAPH_UTILS_HPP
-#define GNURADIO_GRAPH_UTILS_HPP
-
-#include <functional>
-#include <iostream>
-#include <ranges>
-#include <string>
-#include <string_view>
-
-// #include "typelist.hpp"
 
 // #include "vir/simd.h"
 /*
@@ -4518,6 +3722,848 @@ static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
 } // namespace fair::meta
 
 #endif // include guard
+
+
+namespace gr {
+
+struct NoCapacityException : public std::runtime_error {
+    NoCapacityException() : std::runtime_error("NoCapacityException"){};
+};
+
+// clang-format off
+
+template<typename T>
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
+        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
+    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
+    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
+    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
+    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
+    { t.publish(sequence) } -> std::same_as<void>;
+    { t.isAvailable(sequence) } -> std::same_as<bool>;
+    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
+};
+
+namespace claim_strategy::util {
+constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+}
+
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
+    const std::size_t _size;
+    Sequence &_cursor;
+    WAIT_STRATEGY &_waitStrategy;
+    std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    mutable std::int64_t _cachedValue{ kInitialCursorValue };
+
+public:
+    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
+        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
+    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
+    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
+    void operator=(const SingleThreadedStrategy &) = delete;
+
+    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
+        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
+            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
+            _cachedValue     = minSequence;
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
+        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
+
+        auto nextSequence = _nextValue + n_slots_to_claim;
+        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
+
+        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
+            _cursor.setValue(_nextValue);
+
+            SpinWait     spinWait;
+            std::int64_t minSequence;
+            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
+                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                    _waitStrategy.signalAllWhenBlocking();
+                }
+                spinWait.spinOnce();
+            }
+            _cachedValue = minSequence;
+        }
+        _nextValue = nextSequence;
+
+        return nextSequence;
+    }
+
+    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
+            throw NoCapacityException();
+        }
+
+        const auto nextSequence = _nextValue + n_slots_to_claim;
+        _nextValue              = nextSequence;
+
+        return nextSequence;
+    }
+
+    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
+        const auto produced = _nextValue;
+
+        return static_cast<std::int64_t>(_size) - (produced - consumed);
+    }
+
+    void publish(std::int64_t sequence) {
+        _cursor.setValue(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
+    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
+};
+
+static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+
+template <std::size_t Size>
+struct MultiThreadedStrategySizeMembers
+{
+    static inline constexpr std::int32_t _size = Size;
+    static inline constexpr std::int32_t _indexShift = std::bit_width(Size);
+};
+
+template <>
+struct MultiThreadedStrategySizeMembers<std::dynamic_extent>
+{
+    MultiThreadedStrategySizeMembers(std::size_t size)
+    : _size(static_cast<std::int32_t>(size)), _indexShift(std::bit_width(size))
+    {}
+
+    const std::int32_t _size;
+    const std::int32_t _indexShift;
+};
+
+/**
+ * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
+ * Suitable for use for sequencing across multiple publisher threads.
+ * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
+ * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ *
+ * The size argument (compile-time and run-time) must be a power-of-2 value.
+ */
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
+class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
+: private MultiThreadedStrategySizeMembers<SIZE> {
+    Sequence &_cursor;
+    WAIT_STRATEGY &_waitStrategy;
+    std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
+    std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
+    using MultiThreadedStrategySizeMembers<SIZE>::_size;
+    using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
+
+public:
+    MultiThreadedStrategy() = delete;
+
+    explicit
+    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
+    : _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(SIZE, -1) {
+    }
+
+    explicit
+    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
+    requires (SIZE == std::dynamic_extent)
+    : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
+      _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(buffer_size, -1) {
+    }
+
+    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
+    void               operator=(const MultiThreadedStrategy &) = delete;
+
+    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
+        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
+
+        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
+            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
+            _gatingSequenceCache->setValue(minSequence);
+
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        std::int64_t current;
+        std::int64_t next;
+
+        SpinWait     spinWait;
+        do {
+            current                           = _cursor.value();
+            next                              = current + n_slots_to_claim;
+
+            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
+            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
+
+            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
+                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
+
+                if (wrapPoint > gatingSequence) {
+                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                        _waitStrategy.signalAllWhenBlocking();
+                    }
+                    spinWait.spinOnce();
+                    continue;
+                }
+
+                _gatingSequenceCache->setValue(gatingSequence);
+            } else if (_cursor.compareAndSet(current, next)) {
+                break;
+            }
+        } while (true);
+
+        return next;
+    }
+
+    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        std::int64_t current;
+        std::int64_t next;
+
+        do {
+            current = _cursor.value();
+            next    = current + n_slots_to_claim;
+
+            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
+                throw NoCapacityException();
+            }
+        } while (!_cursor.compareAndSet(current, next));
+
+        return next;
+    }
+
+    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto produced = _cursor.value();
+        const auto consumed = detail::getMinimumSequence(dependents, produced);
+
+        return static_cast<std::int64_t>(_size) - (produced - consumed);
+    }
+
+    void publish(std::int64_t sequence) {
+        setAvailable(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
+        const auto index = calculateIndex(sequence);
+        const auto flag  = calculateAvailabilityFlag(sequence);
+
+        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
+    }
+
+    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
+        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
+            if (!isAvailable(sequence)) {
+                return sequence - 1;
+            }
+        }
+
+        return availableSequence;
+    }
+
+private:
+    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
+    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
+};
+
+static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
+// clang-format on
+
+enum class ProducerType {
+    /**
+     * creates a buffer assuming a single producer-thread and multiple consumer
+     */
+    Single,
+
+    /**
+     * creates a buffer assuming multiple producer-threads and multiple consumer
+     */
+    Multi
+};
+
+namespace detail {
+template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+struct producer_type;
+
+template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
+    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
+};
+template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
+    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
+};
+
+template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+
+} // namespace detail
+
+} // namespace gr
+
+
+#endif // GNURADIO_CLAIM_STRATEGY_HPP
+
+// #include "wait_strategy.hpp"
+
+// #include "sequence.hpp"
+
+// #include "buffer.hpp"
+#ifndef GNURADIO_BUFFER2_H
+#define GNURADIO_BUFFER2_H
+
+#include <bit>
+#include <cstdint>
+#include <type_traits>
+#include <concepts>
+#include <span>
+
+namespace gr {
+namespace util {
+template <typename T, typename...>
+struct first_template_arg_helper;
+
+template <template <typename...> class TemplateType,
+          typename ValueType,
+          typename... OtherTypes>
+struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
+    using value_type = ValueType;
+};
+
+template <typename T>
+constexpr auto* value_type_helper()
+{
+    if constexpr (requires { typename T::value_type; }) {
+        return static_cast<typename T::value_type*>(nullptr);
+    }
+    else {
+        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
+    }
+}
+
+template <typename T>
+using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
+
+template <typename... A>
+struct test_fallback {
+};
+
+template <typename, typename ValueType>
+struct test_value_type {
+    using value_type = ValueType;
+};
+
+static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
+static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
+static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
+static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
+
+} // namespace util
+
+// clang-format off
+// disable formatting until clang-format (v16) supporting concepts
+template<class T>
+concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
+    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
+    { t.consume(n_items) } -> std::same_as<bool>;
+    { t.position() }       -> std::same_as<std::int64_t>;
+    { t.available() }      -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class Fn, typename T, typename ...Args>
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+
+template<class T, typename ...Args>
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.get(n_items) } -> std::same_as<std::pair<std::span<util::value_type_t<T>>, std::pair<std::size_t, std::int64_t>>>;
+    { t.publish(token, n_items) } -> std::same_as<void>;
+    { t.available() }         -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class T, typename ...Args>
+concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
+    { T(min_size, args...) };
+    { t.size() }       -> std::same_as<std::size_t>;
+    { t.new_reader() } -> BufferReader;
+    { t.new_writer() } -> BufferWriter;
+};
+
+// compile-time unit-tests
+namespace test {
+template <typename T>
+struct non_compliant_class {
+};
+template <typename T, typename... Args>
+using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
+template <typename T, typename... Args>
+using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
+} // namespace test
+
+static_assert(!Buffer<test::non_compliant_class<int>>);
+static_assert(!BufferReader<test::non_compliant_class<int>>);
+static_assert(!BufferWriter<test::non_compliant_class<int>>);
+
+static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+// clang-format on
+} // namespace gr
+
+#endif // GNURADIO_BUFFER2_H
+
+
+namespace gr {
+
+namespace util {
+constexpr std::size_t
+round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
+    if (multiple == 0) {
+        return num_to_round;
+    }
+    const auto remainder = num_to_round % multiple;
+    if (remainder == 0) {
+        return num_to_round;
+    }
+    return num_to_round + multiple - remainder;
+}
+} // namespace util
+
+// clang-format off
+class double_mapped_memory_resource : public std::pmr::memory_resource {
+#ifdef HAS_POSIX_MAP_INTERFACE
+    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
+
+        const std::size_t size = 2 * required_size;
+        if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
+            throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
+        }
+        const std::size_t size_half = size/2;
+
+        static std::size_t _counter;
+        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
+            return syscall(__NR_memfd_create, name, flags);
+        };
+        int shm_fd = static_cast<int>(memfd_create(0));
+        if (shm_fd < 0) {
+            throw std::runtime_error(fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        void* first_copy = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
+        if (first_copy == MAP_FAILED) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        // unmap the 2nd half
+        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
+            close(shm_fd);
+            throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        // Map the first half into the now available hole.
+        // Note that the second_copy_addr mmap argument is only a hint and mmap might place the
+        // mapping somewhere else: "If addr is not NULL, then the kernel takes it as  a hint about
+        // where to place the mapping". The returned pointer therefore must equal second_copy_addr
+        // for our contiguous mapping to work as intended.
+        void* second_copy_addr = static_cast<char*> (first_copy) + size_half;
+        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); result != second_copy_addr) {
+            close(shm_fd);
+            if (result == MAP_FAILED) {
+                throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+            } else {
+                throw std::runtime_error(fmt::format("{} - failed mmap for second copy: mismatching address", buffer_name));
+            }
+        }
+
+        close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
+        return first_copy;
+}
+#else
+    [[nodiscard]] void* do_allocate(const std::size_t, std::size_t) override {
+        throw std::runtime_error("OS does not provide POSIX interface for mmap(...) and munmao(...)");
+        // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
+    }
+#endif
+
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
+
+        if (munmap(p, size) == -1) {
+            throw std::runtime_error(fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
+        }
+    }
+#else
+    void  do_deallocate(void*, std::size_t, size_t) override { }
+#endif
+
+    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
+
+public:
+    static inline double_mapped_memory_resource* defaultAllocator() {
+        static auto instance = double_mapped_memory_resource();
+        return &instance;
+    }
+
+    template<typename T>
+    requires (std::has_single_bit(sizeof(T)))
+    static inline std::pmr::polymorphic_allocator<T> allocator()
+    {
+        return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
+    }
+};
+
+
+
+/**
+ * @brief circular buffer implementation using double-mapped memory allocations
+ * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
+ * free bulk memory access. The buffer keeps a list of indices (using 'Sequence')
+ * to keep track of which parts can be tread-safely read and/or written
+ *
+ *                          wrap-around point
+ *                                 |
+ *                                 v
+ *  | buffer segment #1 (original) | buffer segment #2 (copy of #1) |
+ *  0                            SIZE                            2*SIZE
+ *                      writeIndex
+ *                          v
+ *  wrap-free write access  |<-  N_1 < SIZE   ->|
+ *
+ *  readIndex < writeIndex-N_2
+ *      v
+ *      |<- N_2 < SIZE ->|
+ *
+ * N.B N_AVAILABLE := (SIZE + writeIndex - readIndex ) % SIZE
+ *
+ * citation: <find appropriate first and educational reference>
+ *
+ * This implementation provides single- as well as multi-producer/consumer buffer
+ * combinations for thread-safe CPU-to-CPU data transfer (optionally) using either
+ * a) the POSIX mmaped(..)/munmapped(..) MMU interface, if available, and/or
+ * b) the guaranteed portable standard C/C++ (de-)allocators as a fall-back.
+ *
+ * for more details see
+ */
+template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
+requires (std::has_single_bit(sizeof(T)))
+class circular_buffer
+{
+    using Allocator         = std::pmr::polymorphic_allocator<T>;
+    using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
+    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
+    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
+
+    struct buffer_impl {
+        using size_type = std::int32_t;
+
+        Sequence                    _cursor;
+        Allocator                   _allocator{};
+        const bool                  _is_mmap_allocated;
+        const size_type             _size; // pre-condition: std::has_single_bit(_size)
+        std::vector<T, Allocator>   _data;
+        WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
+        ClaimType                   _claim_strategy;
+        // list of dependent reader indices
+        DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
+
+        buffer_impl() = delete;
+        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
+            _size(align_with_page_size(std::bit_ceil(min_size), _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
+        }
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
+            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
+        }
+#else
+        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
+            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
+        }
+#endif
+
+        static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
+            // double-mmaped behaviour requires the different size/alloc strategy
+            // i.e. the second buffer half may not default-constructed as it's identical to the first one
+            // and would result in a double dealloc during the default destruction
+            return _is_mmap_allocated ? size : 2 * size;
+        }
+    };
+
+    template <typename U = T>
+    class buffer_writer {
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using size_type = typename buffer_impl::size_type;
+
+        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        bool                        _is_mmap_allocated;
+        size_type                   _size;
+        ClaimType*                  _claim_strategy;
+
+    public:
+        buffer_writer() = delete;
+        buffer_writer(std::shared_ptr<buffer_impl> buffer) :
+            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
+            _size(_buffer->_size), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer(buffer_writer&& other)
+            : _buffer(std::move(other._buffer))
+            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
+            , _size(_buffer->_size)
+            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer& operator=(buffer_writer tmp) {
+            std::swap(_buffer, tmp._buffer);
+            _is_mmap_allocated = _buffer->_is_mmap_allocated;
+            _size = _buffer->_size;
+            _claim_strategy = std::addressof(_buffer->_claim_strategy);
+
+            return *this;
+        }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+
+        [[nodiscard]] constexpr auto get(std::size_t n_slots_to_claim) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
+            try {
+                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
+                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
+                return {{ &_buffer->_data[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
+            } catch (const NoCapacityException &) {
+                return { { /* empty span */ }, { 0, 0 }};
+            }
+        }
+
+        constexpr void publish(std::pair<std::size_t, std::int64_t> token, std::size_t n_produced) {
+            if (!_is_mmap_allocated) {
+                // mirror samples below/above the buffer's wrap-around point
+                const std::size_t index = token.first;
+                const size_t nFirstHalf = std::min(_size - index, n_produced);
+                const size_t nSecondHalf = n_produced  - nFirstHalf;
+
+                auto& data = _buffer->_data;
+                std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+            }
+            _claim_strategy->publish(token.second + n_produced); // points at first non-writable index
+        }
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
+                return;
+            }
+            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
+            translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
+        } // blocks until elements are available
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
+                return true;
+            }
+            try {
+                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
+                translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
+                return true;
+            } catch (const NoCapacityException &) {
+                return false;
+            }
+        }
+
+        [[nodiscard]] constexpr std::size_t available() const noexcept {
+            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
+        }
+
+        private:
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
+            try {
+                auto& data = _buffer->_data;
+                const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
+                std::span<U> writable_data(&data[index], n_slots_to_claim);
+                if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
+                } else {
+                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
+                }
+
+                if (!_is_mmap_allocated) {
+                    // mirror samples below/above the buffer's wrap-around point
+                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
+                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
+
+                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+                }
+                _claim_strategy->publish(publishSequence); // points at first non-writable index
+            } catch (const std::exception& e) {
+                throw e;
+            } catch (...) {
+                throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
+            }
+        }
+    };
+
+    template<typename U = T>
+    class buffer_reader
+    {
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using size_type = typename buffer_impl::size_type;
+
+        std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
+        std::int64_t                _read_index_cached;
+        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        size_type                   _size; // pre-condition: std::has_single_bit(_size)
+
+        std::size_t
+        buffer_index() const noexcept {
+            const auto bitmask = _size - 1;
+            return static_cast<std::size_t>(_read_index_cached & bitmask);
+        }
+
+    public:
+        buffer_reader() = delete;
+        buffer_reader(std::shared_ptr<buffer_impl> buffer) :
+            _buffer(buffer), _size(buffer->_size) {
+            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
+            _read_index_cached = _read_index->value();
+        }
+        buffer_reader(buffer_reader&& other)
+            : _read_index(std::move(other._read_index))
+            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
+            , _buffer(other._buffer)
+            , _size(_buffer->_size) {
+        }
+        buffer_reader& operator=(buffer_reader tmp) noexcept {
+            std::swap(_read_index, tmp._read_index);
+            std::swap(_read_index_cached, tmp._read_index_cached);
+            std::swap(_buffer, tmp._buffer);
+            _size = _buffer->_size;
+            return *this;
+        };
+        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+
+        template <bool strict_check = true>
+        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
+            const auto& data = _buffer->_data;
+            if constexpr (strict_check) {
+                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
+                return { &data[buffer_index()], n };
+            }
+            const std::size_t n = n_requested > 0 ? n_requested : available();
+            return { &data[buffer_index()], n };
+        }
+
+        template <bool strict_check = true>
+        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
+            if constexpr (strict_check) {
+                if (n_elements <= 0) {
+                    return true;
+                }
+                if (n_elements > available()) {
+                    return false;
+                }
+            }
+            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
+            return true;
+        }
+
+        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
+
+        [[nodiscard]] constexpr std::size_t available() const noexcept {
+            return _buffer->_cursor.value() - _read_index_cached;
+        }
+    };
+
+    [[nodiscard]] constexpr static Allocator DefaultAllocator() {
+        if constexpr (has_posix_mmap_interface) {
+            return double_mapped_memory_resource::allocator<T>();
+        } else {
+            return Allocator();
+        }
+    }
+
+    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
+    circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+
+public:
+    circular_buffer() = delete;
+    circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
+        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
+    ~circular_buffer() = default;
+
+    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
+    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
+    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
+
+    // implementation specific interface -- not part of public Buffer / production-code API
+    [[nodiscard]] auto n_readers()       { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] auto claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
+    [[nodiscard]] auto wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
+    [[nodiscard]] auto cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+
+};
+static_assert(Buffer<circular_buffer<int32_t>>);
+// clang-format on
+
+} // namespace gr
+
+#endif // GNURADIO_CIRCULAR_BUFFER_HPP
+
+// #include "buffer.hpp"
+
+// #include "typelist.hpp"
+
+// #include "port.hpp"
+#ifndef GNURADIO_PORT_HPP
+#define GNURADIO_PORT_HPP
+
+#include <variant>
+#include <complex>
+#include <span>
+
+// #include "utils.hpp"
 
 // #include "circular_buffer.hpp"
 

@@ -11,6 +11,7 @@
 
 #include "wait_strategy.hpp"
 #include "sequence.hpp"
+#include "utils.hpp"
 
 namespace gr {
 
@@ -38,12 +39,12 @@ constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x 
 }
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class alignas(kCacheLine) SingleThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    alignas(kCacheLine) mutable std::int64_t _cachedValue{ kInitialCursorValue };
+class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
+    const std::size_t _size;
+    Sequence &_cursor;
+    WAIT_STRATEGY &_waitStrategy;
+    std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    mutable std::int64_t _cachedValue{ kInitialCursorValue };
 
 public:
     SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
@@ -117,34 +118,61 @@ public:
     [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
     [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
 };
+
 static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+
+template <std::size_t Size>
+struct MultiThreadedStrategySizeMembers
+{
+    static inline constexpr std::int32_t _size = Size;
+    static inline constexpr std::int32_t _indexShift = std::bit_width(Size);
+};
+
+template <>
+struct MultiThreadedStrategySizeMembers<std::dynamic_extent>
+{
+    MultiThreadedStrategySizeMembers(std::size_t size)
+    : _size(static_cast<std::int32_t>(size)), _indexShift(std::bit_width(size))
+    {}
+
+    const std::int32_t _size;
+    const std::int32_t _indexShift;
+};
 
 /**
  * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
  * Suitable for use for sequencing across multiple publisher threads.
  * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
  * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ *
+ * The size argument (compile-time and run-time) must be a power-of-2 value.
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class MultiThreadedStrategy {
-    alignas(kCacheLine) const std::size_t _size;
-    alignas(kCacheLine) Sequence &_cursor;
-    alignas(kCacheLine) WAIT_STRATEGY &_waitStrategy;
-    alignas(kCacheLine) std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-    alignas(kCacheLine) std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    const std::int32_t _indexMask;
-    const std::int32_t _indexShift;
+requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
+class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
+: private MultiThreadedStrategySizeMembers<SIZE> {
+    Sequence &_cursor;
+    WAIT_STRATEGY &_waitStrategy;
+    std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
+    std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
+    using MultiThreadedStrategySizeMembers<SIZE>::_size;
+    using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
 
 public:
     MultiThreadedStrategy() = delete;
-    explicit MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(_size),
-        _indexMask(_size - 1), _indexShift(claim_strategy::util::ceillog2(_size)) {
-        for (std::size_t i = _size - 1; i != 0; i--) {
-            setAvailableBufferValue(i, -1);
-        }
-        setAvailableBufferValue(0, -1);
+
+    explicit
+    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
+    : _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(SIZE, -1) {
     }
+
+    explicit
+    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
+    requires (SIZE == std::dynamic_extent)
+    : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
+      _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(buffer_size, -1) {
+    }
+
     MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
     MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
     void               operator=(const MultiThreadedStrategy &) = delete;
@@ -250,8 +278,9 @@ private:
     void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
     forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
     [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & _indexMask); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
 };
+
 static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
 // clang-format on
 

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <boost/ut.hpp>
+#include <charconv>
 #include <chrono>
 #include <iostream>
 #include <map>
@@ -489,6 +490,12 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
             return _data.emplace_back(std::string(name), ResultMap()).second;
         }
 
+        static void
+        add_separator() noexcept {
+            std::lock_guard guard(_lock);
+            _data.emplace_back(std::string{}, ResultMap{});
+        }
+
         [[nodiscard]] static constexpr Data const &
         data() noexcept {
             return _data;
@@ -604,6 +611,21 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
                 value *= base;
                 --exponent;
             }
+            if (significant_digits == 0 && exponent > 10) {
+              if (value < 10.0) {
+                significant_digits = 2;
+              } else if (value < 100.0) {
+                significant_digits = 1;
+              }
+            } else if (significant_digits == 1 && value >= 100.0) {
+              --significant_digits;
+            } else if (significant_digits >= 2) {
+              if (value >= 100.0) {
+                significant_digits -= 2;
+              } else if (value >= 10.0) {
+                --significant_digits;
+              }
+            }
 
             return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ",
                                si_prefixes[exponent], unit);
@@ -693,13 +715,25 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
     template<std::size_t N_ITERATIONS = 1LU, typename ResultType = results, fixed_string... meas_marker_names>
     class benchmark : public ut::detail::test {
         std::size_t _n_scale_results;
+        int _precision = 0;
+
     public:
         benchmark() = delete;
 
-        explicit benchmark(std::string_view _name, std::size_t n_scale_results = 1LU) : ut::detail::test{"benchmark",
-                                                                                                         _name},
-                                                                                        _n_scale_results(
-                                                                                                n_scale_results) {}
+        explicit benchmark(std::string_view _name, std::size_t n_scale_results = 1LU)
+            : ut::detail::test{ "benchmark", _name }
+            , _n_scale_results(n_scale_results) {
+            const char *ptr = std::getenv("BM_DIGITS");
+            if (ptr != nullptr) {
+                const std::string_view env{ ptr };
+                auto [_, ec] = std::from_chars(env.data(), env.data() + env.size(), _precision);
+                if (ec == std::errc()) {
+                  _precision = std::clamp(_precision, 1, 6) - 1;
+                } else {
+                    fmt::print("Invalid value for BM_DIGITS: '{}'\n", env);
+                }
+            }
+        }
 
         template<class TestFunction, std::size_t MARKER_SIZE = argument_size<TestFunction>(), bool has_arguments =
         MARKER_SIZE != 0>
@@ -746,8 +780,10 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
                     const perf_metric perf_data = execMetrics.results();
                     result_map.try_emplace("CPU cache misses", perf_data.cache, "", 0);
                     result_map.try_emplace("CPU branch misses", perf_data.branch, "", 0);
-                    result_map.try_emplace("<CPU-I>", static_cast<double>(perf_data.instructions) /
-                                                      static_cast<double>(N_ITERATIONS * _n_scale_results), "", 1);
+                    result_map.try_emplace("<CPU-I>",
+                                           static_cast<double>(perf_data.instructions)
+                                                   / static_cast<double>(N_ITERATIONS * _n_scale_results),
+                                           "", std::max(1, _precision));
                     result_map.try_emplace("CTX-SW", perf_data.ctx_switches, "", 0);
                 }
                 // not time-critical post-processing starts here
@@ -755,30 +791,31 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
                 const auto ns = stop_iter[N_ITERATIONS - 1] - start;
                 const long double duration_s = 1e-9 * static_cast<long double>(ns.count());
 
-                const auto add_statistics = [&duration_s]<typename T>(ResultMap &map, const T &time_diff) {
+                const auto add_statistics = [&]<typename T>(ResultMap &map, const T &time_diff) {
                     if constexpr (N_ITERATIONS != 1) {
                         const auto [min, mean, stddev, median, max] = utils::compute_statistics(time_diff);
-                        map.try_emplace("min", min, "s", 0);
-                        map.try_emplace("mean", mean, "s", 0);
+                        map.try_emplace("min", min, "s", _precision);
+                        map.try_emplace("mean", mean, "s", _precision);
                         if (stddev == 0) {
-                            map.try_emplace("stddev", std::monostate{}, "s", 0);
+                            map.try_emplace("stddev", std::monostate{}, "s", _precision);
                         } else {
-                            map.try_emplace("stddev", stddev, "s", 0);
+                            map.try_emplace("stddev", stddev, "s", _precision);
                         }
-                        map.try_emplace("median", median, "s", 0);
-                        map.try_emplace("max", max, "s", 0);
+                        map.try_emplace("median", median, "s", _precision);
+                        map.try_emplace("max", max, "s", _precision);
                     } else {
-                        map.try_emplace("min", std::monostate{}, "s", 0);
-                        map.try_emplace("mean", duration_s / N_ITERATIONS, "s", 0);
-                        map.try_emplace("stddev", std::monostate{}, "s", 0);
-                        map.try_emplace("median", std::monostate{}, "s", 0);
-                        map.try_emplace("max", std::monostate{}, "s", 0);
+                        map.try_emplace("min", std::monostate{}, "s", _precision);
+                        map.try_emplace("mean", duration_s / N_ITERATIONS, "s", _precision);
+                        map.try_emplace("stddev", std::monostate{}, "s", _precision);
+                        map.try_emplace("median", std::monostate{}, "s", _precision);
+                        map.try_emplace("max", std::monostate{}, "s", _precision);
                     }
                 };
                 add_statistics(result_map, time_differences_ns);
 
-                result_map.try_emplace("total time", duration_s, "s", 0);
-                result_map.try_emplace("ops/s", _n_scale_results * N_ITERATIONS / duration_s, "", 1);
+                result_map.try_emplace("total time", duration_s, "s", _precision);
+                result_map.try_emplace("ops/s", _n_scale_results * N_ITERATIONS / duration_s, "",
+                                       std::max(1, _precision));
 
                 if constexpr (MARKER_SIZE > 0) {
                     auto transposed_map = utils::convert<N_ITERATIONS>(marker_iter);
@@ -965,6 +1002,14 @@ namespace cfg {
                     }
                     fmt::print("┐\n");
                     first_row = false;
+                } else if (test_name.empty() and result_map.empty()) {
+                    fmt::print("├{1:─^{0}}", name_max_size + 2UL, "");
+                    fmt::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
+                    for (auto const &[metric_key, max_width] : metric_keys) {
+                        fmt::print("┼{1:─^{0}}", max_width + 2UL, "");
+                    }
+                    fmt::print("┤\n");
+                    continue;
                 }
                 fmt::print("│ {1:<{0}} ", name_max_size, test_name);
                 if (result_map.size() == 0) {
