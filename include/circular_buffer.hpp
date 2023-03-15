@@ -247,7 +247,7 @@ class circular_buffer
         ClaimType*                  _claim_strategy;
 
     class ReservedOutputRange {
-        buffer_writer<U>* _parent;
+        buffer_writer<U>* _parent = nullptr;
         std::size_t       _index = 0;
         std::size_t       _n_slots_to_claim = 0;
         std::int64_t      _offset = 0;
@@ -265,18 +265,22 @@ class circular_buffer
         _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - n_slots_to_claim), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
     ReservedOutputRange(const ReservedOutputRange&) = delete;
     ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
-    explicit ReservedOutputRange(ReservedOutputRange&& other) noexcept : ReservedOutputRange(other._parent) {
-        *this = std::move(other);
+    explicit ReservedOutputRange(ReservedOutputRange&& other) noexcept
+        : _parent(std::exchange(other._parent, nullptr))
+        , _index(std::exchange(other._index, 0))
+        , _n_slots_to_claim(std::exchange(other._n_slots_to_claim, 0))
+        , _offset(std::exchange(other._offset, 0))
+        , _published_data(std::exchange(other._published_data, 0))
+        , _internal_span(std::exchange(other._internal_span, std::span<T>{})) {
     };
     ReservedOutputRange& operator=(ReservedOutputRange&& other) noexcept {
-        std::swap(_parent, other._parent);
-        std::swap(_index, other._index);
-        std::swap(_n_slots_to_claim, other._n_slots_to_claim);
-        std::swap(_offset, other._offset);
-        std::swap(_published_data, other._published_data);
-        std::swap(_internal_span, other._internal_span);
-        other._n_slots_to_claim = 0;
-        other._published_data = true;
+        auto tmp = std::move(other);
+        std::swap(_parent, tmp._parent);
+        std::swap(_index, tmp._index);
+        std::swap(_n_slots_to_claim, tmp._n_slots_to_claim);
+        std::swap(_offset, tmp._offset);
+        std::swap(_published_data, tmp._published_data);
+        std::swap(_internal_span, tmp._internal_span);
         return *this;
     };
     ~ReservedOutputRange() {
