@@ -71,8 +71,6 @@ public:
         auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
 
         if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            _cursor.setValue(_nextValue);
-
             SpinWait     spinWait;
             std::int64_t minSequence;
             while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
@@ -110,6 +108,7 @@ public:
 
     void publish(std::int64_t sequence) {
         _cursor.setValue(sequence);
+        _nextValue = sequence;
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
             _waitStrategy.signalAllWhenBlocking();
         }
@@ -124,14 +123,14 @@ static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
 template <std::size_t Size>
 struct MultiThreadedStrategySizeMembers
 {
-    static inline constexpr std::int32_t _size = Size;
-    static inline constexpr std::int32_t _indexShift = std::bit_width(Size);
+    static constexpr std::int32_t _size = Size;
+    static constexpr std::int32_t _indexShift = std::bit_width(Size);
 };
 
 template <>
 struct MultiThreadedStrategySizeMembers<std::dynamic_extent>
 {
-    MultiThreadedStrategySizeMembers(std::size_t size)
+    explicit MultiThreadedStrategySizeMembers(std::size_t size)
     : _size(static_cast<std::int32_t>(size)), _indexShift(std::bit_width(size))
     {}
 

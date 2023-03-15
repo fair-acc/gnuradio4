@@ -94,7 +94,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
             throw std::runtime_error(fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
-        void* first_copy = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
+        void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
             close(shm_fd);
             throw std::runtime_error(fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
@@ -248,15 +248,15 @@ class circular_buffer
 
     public:
         buffer_writer() = delete;
-        buffer_writer(std::shared_ptr<buffer_impl> buffer) :
+        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
             _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
             _size(_buffer->_size), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer(buffer_writer&& other)
+        buffer_writer(buffer_writer&& other) noexcept
             : _buffer(std::move(other._buffer))
             , _is_mmap_allocated(_buffer->_is_mmap_allocated)
             , _size(_buffer->_size)
             , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer& operator=(buffer_writer tmp) {
+        buffer_writer& operator=(buffer_writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
             _is_mmap_allocated = _buffer->_is_mmap_allocated;
             _size = _buffer->_size;
@@ -340,8 +340,8 @@ class circular_buffer
                     std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
                 }
                 _claim_strategy->publish(publishSequence); // points at first non-writable index
-            } catch (const std::exception& e) {
-                throw e;
+            } catch (const std::exception&) {
+                throw;
             } catch (...) {
                 throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
             }
@@ -367,12 +367,12 @@ class circular_buffer
 
     public:
         buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) :
+        buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept :
             _buffer(buffer), _size(buffer->_size) {
             gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
             _read_index_cached = _read_index->value();
         }
-        buffer_reader(buffer_reader&& other)
+        buffer_reader(buffer_reader&& other) noexcept
             : _read_index(std::move(other._read_index))
             , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
             , _buffer(other._buffer)
@@ -430,11 +430,11 @@ class circular_buffer
     }
 
     std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    explicit circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
     circular_buffer() = delete;
-    circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
+    explicit circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
         : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
     ~circular_buffer() = default;
 
@@ -444,9 +444,9 @@ public:
 
     // implementation specific interface -- not part of public Buffer / production-code API
     [[nodiscard]] auto n_readers()       { return _shared_buffer_ptr->_read_indices->size(); }
-    [[nodiscard]] auto claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
-    [[nodiscard]] auto wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] auto cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+    [[nodiscard]] auto &claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
+    [[nodiscard]] auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
+    [[nodiscard]] auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
 
 };
 static_assert(Buffer<circular_buffer<int32_t>>);
