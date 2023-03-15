@@ -325,6 +325,25 @@ const boost::ut::suite CircularBufferTests = [] {
             }
             expect(reader.consume(2));
         }
+        for (int k = 0; k < 3; k++) {
+            // case 2: reserve using RAII token
+            const auto cursor_initial = buffer.cursor_sequence().value();
+            auto data = writer.reserve_output_range(4);
+            std::span<int32_t> span = data; // tests conversion operator
+            for (std::size_t i = 0; i < data.size(); i++) {
+                data[i] = static_cast<int>(i + 1);
+                expect(eq(data[i], span[i]));
+            }
+            data.publish(2);
+            const auto cursor_after = buffer.cursor_sequence().value();
+            expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
+            auto read_data = reader.get();
+            expect(eq(std::size_t{2}, read_data.size())) << fmt::format("received {} samples instead of expected 2", read_data.size());
+            for (std::size_t i = 0; i < data.size(); i++) {
+                expect(eq(static_cast<int>(i + 1), read_data[i])) << "read 1: index " << i;
+            }
+            expect(reader.consume(2));
+        }
     } | std::vector{
 #ifndef __EMSCRIPTEN__
         Allocator(gr::double_mapped_memory_resource::allocator<int32_t>()),
