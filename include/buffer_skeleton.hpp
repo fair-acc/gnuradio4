@@ -71,8 +71,8 @@ class buffer_skeleton
     public:
         [[nodiscard]] buffer_skeleton buffer() const noexcept { return buffer_skeleton(_buffer); };
 
-        [[nodiscard]] constexpr auto get(std::size_t n) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
-                return { { &_buffer->_data[0], n }, { _buffer->_size -1, -1 }};
+        [[nodiscard]] constexpr auto reserve_output_range(std::size_t n) noexcept -> std::span<U> {
+                return { &_buffer->_data[0], n };
         }
 
         constexpr void publish(std::pair<std::size_t, std::int64_t>, std::size_t) const { /* empty */ }

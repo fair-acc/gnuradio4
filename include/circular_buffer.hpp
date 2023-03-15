@@ -301,7 +301,7 @@ class circular_buffer
     constexpr iterator end() const noexcept { return _internal_span.end(); }
     constexpr reverse_iterator rbegin() const noexcept { return _internal_span.rbegin(); }
     constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
-    constexpr pointer data() const noexcept { return _internal_span.data(); }
+    constexpr T* data() const noexcept { return _internal_span.data(); }
 
     T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data[_index + i]; }
     T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data[_index + i]; }
@@ -347,16 +347,6 @@ class circular_buffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
 
-        [[nodiscard]] constexpr auto get(std::size_t n_slots_to_claim) noexcept -> std::pair<std::span<U>, std::pair<std::size_t, std::int64_t>> {
-            try {
-                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
-                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
-                return {{ &_buffer->_data[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
-            } catch (const NoCapacityException &) {
-                return { { /* empty span */ }, { 0, 0 }};
-            }
-        }
-
         [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
             try {
                 const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
@@ -365,20 +355,6 @@ class circular_buffer
             } catch (const NoCapacityException &) {
                 return ReservedOutputRange(this);
             }
-        }
-
-        constexpr void publish(std::pair<std::size_t, std::int64_t> token, std::size_t n_produced) {
-            if (!_is_mmap_allocated) {
-                // mirror samples below/above the buffer's wrap-around point
-                const std::size_t index = token.first;
-                const size_t nFirstHalf = std::min(_size - index, n_produced);
-                const size_t nSecondHalf = n_produced  - nFirstHalf;
-
-                auto& data = _buffer->_data;
-                std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
-            }
-            _claim_strategy->publish(token.second + n_produced); // points at first non-writable index
         }
 
         template <typename... Args, WriterCallback<U, Args...> Translator>

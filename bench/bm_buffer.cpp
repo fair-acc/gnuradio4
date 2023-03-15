@@ -48,8 +48,8 @@ setCpuAffinity(const int cpuID) {}
 #endif
 
 enum class WriteApi {
-    via_lambda,
-    via_split_get_publish, via_split_get_publish_RAII };
+    via_lambda, via_split_request_publish_RAII };
+
 
 template<WriteApi PublisherAPI = WriteApi::via_lambda, typename T = int>
 void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const int nProducer,
@@ -76,11 +76,7 @@ void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std:
                 while (nSamplesProduced <= (min_samples + nProducer - 1) / nProducer) {
                     if constexpr (PublisherAPI == WriteApi::via_lambda) {
                         writer.publish([](auto &) {}, vector_length);
-                    } else if constexpr (PublisherAPI == WriteApi::via_split_get_publish) {
-                        auto [data, token] = writer.get(vector_length);
-
-                        writer.publish(token, vector_length);
-                    }  else if constexpr (PublisherAPI == WriteApi::via_split_get_publish_RAII) {
+                    } else if constexpr (PublisherAPI == WriteApi::via_split_request_publish_RAII) {
                         auto data = writer.reserve_output_range(vector_length);
 
                         data.publish(vector_length);
@@ -143,7 +139,7 @@ inline const boost::ut::suite _buffer_tests = [] {
       portable
     };
 
-    for (WriteApi writerAPI : { WriteApi::via_lambda,  WriteApi::via_split_get_publish, WriteApi::via_split_get_publish_RAII }) {
+    for (WriteApi writerAPI : { WriteApi::via_lambda,  WriteApi::via_split_request_publish_RAII }) {
         for (BufferStrategy strategy : { /*BufferStrategy::posix,*/ BufferStrategy::portable }) {
             for (int veclen : { 1, 1024 }) {
                 if (not(strategy == BufferStrategy::posix and veclen == 1)) {
@@ -156,11 +152,8 @@ inline const boost::ut::suite _buffer_tests = [] {
                         const bool        is_posix  = strategy == BufferStrategy::posix;
                         auto              invoke    = [&](auto buffer) {
                             switch (writerAPI) {
-                            case WriteApi::via_split_get_publish:
-                                testNewAPI<WriteApi::via_split_get_publish>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - split writer" : "portable - split writer");
-                                break;
-                            case WriteApi::via_split_get_publish_RAII:
-                                testNewAPI<WriteApi::via_split_get_publish_RAII>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - split writer RAII" : "portable - split writer RAII");
+                            case WriteApi::via_split_request_publish_RAII:
+                                testNewAPI<WriteApi::via_split_request_publish_RAII>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - RAII writer" : "portable - RAII writer");
                                 break;
                             case WriteApi::via_lambda:
                             default:
