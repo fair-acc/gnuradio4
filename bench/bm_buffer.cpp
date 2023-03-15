@@ -47,8 +47,12 @@ void
 setCpuAffinity(const int cpuID) {}
 #endif
 
-void
-testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const int nProducer,
+enum class WriteApi {
+    via_lambda,
+    via_split_get_publish, via_split_get_publish_RAII };
+
+template<WriteApi PublisherAPI = WriteApi::via_lambda, typename T = int>
+void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const int nProducer,
            const int nConsumer, const std::string_view name) {
     fair::meta::precondition(nProducer > 0);
     fair::meta::precondition(nConsumer > 0);
@@ -70,7 +74,19 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
                 std::size_t nSamplesProduced = 0;
                 barrier.arrive_and_wait();
                 while (nSamplesProduced <= (min_samples + nProducer - 1) / nProducer) {
-                    writer.publish([](auto &) {}, vector_length);
+                    if constexpr (PublisherAPI == WriteApi::via_lambda) {
+                        writer.publish([](auto &) {}, vector_length);
+                    } else if constexpr (PublisherAPI == WriteApi::via_split_get_publish) {
+                        auto [data, token] = writer.get(vector_length);
+
+                        writer.publish(token, vector_length);
+                    }  else if constexpr (PublisherAPI == WriteApi::via_split_get_publish_RAII) {
+                        auto data = writer.reserve_output_range(vector_length);
+
+                        data.publish(vector_length);
+                    } else {
+                        static_assert(fair::meta::always_false<T>, "unknown PublisherAPI case");
+                    }
                     nSamplesProduced += vector_length;
                 }
                 barrier.arrive_and_wait();
@@ -127,27 +143,40 @@ inline const boost::ut::suite _buffer_tests = [] {
       portable
     };
 
-    for (BufferStrategy strategy : { BufferStrategy::posix, BufferStrategy::portable }) {
-        for (int veclen : {1, 1024}) {
-            if (not(strategy == BufferStrategy::posix and veclen == 1)) {
-                benchmark::results::add_separator();
-            }
-            for (int nP = 1; nP <= 4; nP *= 2) {
-                for (int nR = 1; nR <= 4; nR *= 2) {
-                    const std::size_t size = std::max(4096, veclen) * nR * 10;
-                    auto allocator = std::pmr::polymorphic_allocator<int32_t>();
-                    const bool is_posix = strategy == BufferStrategy::posix;
-                    auto invoke = [&](auto buffer) {
-                        testNewAPI(buffer, veclen, samples, nP, nR, is_posix ? "POSIX" : "portable");
-                    };
-                    if (nP == 1) {
-                        using BufferType = circular_buffer<int32_t, std::dynamic_extent, ProducerType::Single>;
-                        Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
-                        invoke(buffer);
-                    } else {
-                        using BufferType = circular_buffer<int32_t, std::dynamic_extent, ProducerType::Multi>;
-                        Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
-                        invoke(buffer);
+    for (WriteApi writerAPI : { WriteApi::via_lambda,  WriteApi::via_split_get_publish, WriteApi::via_split_get_publish_RAII }) {
+        for (BufferStrategy strategy : { /*BufferStrategy::posix,*/ BufferStrategy::portable }) {
+            for (int veclen : { 1, 1024 }) {
+                if (not(strategy == BufferStrategy::posix and veclen == 1)) {
+                    benchmark::results::add_separator();
+                }
+                for (int nP = 1; nP <= 4; nP *= 2) {
+                    for (int nR = 1; nR <= 4; nR *= 2) {
+                        const std::size_t size      = std::max(4096, veclen) * nR * 10;
+                        auto              allocator = std::pmr::polymorphic_allocator<int32_t>();
+                        const bool        is_posix  = strategy == BufferStrategy::posix;
+                        auto              invoke    = [&](auto buffer) {
+                            switch (writerAPI) {
+                            case WriteApi::via_split_get_publish:
+                                testNewAPI<WriteApi::via_split_get_publish>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - split writer" : "portable - split writer");
+                                break;
+                            case WriteApi::via_split_get_publish_RAII:
+                                testNewAPI<WriteApi::via_split_get_publish_RAII>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - split writer RAII" : "portable - split writer RAII");
+                                break;
+                            case WriteApi::via_lambda:
+                            default:
+                                testNewAPI<WriteApi::via_lambda>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX" : "portable");
+                                break;
+                            }
+                        };
+                        if (nP == 1) {
+                            using BufferType   = circular_buffer<int32_t, std::dynamic_extent, ProducerType::Single>;
+                            Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
+                            invoke(buffer);
+                        } else {
+                            using BufferType   = circular_buffer<int32_t, std::dynamic_extent, ProducerType::Multi>;
+                            Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
+                            invoke(buffer);
+                        }
                     }
                 }
             }

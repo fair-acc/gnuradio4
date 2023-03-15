@@ -246,6 +246,86 @@ class circular_buffer
         size_type                   _size;
         ClaimType*                  _claim_strategy;
 
+    class ReservedOutputRange {
+        buffer_writer<U>* _parent;
+        std::size_t       _index = 0;
+        std::size_t       _n_slots_to_claim = 0;
+        std::int64_t      _offset = 0;
+        bool              _published_data = false;
+        std::span<T>      _internal_span{};
+    public:
+    using element_type = T;
+    using value_type = typename std::remove_cv_t<T>;
+    using iterator = typename std::span<T>::iterator;
+    using reverse_iterator = typename std::span<T>::reverse_iterator;
+    using pointer = typename std::span<T>::reverse_iterator;
+
+    explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
+    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, std::int64_t sequence, std::size_t n_slots_to_claim) noexcept :
+        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - n_slots_to_claim), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
+    ReservedOutputRange(const ReservedOutputRange&) = delete;
+    ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
+    explicit ReservedOutputRange(ReservedOutputRange&& other) noexcept : ReservedOutputRange(other._parent) {
+        *this = std::move(other);
+    };
+    ReservedOutputRange& operator=(ReservedOutputRange&& other) noexcept {
+        std::swap(_parent, other._parent);
+        std::swap(_index, other._index);
+        std::swap(_n_slots_to_claim, other._n_slots_to_claim);
+        std::swap(_offset, other._offset);
+        std::swap(_published_data, other._published_data);
+        std::swap(_internal_span, other._internal_span);
+        other._n_slots_to_claim = 0;
+        other._published_data = true;
+        return *this;
+    };
+    ~ReservedOutputRange() {
+        if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
+            if (_n_slots_to_claim) {
+                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples", _n_slots_to_claim);
+                std::terminate();
+            }
+
+        } else {
+            if (_n_slots_to_claim && not _published_data) {
+                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples", _n_slots_to_claim);
+                std::terminate();
+            }
+        }
+    }
+
+    constexpr std::size_t size() const noexcept { return _n_slots_to_claim; };
+    constexpr std::size_t size_bytes() const noexcept { return _n_slots_to_claim * sizeof(T); };
+    constexpr bool empty() const noexcept { return _n_slots_to_claim == 0; }
+    constexpr iterator begin() const noexcept { return _internal_span.begin(); }
+    constexpr iterator end() const noexcept { return _internal_span.end(); }
+    constexpr reverse_iterator rbegin() const noexcept { return _internal_span.rbegin(); }
+    constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
+    constexpr pointer data() const noexcept { return _internal_span.data(); }
+
+    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data[_index + i]; }
+    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data[_index + i]; }
+    operator std::span<T>&() const noexcept { return _internal_span; }
+    operator std::span<T>&() noexcept { return _internal_span; }
+
+    constexpr void publish(std::size_t n_produced) noexcept {
+        assert(n_produced <= _n_slots_to_claim && "n_produced must be <= than claimed slots");
+        if (!_parent->_is_mmap_allocated) {
+            const std::size_t size = _parent->_size;
+            // mirror samples below/above the buffer's wrap-around point
+            const size_t nFirstHalf = std::min(size - _index, n_produced);
+            const size_t nSecondHalf = n_produced - nFirstHalf;
+
+            auto &data = _parent->_buffer->_data;
+            std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
+            std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+        }
+        _parent->_claim_strategy->publish(_offset + n_produced);
+        _n_slots_to_claim -= n_produced;
+        _published_data = true;
+    }
+    };
+
     public:
         buffer_writer() = delete;
         explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
@@ -274,6 +354,16 @@ class circular_buffer
                 return {{ &_buffer->_data[index], n_slots_to_claim }, {index, sequence - n_slots_to_claim } };
             } catch (const NoCapacityException &) {
                 return { { /* empty span */ }, { 0, 0 }};
+            }
+        }
+
+        [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
+            try {
+                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
+                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
+                return ReservedOutputRange(this, index, sequence, n_slots_to_claim);
+            } catch (const NoCapacityException &) {
+                return ReservedOutputRange(this);
             }
         }
 
@@ -443,10 +533,10 @@ public:
     [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] auto n_readers()       { return _shared_buffer_ptr->_read_indices->size(); }
-    [[nodiscard]] auto &claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
-    [[nodiscard]] auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+    [[nodiscard]] auto n_readers()              { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] const auto &claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
+    [[nodiscard]] const auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
+    [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
 
 };
 static_assert(Buffer<circular_buffer<int32_t>>);
