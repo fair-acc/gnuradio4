@@ -7,7 +7,9 @@ if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
 endif()
 
+add_library(graph-prototype-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
+set_project_warnings(graph-prototype-options)
 
 include(FetchContent)
 FetchContent_Declare(
