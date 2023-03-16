@@ -295,14 +295,9 @@ public:
 
     // This function is a template and static to provide easier
     // transition to C++23's deducing this later
-    template<typename Self>
-    auto
-    write_to_outputs(Self &self, std::size_t available_values_count, auto &writers_tuple) noexcept {
+    auto write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
-            meta::tuple_for_each([available_values_count](auto &output_port, auto &writer) {
-                                     output_port.writer().publish(writer.second, available_values_count);
-                                 },
-                                 output_ports(&self), writers_tuple);
+            meta::tuple_for_each([available_values_count](auto &output_range) { output_range.publish(available_values_count); }, writers_tuple);
         }
     }
 
@@ -410,8 +405,8 @@ public:
             return input_port.reader().get(samples_to_process);
         }, input_ports(&self()));
 
-        const auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept {
-            return output_port.writer().get(samples_to_process);
+        auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept {
+            return output_port.writer().reserve_output_range(samples_to_process);
         }, output_ports(&self()));
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
@@ -427,9 +422,9 @@ public:
 
         if constexpr (requires { &Derived::process_bulk;  }) {
             const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
-                                        std::tuple_cat(input_spans, meta::tuple_transform([](const auto &span) { return span.first; }, writers_tuple)));
+                                        std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
 
-            write_to_outputs(self(), samples_to_process, writers_tuple);
+            write_to_outputs(samples_to_process, writers_tuple);
             const bool success = consume_readers(self(), samples_to_process);
             return success ? ret : work_return_t::ERROR;
         }
@@ -453,10 +448,9 @@ public:
                     return invoke_process_one_simd(width, input_simds...);
                 });
                 meta::tuple_for_each(
-                        [i](auto &writer, const auto &result) {
-                            result.copy_to(writer.first /*data*/.data() + i, stdx::element_aligned);
-                        },
-                        writers_tuple, results);
+                        [i](auto &output_range, const auto &result) {
+                            result.copy_to(output_range.data() + i, stdx::element_aligned);
+                        }, writers_tuple, results);
             }
             simd_epilogue(width, [&](auto w) {
                 if (i + w <= samples_to_process) {
@@ -464,10 +458,9 @@ public:
                         return invoke_process_one_simd(w, input_simds...);
                     });
                     meta::tuple_for_each(
-                            [i](auto &writer, auto &result) {
-                                result.copy_to(writer.first /*data*/.data() + i, stdx::element_aligned);
-                            },
-                            writers_tuple, results);
+                            [i](auto &output_range, auto &result) {
+                                result.copy_to(output_range.data() + i, stdx::element_aligned);
+                            }, writers_tuple, results);
                     i += w;
                 }
             });
@@ -476,12 +469,12 @@ public:
             for (std::size_t i = 0; i < samples_to_process; ++i) {
                 const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
                                                 input_spans);
-                meta::tuple_for_each([i](auto &writer, auto &result) { writer.first /*data*/[i] = std::move(result); },
+                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); },
                                      writers_tuple, results);
             }
         }
 
-        write_to_outputs(self(), samples_to_process, writers_tuple);
+        write_to_outputs(samples_to_process, writers_tuple);
 
         const bool success = consume_readers(self(), samples_to_process);
 

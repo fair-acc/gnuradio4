@@ -71,9 +71,9 @@ public:
         if (_counter < count) {
             _counter++;
             auto &writer       = output_port<"value">(this).writer();
-            auto [data, token] = writer.get(1);
+            auto data = writer.reserve_output_range(1);
             data[0]            = val;
-            writer.publish(token, 1);
+            data.publish(1);
 
             return fair::graph::work_return_t::OK;
         } else {

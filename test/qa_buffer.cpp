@@ -56,10 +56,11 @@ const boost::ut::suite BasicConceptsTests = [] {
         }));
 
         // alt expert write interface
-        auto [value, sequence] = writer.get(1);
+        auto value = writer.reserve_output_range(1);
         expect(eq(1LU, value.size())) << "for " << typeName;
-        expect(eq(1023LU, sequence.first)) << "for " << typeName;
-        expect(eq(-1L, sequence.second)) << "for " << typeName;
+        if constexpr (requires { value.publish(1); }) {
+            value.publish(1);
+        }
     } | std::tuple<gr::test::buffer_skeleton<int32_t>,
             gr::circular_buffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>,
             gr::circular_buffer<int32_t, std::dynamic_extent, gr::ProducerType::Multi>>{2, 2, 2};
@@ -294,13 +295,13 @@ const boost::ut::suite CircularBufferTests = [] {
         }
 
         // basic expert writer api
-        {
+        for (int k = 0; k < 3; k++) {
             // case 0: write fully reserved data
-            auto [data, token] = writer.get(4);
+            auto data = writer.reserve_output_range(4);
             for (std::size_t i = 0; i < data.size(); i++) {
                 data[i] = static_cast<int>(i + 1);
             }
-            writer.publish(token, 4);
+            data.publish(4);
             auto read_data = reader.get();
             expect(eq(read_data.size(), std::size_t{4}));
             for (std::size_t i = 0; i < data.size(); i++) {
@@ -308,15 +309,37 @@ const boost::ut::suite CircularBufferTests = [] {
             }
             expect(reader.consume(4));
         }
-        {
+        for (int k = 0; k < 3; k++) {
             // case 1: reserve more than actually written
-            auto [data, token] = writer.get(4);
+            const auto cursor_initial = buffer.cursor_sequence().value();
+            auto data = writer.reserve_output_range(4);
             for (std::size_t i = 0; i < data.size(); i++) {
                 data[i] = static_cast<int>(i + 1);
             }
-            writer.publish(token, 2);
+            data.publish(2);
+            const auto cursor_after = buffer.cursor_sequence().value();
+            expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
             auto read_data = reader.get();
-            expect(eq(std::size_t{2}, read_data.size()));
+            expect(eq(std::size_t{2}, read_data.size())) << fmt::format("received {} samples instead of expected 2", read_data.size());
+            for (std::size_t i = 0; i < data.size(); i++) {
+                expect(eq(static_cast<int>(i + 1), read_data[i])) << "read 1: index " << i;
+            }
+            expect(reader.consume(2));
+        }
+        for (int k = 0; k < 3; k++) {
+            // case 2: reserve using RAII token
+            const auto cursor_initial = buffer.cursor_sequence().value();
+            auto data = writer.reserve_output_range(4);
+            std::span<int32_t> span = data; // tests conversion operator
+            for (std::size_t i = 0; i < data.size(); i++) {
+                data[i] = static_cast<int>(i + 1);
+                expect(eq(data[i], span[i]));
+            }
+            data.publish(2);
+            const auto cursor_after = buffer.cursor_sequence().value();
+            expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
+            auto read_data = reader.get();
+            expect(eq(std::size_t{2}, read_data.size())) << fmt::format("received {} samples instead of expected 2", read_data.size());
             for (std::size_t i = 0; i < data.size(); i++) {
                 expect(eq(static_cast<int>(i + 1), read_data[i])) << "read 1: index " << i;
             }
