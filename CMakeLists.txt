@@ -25,12 +25,21 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
+        pmt
+        GIT_REPOSITORY https://github.com/gnuradio/pmt.git
+        GIT_TAG 6a6ba288840c1cb0c1091347530aec578ab60c8e # main 03/2023
+)
+
+FetchContent_Declare(
         ut
         GIT_REPOSITORY https://github.com/boost-ext/ut.git
         GIT_TAG 265199e173b16a75670fae62fc2446b9dffad39e # head as of 2022-12-19
 )
 
-FetchContent_MakeAvailable(fmt refl-cpp ut)
+FetchContent_MakeAvailable(fmt refl-cpp pmt ut)
+
+add_library(pmtv INTERFACE)
+target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
 
 add_subdirectory(include)
 add_subdirectory(src)
