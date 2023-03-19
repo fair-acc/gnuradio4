@@ -165,8 +165,8 @@ output_ports(Self *self) noexcept {
  *     auto &out_port = output_port<"out">(this);
  *     auto &in_port = input_port<"in">(this);
  *
- *     auto &reader = in_port.reader();
- *     auto &writer = out_port.writer();
+ *     auto &reader = in_port.streamReader();
+ *     auto &writer = out_port.streamWriter();
  *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
  *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
  *     if (n_readable == 0) {
@@ -227,9 +227,7 @@ protected:
 
     constexpr bool
     space_available_on_output_ports(std::size_t n) {
-        return std::apply([n](const auto &...port) noexcept {
-                   return ((n <= port.writer().available()) && ... && true);
-               }, output_ports(&self()));
+        return std::apply([n](const auto &...port) noexcept { return ((n <= port.streamWriter().available()) && ... && true); }, output_ports(&self()));
     }
 
 public:
@@ -268,7 +266,7 @@ public:
                       "A source node has no inputs, therefore no inputs status.");
         bool at_least_one_input_has_data = false;
         const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
-            const std::size_t available = port.reader().available();
+            const std::size_t available = port.streamReader().available();
             if (available > 0_UZ) at_least_one_input_has_data = true;
             if (available < port.min_buffer_size()) {
                 return 0_UZ;
@@ -308,9 +306,7 @@ public:
     consume_readers(Self& self, std::size_t available_values_count) {
         bool success = true;
         if constexpr (traits::node::input_ports<Derived>::size > 0) {
-            std::apply([available_values_count, &success] (auto&... input_port) {
-                    ((success = success && input_port.reader().consume(available_values_count)), ...);
-                }, input_ports(&self));
+            std::apply([available_values_count, &success] (auto&... input_port) { ((success = success && input_port.streamReader().consume(available_values_count)), ...); }, input_ports(&self));
         }
         return success;
     }
@@ -378,9 +374,7 @@ public:
                 samples_to_process = chunk_size;
             } else {
                 // derive value from output buffer size
-                samples_to_process = std::apply([&](const auto &...ports) {
-                                         return std::min({ ports.writer().available()..., ports.max_buffer_size()... });
-                                     }, output_ports(&self()));
+                samples_to_process = std::apply([&](const auto &...ports) { return std::min({ ports.streamWriter().available()..., ports.max_buffer_size()... }); }, output_ports(&self()));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
                 }
@@ -401,13 +395,9 @@ public:
             }
         }
 
-        const auto input_spans = meta::tuple_transform([samples_to_process](auto &input_port) noexcept {
-            return input_port.reader().get(samples_to_process);
-        }, input_ports(&self()));
+        const auto input_spans = meta::tuple_transform([samples_to_process](auto &input_port) noexcept { return input_port.streamReader().get(samples_to_process); }, input_ports(&self()));
 
-        auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept {
-            return output_port.writer().reserve_output_range(samples_to_process);
-        }, output_ports(&self()));
+        auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(samples_to_process); }, output_ports(&self()));
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags

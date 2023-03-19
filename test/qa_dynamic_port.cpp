@@ -70,8 +70,8 @@ public:
     work() {
         if (_counter < count) {
             _counter++;
-            auto &writer       = output_port<"value">(this).writer();
-            auto data = writer.reserve_output_range(1);
+            auto &writer = output_port<"value">(this).streamWriter();
+            auto  data   = writer.reserve_output_range(1);
             data[0]            = val;
             data.publish(1);
 
@@ -101,15 +101,17 @@ const boost::ut::suite PortApiTests = [] {
 
     "PortBufferApi"_test = [] {
         OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out0"> output_port;
-        BufferWriter auto &writer = output_port.writer();
+        BufferWriter auto                                             &writer    = output_port.streamWriter();
+        BufferWriter auto                                             &tagWriter = output_port.tagWriter();
         expect(ge(writer.available(), 32_UZ));
 
-        IN<float, 0, std::numeric_limits<std::size_t>::max(), "int0">        input_port;
-        const BufferReader auto &reader = input_port.reader();
+        IN<float, 0, std::numeric_limits<std::size_t>::max(), "int0"> input_port;
+        const BufferReader auto                                      &reader = input_port.streamReader();
         expect(eq(reader.available(), 0_UZ));
-        input_port.setBuffer(output_port.buffer());
+        auto buffers = output_port.buffer();
+        input_port.setBuffer(buffers.streamBuffer, buffers.tagBufferType);
 
-        expect(eq(output_port.buffer().n_readers(), 1_UZ));
+        expect(eq(buffers.streamBuffer.n_readers(), 1_UZ));
 
         int  offset = 1;
         auto lambda = [&offset](auto &w) {
