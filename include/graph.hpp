@@ -77,7 +77,7 @@ class dynamic_port {
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool
-        update_reader_internal(void *buffer_other) noexcept
+        update_reader_internal(internal_port_buffers buffer_other) noexcept
                 = 0;
     };
 
@@ -88,13 +88,13 @@ class dynamic_port {
         using PortType = std::decay_t<T>;
         std::conditional_t<owning, PortType, PortType &> _value;
 
-        [[nodiscard]] void *
+        [[nodiscard]] internal_port_buffers
         writer_handler_internal() noexcept {
             return _value.writer_handler_internal();
         };
 
         [[nodiscard]] bool
-        update_reader_internal(void *buffer_other) noexcept override {
+        update_reader_internal(internal_port_buffers buffer_other) noexcept override {
             if constexpr (T::IS_INPUT) {
                 return _value.update_reader_internal(buffer_other);
             } else {
@@ -122,7 +122,7 @@ class dynamic_port {
                         requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
             } else {
                 static_assert(
-                        requires { arg.update_reader_internal(std::declval<void *>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
+                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
             }
         }
 
@@ -132,7 +132,7 @@ class dynamic_port {
                         requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
             } else {
                 static_assert(
-                        requires { arg.update_reader_internal(std::declval<void *>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
+                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
             }
         }
 
@@ -182,7 +182,7 @@ class dynamic_port {
     };
 
     bool
-    update_reader_internal(void *buffer_other) noexcept {
+    update_reader_internal(internal_port_buffers buffer_other) noexcept {
         return _accessor->update_reader_internal(buffer_other);
     }
 

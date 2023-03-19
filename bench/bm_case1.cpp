@@ -187,8 +187,8 @@ public:
         auto      &out_port   = output_port<"out">(this);
         auto      &in_port    = input_port<"in">(this);
 
-        auto      &reader     = in_port.reader();
-        auto      &writer     = out_port.writer();
+        auto      &reader     = in_port.streamReader();
+        auto      &writer     = out_port.streamWriter();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
@@ -278,8 +278,8 @@ public:
         auto      &out_port   = output_port<"out">(this);
         auto      &in_port    = input_port<"in">(this);
 
-        auto      &reader     = in_port.reader();
-        auto      &writer     = out_port.writer();
+        auto      &reader     = in_port.streamReader();
+        auto      &writer     = out_port.streamWriter();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
@@ -341,8 +341,8 @@ public:
         auto      &out_port   = output_port<"out">(this);
         auto      &in_port    = input_port<"in">(this);
 
-        auto      &reader     = in_port.reader();
-        auto      &writer     = out_port.writer();
+        auto      &reader     = in_port.streamReader();
+        auto      &writer     = out_port.streamWriter();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable < to_simd_size) {
