@@ -24,7 +24,7 @@ AlignOperands: AlignAfterOperator
 AlignTrailingComments: true
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowAllArgumentsOnNextLine: true
-PackConstructorInitializers: CurrentLine
+PackConstructorInitializers: NextLine
 AllowAllConstructorInitializersOnNextLine: true
 AllowShortLambdasOnASingleLine: All
 AllowShortCaseLabelsOnASingleLine: true
@@ -154,8 +154,8 @@ BraceWrapping:
   BeforeCatch: false
   BeforeElse: false
   IndentBraces: false
-  SplitEmptyFunction: true
-  SplitEmptyRecord: true
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
   SplitEmptyNamespace: true
 BreakBeforeBinaryOperators: All
 BreakBeforeBraces: Custom
