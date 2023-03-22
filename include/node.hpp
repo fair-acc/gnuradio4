@@ -3,10 +3,11 @@
 
 #include <map>
 
-#include <typelist.hpp> // localinclude
-#include <port.hpp> // localinclude
-#include <utils.hpp> // localinclude
-#include <node_traits.hpp> // localinclude
+#include <node_traits.hpp>
+#include <port.hpp>
+#include <tag.hpp>
+#include <typelist.hpp>
+#include <utils.hpp>
 
 #include <fmt/format.h>
 #include <reflection.hpp>
@@ -39,17 +40,13 @@ simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto off
 }
 
 enum class work_return_t {
-    ERROR = -100, /// error occurred in the work function
-    INSUFFICIENT_OUTPUT_ITEMS =
-        -3, /// work requires a larger output buffer to produce output
-    INSUFFICIENT_INPUT_ITEMS =
-        -2, /// work requires a larger input buffer to produce output
-    DONE =
-        -1, /// this block has completed its processing and the flowgraph should be done
-    OK = 0, /// work call was successful and return values in i/o structs are valid
-    CALLBACK_INITIATED =
-        1, /// rather than blocking in the work function, the block will call back to the
-           /// parent interface when it is ready to be called again
+    ERROR                     = -100, /// error occurred in the work function
+    INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
+    INSUFFICIENT_INPUT_ITEMS  = -2,   /// work requires a larger input buffer to produce output
+    DONE                      = -1,   /// this block has completed its processing and the flowgraph should be done
+    OK                        = 0,    /// work call was successful and return values in i/o structs are valid
+    CALLBACK_INITIATED        = 1,    /// rather than blocking in the work function, the block will call back to the
+                                      /// parent interface when it is ready to be called again
 };
 
 template<std::size_t Index, typename Self>
@@ -93,19 +90,13 @@ output_port(Self *self) noexcept {
 template<typename Self>
 [[nodiscard]] constexpr auto
 input_ports(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(input_port<Idx>(self)...);
-    }
-    (std::make_index_sequence<traits::node::input_ports<Self>::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(input_port<Idx>(self)...); }(std::make_index_sequence<traits::node::input_ports<Self>::size>());
 }
 
 template<typename Self>
 [[nodiscard]] constexpr auto
 output_ports(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(output_port<Idx>(self)...);
-    }
-    (std::make_index_sequence<traits::node::output_ports<Self>::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(output_port<Idx>(self)...); }(std::make_index_sequence<traits::node::output_ports<Self>::size>());
 }
 
 /**
@@ -200,12 +191,17 @@ output_ports(Self *self) noexcept {
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
 public:
-    using derived_t = Derived;
-    using node_template_parameters = meta::typelist<Arguments...>;
+    using derived_t                                      = Derived;
+    using node_template_parameters                       = meta::typelist<Arguments...>;
+    constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
 
 private:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string _name{std::string(fair::meta::type_name<Derived>())};
+    std::string        _name{ std::string(fair::meta::type_name<Derived>()) };
+    bool               _input_tags_present  = false;
+    bool               _output_tags_changed = false;
+    std::vector<tag_t::map_type> _tags_at_input;
+    std::vector<tag_t::map_type> _tags_at_output;
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -220,9 +216,7 @@ private:
 protected:
     constexpr bool
     enough_samples_for_output_ports(std::size_t n) {
-        return std::apply([n](const auto &...port) noexcept {
-                   return ((n >= port.min_buffer_size()) && ... && true);
-               }, output_ports(&self()));
+        return std::apply([n](const auto &...port) noexcept { return ((n >= port.min_buffer_size()) && ... && true); }, output_ports(&self()));
     }
 
     constexpr bool
@@ -231,6 +225,8 @@ protected:
     }
 
 public:
+    node() : _tags_at_input(traits::node::input_port_types<Derived>::size()), _tags_at_output(traits::node::output_port_types<Derived>::size()){};
+
     [[nodiscard]] std::string_view
     name() const noexcept {
         return _name;
@@ -241,6 +237,36 @@ public:
         _name = std::move(name);
     }
 
+    [[nodiscard]] constexpr bool
+    input_tags_present() const noexcept {
+        return _input_tags_present;
+    };
+
+    constexpr bool
+    acknowledge_input_tags() noexcept {
+        if (_input_tags_present) {
+            _input_tags_present = false;
+            return true;
+        }
+        return false;
+    };
+
+    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    input_tags() const noexcept {
+        return { _tags_at_input.data(), _tags_at_input.size() };
+    }
+
+    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    output_tags() const noexcept {
+        return { _tags_at_output.data(), _tags_at_output.size() };
+    }
+
+    [[nodiscard]] constexpr std::span<tag_t::map_type>
+    output_tags() noexcept {
+        _output_tags_changed = true;
+        return { _tags_at_output.data(), _tags_at_output.size() };
+    }
+
     template<std::size_t Index, typename Self>
     friend constexpr auto &
     input_port(Self *self) noexcept;
@@ -260,40 +286,51 @@ public:
     // This function is a template and static to provide easier
     // transition to C++23's deducing this later
     template<typename Self>
-    [[nodiscard]] constexpr auto static
-    inputs_status(Self &self) noexcept {
-        static_assert(traits::node::input_ports<Derived>::size > 0,
-                      "A source node has no inputs, therefore no inputs status.");
-        bool at_least_one_input_has_data = false;
-        const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
-            const std::size_t available = port.streamReader().available();
-            if (available > 0_UZ) at_least_one_input_has_data = true;
-            if (available < port.min_buffer_size()) {
-                return 0_UZ;
+    [[nodiscard]] constexpr auto static inputs_status(Self &self) noexcept {
+        static_assert(traits::node::input_ports<Derived>::size > 0, "A source node has no inputs, therefore no inputs status.");
+        bool       at_least_one_input_has_data = false;
+        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, std::size_t> {
+            std::size_t       availableSamples = port.streamReader().available();
+            const std::size_t availableTags    = port.tagReader().available();
+            if (availableTags > 0) {
+                // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+                auto tagData                  = port.tagReader().get();
+                auto tag_stream_head_distance = tagData[0].index - port.streamReader().position();
+                assert(tag_stream_head_distance >= 0 && "negative tag vs. stream distance");
+
+                if (tag_stream_head_distance > 0 && availableSamples > tag_stream_head_distance) {
+                    // limit number of samples to read up to the next tag <-> forces processing from tag to tag|MAX_SIZE
+                    // N.B. new tags are thus always on the first readable sample
+                    availableSamples = std::min(availableSamples, static_cast<std::size_t>(tag_stream_head_distance));
+                    //TODO: handle corner case where the distance to the next tag is less than the ports MIN_SIZE
+                }
+            }
+            if (availableSamples > 0_UZ) at_least_one_input_has_data = true;
+            if (availableSamples < port.min_buffer_size()) {
+                return { 0_UZ, availableTags };
             } else {
-                return std::min(available, port.max_buffer_size());
+                return { std::min(availableSamples, port.max_buffer_size()), availableTags };
             }
         };
 
-        const std::size_t available_values_count
-                = std::apply([&availableForPort](
-                                     auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
-                             input_ports(&self));
+        const std::pair<std::size_t, std::size_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
+                                                                                              input_ports(&self));
 
         struct result {
-            bool at_least_one_input_has_data;
-           std::size_t available_values_count;
+            bool        at_least_one_input_has_data;
+            std::size_t available_values_count;
+            std::size_t available_tags_count;
         };
 
-        return result {
-            .at_least_one_input_has_data = at_least_one_input_has_data,
-            .available_values_count = available_values_count
-        };
+        return result{ .at_least_one_input_has_data = at_least_one_input_has_data,
+                       .available_values_count      = available_values_and_tag_count.first,
+                       .available_tags_count        = available_values_and_tag_count.second };
     }
 
     // This function is a template and static to provide easier
     // transition to C++23's deducing this later
-    auto write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
+    auto
+    write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
             meta::tuple_for_each([available_values_count](auto &output_range) { output_range.publish(available_values_count); }, writers_tuple);
         }
@@ -303,23 +340,22 @@ public:
     // transition to C++23's deducing this later
     template<typename Self>
     bool
-    consume_readers(Self& self, std::size_t available_values_count) {
+    consume_readers(Self &self, std::size_t available_values_count) {
         bool success = true;
         if constexpr (traits::node::input_ports<Derived>::size > 0) {
-            std::apply([available_values_count, &success] (auto&... input_port) { ((success = success && input_port.streamReader().consume(available_values_count)), ...); }, input_ports(&self));
+            std::apply([available_values_count, &success](auto &...input_port) { ((success = success && input_port.streamReader().consume(available_values_count)), ...); }, input_ports(&self));
         }
         return success;
     }
 
-    template <typename... Ts>
+    template<typename... Ts>
     constexpr auto
-    invoke_process_one(Ts&&... inputs)
-    {
+    invoke_process_one(Ts &&...inputs) {
         if constexpr (traits::node::output_ports<Derived>::size == 0) {
             self().process_one(std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::node::output_ports<Derived>::size == 1) {
-            return std::tuple{self().process_one(std::forward<Ts>(inputs)...)};
+            return std::tuple{ self().process_one(std::forward<Ts>(inputs)...) };
         } else {
             return self().process_one(std::forward<Ts>(inputs)...);
         }
@@ -342,15 +378,17 @@ public:
         }
     }
 
+public:
     work_return_t
     work() noexcept {
-        using input_types = traits::node::input_port_types<Derived>;
-        using output_types = traits::node::output_port_types<Derived>;
+        using input_types                 = traits::node::input_port_types<Derived>;
+        using output_types                = traits::node::output_port_types<Derived>;
 
-        constexpr bool is_source_node = input_types::size == 0;
-        constexpr bool is_sink_node = output_types::size == 0;
+        constexpr bool is_source_node     = input_types::size == 0;
+        constexpr bool is_sink_node       = output_types::size == 0;
 
-        std::size_t samples_to_process = 0;
+        std::size_t    samples_to_process = 0;
+        std::size_t    tags_to_process    = 0;
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
                               { available_samples(d) } -> std::same_as<std::size_t>;
@@ -367,10 +405,8 @@ public:
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
                 // buffer size would be if the node were not merged)
                 constexpr std::size_t chunk_size = Derived::merged_work_chunk_size();
-                static_assert(
-                        chunk_size != std::dynamic_extent && chunk_size > 0,
-                        "At least one internal port must define a maximum number of samples or the non-member/hidden "
-                        "friend function `available_samples(const NodeType&)` must be defined.");
+                static_assert(chunk_size != std::dynamic_extent && chunk_size > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
+                                                                                   "friend function `available_samples(const NodeType&)` must be defined.");
                 samples_to_process = chunk_size;
             } else {
                 // derive value from output buffer size
@@ -382,11 +418,12 @@ public:
             }
         } else {
             // Capturing structured bindings does not work in Clang...
-            const auto [at_least_one_input_has_data, available_values_count] = self().inputs_status(self());
+            const auto [at_least_one_input_has_data, available_values_count, available_tags_count] = self().inputs_status(self());
             if (available_values_count == 0) {
                 return at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
             }
             samples_to_process = available_values_count;
+            tags_to_process    = available_tags_count;
             if (not enough_samples_for_output_ports(samples_to_process)) {
                 return work_return_t::INSUFFICIENT_INPUT_ITEMS;
             }
@@ -395,9 +432,64 @@ public:
             }
         }
 
-        const auto input_spans = meta::tuple_transform([samples_to_process](auto &input_port) noexcept { return input_port.streamReader().get(samples_to_process); }, input_ports(&self()));
+        const auto input_spans   = meta::tuple_transform([samples_to_process](auto &input_port) noexcept { return input_port.streamReader().get(samples_to_process); }, input_ports(&self()));
 
-        auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(samples_to_process); }, output_ports(&self()));
+        auto       writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(samples_to_process); },
+                                                   output_ports(&self()));
+
+        _input_tags_present      = false;
+        _output_tags_changed     = false;
+        if (tags_to_process) {
+            _input_tags_present = true;
+            tag_t::map_type merged_tag_map;
+            std::size_t                      port_index = 0; // TODO absorb this as optional tuple_for_each argument
+            meta::tuple_for_each(
+                    [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
+                        auto tags = input_port.tagReader().get();
+                        if (tags.size() > 0 && (tags[0].index == input_port.streamReader().position() || tags[0].index == -1)) {
+                            _tags_at_input[port_index].clear();
+                            for (const auto &[index, map] : tags) {
+                                _tags_at_input[port_index++].insert(map.begin(), map.end());
+                                merged_tag_map.insert(map.begin(), map.end());
+                            }
+                            input_port.tagReader().consume(1);
+                        }
+                    },
+                    input_ports(&self()));
+
+            if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
+                // N.B. ranges omitted because of missing Clang/Emscripten support
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type& tag) { tag = merged_tag_map; });
+                _output_tags_changed = true;
+            }
+        }
+
+        const auto forward_tags = [this]() noexcept {
+            if (!_output_tags_changed) {
+                return;
+            }
+            std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
+            //TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
+            //meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
+            meta::tuple_for_each(
+                    [&port_id, this](auto &output_port) noexcept {
+                        if (_tags_at_output[port_id].empty()) {
+                            port_id++;
+                            return;
+                        }
+                        auto data           = output_port.tagWriter().reserve_output_range(1);
+                        data[port_id].index = output_port.streamWriter().position();
+                        data[port_id].map = _tags_at_output[port_id];
+                        data.publish(1);
+                        port_id++;
+                    },
+                    output_ports(&self()));
+            // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
+            _input_tags_present  = false;
+            _output_tags_changed = false;
+            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t::map_type &tag) { tag.clear(); });
+            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t::map_type &tag) { tag.clear(); });
+        };
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags
@@ -410,57 +502,45 @@ public:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
-        if constexpr (requires { &Derived::process_bulk;  }) {
+        if constexpr (requires { &Derived::process_bulk; }) {
             const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
-                                        std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
+                                                 std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
 
             write_to_outputs(samples_to_process, writers_tuple);
             const bool success = consume_readers(self(), samples_to_process);
+            forward_tags();
             return success ? ret : work_return_t::ERROR;
         }
 
-        using input_simd_types = meta::simdize<typename input_types::template apply<std::tuple>>;
+        using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
         using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
 
-        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0
-                                                 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
-                                                 : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>),
-                                                            meta::simdize_size_v<input_simd_types> * 4))> width{};
+        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
+                                                                                         : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
+                width{};
 
         if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0)
-                      and ((is_source_node and requires(Derived &d) {
-                               { d.process_one_simd(width) };
-                           }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+                      and ((is_source_node and requires(Derived & d) {
+                                                   { d.process_one_simd(width) };
+                                               }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
             // SIMD loop
             std::size_t i = 0;
             for (; i + width <= samples_to_process; i += width) {
-                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) {
-                    return invoke_process_one_simd(width, input_simds...);
-                });
-                meta::tuple_for_each(
-                        [i](auto &output_range, const auto &result) {
-                            result.copy_to(output_range.data() + i, stdx::element_aligned);
-                        }, writers_tuple, results);
+                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
+                meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
             }
             simd_epilogue(width, [&](auto w) {
                 if (i + w <= samples_to_process) {
-                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) {
-                        return invoke_process_one_simd(w, input_simds...);
-                    });
-                    meta::tuple_for_each(
-                            [i](auto &output_range, auto &result) {
-                                result.copy_to(output_range.data() + i, stdx::element_aligned);
-                            }, writers_tuple, results);
+                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
+                    meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
                     i += w;
                 }
             });
         } else {
             // Non-SIMD loop
             for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
-                                                input_spans);
-                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); },
-                                     writers_tuple, results);
+                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
             }
         }
 
@@ -473,7 +553,7 @@ public:
             fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
         }
 #endif
-
+        forward_tags();
         return success ? work_return_t::OK : work_return_t::ERROR;
     } // end: work_return_t work() noexcept { ..}
 };
@@ -484,13 +564,14 @@ concept source_node = requires(Node &node, typename traits::node::input_port_typ
                               [](Node &n, auto &inputs) {
                                   constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
                                   if constexpr (port_count > 0) {
-                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
-                                      (n, inputs, std::make_index_sequence<port_count>());
+                                      return []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) -> decltype(n_inside.process_one(std::get<Is>(tup)...)) {
+                                          return {};
+                                      }(n, inputs, std::make_index_sequence<port_count>());
                                   } else {
                                       return n.process_one();
                                   }
                               }(node, inputs)
-                              } -> std::same_as<typename traits::node::return_type<Node>>;
+                          } -> std::same_as<typename traits::node::return_type<Node>>;
                       };
 
 template<typename Node>
@@ -498,14 +579,13 @@ concept sink_node = requires(Node &node, typename traits::node::input_port_types
                         {
                             [](Node &n, auto &inputs) {
                                 constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
-                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
+                                []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) {
                                     if constexpr (port_count > 0) {
                                         auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
                                     } else {
                                         n_inside.process_one(std::get<Is>(tup)...);
                                     }
-                                }
-                                (n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
+                                }(n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
                             }(node, inputs)
                         };
                     };
@@ -547,32 +627,25 @@ private:
                 return std::dynamic_extent;
             }
         }();
-        return std::min({ traits::node::input_ports<Right>::template apply<traits::port::max_samples>::value,
-                          traits::node::output_ports<Left>::template apply<traits::port::max_samples>::value, left_size,
-                          right_size });
+        return std::min({ traits::node::input_ports<Right>::template apply<traits::port::max_samples>::value, traits::node::output_ports<Left>::template apply<traits::port::max_samples>::value,
+                          left_size, right_size });
     }
 
     template<std::size_t I>
     constexpr auto
     apply_left(auto &&input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return left.process_one(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...);
-        }
-                (std::make_index_sequence<I>());
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.process_one(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
     }
 
     template<std::size_t I, std::size_t J>
     constexpr auto
     apply_right(auto &&input_tuple, auto &&tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
-            constexpr std::size_t first_offset = traits::node::input_port_types<Left>::size;
+            constexpr std::size_t first_offset  = traits::node::input_port_types<Left>::size;
             constexpr std::size_t second_offset = traits::node::input_port_types<Left>::size + sizeof...(Is);
-            static_assert(
-                    second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return right.process_one(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))...,
-                                     std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
-        }
-                (std::make_index_sequence<I>(), std::make_index_sequence<J>());
+            static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
+            return right.process_one(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
+        }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
 public:
@@ -586,8 +659,8 @@ public:
     friend constexpr std::size_t
     available_samples(const merged_node &self) noexcept
         requires requires(const Left &l) {
-            { available_samples(l) } -> std::same_as<std::size_t>;
-        }
+                     { available_samples(l) } -> std::same_as<std::size_t>;
+                 }
     {
         return available_samples(self.left);
     }
@@ -596,23 +669,21 @@ public:
         requires traits::node::can_process_simd<Left> && traits::node::can_process_simd<Right>
     constexpr meta::simdize<return_type, meta::simdize_size_v<std::tuple<Ts...>>>
     process_one(const Ts &...inputs) {
-        static_assert(traits::node::output_port_types<Left>::size == 1,
-                      "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(
-                std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+        static_assert(traits::node::output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
+        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
     }
 
     constexpr auto
     process_one_simd(auto N)
         requires traits::node::can_process_simd<Right>
     {
-        if constexpr (requires(Left &l) {
+        if constexpr (requires(Left & l) {
                           { l.process_one_simd(N) };
                       }) {
             return right.process_one(left.process_one_simd(N));
         } else {
             using LeftResult = typename traits::node::return_type<Left>;
-            using V = meta::simdize<LeftResult, N>;
+            using V          = meta::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0; i < V::size(); ++i) {
                 tmp[i] = left.process_one();
@@ -633,7 +704,8 @@ public:
         if constexpr (traits::node::output_port_types<Left>::size == 1) {
             // only the result from the right node needs to be returned
             return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                 apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+                                                                                               apply_left<traits::node::input_port_types<Left>::size()>(
+                                                                                                       std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
@@ -649,21 +721,12 @@ public:
             } else if constexpr (traits::node::output_port_types<Right>::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
                     return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out));
-                }
-                        (std::make_index_sequence<OutId>(),
-                         std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>());
+                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>());
 
             } else {
-                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>,
-                                                                                    std::index_sequence<Js...>,
-                                                                                    std::index_sequence<Ks...>) {
-                    return std::make_tuple(std::move(std::get<Is>(left_out))...,
-                                           std::move(std::get<OutId + 1 + Js>(left_out))...,
-                                           std::move(std::get<Ks>(right_out)...));
-                }
-                        (std::make_index_sequence<OutId>(),
-                         std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>(),
-                         std::make_index_sequence<Right::output_port_types::size>());
+                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) {
+                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...));
+                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
             }
         }
     } // end:: process_one
@@ -699,14 +762,15 @@ public:
 template<std::size_t OutId, std::size_t InId, source_node A, sink_node B>
 constexpr auto
 merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
-        if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-            fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
-                    typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+    if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+                                  typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+        fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+                                typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                    fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
-                    typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
-        }
-        return { std::forward<A>(a), std::forward<B>(b) };
+                                fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                                typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+    }
+    return { std::forward<A>(a), std::forward<B>(b) };
 }
 
 /**
@@ -734,32 +798,31 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
 constexpr auto
 merge(A &&a, B &&b) {
-        constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
-        constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
-        static_assert(OutId != -1);
-        static_assert(InId != -1);
-        static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
-                      "Port types do not match");
-        return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
+    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+    static_assert(OutId != -1);
+    static_assert(InId != -1);
+    static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+                  "Port types do not match");
+    return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
 
 #if !DISABLE_SIMD
-namespace test
-{
+namespace test {
 struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
-    public:
-        template<meta::t_or_simd<float> V>
-        constexpr V
-        process_one(const V &a) const noexcept {
-            return a;
-        }
+public:
+    template<meta::t_or_simd<float> V>
+    constexpr V
+    process_one(const V &a) const noexcept {
+        return a;
+    }
 };
 
 static_assert(traits::node::input_port_types<copy>::size() == 1);
 static_assert(std::same_as<traits::node::return_type<copy>, float>);
 static_assert(traits::node::can_process_simd<copy>);
 static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
-}
+} // namespace test
 #endif
 
 } // namespace fair::graph
