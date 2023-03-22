@@ -384,6 +384,8 @@ class circular_buffer
             }
         }
 
+        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _buffer->_cursor.value(); }
+
         [[nodiscard]] constexpr std::size_t available() const noexcept {
             return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
         }
