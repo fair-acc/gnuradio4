@@ -138,6 +138,9 @@ inline constexpr default_tag<"signal_max", float, "a.u.", "signal physical max. 
 inline constexpr default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
 inline constexpr default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
 inline constexpr default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline constexpr default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
+
+inline constexpr std::tuple DEFAULT_TAGS = {SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT};
 } // namespace tag
 
 } // namespace fair::graph

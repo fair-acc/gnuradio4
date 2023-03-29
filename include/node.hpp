@@ -10,7 +10,9 @@
 #include <utils.hpp>
 
 #include <fmt/format.h>
+#include <refl.hpp>
 #include <reflection.hpp>
+#include <settings.hpp>
 
 namespace fair::graph {
 
@@ -195,13 +197,16 @@ public:
     using node_template_parameters                       = meta::typelist<Arguments...>;
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
 
-private:
+protected:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string        _name{ std::string(fair::meta::type_name<Derived>()) };
-    bool               _input_tags_present  = false;
-    bool               _output_tags_changed = false;
+    std::string                  _name{ std::string(fair::meta::type_name<Derived>()) };
+    bool                         _input_tags_present  = false;
+    bool                         _output_tags_changed = false;
     std::vector<tag_t::map_type> _tags_at_input;
     std::vector<tag_t::map_type> _tags_at_output;
+
+    // intermediate non-real-time<->real-time setting states
+    std::unique_ptr<settings_base<Derived>> _settings = std::make_unique<basic_settings<Derived>>(self());
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -213,7 +218,6 @@ private:
         return *static_cast<const Derived *>(this);
     }
 
-protected:
     constexpr bool
     enough_samples_for_output_ports(std::size_t n) {
         return std::apply([n](const auto &...port) noexcept { return ((n >= port.min_buffer_size()) && ... && true); }, output_ports(&self()));
@@ -225,7 +229,15 @@ protected:
     }
 
 public:
-    node() : _tags_at_input(traits::node::input_port_types<Derived>::size()), _tags_at_output(traits::node::output_port_types<Derived>::size()){};
+    constexpr node() noexcept : node(self()) {}
+
+    constexpr node(Derived &derived) noexcept
+        : _tags_at_input(traits::node::input_port_types<Derived>::size())
+        , _tags_at_output(traits::node::output_port_types<Derived>::size())
+        , _settings(std::make_unique<basic_settings<Derived>>(derived)) {}
+
+    node(node &&other) noexcept
+        : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
     [[nodiscard]] std::string_view
     name() const noexcept {
@@ -265,6 +277,16 @@ public:
     output_tags() noexcept {
         _output_tags_changed = true;
         return { _tags_at_output.data(), _tags_at_output.size() };
+    }
+
+    constexpr settings_base<Derived> &
+    settings() const noexcept {
+        return *_settings;
+    }
+
+    constexpr settings_base<Derived> &
+    settings() noexcept {
+        return *_settings;
     }
 
     template<std::size_t Index, typename Self>
@@ -391,6 +413,23 @@ public:
         std::size_t    tags_to_process    = 0;
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
+                              { self().available_samples(d) } -> std::same_as<std::int64_t>;
+                          }) {
+                // the (source) node wants to determine the number of samples to process
+                std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
+                meta::tuple_for_each([&max_buffer](auto&& out){ max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
+                const std::int64_t available_samples = self().available_samples(self());
+                samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
+                if (available_samples < 0 && max_buffer > 0) {
+                    return work_return_t::DONE;
+                }
+                if (not enough_samples_for_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                }
+                if (not space_available_on_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                }
+            } else if constexpr (requires(const Derived &d) {
                               { available_samples(d) } -> std::same_as<std::size_t>;
                           }) {
                 // the (source) node wants to determine the number of samples to process
@@ -439,27 +478,36 @@ public:
 
         _input_tags_present      = false;
         _output_tags_changed     = false;
+        bool auto_change         = false;
         if (tags_to_process) {
-            _input_tags_present = true;
             tag_t::map_type merged_tag_map;
+            _input_tags_present = true;
             std::size_t                      port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
                     [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
-                        auto tags = input_port.tagReader().get();
+                        auto tags = input_port.tagReader().get(1_UZ);
                         if (tags.size() > 0 && (tags[0].index == input_port.streamReader().position() || tags[0].index == -1)) {
                             _tags_at_input[port_index].clear();
                             for (const auto &[index, map] : tags) {
-                                _tags_at_input[port_index++].insert(map.begin(), map.end());
+                                _tags_at_input[port_index].insert(map.begin(), map.end());
                                 merged_tag_map.insert(map.begin(), map.end());
                             }
-                            input_port.tagReader().consume(1);
+                            input_port.tagReader().consume(1_UZ);
+                            port_index++;
                         }
                     },
                     input_ports(&self()));
 
+            if (_input_tags_present) { // apply tags as new settings if matching
+                if (!merged_tag_map.empty()) {
+                    settings().auto_update(merged_tag_map);
+                    auto_change = true;
+                }
+            }
+
             if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type& tag) { tag = merged_tag_map; });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type &tag) { tag = merged_tag_map; });
                 _output_tags_changed = true;
             }
         }
@@ -479,7 +527,7 @@ public:
                         }
                         auto data           = output_port.tagWriter().reserve_output_range(1);
                         data[port_id].index = output_port.streamWriter().position();
-                        data[port_id].map = _tags_at_output[port_id];
+                        data[port_id].map   = _tags_at_output[port_id];
                         data.publish(1);
                         port_id++;
                     },
@@ -490,6 +538,15 @@ public:
             std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t::map_type &tag) { tag.clear(); });
             std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t::map_type &tag) { tag.clear(); });
         };
+
+        if (settings().changed()) {
+            const auto forward_parameters = settings().apply_staged_parameters();
+            if (!forward_parameters.empty()) {
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t::map_type &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
+                _output_tags_changed = true;
+            }
+            settings()._changed.store(false);
+        }
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags

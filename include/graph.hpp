@@ -601,10 +601,22 @@ public:
 
     template<typename Node, typename... Args>
     auto&
-    make_node(Args&&... args) {
+    make_node(Args&&... args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         return *static_cast<Node*>(new_node_ref->raw());
+    }
+
+    template<typename Node>
+    auto&
+    make_node(const tag_t::map_type& initial_settings) {
+        static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
+        auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
+        auto raw_ref = static_cast<Node*>(new_node_ref->raw());
+        if (!initial_settings.empty()) {
+            static_cast<node<Node>*>(raw_ref)->settings().init(*raw_ref, initial_settings);
+        }
+        return *raw_ref;
     }
 
     template<std::size_t src_port_index, typename Source>
