@@ -141,6 +141,7 @@ constexpr bool node_defines_ports_as_member_variables = fixed_node_ports_data<No
 template<typename Node, typename PortType>
 using get_port_member_descriptor =
     typename meta::to_typelist<refl::descriptor::member_list<Node>>
+        ::template filter<detail::is_port_descriptor>
         ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
 
 namespace detail {
