@@ -9,4 +9,5 @@ function(add_ut_test TEST_NAME)
 endfunction()
 
 add_ut_test(qa_dynamic_port)
+add_ut_test(qa_settings)
 add_ut_test(qa_tags)
