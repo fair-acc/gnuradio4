@@ -47,7 +47,7 @@ public:
     work() {
         const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
         if (n_to_publish > 0) {
-            auto &port   = output_port<"out">(this);
+            auto &port   = out;
             auto &writer = port.streamWriter();
 
             if constexpr (use_bulk_operation) {

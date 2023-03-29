@@ -184,8 +184,8 @@ public:
 
     fair::graph::work_return_t
     work() noexcept {
-        auto      &out_port   = output_port<"out">(this);
-        auto      &in_port    = input_port<"in">(this);
+        auto      &out_port   = output_port<0>(this);
+        auto      &in_port    = input_port<0>(this);
 
         auto      &reader     = in_port.streamReader();
         auto      &writer     = out_port.streamWriter();
@@ -275,8 +275,8 @@ public:
 
     fair::graph::work_return_t
     work() noexcept { // TODO - make this an alternate version to 'process_one'
-        auto      &out_port   = output_port<"out">(this);
-        auto      &in_port    = input_port<"in">(this);
+        auto      &out_port   = out;
+        auto      &in_port    = in;
 
         auto      &reader     = in_port.streamReader();
         auto      &writer     = out_port.streamWriter();
