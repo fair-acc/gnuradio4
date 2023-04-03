@@ -3,13 +3,17 @@ cmake_minimum_required(VERSION 3.19)
 project(graph-prototype CXX)
 set(CMAKE_CXX_STANDARD 20)
 
-if (EMSCRIPTEN)
-    set(CMAKE_EXECUTABLE_SUFFIX ".js")
-endif()
-
 add_library(graph-prototype-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(graph-prototype-options)
+
+if (EMSCRIPTEN)
+    set(CMAKE_EXECUTABLE_SUFFIX ".js")
+    target_link_options(graph-prototype-options INTERFACE
+            "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+    )
+endif()
+
 
 include(FetchContent)
 FetchContent_Declare(
