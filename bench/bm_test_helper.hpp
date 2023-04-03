@@ -2,6 +2,8 @@
 #define GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
 
 #include <graph.hpp>
+#include <tag.hpp>
+#include <utility>
 #include <variant>
 
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
@@ -16,7 +18,7 @@ inline static std::size_t n_samples_produced = 0_UZ;
 template<typename T, std::size_t min = 0_UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
 class source : public fg::node<source<T, min, count>> {
 public:
-    std::size_t _n_samples_max;
+    uint64_t _n_samples_max;
     std::size_t _n_tag_offset;
     fg::OUT<T>  out;
 
@@ -52,7 +54,7 @@ public:
             auto &port   = out;
             auto &writer = port.streamWriter();
             if (n_samples_produced == 0) {
-                fair::graph::publish_tag(port, { { "N_SAMPLES_MAX", _n_samples_max } }, _n_tag_offset);
+                fair::graph::publish_tag(port, { { "N_SAMPLES_MAX", _n_samples_max } }, _n_tag_offset); // shorter version
             }
 
             if constexpr (use_bulk_operation) {
@@ -98,9 +100,10 @@ struct sink : public fg::node<sink<T, N_MIN, N_MAX>> {
         if (this->input_tags_present()) {
             if (this->input_tags_present() && this->input_tags()[0].contains("N_SAMPLES_MAX")) {
                 const auto value = this->input_tags()[0].at("N_SAMPLES_MAX");
-                assert(std::holds_alternative<std::size_t>(value));
-                should_receive_n_samples = std::get<std::size_t>(value);
-                _last_tag_position = in.streamReader().position();
+                if (std::holds_alternative<uint64_t>(value)) { // should be std::size_t but emscripten/pmtv seem to have issues with it
+                    should_receive_n_samples = std::get<uint64_t>(value);
+                    _last_tag_position       = in.streamReader().position();
+                }
                 this->acknowledge_input_tags(); // clears further tag notifications
             }
         }
