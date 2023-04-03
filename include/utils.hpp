@@ -3,9 +3,11 @@
 
 #include <functional>
 #include <iostream>
+#include <map>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include "typelist.hpp"
 #include "vir/simd.h"
@@ -21,12 +23,10 @@
 #endif
 
 namespace fair::literals {
-    // C++23 has literal suffixes for std::size_t, but we are not
-    // in C++23 just yet
-    constexpr std::size_t operator"" _UZ(unsigned long long n) {
-        return static_cast<std::size_t>(n);
-    }
-}
+// C++23 has literal suffixes for std::size_t, but we are not
+// in C++23 just yet
+constexpr std::size_t operator"" _UZ(unsigned long long n) { return static_cast<std::size_t>(n); }
+} // namespace fair::literals
 
 namespace fair::meta {
 
@@ -39,6 +39,8 @@ template<typename CharT, std::size_t SIZE>
 struct fixed_string {
     constexpr static std::size_t N            = SIZE;
     CharT                        _data[N + 1] = {};
+
+    constexpr fixed_string()                  = default;
 
     constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
         if constexpr (N != 0)
@@ -76,6 +78,20 @@ struct fixed_string {
 template<typename CharT, std::size_t N>
 fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
 
+template<typename CharT, std::size_t N1, std::size_t N2>
+constexpr fixed_string<CharT, N1 + N2>
+operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
+    meta::fixed_string<CharT, N1 + N2> result{};
+    for (std::size_t i = 0; i < N1; ++i) {
+        result._data[i] = lhs._data[i];
+    }
+    for (std::size_t i = 0; i < N2; ++i) {
+        result._data[N1 + i] = rhs._data[i];
+    }
+    result._data[N1 + N2] = '\0';
+    return result;
+}
+
 template<typename T>
 [[nodiscard]] std::string
 type_name() noexcept {
@@ -97,7 +113,7 @@ template<fixed_string val>
 struct message_type {};
 
 template<class... T>
-constexpr bool always_false = false;
+constexpr bool        always_false  = false;
 
 constexpr std::size_t invalid_index = -1_UZ;
 
@@ -137,20 +153,31 @@ precondition(bool cond) {
  */
 template<typename T>
 concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
-    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
-};
+                                                            { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+                                                        };
 
 static_assert(!tuple_like<int>);
 static_assert(!tuple_like<std::tuple<>>);
 static_assert(tuple_like<std::tuple<int>>);
-static_assert(tuple_like<std::tuple<int&>>);
-static_assert(tuple_like<std::tuple<const int&>>);
+static_assert(tuple_like<std::tuple<int &>>);
+static_assert(tuple_like<std::tuple<const int &>>);
 static_assert(tuple_like<std::tuple<const int>>);
 static_assert(!tuple_like<std::array<int, 0>>);
 static_assert(tuple_like<std::array<int, 2>>);
 static_assert(tuple_like<std::pair<int, short>>);
 
-namespace stdx = vir::stdx;
+template<template<typename...> class Template, typename Class>
+struct is_instantiation : std::false_type {};
+
+template<template<typename...> class Template, typename... Args>
+struct is_instantiation<Template, Template<Args...>> : std::true_type {};
+template<typename Class, template<typename...> class Template>
+concept is_instantiation_of = is_instantiation<Template, Class>::value;
+
+template<typename T>
+concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
+
+namespace stdx   = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
@@ -178,8 +205,7 @@ struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
 template<tuple_like Tup>
 struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
     static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value)
-                && ...);
+        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...);
     }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
 
@@ -198,7 +224,7 @@ template<typename T, std::size_t N>
 struct simdize_impl;
 
 template<vectorizable_v T, std::size_t N>
-requires requires { typename stdx::native_simd<T>; }
+    requires requires { typename stdx::native_simd<T>; }
 struct simdize_impl<T, N> {
     using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
 };
@@ -215,8 +241,7 @@ struct simdize_impl<Tup, N> {
         return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... });
     }(std::make_index_sequence<std::tuple_size_v<Tup>>());
 
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>)
-                                  -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
+    using type                               = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
         return {};
     }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
@@ -232,9 +257,7 @@ template<typename T, std::size_t N = 0>
 using simdize = typename detail::simdize_impl<T, N>::type;
 
 static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
-                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>,
-                                                 detail::deduced_simd<double, stdx::native_simd<short>::size()>>,
-                                      stdx::native_simd<short>,
+                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>,
                                       std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<fixed_string Name, typename PortList>
@@ -278,8 +301,8 @@ template<template<typename...> typename Mapper, typename T>
 using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
 
 template<typename Arg, typename... Args>
-auto safe_min(Arg&& arg, Args&&... args)
-{
+auto
+safe_min(Arg &&arg, Args &&...args) {
     if constexpr (sizeof...(Args) == 0) {
         return arg;
     } else {
@@ -288,27 +311,22 @@ auto safe_min(Arg&& arg, Args&&... args)
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto tuple_for_each(Function&& function, Tuple&& tuple, Tuples&&... tuples)
-{
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+auto
+tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        (([&function, &tuple, &tuples...](auto I) {
-            function(std::get<I>(tuple), std::get<I>(tuples)...);
-        }(std::integral_constant<std::size_t, Idx>{}), ...));
+        (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
-{
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+auto
+tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
-                   return function(std::get<I>(tuple), std::get<I>(tuples)...);
-               }(std::integral_constant<std::size_t, Idx>{})...);
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
-
 
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);

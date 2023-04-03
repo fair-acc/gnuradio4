@@ -27,7 +27,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         pmt
         GIT_REPOSITORY https://github.com/gnuradio/pmt.git
-        GIT_TAG 6a6ba288840c1cb0c1091347530aec578ab60c8e # main 03/2023
+        GIT_TAG f7a789d699fd7806fb3a35ed3c00d013023f2553 # main 29/03/2023
 )
 
 FetchContent_Declare(

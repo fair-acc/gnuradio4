@@ -14,7 +14,8 @@
 namespace fg                           = fair::graph;
 
 inline constexpr std::size_t N_ITER    = 10;
-inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
+//inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
+inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000, 1024);
 
 template<typename T, char op>
 class math_op : public fg::node<math_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
@@ -184,11 +185,11 @@ public:
 
     fair::graph::work_return_t
     work() noexcept {
-        auto      &out_port   = output_port<"out">(this);
-        auto      &in_port    = input_port<"in">(this);
+        auto      &out_port   = output_port<0>(this);
+        auto      &in_port    = input_port<0>(this);
 
-        auto      &reader     = in_port.reader();
-        auto      &writer     = out_port.writer();
+        auto      &reader     = in_port.streamReader();
+        auto      &writer     = out_port.streamWriter();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
@@ -275,11 +276,11 @@ public:
 
     fair::graph::work_return_t
     work() noexcept { // TODO - make this an alternate version to 'process_one'
-        auto      &out_port   = output_port<"out">(this);
-        auto      &in_port    = input_port<"in">(this);
+        auto      &out_port   = out;
+        auto      &in_port    = in;
 
-        auto      &reader     = in_port.reader();
-        auto      &writer     = out_port.writer();
+        auto      &reader     = in_port.streamReader();
+        auto      &writer     = out_port.streamWriter();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
@@ -341,8 +342,8 @@ public:
         auto      &out_port   = output_port<"out">(this);
         auto      &in_port    = input_port<"in">(this);
 
-        auto      &reader     = in_port.reader();
-        auto      &writer     = out_port.writer();
+        auto      &reader     = in_port.streamReader();
+        auto      &writer     = out_port.streamWriter();
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable < to_simd_size) {

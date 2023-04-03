@@ -652,9 +652,11 @@ public:
 
 #include <functional>
 #include <iostream>
+#include <map>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 // #include "typelist.hpp"
 #ifndef GNURADIO_TYPELIST_HPP
@@ -3426,12 +3428,10 @@ namespace vir::stdx
 #endif
 
 namespace fair::literals {
-    // C++23 has literal suffixes for std::size_t, but we are not
-    // in C++23 just yet
-    constexpr std::size_t operator"" _UZ(unsigned long long n) {
-        return static_cast<std::size_t>(n);
-    }
-}
+// C++23 has literal suffixes for std::size_t, but we are not
+// in C++23 just yet
+constexpr std::size_t operator"" _UZ(unsigned long long n) { return static_cast<std::size_t>(n); }
+} // namespace fair::literals
 
 namespace fair::meta {
 
@@ -3444,6 +3444,8 @@ template<typename CharT, std::size_t SIZE>
 struct fixed_string {
     constexpr static std::size_t N            = SIZE;
     CharT                        _data[N + 1] = {};
+
+    constexpr fixed_string()                  = default;
 
     constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
         if constexpr (N != 0)
@@ -3481,6 +3483,20 @@ struct fixed_string {
 template<typename CharT, std::size_t N>
 fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
 
+template<typename CharT, std::size_t N1, std::size_t N2>
+constexpr fixed_string<CharT, N1 + N2>
+operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
+    meta::fixed_string<CharT, N1 + N2> result{};
+    for (std::size_t i = 0; i < N1; ++i) {
+        result._data[i] = lhs._data[i];
+    }
+    for (std::size_t i = 0; i < N2; ++i) {
+        result._data[N1 + i] = rhs._data[i];
+    }
+    result._data[N1 + N2] = '\0';
+    return result;
+}
+
 template<typename T>
 [[nodiscard]] std::string
 type_name() noexcept {
@@ -3502,7 +3518,7 @@ template<fixed_string val>
 struct message_type {};
 
 template<class... T>
-constexpr bool always_false = false;
+constexpr bool        always_false  = false;
 
 constexpr std::size_t invalid_index = -1_UZ;
 
@@ -3542,20 +3558,31 @@ precondition(bool cond) {
  */
 template<typename T>
 concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
-    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
-};
+                                                            { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+                                                        };
 
 static_assert(!tuple_like<int>);
 static_assert(!tuple_like<std::tuple<>>);
 static_assert(tuple_like<std::tuple<int>>);
-static_assert(tuple_like<std::tuple<int&>>);
-static_assert(tuple_like<std::tuple<const int&>>);
+static_assert(tuple_like<std::tuple<int &>>);
+static_assert(tuple_like<std::tuple<const int &>>);
 static_assert(tuple_like<std::tuple<const int>>);
 static_assert(!tuple_like<std::array<int, 0>>);
 static_assert(tuple_like<std::array<int, 2>>);
 static_assert(tuple_like<std::pair<int, short>>);
 
-namespace stdx = vir::stdx;
+template<template<typename...> class Template, typename Class>
+struct is_instantiation : std::false_type {};
+
+template<template<typename...> class Template, typename... Args>
+struct is_instantiation<Template, Template<Args...>> : std::true_type {};
+template<typename Class, template<typename...> class Template>
+concept is_instantiation_of = is_instantiation<Template, Class>::value;
+
+template<typename T>
+concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
+
+namespace stdx   = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
@@ -3583,8 +3610,7 @@ struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
 template<tuple_like Tup>
 struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
     static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value)
-                && ...);
+        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...);
     }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
 
@@ -3603,7 +3629,7 @@ template<typename T, std::size_t N>
 struct simdize_impl;
 
 template<vectorizable_v T, std::size_t N>
-requires requires { typename stdx::native_simd<T>; }
+    requires requires { typename stdx::native_simd<T>; }
 struct simdize_impl<T, N> {
     using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
 };
@@ -3620,8 +3646,7 @@ struct simdize_impl<Tup, N> {
         return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... });
     }(std::make_index_sequence<std::tuple_size_v<Tup>>());
 
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>)
-                                  -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
+    using type                               = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
         return {};
     }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
@@ -3637,9 +3662,7 @@ template<typename T, std::size_t N = 0>
 using simdize = typename detail::simdize_impl<T, N>::type;
 
 static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
-                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>,
-                                                 detail::deduced_simd<double, stdx::native_simd<short>::size()>>,
-                                      stdx::native_simd<short>,
+                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>,
                                       std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<fixed_string Name, typename PortList>
@@ -3683,8 +3706,8 @@ template<template<typename...> typename Mapper, typename T>
 using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
 
 template<typename Arg, typename... Args>
-auto safe_min(Arg&& arg, Args&&... args)
-{
+auto
+safe_min(Arg &&arg, Args &&...args) {
     if constexpr (sizeof...(Args) == 0) {
         return arg;
     } else {
@@ -3693,27 +3716,22 @@ auto safe_min(Arg&& arg, Args&&... args)
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto tuple_for_each(Function&& function, Tuple&& tuple, Tuples&&... tuples)
-{
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+auto
+tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        (([&function, &tuple, &tuples...](auto I) {
-            function(std::get<I>(tuple), std::get<I>(tuples)...);
-        }(std::integral_constant<std::size_t, Idx>{}), ...));
+        (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples)
-{
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+auto
+tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
-                   return function(std::get<I>(tuple), std::get<I>(tuples)...);
-               }(std::integral_constant<std::size_t, Idx>{})...);
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
-
 
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
@@ -4477,6 +4495,8 @@ class circular_buffer
             }
         }
 
+        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _buffer->_cursor.value(); }
+
         [[nodiscard]] constexpr std::size_t available() const noexcept {
             return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
         }
@@ -4627,330 +4647,21 @@ static_assert(Buffer<circular_buffer<int32_t>>);
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
-#include <variant>
 #include <complex>
 #include <span>
-
-// #include "utils.hpp"
+#include <variant>
 
 // #include "circular_buffer.hpp"
 
-
-namespace fair::graph {
-
-using fair::meta::fixed_string;
-using namespace fair::literals;
-
-// #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
-using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> /*, ...*/>;
-
-enum class port_direction_t { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
-enum class connection_result_t { SUCCESS, FAILED };
-enum class port_type_t { STREAM, MESSAGE }; // TODO: Think of a better name
-enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
-
-template<class T>
-concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
-                   typename T::value_type;
-                   { t.pmt_type() } -> std::same_as<supported_type>;
-                   { t.type() } -> std::same_as<port_type_t>;
-                   { t.direction() } -> std::same_as<port_direction_t>;
-                   { t.name() } -> std::same_as<std::string_view>;
-                   { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
-                   { t.disconnect() } -> std::same_as<connection_result_t>;
-               };
-
-
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
-         std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent,
-         gr::Buffer BufferType = gr::circular_buffer<T>>
-class port {
-public:
-    static_assert(PortDirection != port_direction_t::ANY, "ANY reserved for queries and not port direction declarations");
-
-    using value_type                = T;
-
-    static constexpr bool IS_INPUT  = PortDirection == port_direction_t::INPUT;
-    static constexpr bool IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
-
-    using port_tag                  = std::true_type;
-
-    template <fixed_string NewName>
-    using with_name = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
-
-private:
-    using ReaderType          = decltype(std::declval<BufferType>().new_reader());
-    using WriterType          = decltype(std::declval<BufferType>().new_writer());
-    using IoType              = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
-
-    std::string  _name        = static_cast<std::string>(PortName);
-    std::int16_t _priority    = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t  _min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
-    std::size_t  _max_samples = MAX_SAMPLES;
-    bool         _connected   = false;
-
-    IoType       _ioHandler   = new_io_handler();
-
-public:
-    [[nodiscard]] constexpr auto
-    new_io_handler() const noexcept {
-        if constexpr (IS_INPUT) {
-            return BufferType(65536).new_reader();
-        } else {
-            return BufferType(65536).new_writer();
-        }
-    }
-
-    [[nodiscard]] void *
-    writer_handler_internal() noexcept {
-        static_assert(IS_OUTPUT, "only to be used with output ports");
-        return static_cast<void *>(std::addressof(_ioHandler));
-    }
-
-    [[nodiscard]] bool
-    update_reader_internal(void *buffer_writer_handler_other) noexcept {
-        static_assert(IS_INPUT, "only to be used with input ports");
-
-        if (buffer_writer_handler_other == nullptr) {
-            return false;
-        }
-
-        // TODO: If we want to allow ports with different buffer types to be mixed
-        //       this will fail. We need to add a check that two ports that
-        //       connect to each other use the same buffer type
-        //       (std::any could be a viable approach)
-        auto typed_buffer_writer = static_cast<WriterType *>(buffer_writer_handler_other);
-        setBuffer(typed_buffer_writer->buffer());
-        return true;
-    }
-
-public:
-    port()             = default;
-
-    port(const port &) = delete;
-
-    auto
-    operator=(const port &)
-            = delete;
-
-    port(std::string port_name, std::int16_t priority = 0, std::size_t min_samples = 0_UZ, std::size_t max_samples = SIZE_MAX) noexcept
-        : _name(std::move(port_name))
-        , _priority{ priority }
-        , _min_samples(min_samples)
-        , _max_samples(max_samples) {
-        static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
-    }
-
-    constexpr port(port &&other) noexcept
-        : _name(std::move(other._name))
-        , _priority{ other._priority }
-        , _min_samples(other._min_samples)
-        , _max_samples(other._max_samples) {}
-
-    constexpr port &
-    operator=(port &&other) {
-        port tmp(std::move(other));
-        std::swap(_name, tmp._name);
-        std::swap(_priority, tmp._priority);
-        std::swap(_min_samples, tmp._min_samples);
-        std::swap(_max_samples, tmp._max_samples);
-        std::swap(_connected, tmp._connected);
-        std::swap(_ioHandler, tmp._ioHandler);
-        return *this;
-    }
-
-    [[nodiscard]] constexpr static port_type_t
-    type() noexcept {
-        return PortType;
-    }
-
-    [[nodiscard]] constexpr static port_direction_t
-    direction() noexcept {
-        return PortDirection;
-    }
-
-    [[nodiscard]] constexpr static decltype(PortName)
-    static_name() noexcept
-        requires(!PortName.empty())
-    {
-        return PortName;
-    }
-
-    [[nodiscard]] constexpr supported_type
-    pmt_type() const noexcept {
-        return T();
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    name() const noexcept {
-        if constexpr (!PortName.empty()) {
-            return static_cast<std::string_view>(PortName);
-        } else {
-            return _name;
-        }
-    }
-
-    [[nodiscard]] constexpr std::int16_t
-    priority() const noexcept {
-        return _priority;
-    }
-
-    [[nodiscard]] constexpr static std::size_t
-    available() noexcept {
-        return 0;
-    } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
-
-    [[nodiscard]] constexpr std::size_t
-    min_buffer_size() const noexcept {
-        if constexpr (MIN_SAMPLES == std::dynamic_extent) {
-            return _min_samples;
-        } else {
-            return MIN_SAMPLES;
-        }
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    max_buffer_size() const noexcept {
-        if constexpr (MAX_SAMPLES == std::dynamic_extent) {
-            return _max_samples;
-        } else {
-            return MAX_SAMPLES;
-        }
-    }
-
-    [[nodiscard]] constexpr connection_result_t
-    resize_buffer(std::size_t min_size) noexcept {
-        if constexpr (IS_INPUT) {
-            return connection_result_t::SUCCESS;
-        } else {
-            try {
-                _ioHandler = BufferType(min_size).new_writer();
-            } catch (...) {
-                return connection_result_t::FAILED;
-            }
-        }
-        return connection_result_t::SUCCESS;
-    }
-
-    [[nodiscard]] BufferType
-    buffer() {
-        return _ioHandler.buffer();
-    }
-
-    void
-    setBuffer(gr::Buffer auto buffer) noexcept {
-        if constexpr (IS_INPUT) {
-            _ioHandler = std::move(buffer.new_reader());
-            _connected = true;
-        } else {
-            _ioHandler = std::move(buffer.new_writer());
-        }
-    }
-
-    [[nodiscard]] constexpr const ReaderType &
-    reader() const noexcept {
-        static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] constexpr ReaderType &
-    reader() noexcept {
-        static_assert(!IS_OUTPUT, "reader() not applicable for outputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] constexpr const WriterType &
-    writer() const noexcept {
-        static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] constexpr WriterType &
-    writer() noexcept {
-        static_assert(!IS_INPUT, "writer() not applicable for inputs (yet)");
-        return _ioHandler;
-    }
-
-    [[nodiscard]] connection_result_t
-    disconnect() noexcept {
-        if (_connected == false) {
-            return connection_result_t::FAILED;
-        }
-        _ioHandler = new_io_handler();
-        _connected = false;
-        return connection_result_t::SUCCESS;
-    }
-
-    template<typename Other>
-    [[nodiscard]] connection_result_t
-    connect(Other &&other) {
-        static_assert(IS_OUTPUT && std::remove_cvref_t<Other>::IS_INPUT);
-        auto src_buffer = writer_handler_internal();
-        return std::forward<Other>(other).update_reader_internal(src_buffer) ? connection_result_t::SUCCESS
-                                                                             : connection_result_t::FAILED;
-    }
-
-    friend class dynamic_port;
-};
-
-
-namespace detail {
-template<typename T, auto>
-using just_t = T;
-
-template<typename T, std::size_t... Is>
-consteval fair::meta::typelist<just_t<T, Is>...>
-repeated_ports_impl(std::index_sequence<Is...>) {
-    return {};
-}
-} // namespace detail
-
-// TODO: Add port index to BaseName
-template<std::size_t Count, typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
-         std::size_t MAX_SAMPLES = std::dynamic_extent>
-using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
-
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using IN = port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using OUT = port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using IN_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using OUT_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
-
-static_assert(Port<IN<float>>);
-static_assert(Port<decltype(IN<float>())>);
-static_assert(Port<OUT<float>>);
-static_assert(Port<IN_MSG<float>>);
-static_assert(Port<OUT_MSG<float>>);
-
-static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
-static_assert(requires { IN<float>("in").name(); });
-
-static_assert(OUT_MSG<float, 0, 0, "out_msg">::static_name() == fixed_string("out_msg"));
-static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
-static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
-
-}
-
-#endif // include guard
-
-// #include "node.hpp"
-#ifndef GNURADIO_NODE_HPP
-#define GNURADIO_NODE_HPP
+// #include "tag.hpp"
+#ifndef GRAPH_PROTOTYPE_TAG_HPP
+#define GRAPH_PROTOTYPE_TAG_HPP
 
 #include <map>
-
-// #include <typelist.hpp>
- // localinclude
-// #include <port.hpp>
- // localinclude
-// #include <utils.hpp>
- // localinclude
-// #include <node_traits.hpp>
-#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
-#define GNURADIO_NODE_NODE_TRAITS_HPP
+#include <pmtv/pmt.hpp>
+// #include <reflection.hpp>
+#ifndef GRAPH_PROTOTYPE_REFLECTION_HPP
+#define GRAPH_PROTOTYPE_REFLECTION_HPP
 
 // #include <refl.hpp>
 // The MIT License (MIT)
@@ -9743,6 +9454,688 @@ REFL_END
 #endif // REFL_INCLUDE_HPP
 
 
+/**
+ *
+ *                                |￣￣￣￣￣￣￣￣￣￣￣￣￣￣|
+ *                                |     !!!Horray!!!      |
+ *                                |      you made it!     |
+ *                                |                       |
+ *                                |        Warning!       |
+ *                                |  Beneath are dragons! |
+ *                                |＿＿＿＿＿＿＿＿＿＿＿＿＿＿|
+ *                                    (\__/)  ||
+ *                                    (•ㅅ•)  ||
+ *                                    /  　  づ
+ * ******************************************************************************************************************
+ *
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⡧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡱⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠊⠶⣂⣠⢠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡑⡑⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⣼⡾⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠂⠑⡳⠀⣀⠠⠤⠠⡀⠀⠀⠀⠀⠀⢿⣿⣿⣿⣿⣷⣤⡀⡄⠚⢸⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠁⠁⠀⠀⠀⠙⡕⠀⠀⠀⠀⢻⣿⣿⣿⣿⢿⢧⡭⣶⣿⣿⣿⣷⣶⣶⣤⡀⣀⢄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠪⠤⡠⣙⣿⡿⡫⠉⣿⣭⡞⣿⣿⣿⣿⣿⣿⣿⣷⠂⠨⣌⠚⡴⠂⠤⣀⢀⡂⢢⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠀⠁⠀⠀⠈⢩⣿⢿⣿⣿⡋⣿⣿⣧⣀⠛⠛⠟⢿⢹⣿⣷⣶⣶⣤⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣦⣾⠿⣷⣯⣿⣿⣿⢤⣿⣿⣿⣶⣶⣤⣭⣒⣕⡁⠛⠛⠂⠝⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣞⣿⣾⣿⣿⠿⠿⠿⣅⡐⣶⣿⣿⣿⣿⣿⣿⣿⡏⣿⣿⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⣀⠅⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⣿⣿⣿⣿⣷⣿⣶⣿⣿⣿⣿⣿⡿⣿⣿⣷⢿⣿⡄⠀⠛⠂⠀⠀⠀⠀⠀⠀⠀⠀⢀⢤⠀⠀⠀⢀⠠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠜⢠⢁⡁⠒⡈⠐⠒⠒⠛⠊
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⢀⣕⢂⣬⣶⠒⠠⠀⣿⣿⠉⣿⡇⣿⣿⢻⣿⣿⣿⣿⣿⣿⣿⣿⣷⠙⠛⡄⠀⠀⠀⠀⠀⠄⣀⢤⣴⣶⣶⡶⣿⣾⣿⣶⣶⣿⣶⣶⡂⡔⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⣸⢃⣼⠫⢓⠬⠤⠄⠶⠒⠀
+ *    ⠀⠀⠀⠀⠀⠀⠴⠂⣼⣿⡄⣿⠁⣴⣷⠾⠁⠉⠛⠏⣿⠛⠿⣷⡍⣿⣿⢿⣿⣿⣿⣈⠛⡄⠀⠀⠀⠀⠀⣀⡼⣶⣿⣷⣿⣿⣯⣿⢷⣟⣿⡻⣿⣯⣿⣿⣿⣿⣾⣖⠒⠤⠀⠀⠀⠀⠀⠀⣤⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⠀⡀⣿⠁⠁⣒⢒⡠⡀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣿⣿⠛⣀⡤⢱⠀⠀⠀⠉⠃⠀⠈⣳⣿⡿⣿⠿⣿⠟⠀⠀⣀⣤⠀⠀⠁⣬⣿⣿⣿⣿⣿⣟⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣿⣿⡿⠮⡂⠀⣀⠀⢀⣼⠏⡖⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠢⠂⣞⡿⠰⠠⢀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⣿⡿⠛⠛⠛⠃⠀⠀⠀⠀⠀⢀⣴⣿⣿⣿⣿⣿⡫⡱⠀⣾⠁⣀⠀⢴⣾⣿⣿⣷⣿⣿⣿⣿⣿⠟⠛⠉⠉⠁⢀⣉⡙⠛⣿⣿⣿⣿⣿⣯⣿⣿⣶⣧⣶⣟⣁⣾⠁⠀⠀⠀⠀⠀⣰⠃⣶⣷⣶⣶⣶⣶⣈⡄⢀⠒⣤⣶⣿⠁⡉⢒⠁⠑⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⠋⠙⣿⣿⣶⣄⠀⠀⠀⠀⠀⣴⣿⣿⢿⣿⣿⣿⠟⠀⢀⣾⣁⠀⠄⣴⣿⣿⣷⣿⣿⣿⣿⠟⠁⠀⠀⠀⢀⠀⣿⠉⢿⣿⢙⣐⡈⠻⣿⣿⣿⣿⣿⣿⣿⣿⣭⢩⠂⠀⠀⠀⣀⠀⡠⣵⣯⣷⣗⣿⣿⣽⣽⣿⣯⣿⣿⠯⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠃⣒⢿⡏⠀⠀⠈⠛⣽⡽⠿⣿⣿⣿⣿⣿⣿⣿⣯⣿⣿⣤⣷⠿⣯⠟⢠⣢⣿⢿⣿⣿⣿⣽⣿⠟⠀⠀⠀⠀⠀⠀⠋⣦⣍⣻⣮⣿⣿⠋⠀⠀⡴⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⣶⣥⣬⣿⣿⣿⣿⣿⠿⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣏⣶⣤⣿⢿⣿⣿⣿⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⢺⠋⠋⠉⠛⣿⣿⣯⢿⢿⣿⣯⣿⡿⢻⣿⣿⣽⢷⢿⣿⠿⣯⣿⣿⣿⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠻⣿⣿⣍⠙⣿⣿⣿⣿⣿⣿⢿⣿⣽⣿⣿⢿⣿⣿⣿⣷⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣆⡀⠁⠙⣿⣿⣧⡀⠛⣿⣿⣿⢿⣿⣿⣿⣿⣿⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⢻⣄⠙⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣌⠝⠋⠀⠀⠉⠉⠉⠛⠁⠀⠀⠙⢿⣟⣟⣿⠛⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⢿⣿⣿⣿⣿⣿⣿⠿⣟⣿⣭⠤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠤⣤⡘⣿⣯⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠤⣤⠴⣒⣀⣄⠀⠀⣿⡿⣿⡻⣿⣧⣿⣿⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣶⣥⣈⢿⣦⣿⣿⠃⠀⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣟⠀⠛⣿⣦⣸⣿⠁⢀⣤⣿⣿⢿⣿⢿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢧⣁⣉⣭⣿⣿⠿⠛⠛⠛⠛⣹⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡞⡻⣿⣷⣶⣿⣿⣿⣾⣿⣿⣽⡿⠟⠋⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡈⢋⣴⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠛⢶⢷⣿⡿⠛⠛⠛⢿⣦⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠈⠊⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢄⠀⠀⠀⠀⠀⠀⠉⠛⡿⠿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ *
+ * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp
+ * The are basically needed to do a struct member-field introspections, to support
+ *   a) compile-time serialiser generation between std::map<std::string, pmt::pmtv> <-> user-defined settings structs
+ *   b) allow for block ports being defined a member fields rather than as NTTPs of the node<T, ...> template
+
+ * Their use is limited to the namespace scope where the block is defined (i.e. not across .so boundaries) and will be
+ * supplanted once the compile-time reflection language feature is merged with the C++ standard, e.g.
+ * Matúš Chochlík, Axel Naumann, David Sankel: Static reflection, P0194R3, ISO/IEC JTC1 SC22 WG21
+ *    https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0194r3.html
+ *
+ *  These macros need to be defined in a global scope due to relying on template specialisation that cannot be done in
+ *  any other namespace than the one they were declared -- for illustration see, for example:
+ *  https://github.com/veselink1/refl-cpp/issues/59
+ *  https://compiler-explorer.com/z/MG7fxzK4j
+ *
+ *  For practical purposes, the macro can be defined either at the end of the struct declaring namespace or the specific
+ *  namespace exited/re-enteres such as
+ *  @code
+ *  namespace private::library {
+ *     struct my_struct {
+ *         int field_a;
+ *         std::string field_b;
+ *     };
+ *  }
+ *  ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
+ *  namespace private::library {
+ *   // ...
+ *  @endcode
+ *
+ *  And please, if you want to accelerator the compile-time reflection process, please give your support and shout-out
+ *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
+ */
+
+
+/**
+ * This macro can be used for simple non-templated structs and classes, e.g.
+ * @code
+ * struct my_struct {
+ *     int field_a;
+ *      std::string field_b;
+ * };
+ * ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
+ */
+#define ENABLE_REFLECTION(TypeName, ...) \
+    REFL_TYPE(TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+/**
+ * This macro can be used for arbitrary templated structs and classes, that depend
+ * on mixed typename and NTTP parameters
+ * @code
+ * template<typename T, std::size_t size>
+ * struct custom_struct {
+ *     T field_a;
+ *     T field_b;
+ *
+ *     [[nodiscard]] constexpr std::size_t size() const noexcept { return size; }
+ * };
+ * ENABLE_REFLECTION_FOR_TEMPLATE_FULL(typename T, std::size_t size), (custom_struct<T, size>), field_a, field_a);
+ */
+#define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
+    REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+/**
+ * This macro can be used for simple templated structs and classes, that depend
+ * only on pure typename-template lists
+ * @code
+ * template<typename T>
+ * struct my_templated_struct {
+ *     T field_a;
+ *     T field_b;
+ * };
+ * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
+ */
+#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
+    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
+
+
+#endif //GRAPH_PROTOTYPE_REFLECTION_HPP
+
+// #include <utils.hpp>
+
+
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_constructive_interference_size;
+using std::hardware_destructive_interference_size;
+#else
+inline constexpr std::size_t hardware_destructive_interference_size  = 64;
+inline constexpr std::size_t hardware_constructive_interference_size = 64;
+#endif
+
+namespace fair::graph {
+
+enum class tag_propagation_policy_t {
+    TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The
+                       block itself is free to insert tags. */
+    TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The
+                       scheduler takes care of that. */
+    TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires
+                       same number of in- and outputs */
+    TPP_CUSTOM = 3      /*!< Like TPP_DONT, but signals the block it should implement
+                       application-specific forwarding behaviour. */
+};
+
+/**
+ * @brief 'tag_t' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
+ * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
+ * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
+ * any point in the signal processing flow, allowing for flexible and customisable data processing.
+ *
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Node implementations
+ * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
+ * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
+ */
+struct alignas(hardware_constructive_interference_size) tag_t {
+    using map_type = std::map<std::string, pmtv::pmt, std::less<>>;
+    int64_t  index = 0;
+    map_type map;
+
+    // TODO: do we need the convenience methods below?
+    pmtv::pmt &
+    at(const std::string &key) {
+        return map.at(key);
+    }
+
+    const pmtv::pmt &
+    at(const std::string &key) const {
+        return map.at(key);
+    }
+
+    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>>
+    get(const std::string &key) const noexcept {
+        try {
+            return map.at(key);
+        } catch (std::out_of_range &e) {
+            return std::nullopt;
+        }
+    }
+
+    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>>
+    get(const std::string &key) noexcept {
+        try {
+            return map.at(key);
+        } catch (std::out_of_range &) {
+            return std::nullopt;
+        }
+    }
+
+    void
+    insert_or_assign(const std::pair<std::string, pmtv::pmt> &value) {
+        map[value.first] = value.second;
+    }
+
+    void
+    insert_or_assign(const std::string &key, const pmtv::pmt &value) {
+        map[key] = value;
+    }
+};
+} // namespace fair::graph
+
+ENABLE_REFLECTION(fair::graph::tag_t, index, map);
+
+namespace fair::graph {
+using meta::fixed_string;
+
+constexpr fixed_string GR_TAG_PREFIX = "gr:";
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
+class default_tag {
+    constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
+
+public:
+    using value_type = PMT_TYPE;
+
+    [[nodiscard]] constexpr std::string_view
+    key() const noexcept {
+        return std::string_view{ _key };
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    shortKey() const noexcept {
+        return std::string_view(Key);
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    unit() const noexcept {
+        return std::string_view(Unit);
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    description() const noexcept {
+        return std::string_view(Description);
+    }
+
+    [[nodiscard]] constexpr explicit(false) operator std::string() const noexcept { return std::string(_key); }
+
+    template<typename T>
+        requires std::is_same_v<value_type, T>
+    [[nodiscard]] std::pair<std::string, pmtv::pmt>
+    operator()(const T &newValue) const noexcept {
+        return { std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue)) };
+    }
+};
+
+namespace tag { // definition of default tags and names
+                // TODO: change 'inline static const' to 'inline constexpr' once pmtv supports constexpr
+inline constexpr default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
+inline constexpr default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
+inline constexpr default_tag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
+inline constexpr default_tag<"signal_unit", std::string, "", "signal's physical SI unit">                                            SIGNAL_UNIT;
+inline constexpr default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MIN;
+inline constexpr default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MAX;
+inline constexpr default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
+inline constexpr default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
+inline constexpr default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+} // namespace tag
+
+} // namespace fair::graph
+
+#endif // GRAPH_PROTOTYPE_TAG_HPP
+
+// #include "utils.hpp"
+
+
+namespace fair::graph {
+
+using fair::meta::fixed_string;
+using namespace fair::literals;
+
+// #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
+using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> /*, ...*/>;
+
+enum class port_direction_t { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
+enum class connection_result_t { SUCCESS, FAILED };
+enum class port_type_t {
+    STREAM, /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
+    MESSAGE /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+};
+enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
+
+template<class T>
+concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
+                   typename T::value_type;
+                   { t.pmt_type() } -> std::same_as<supported_type>;
+                   { t.type() } -> std::same_as<port_type_t>;
+                   { t.direction() } -> std::same_as<port_direction_t>;
+                   { t.name() } -> std::same_as<std::string_view>;
+                   { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
+                   { t.disconnect() } -> std::same_as<connection_result_t>;
+               };
+
+/**
+ * @brief internal port buffer handler
+ *
+ * N.B. void* needed for type-erasure/Python compatibility/wrapping
+ */
+struct internal_port_buffers {
+    void* streamHandler;
+    void* tagHandler;
+};
+
+/**
+ * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
+ * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
+ * connection method can be used. Ports belong to a computing domain, such as CPU, GPU, or FPGA, and transitions
+ * between domains require explicit data conversion.
+ * Each port consists of a synchronous performance-optimised streaming and asynchronous tag communication component:
+ *                                                                                      ┌───────────────────────
+ *         ───────────────────┐                                       ┌─────────────────┤  <node/block definition>
+ *             output-port    │                                       │    input-port   │  ...
+ *          stream-buffer<T>  │>───────┬─────────────────┬───────────>│                 │
+ *          tag-buffer<tag_t> │      tag#0             tag#1          │                 │
+ *                            │                                       │                 │
+ *         ───────────────────┘                                       └─────────────────┤
+ *
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Node implementations
+ * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
+ * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
+ *
+ * @tparam T the data type of the port. It can be any copyable preferably cache-aligned (i.e. 64 byte-sized) type.
+ * @tparam PortName a string to identify the port, notably to be used in an UI- and hand-written explicit code context.
+ * @tparam PortType STREAM  or MESSAGE
+ * @tparam PortDirection either input or output
+ * @tparam MIN_SAMPLES specifies the minimum number of samples the port/block requires for processing in one scheduler iteration
+ * @tparam MAX_SAMPLES specifies the maximum number of samples the port/block can process in one scheduler iteration
+ * @tparam BufferType user-extendable buffer implementation for the streaming data
+ * @tparam TagBufferType user-extendable buffer implementation for the tag data
+ */
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
+         std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, gr::Buffer BufferType = gr::circular_buffer<T>,
+         gr::Buffer TagBufferType = gr::circular_buffer<tag_t>>
+class port {
+public:
+    static_assert(PortDirection != port_direction_t::ANY, "ANY reserved for queries and not port direction declarations");
+
+    using value_type                = T;
+
+    static constexpr bool IS_INPUT  = PortDirection == port_direction_t::INPUT;
+    static constexpr bool IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
+
+    using port_tag                  = std::true_type;
+
+    template<fixed_string NewName>
+    using with_name = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
+
+private:
+    using ReaderType           = decltype(std::declval<BufferType>().new_reader());
+    using WriterType           = decltype(std::declval<BufferType>().new_writer());
+    using IoType               = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
+    using TagReaderType        = decltype(std::declval<TagBufferType>().new_reader());
+    using TagWriterType        = decltype(std::declval<TagBufferType>().new_writer());
+    using TagIoType            = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
+
+    std::string  _name         = static_cast<std::string>(PortName);
+    std::int16_t _priority     = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t  _min_samples  = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
+    std::size_t  _max_samples  = MAX_SAMPLES;
+    bool         _connected    = false;
+
+    IoType       _ioHandler    = new_io_handler();
+    TagIoType    _tagIoHandler = new_tag_io_handler();
+
+public:
+    [[nodiscard]] constexpr auto
+    new_io_handler() const noexcept {
+        if constexpr (IS_INPUT) {
+            return BufferType(65536).new_reader();
+        } else {
+            return BufferType(65536).new_writer();
+        }
+    }
+
+    [[nodiscard]] constexpr auto
+    new_tag_io_handler() const noexcept {
+        if constexpr (IS_INPUT) {
+            return TagBufferType(65536).new_reader();
+        } else {
+            return TagBufferType(65536).new_writer();
+        }
+    }
+
+    [[nodiscard]] internal_port_buffers
+    writer_handler_internal() noexcept {
+        static_assert(IS_OUTPUT, "only to be used with output ports");
+        return { static_cast<void *>(std::addressof(_ioHandler)), static_cast<void *>(std::addressof(_tagIoHandler)) };
+    }
+
+    [[nodiscard]] bool
+    update_reader_internal(internal_port_buffers buffer_writer_handler_other) noexcept {
+        static_assert(IS_INPUT, "only to be used with input ports");
+
+        if (buffer_writer_handler_other.streamHandler == nullptr) {
+            return false;
+        }
+        if (buffer_writer_handler_other.tagHandler == nullptr) {
+            return false;
+        }
+
+        // TODO: If we want to allow ports with different buffer types to be mixed
+        //       this will fail. We need to add a check that two ports that
+        //       connect to each other use the same buffer type
+        //       (std::any could be a viable approach)
+        auto typed_buffer_writer     = static_cast<WriterType *>(buffer_writer_handler_other.streamHandler);
+        auto typed_tag_buffer_writer = static_cast<TagWriterType *>(buffer_writer_handler_other.tagHandler);
+        setBuffer(typed_buffer_writer->buffer(), typed_tag_buffer_writer->buffer());
+        return true;
+    }
+
+public:
+    port()             = default;
+    port(const port &) = delete;
+    auto
+    operator=(const port &)
+            = delete;
+
+    port(std::string port_name, std::int16_t priority = 0, std::size_t min_samples = 0_UZ, std::size_t max_samples = SIZE_MAX) noexcept
+        : _name(std::move(port_name)), _priority{ priority }, _min_samples(min_samples), _max_samples(max_samples) {
+        static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
+    }
+
+    constexpr port(port &&other) noexcept : _name(std::move(other._name)), _priority{ other._priority }, _min_samples(other._min_samples), _max_samples(other._max_samples) {}
+
+    constexpr port &
+    operator=(port &&other) {
+        port tmp(std::move(other));
+        std::swap(_name, tmp._name);
+        std::swap(_priority, tmp._priority);
+        std::swap(_min_samples, tmp._min_samples);
+        std::swap(_max_samples, tmp._max_samples);
+        std::swap(_connected, tmp._connected);
+        std::swap(_ioHandler, tmp._ioHandler);
+        std::swap(_tagIoHandler, tmp._tagIoHandler);
+        return *this;
+    }
+
+    [[nodiscard]] constexpr static port_type_t
+    type() noexcept {
+        return PortType;
+    }
+
+    [[nodiscard]] constexpr static port_direction_t
+    direction() noexcept {
+        return PortDirection;
+    }
+
+    [[nodiscard]] constexpr static decltype(PortName)
+    static_name() noexcept
+        requires(!PortName.empty())
+    {
+        return PortName;
+    }
+
+    [[nodiscard]] constexpr supported_type
+    pmt_type() const noexcept {
+        return T();
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    name() const noexcept {
+        if constexpr (!PortName.empty()) {
+            return static_cast<std::string_view>(PortName);
+        } else {
+            return _name;
+        }
+    }
+
+    [[nodiscard]] constexpr std::int16_t
+    priority() const noexcept {
+        return _priority;
+    }
+
+    [[nodiscard]] constexpr static std::size_t
+    available() noexcept {
+        return 0;
+    } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
+
+    [[nodiscard]] constexpr std::size_t
+    min_buffer_size() const noexcept {
+        if constexpr (MIN_SAMPLES == std::dynamic_extent) {
+            return _min_samples;
+        } else {
+            return MIN_SAMPLES;
+        }
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    max_buffer_size() const noexcept {
+        if constexpr (MAX_SAMPLES == std::dynamic_extent) {
+            return _max_samples;
+        } else {
+            return MAX_SAMPLES;
+        }
+    }
+
+    [[nodiscard]] constexpr connection_result_t
+    resize_buffer(std::size_t min_size) noexcept {
+        if constexpr (IS_INPUT) {
+            return connection_result_t::SUCCESS;
+        } else {
+            try {
+                _ioHandler    = BufferType(min_size).new_writer();
+                _tagIoHandler = TagBufferType(min_size).new_writer();
+            } catch (...) {
+                return connection_result_t::FAILED;
+            }
+        }
+        return connection_result_t::SUCCESS;
+    }
+
+    [[nodiscard]] auto
+    buffer() {
+        struct port_buffers {
+            BufferType streamBuffer;
+            TagBufferType tagBufferType;
+        } ;
+        return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
+    }
+
+    void
+    setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
+        if constexpr (IS_INPUT) {
+            _ioHandler    = std::move(streamBuffer.new_reader());
+            _tagIoHandler = std::move(tagBuffer.new_reader());
+            _connected    = true;
+        } else {
+            _ioHandler    = std::move(streamBuffer.new_writer());
+            _tagIoHandler = std::move(tagBuffer.new_reader());
+        }
+    }
+
+    [[nodiscard]] constexpr const ReaderType &
+    streamReader() const noexcept {
+        static_assert(!IS_OUTPUT, "streamReader() not applicable for outputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr ReaderType &
+    streamReader() noexcept {
+        static_assert(!IS_OUTPUT, "streamReader() not applicable for outputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr const WriterType &
+    streamWriter() const noexcept {
+        static_assert(!IS_INPUT, "streamWriter() not applicable for inputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr WriterType &
+    streamWriter() noexcept {
+        static_assert(!IS_INPUT, "streamWriter() not applicable for inputs (yet)");
+        return _ioHandler;
+    }
+
+    [[nodiscard]] constexpr const TagReaderType &
+    tagReader() const noexcept {
+        static_assert(!IS_OUTPUT, "tagReader() not applicable for outputs (yet)");
+        return _tagIoHandler;
+    }
+
+    [[nodiscard]] constexpr TagReaderType &
+    tagReader() noexcept {
+        static_assert(!IS_OUTPUT, "tagReader() not applicable for outputs (yet)");
+        return _tagIoHandler;
+    }
+
+    [[nodiscard]] constexpr const TagWriterType &
+    tagWriter() const noexcept {
+        static_assert(!IS_INPUT, "tagWriter() not applicable for inputs (yet)");
+        return _tagIoHandler;
+    }
+
+    [[nodiscard]] constexpr TagWriterType &
+    tagWriter() noexcept {
+        static_assert(!IS_INPUT, "tagWriter() not applicable for inputs (yet)");
+        return _tagIoHandler;
+    }
+
+    [[nodiscard]] connection_result_t
+    disconnect() noexcept {
+        if (_connected == false) {
+            return connection_result_t::FAILED;
+        }
+        _ioHandler    = new_io_handler();
+        _tagIoHandler = new_tag_io_handler();
+        _connected    = false;
+        return connection_result_t::SUCCESS;
+    }
+
+    template<typename Other>
+    [[nodiscard]] connection_result_t
+    connect(Other &&other) {
+        static_assert(IS_OUTPUT && std::remove_cvref_t<Other>::IS_INPUT);
+        auto src_buffer = writer_handler_internal();
+        return std::forward<Other>(other).update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
+    }
+
+    friend class dynamic_port;
+};
+
+namespace detail {
+template<typename T, auto>
+using just_t = T;
+
+template<typename T, std::size_t... Is>
+consteval fair::meta::typelist<just_t<T, Is>...>
+repeated_ports_impl(std::index_sequence<Is...>) {
+    return {};
+}
+} // namespace detail
+
+// TODO: Add port index to BaseName
+template<std::size_t Count, typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
+         std::size_t MAX_SAMPLES = std::dynamic_extent>
+using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
+
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using IN = port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using OUT = port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using IN_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
+template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
+using OUT_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
+
+static_assert(Port<IN<float>>);
+static_assert(Port<decltype(IN<float>())>);
+static_assert(Port<OUT<float>>);
+static_assert(Port<IN_MSG<float>>);
+static_assert(Port<OUT_MSG<float>>);
+
+static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
+static_assert(requires { IN<float>("in").name(); });
+
+static_assert(OUT_MSG<float, 0, 0, "out_msg">::static_name() == fixed_string("out_msg"));
+static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
+static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
+
+constexpr void
+publish_tag(Port auto &port, tag_t::map_type &&tag_data, std::size_t tag_offset = 0) noexcept {
+    port.tagWriter().publish(
+            [&port, data = std::move(tag_data), &tag_offset](std::span<fair::graph::tag_t> tag_output) {
+                tag_output[0].index = port.streamWriter().position() + tag_offset;
+                tag_output[0].map   = std::move(data);
+            },
+            1_UZ);
+}
+
+constexpr void
+publish_tag(Port auto &port, const tag_t::map_type &tag_data, std::size_t tag_offset = 0) noexcept {
+    port.tagWriter().publish(
+            [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
+                tag_output[0].index = port.streamWriter().position() + tag_offset;
+                tag_output[0].map = tag_data;
+            },
+            1_UZ);
+}
+
+} // namespace fair::graph
+
+#endif // include guard
+
+// #include "node.hpp"
+#ifndef GNURADIO_NODE_HPP
+#define GNURADIO_NODE_HPP
+
+#include <map>
+
+// #include <node_traits.hpp>
+#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
+#define GNURADIO_NODE_NODE_TRAITS_HPP
+
+// #include <reflection.hpp>
+
+
 // #include <port.hpp>
  // localinclude
 // #include <port_traits.hpp>
@@ -9750,8 +10143,6 @@ REFL_END
 #define GNURADIO_NODE_PORT_TRAITS_HPP
 
 // #include "port.hpp"
-
-// #include <refl.hpp>
 
 // #include <utils.hpp>
  // localinclude
@@ -9995,10 +10386,18 @@ concept can_process_simd
 } // namespace node
 
 #endif // include guard
- // localinclude
+
+// #include <port.hpp>
+
+// #include <tag.hpp>
+
+// #include <typelist.hpp>
+
+// #include <utils.hpp>
+
 
 #include <fmt/format.h>
-// #include <refl.hpp>
+// #include <reflection.hpp>
 
 
 namespace fair::graph {
@@ -10029,17 +10428,13 @@ simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto off
 }
 
 enum class work_return_t {
-    ERROR = -100, /// error occurred in the work function
-    INSUFFICIENT_OUTPUT_ITEMS =
-        -3, /// work requires a larger output buffer to produce output
-    INSUFFICIENT_INPUT_ITEMS =
-        -2, /// work requires a larger input buffer to produce output
-    DONE =
-        -1, /// this block has completed its processing and the flowgraph should be done
-    OK = 0, /// work call was successful and return values in i/o structs are valid
-    CALLBACK_INITIATED =
-        1, /// rather than blocking in the work function, the block will call back to the
-           /// parent interface when it is ready to be called again
+    ERROR                     = -100, /// error occurred in the work function
+    INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
+    INSUFFICIENT_INPUT_ITEMS  = -2,   /// work requires a larger input buffer to produce output
+    DONE                      = -1,   /// this block has completed its processing and the flowgraph should be done
+    OK                        = 0,    /// work call was successful and return values in i/o structs are valid
+    CALLBACK_INITIATED        = 1,    /// rather than blocking in the work function, the block will call back to the
+                                      /// parent interface when it is ready to be called again
 };
 
 template<std::size_t Index, typename Self>
@@ -10083,19 +10478,13 @@ output_port(Self *self) noexcept {
 template<typename Self>
 [[nodiscard]] constexpr auto
 input_ports(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(input_port<Idx>(self)...);
-    }
-    (std::make_index_sequence<traits::node::input_ports<Self>::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(input_port<Idx>(self)...); }(std::make_index_sequence<traits::node::input_ports<Self>::size>());
 }
 
 template<typename Self>
 [[nodiscard]] constexpr auto
 output_ports(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(output_port<Idx>(self)...);
-    }
-    (std::make_index_sequence<traits::node::output_ports<Self>::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(output_port<Idx>(self)...); }(std::make_index_sequence<traits::node::output_ports<Self>::size>());
 }
 
 /**
@@ -10155,8 +10544,8 @@ output_ports(Self *self) noexcept {
  *     auto &out_port = output_port<"out">(this);
  *     auto &in_port = input_port<"in">(this);
  *
- *     auto &reader = in_port.reader();
- *     auto &writer = out_port.writer();
+ *     auto &reader = in_port.streamReader();
+ *     auto &writer = out_port.streamWriter();
  *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
  *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
  *     if (n_readable == 0) {
@@ -10190,12 +10579,17 @@ output_ports(Self *self) noexcept {
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
 public:
-    using derived_t = Derived;
-    using node_template_parameters = meta::typelist<Arguments...>;
+    using derived_t                                      = Derived;
+    using node_template_parameters                       = meta::typelist<Arguments...>;
+    constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
 
 private:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string _name{std::string(fair::meta::type_name<Derived>())};
+    std::string        _name{ std::string(fair::meta::type_name<Derived>()) };
+    bool               _input_tags_present  = false;
+    bool               _output_tags_changed = false;
+    std::vector<tag_t::map_type> _tags_at_input;
+    std::vector<tag_t::map_type> _tags_at_output;
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -10210,19 +10604,17 @@ private:
 protected:
     constexpr bool
     enough_samples_for_output_ports(std::size_t n) {
-        return std::apply([n](const auto &...port) noexcept {
-                   return ((n >= port.min_buffer_size()) && ... && true);
-               }, output_ports(&self()));
+        return std::apply([n](const auto &...port) noexcept { return ((n >= port.min_buffer_size()) && ... && true); }, output_ports(&self()));
     }
 
     constexpr bool
     space_available_on_output_ports(std::size_t n) {
-        return std::apply([n](const auto &...port) noexcept {
-                   return ((n <= port.writer().available()) && ... && true);
-               }, output_ports(&self()));
+        return std::apply([n](const auto &...port) noexcept { return ((n <= port.streamWriter().available()) && ... && true); }, output_ports(&self()));
     }
 
 public:
+    node() : _tags_at_input(traits::node::input_port_types<Derived>::size()), _tags_at_output(traits::node::output_port_types<Derived>::size()){};
+
     [[nodiscard]] std::string_view
     name() const noexcept {
         return _name;
@@ -10233,6 +10625,36 @@ public:
         _name = std::move(name);
     }
 
+    [[nodiscard]] constexpr bool
+    input_tags_present() const noexcept {
+        return _input_tags_present;
+    };
+
+    constexpr bool
+    acknowledge_input_tags() noexcept {
+        if (_input_tags_present) {
+            _input_tags_present = false;
+            return true;
+        }
+        return false;
+    };
+
+    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    input_tags() const noexcept {
+        return { _tags_at_input.data(), _tags_at_input.size() };
+    }
+
+    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    output_tags() const noexcept {
+        return { _tags_at_output.data(), _tags_at_output.size() };
+    }
+
+    [[nodiscard]] constexpr std::span<tag_t::map_type>
+    output_tags() noexcept {
+        _output_tags_changed = true;
+        return { _tags_at_output.data(), _tags_at_output.size() };
+    }
+
     template<std::size_t Index, typename Self>
     friend constexpr auto &
     input_port(Self *self) noexcept;
@@ -10252,40 +10674,51 @@ public:
     // This function is a template and static to provide easier
     // transition to C++23's deducing this later
     template<typename Self>
-    [[nodiscard]] constexpr auto static
-    inputs_status(Self &self) noexcept {
-        static_assert(traits::node::input_ports<Derived>::size > 0,
-                      "A source node has no inputs, therefore no inputs status.");
-        bool at_least_one_input_has_data = false;
-        const auto availableForPort = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept {
-            const std::size_t available = port.reader().available();
-            if (available > 0_UZ) at_least_one_input_has_data = true;
-            if (available < port.min_buffer_size()) {
-                return 0_UZ;
+    [[nodiscard]] constexpr auto static inputs_status(Self &self) noexcept {
+        static_assert(traits::node::input_ports<Derived>::size > 0, "A source node has no inputs, therefore no inputs status.");
+        bool       at_least_one_input_has_data = false;
+        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, std::size_t> {
+            std::size_t       availableSamples = port.streamReader().available();
+            const std::size_t availableTags    = port.tagReader().available();
+            if (availableTags > 0) {
+                // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+                auto tagData                  = port.tagReader().get();
+                auto tag_stream_head_distance = tagData[0].index - port.streamReader().position();
+                assert(tag_stream_head_distance >= 0 && "negative tag vs. stream distance");
+
+                if (tag_stream_head_distance > 0 && availableSamples > tag_stream_head_distance) {
+                    // limit number of samples to read up to the next tag <-> forces processing from tag to tag|MAX_SIZE
+                    // N.B. new tags are thus always on the first readable sample
+                    availableSamples = std::min(availableSamples, static_cast<std::size_t>(tag_stream_head_distance));
+                    //TODO: handle corner case where the distance to the next tag is less than the ports MIN_SIZE
+                }
+            }
+            if (availableSamples > 0_UZ) at_least_one_input_has_data = true;
+            if (availableSamples < port.min_buffer_size()) {
+                return { 0_UZ, availableTags };
             } else {
-                return std::min(available, port.max_buffer_size());
+                return { std::min(availableSamples, port.max_buffer_size()), availableTags };
             }
         };
 
-        const std::size_t available_values_count
-                = std::apply([&availableForPort](
-                                     auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
-                             input_ports(&self));
+        const std::pair<std::size_t, std::size_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
+                                                                                              input_ports(&self));
 
         struct result {
-            bool at_least_one_input_has_data;
-           std::size_t available_values_count;
+            bool        at_least_one_input_has_data;
+            std::size_t available_values_count;
+            std::size_t available_tags_count;
         };
 
-        return result {
-            .at_least_one_input_has_data = at_least_one_input_has_data,
-            .available_values_count = available_values_count
-        };
+        return result{ .at_least_one_input_has_data = at_least_one_input_has_data,
+                       .available_values_count      = available_values_and_tag_count.first,
+                       .available_tags_count        = available_values_and_tag_count.second };
     }
 
     // This function is a template and static to provide easier
     // transition to C++23's deducing this later
-    auto write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
+    auto
+    write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
             meta::tuple_for_each([available_values_count](auto &output_range) { output_range.publish(available_values_count); }, writers_tuple);
         }
@@ -10295,25 +10728,22 @@ public:
     // transition to C++23's deducing this later
     template<typename Self>
     bool
-    consume_readers(Self& self, std::size_t available_values_count) {
+    consume_readers(Self &self, std::size_t available_values_count) {
         bool success = true;
         if constexpr (traits::node::input_ports<Derived>::size > 0) {
-            std::apply([available_values_count, &success] (auto&... input_port) {
-                    ((success = success && input_port.reader().consume(available_values_count)), ...);
-                }, input_ports(&self));
+            std::apply([available_values_count, &success](auto &...input_port) { ((success = success && input_port.streamReader().consume(available_values_count)), ...); }, input_ports(&self));
         }
         return success;
     }
 
-    template <typename... Ts>
+    template<typename... Ts>
     constexpr auto
-    invoke_process_one(Ts&&... inputs)
-    {
+    invoke_process_one(Ts &&...inputs) {
         if constexpr (traits::node::output_ports<Derived>::size == 0) {
             self().process_one(std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::node::output_ports<Derived>::size == 1) {
-            return std::tuple{self().process_one(std::forward<Ts>(inputs)...)};
+            return std::tuple{ self().process_one(std::forward<Ts>(inputs)...) };
         } else {
             return self().process_one(std::forward<Ts>(inputs)...);
         }
@@ -10336,15 +10766,17 @@ public:
         }
     }
 
+public:
     work_return_t
     work() noexcept {
-        using input_types = traits::node::input_port_types<Derived>;
-        using output_types = traits::node::output_port_types<Derived>;
+        using input_types                 = traits::node::input_port_types<Derived>;
+        using output_types                = traits::node::output_port_types<Derived>;
 
-        constexpr bool is_source_node = input_types::size == 0;
-        constexpr bool is_sink_node = output_types::size == 0;
+        constexpr bool is_source_node     = input_types::size == 0;
+        constexpr bool is_sink_node       = output_types::size == 0;
 
-        std::size_t samples_to_process = 0;
+        std::size_t    samples_to_process = 0;
+        std::size_t    tags_to_process    = 0;
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
                               { available_samples(d) } -> std::same_as<std::size_t>;
@@ -10361,16 +10793,12 @@ public:
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
                 // buffer size would be if the node were not merged)
                 constexpr std::size_t chunk_size = Derived::merged_work_chunk_size();
-                static_assert(
-                        chunk_size != std::dynamic_extent && chunk_size > 0,
-                        "At least one internal port must define a maximum number of samples or the non-member/hidden "
-                        "friend function `available_samples(const NodeType&)` must be defined.");
+                static_assert(chunk_size != std::dynamic_extent && chunk_size > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
+                                                                                   "friend function `available_samples(const NodeType&)` must be defined.");
                 samples_to_process = chunk_size;
             } else {
                 // derive value from output buffer size
-                samples_to_process = std::apply([&](const auto &...ports) {
-                                         return std::min({ ports.writer().available()..., ports.max_buffer_size()... });
-                                     }, output_ports(&self()));
+                samples_to_process = std::apply([&](const auto &...ports) { return std::min({ ports.streamWriter().available()..., ports.max_buffer_size()... }); }, output_ports(&self()));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
                 }
@@ -10378,11 +10806,12 @@ public:
             }
         } else {
             // Capturing structured bindings does not work in Clang...
-            const auto [at_least_one_input_has_data, available_values_count] = self().inputs_status(self());
+            const auto [at_least_one_input_has_data, available_values_count, available_tags_count] = self().inputs_status(self());
             if (available_values_count == 0) {
                 return at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
             }
             samples_to_process = available_values_count;
+            tags_to_process    = available_tags_count;
             if (not enough_samples_for_output_ports(samples_to_process)) {
                 return work_return_t::INSUFFICIENT_INPUT_ITEMS;
             }
@@ -10391,13 +10820,64 @@ public:
             }
         }
 
-        const auto input_spans = meta::tuple_transform([samples_to_process](auto &input_port) noexcept {
-            return input_port.reader().get(samples_to_process);
-        }, input_ports(&self()));
+        const auto input_spans   = meta::tuple_transform([samples_to_process](auto &input_port) noexcept { return input_port.streamReader().get(samples_to_process); }, input_ports(&self()));
 
-        auto writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept {
-            return output_port.writer().reserve_output_range(samples_to_process);
-        }, output_ports(&self()));
+        auto       writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(samples_to_process); },
+                                                   output_ports(&self()));
+
+        _input_tags_present      = false;
+        _output_tags_changed     = false;
+        if (tags_to_process) {
+            _input_tags_present = true;
+            tag_t::map_type merged_tag_map;
+            std::size_t                      port_index = 0; // TODO absorb this as optional tuple_for_each argument
+            meta::tuple_for_each(
+                    [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
+                        auto tags = input_port.tagReader().get();
+                        if (tags.size() > 0 && (tags[0].index == input_port.streamReader().position() || tags[0].index == -1)) {
+                            _tags_at_input[port_index].clear();
+                            for (const auto &[index, map] : tags) {
+                                _tags_at_input[port_index++].insert(map.begin(), map.end());
+                                merged_tag_map.insert(map.begin(), map.end());
+                            }
+                            input_port.tagReader().consume(1);
+                        }
+                    },
+                    input_ports(&self()));
+
+            if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
+                // N.B. ranges omitted because of missing Clang/Emscripten support
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type& tag) { tag = merged_tag_map; });
+                _output_tags_changed = true;
+            }
+        }
+
+        const auto forward_tags = [this]() noexcept {
+            if (!_output_tags_changed) {
+                return;
+            }
+            std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
+            //TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
+            //meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
+            meta::tuple_for_each(
+                    [&port_id, this](auto &output_port) noexcept {
+                        if (_tags_at_output[port_id].empty()) {
+                            port_id++;
+                            return;
+                        }
+                        auto data           = output_port.tagWriter().reserve_output_range(1);
+                        data[port_id].index = output_port.streamWriter().position();
+                        data[port_id].map = _tags_at_output[port_id];
+                        data.publish(1);
+                        port_id++;
+                    },
+                    output_ports(&self()));
+            // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
+            _input_tags_present  = false;
+            _output_tags_changed = false;
+            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t::map_type &tag) { tag.clear(); });
+            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t::map_type &tag) { tag.clear(); });
+        };
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags
@@ -10410,57 +10890,45 @@ public:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
-        if constexpr (requires { &Derived::process_bulk;  }) {
+        if constexpr (requires { &Derived::process_bulk; }) {
             const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
-                                        std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
+                                                 std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
 
             write_to_outputs(samples_to_process, writers_tuple);
             const bool success = consume_readers(self(), samples_to_process);
+            forward_tags();
             return success ? ret : work_return_t::ERROR;
         }
 
-        using input_simd_types = meta::simdize<typename input_types::template apply<std::tuple>>;
+        using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
         using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
 
-        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0
-                                                 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
-                                                 : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>),
-                                                            meta::simdize_size_v<input_simd_types> * 4))> width{};
+        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
+                                                                                         : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
+                width{};
 
         if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0)
-                      and ((is_source_node and requires(Derived &d) {
-                               { d.process_one_simd(width) };
-                           }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+                      and ((is_source_node and requires(Derived & d) {
+                                                   { d.process_one_simd(width) };
+                                               }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
             // SIMD loop
             std::size_t i = 0;
             for (; i + width <= samples_to_process; i += width) {
-                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) {
-                    return invoke_process_one_simd(width, input_simds...);
-                });
-                meta::tuple_for_each(
-                        [i](auto &output_range, const auto &result) {
-                            result.copy_to(output_range.data() + i, stdx::element_aligned);
-                        }, writers_tuple, results);
+                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
+                meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
             }
             simd_epilogue(width, [&](auto w) {
                 if (i + w <= samples_to_process) {
-                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) {
-                        return invoke_process_one_simd(w, input_simds...);
-                    });
-                    meta::tuple_for_each(
-                            [i](auto &output_range, auto &result) {
-                                result.copy_to(output_range.data() + i, stdx::element_aligned);
-                            }, writers_tuple, results);
+                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
+                    meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
                     i += w;
                 }
             });
         } else {
             // Non-SIMD loop
             for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); },
-                                                input_spans);
-                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); },
-                                     writers_tuple, results);
+                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
             }
         }
 
@@ -10473,7 +10941,7 @@ public:
             fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
         }
 #endif
-
+        forward_tags();
         return success ? work_return_t::OK : work_return_t::ERROR;
     } // end: work_return_t work() noexcept { ..}
 };
@@ -10484,13 +10952,14 @@ concept source_node = requires(Node &node, typename traits::node::input_port_typ
                               [](Node &n, auto &inputs) {
                                   constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
                                   if constexpr (port_count > 0) {
-                                      return []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>)->decltype(n_inside.process_one(std::get<Is>(tup)...)) { return {}; }
-                                      (n, inputs, std::make_index_sequence<port_count>());
+                                      return []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) -> decltype(n_inside.process_one(std::get<Is>(tup)...)) {
+                                          return {};
+                                      }(n, inputs, std::make_index_sequence<port_count>());
                                   } else {
                                       return n.process_one();
                                   }
                               }(node, inputs)
-                              } -> std::same_as<typename traits::node::return_type<Node>>;
+                          } -> std::same_as<typename traits::node::return_type<Node>>;
                       };
 
 template<typename Node>
@@ -10498,14 +10967,13 @@ concept sink_node = requires(Node &node, typename traits::node::input_port_types
                         {
                             [](Node &n, auto &inputs) {
                                 constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
-                                []<std::size_t... Is>(Node & n_inside, auto const &tup, std::index_sequence<Is...>) {
+                                []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) {
                                     if constexpr (port_count > 0) {
                                         auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
                                     } else {
                                         n_inside.process_one(std::get<Is>(tup)...);
                                     }
-                                }
-                                (n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
+                                }(n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
                             }(node, inputs)
                         };
                     };
@@ -10547,32 +11015,25 @@ private:
                 return std::dynamic_extent;
             }
         }();
-        return std::min({ traits::node::input_ports<Right>::template apply<traits::port::max_samples>::value,
-                          traits::node::output_ports<Left>::template apply<traits::port::max_samples>::value, left_size,
-                          right_size });
+        return std::min({ traits::node::input_ports<Right>::template apply<traits::port::max_samples>::value, traits::node::output_ports<Left>::template apply<traits::port::max_samples>::value,
+                          left_size, right_size });
     }
 
     template<std::size_t I>
     constexpr auto
     apply_left(auto &&input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return left.process_one(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...);
-        }
-                (std::make_index_sequence<I>());
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.process_one(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
     }
 
     template<std::size_t I, std::size_t J>
     constexpr auto
     apply_right(auto &&input_tuple, auto &&tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
-            constexpr std::size_t first_offset = traits::node::input_port_types<Left>::size;
+            constexpr std::size_t first_offset  = traits::node::input_port_types<Left>::size;
             constexpr std::size_t second_offset = traits::node::input_port_types<Left>::size + sizeof...(Is);
-            static_assert(
-                    second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return right.process_one(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))...,
-                                     std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
-        }
-                (std::make_index_sequence<I>(), std::make_index_sequence<J>());
+            static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
+            return right.process_one(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
+        }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
 public:
@@ -10586,8 +11047,8 @@ public:
     friend constexpr std::size_t
     available_samples(const merged_node &self) noexcept
         requires requires(const Left &l) {
-            { available_samples(l) } -> std::same_as<std::size_t>;
-        }
+                     { available_samples(l) } -> std::same_as<std::size_t>;
+                 }
     {
         return available_samples(self.left);
     }
@@ -10596,23 +11057,21 @@ public:
         requires traits::node::can_process_simd<Left> && traits::node::can_process_simd<Right>
     constexpr meta::simdize<return_type, meta::simdize_size_v<std::tuple<Ts...>>>
     process_one(const Ts &...inputs) {
-        static_assert(traits::node::output_port_types<Left>::size == 1,
-                      "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(
-                std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+        static_assert(traits::node::output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
+        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
     }
 
     constexpr auto
     process_one_simd(auto N)
         requires traits::node::can_process_simd<Right>
     {
-        if constexpr (requires(Left &l) {
+        if constexpr (requires(Left & l) {
                           { l.process_one_simd(N) };
                       }) {
             return right.process_one(left.process_one_simd(N));
         } else {
             using LeftResult = typename traits::node::return_type<Left>;
-            using V = meta::simdize<LeftResult, N>;
+            using V          = meta::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0; i < V::size(); ++i) {
                 tmp[i] = left.process_one();
@@ -10633,7 +11092,8 @@ public:
         if constexpr (traits::node::output_port_types<Left>::size == 1) {
             // only the result from the right node needs to be returned
             return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                 apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+                                                                                               apply_left<traits::node::input_port_types<Left>::size()>(
+                                                                                                       std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
@@ -10649,21 +11109,12 @@ public:
             } else if constexpr (traits::node::output_port_types<Right>::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
                     return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out));
-                }
-                        (std::make_index_sequence<OutId>(),
-                         std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>());
+                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>());
 
             } else {
-                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>,
-                                                                                    std::index_sequence<Js...>,
-                                                                                    std::index_sequence<Ks...>) {
-                    return std::make_tuple(std::move(std::get<Is>(left_out))...,
-                                           std::move(std::get<OutId + 1 + Js>(left_out))...,
-                                           std::move(std::get<Ks>(right_out)...));
-                }
-                        (std::make_index_sequence<OutId>(),
-                         std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>(),
-                         std::make_index_sequence<Right::output_port_types::size>());
+                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) {
+                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...));
+                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::node::output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
             }
         }
     } // end:: process_one
@@ -10699,14 +11150,15 @@ public:
 template<std::size_t OutId, std::size_t InId, source_node A, sink_node B>
 constexpr auto
 merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
-        if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-            fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
-                    typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+    if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+                                  typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+        fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+                                typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                    fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
-                    typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
-        }
-        return { std::forward<A>(a), std::forward<B>(b) };
+                                fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                                typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+    }
+    return { std::forward<A>(a), std::forward<B>(b) };
 }
 
 /**
@@ -10734,158 +11186,32 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
 constexpr auto
 merge(A &&a, B &&b) {
-        constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
-        constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
-        static_assert(OutId != -1);
-        static_assert(InId != -1);
-        static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
-                      "Port types do not match");
-        return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
+    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+    static_assert(OutId != -1);
+    static_assert(InId != -1);
+    static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+                  "Port types do not match");
+    return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
 
 #if !DISABLE_SIMD
-namespace test
-{
+namespace test {
 struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
-    public:
-        template<meta::t_or_simd<float> V>
-        constexpr V
-        process_one(const V &a) const noexcept {
-            return a;
-        }
+public:
+    template<meta::t_or_simd<float> V>
+    constexpr V
+    process_one(const V &a) const noexcept {
+        return a;
+    }
 };
 
 static_assert(traits::node::input_port_types<copy>::size() == 1);
 static_assert(std::same_as<traits::node::return_type<copy>, float>);
 static_assert(traits::node::can_process_simd<copy>);
 static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
-}
+} // namespace test
 #endif
-
-
-/**
- *
- *                                |￣￣￣￣￣￣￣￣￣￣￣￣￣￣|
- *                                |     !!!Horray!!!      |
- *                                |      you made it!     |
- *                                |                       |
- *                                |        Warning!       |
- *                                |  Beneath are dragons! |
- *                                |＿＿＿＿＿＿＿＿＿＿＿＿＿＿|
- *                                    (\__/)  ||
- *                                    (•ㅅ•)  ||
- *                                    /  　  づ
- * ******************************************************************************************************************
- *
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⡧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡱⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠊⠶⣂⣠⢠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡑⡑⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⣼⡾⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠂⠑⡳⠀⣀⠠⠤⠠⡀⠀⠀⠀⠀⠀⢿⣿⣿⣿⣿⣷⣤⡀⡄⠚⢸⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠁⠁⠀⠀⠀⠙⡕⠀⠀⠀⠀⢻⣿⣿⣿⣿⢿⢧⡭⣶⣿⣿⣿⣷⣶⣶⣤⡀⣀⢄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠪⠤⡠⣙⣿⡿⡫⠉⣿⣭⡞⣿⣿⣿⣿⣿⣿⣿⣷⠂⠨⣌⠚⡴⠂⠤⣀⢀⡂⢢⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠀⠁⠀⠀⠈⢩⣿⢿⣿⣿⡋⣿⣿⣧⣀⠛⠛⠟⢿⢹⣿⣷⣶⣶⣤⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣦⣾⠿⣷⣯⣿⣿⣿⢤⣿⣿⣿⣶⣶⣤⣭⣒⣕⡁⠛⠛⠂⠝⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣞⣿⣾⣿⣿⠿⠿⠿⣅⡐⣶⣿⣿⣿⣿⣿⣿⣿⡏⣿⣿⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⣀⠅⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⣿⣿⣿⣿⣷⣿⣶⣿⣿⣿⣿⣿⡿⣿⣿⣷⢿⣿⡄⠀⠛⠂⠀⠀⠀⠀⠀⠀⠀⠀⢀⢤⠀⠀⠀⢀⠠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠜⢠⢁⡁⠒⡈⠐⠒⠒⠛⠊
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⢀⣕⢂⣬⣶⠒⠠⠀⣿⣿⠉⣿⡇⣿⣿⢻⣿⣿⣿⣿⣿⣿⣿⣿⣷⠙⠛⡄⠀⠀⠀⠀⠀⠄⣀⢤⣴⣶⣶⡶⣿⣾⣿⣶⣶⣿⣶⣶⡂⡔⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⣸⢃⣼⠫⢓⠬⠤⠄⠶⠒⠀
- *    ⠀⠀⠀⠀⠀⠀⠴⠂⣼⣿⡄⣿⠁⣴⣷⠾⠁⠉⠛⠏⣿⠛⠿⣷⡍⣿⣿⢿⣿⣿⣿⣈⠛⡄⠀⠀⠀⠀⠀⣀⡼⣶⣿⣷⣿⣿⣯⣿⢷⣟⣿⡻⣿⣯⣿⣿⣿⣿⣾⣖⠒⠤⠀⠀⠀⠀⠀⠀⣤⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⠀⡀⣿⠁⠁⣒⢒⡠⡀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣿⣿⠛⣀⡤⢱⠀⠀⠀⠉⠃⠀⠈⣳⣿⡿⣿⠿⣿⠟⠀⠀⣀⣤⠀⠀⠁⣬⣿⣿⣿⣿⣿⣟⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣿⣿⡿⠮⡂⠀⣀⠀⢀⣼⠏⡖⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠢⠂⣞⡿⠰⠠⢀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⣿⡿⠛⠛⠛⠃⠀⠀⠀⠀⠀⢀⣴⣿⣿⣿⣿⣿⡫⡱⠀⣾⠁⣀⠀⢴⣾⣿⣿⣷⣿⣿⣿⣿⣿⠟⠛⠉⠉⠁⢀⣉⡙⠛⣿⣿⣿⣿⣿⣯⣿⣿⣶⣧⣶⣟⣁⣾⠁⠀⠀⠀⠀⠀⣰⠃⣶⣷⣶⣶⣶⣶⣈⡄⢀⠒⣤⣶⣿⠁⡉⢒⠁⠑⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⠋⠙⣿⣿⣶⣄⠀⠀⠀⠀⠀⣴⣿⣿⢿⣿⣿⣿⠟⠀⢀⣾⣁⠀⠄⣴⣿⣿⣷⣿⣿⣿⣿⠟⠁⠀⠀⠀⢀⠀⣿⠉⢿⣿⢙⣐⡈⠻⣿⣿⣿⣿⣿⣿⣿⣿⣭⢩⠂⠀⠀⠀⣀⠀⡠⣵⣯⣷⣗⣿⣿⣽⣽⣿⣯⣿⣿⠯⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠃⣒⢿⡏⠀⠀⠈⠛⣽⡽⠿⣿⣿⣿⣿⣿⣿⣿⣯⣿⣿⣤⣷⠿⣯⠟⢠⣢⣿⢿⣿⣿⣿⣽⣿⠟⠀⠀⠀⠀⠀⠀⠋⣦⣍⣻⣮⣿⣿⠋⠀⠀⡴⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣦⣶⣥⣬⣿⣿⣿⣿⣿⠿⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣏⣶⣤⣿⢿⣿⣿⣿⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⢺⠋⠋⠉⠛⣿⣿⣯⢿⢿⣿⣯⣿⡿⢻⣿⣿⣽⢷⢿⣿⠿⣯⣿⣿⣿⣿⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠻⣿⣿⣍⠙⣿⣿⣿⣿⣿⣿⢿⣿⣽⣿⣿⢿⣿⣿⣿⣷⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣆⡀⠁⠙⣿⣿⣧⡀⠛⣿⣿⣿⢿⣿⣿⣿⣿⣿⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⢻⣄⠙⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣌⠝⠋⠀⠀⠉⠉⠉⠛⠁⠀⠀⠙⢿⣟⣟⣿⠛⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⢿⣿⣿⣿⣿⣿⣿⠿⣟⣿⣭⠤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠤⣤⡘⣿⣯⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠤⣤⠴⣒⣀⣄⠀⠀⣿⡿⣿⡻⣿⣧⣿⣿⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣶⣥⣈⢿⣦⣿⣿⠃⠀⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣟⠀⠛⣿⣦⣸⣿⠁⢀⣤⣿⣿⢿⣿⢿⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢧⣁⣉⣭⣿⣿⠿⠛⠛⠛⠛⣹⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡞⡻⣿⣷⣶⣿⣿⣿⣾⣿⣿⣽⡿⠟⠋⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡈⢋⣴⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠛⢶⢷⣿⡿⠛⠛⠛⢿⣦⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⠈⠊⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢄⠀⠀⠀⠀⠀⠀⠉⠛⡿⠿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
- *
- * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp
- * The are basically needed to do a struct member-field introspections, to support
- *   a) compile-time serialiser generation between std::map<std::string, pmt::pmtv> <-> user-defined settings structs
- *   b) allow for block ports being defined a member fields rather than as NTTPs of the node<T, ...> template
-
- * Their use is limited to the namespace scope where the block is defined (i.e. not across .so boundaries) and will be
- * supplanted once the compile-time reflection language feature is merged with the C++ standard, e.g.
- * Matúš Chochlík, Axel Naumann, David Sankel: Static reflection, P0194R3, ISO/IEC JTC1 SC22 WG21
- *    https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0194r3.html
- *
- *  These macros need to be defined in a global scope due to relying on template specialisation that cannot be done in
- *  any other namespace than the one they were declared -- for illustration see, for example:
- *  https://github.com/veselink1/refl-cpp/issues/59
- *  https://compiler-explorer.com/z/MG7fxzK4j
- *
- *  For practical purposes, the macro can be defined either at the end of the struct declaring namespace or the specific
- *  namespace exited/re-enteres such as
- *  @code
- *  namespace private::library {
- *     struct my_struct {
- *         int field_a;
- *         std::string field_b;
- *     };
- *  }
- *  ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
- *  namespace private::library {
- *   // ...
- *  @endcode
- *
- *  And please, if you want to accelerator the compile-time reflection process, please give your support and shout-out
- *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
- */
-
-
-/**
- * This macro can be used for simple non-templated structs and classes, e.g.
- * @code
- * struct my_struct {
- *     int field_a;
- *      std::string field_b;
- * };
- * ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
- */
-#define ENABLE_REFLECTION(TypeName, ...) \
-    REFL_TYPE(TypeName __VA_OPT__(, )) \
-    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
-    REFL_END
-
-/**
- * This macro can be used for arbitrary templated structs and classes, that depend
- * on mixed typename and NTTP parameters
- * @code
- * template<typename T, std::size_t size>
- * struct custom_struct {
- *     T field_a;
- *     T field_b;
- *
- *     [[nodiscard]] constexpr std::size_t size() const noexcept { return size; }
- * };
- * ENABLE_REFLECTION_FOR_TEMPLATE_FULL(typename T, std::size_t size), (custom_struct<T, size>), field_a, field_a);
- */
-#define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
-    REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
-    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
-    REFL_END
-
-/**
- * This macro can be used for simple templated structs and classes, that depend
- * only on pure typename-template lists
- * @code
- * template<typename T>
- * struct my_templated_struct {
- *     T field_a;
- *     T field_b;
- * };
- * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
- */
-#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
-    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
 
 } // namespace fair::graph
 
@@ -10962,7 +11288,7 @@ class dynamic_port {
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool
-        update_reader_internal(void *buffer_other) noexcept
+        update_reader_internal(internal_port_buffers buffer_other) noexcept
                 = 0;
     };
 
@@ -10973,13 +11299,13 @@ class dynamic_port {
         using PortType = std::decay_t<T>;
         std::conditional_t<owning, PortType, PortType &> _value;
 
-        [[nodiscard]] void *
+        [[nodiscard]] internal_port_buffers
         writer_handler_internal() noexcept {
             return _value.writer_handler_internal();
         };
 
         [[nodiscard]] bool
-        update_reader_internal(void *buffer_other) noexcept override {
+        update_reader_internal(internal_port_buffers buffer_other) noexcept override {
             if constexpr (T::IS_INPUT) {
                 return _value.update_reader_internal(buffer_other);
             } else {
@@ -11007,7 +11333,7 @@ class dynamic_port {
                         requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
             } else {
                 static_assert(
-                        requires { arg.update_reader_internal(std::declval<void *>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
+                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
             }
         }
 
@@ -11017,7 +11343,7 @@ class dynamic_port {
                         requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
             } else {
                 static_assert(
-                        requires { arg.update_reader_internal(std::declval<void *>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
+                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
             }
         }
 
@@ -11067,7 +11393,7 @@ class dynamic_port {
     };
 
     bool
-    update_reader_internal(void *buffer_other) noexcept {
+    update_reader_internal(internal_port_buffers buffer_other) noexcept {
         return _accessor->update_reader_internal(buffer_other);
     }
 

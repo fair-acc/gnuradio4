@@ -1,7 +1,7 @@
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
-#include <refl.hpp>
+#include <reflection.hpp>
 
 #include <port.hpp> // localinclude
 #include <port_traits.hpp> // localinclude
