@@ -9716,6 +9716,9 @@ inline constexpr default_tag<"signal_max", float, "a.u.", "signal physical max. 
 inline constexpr default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
 inline constexpr default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
 inline constexpr default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline constexpr default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
+
+inline constexpr std::tuple DEFAULT_TAGS = {SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT};
 } // namespace tag
 
 } // namespace fair::graph
@@ -10397,7 +10400,441 @@ concept can_process_simd
 
 
 #include <fmt/format.h>
+// #include <refl.hpp>
+
 // #include <reflection.hpp>
+
+// #include <settings.hpp>
+#ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
+#define GRAPH_PROTOTYPE_SETTINGS_HPP
+
+#include <atomic>
+#include <chrono>
+#include <concepts>
+#include <mutex>
+#include <optional>
+// #include <reflection.hpp>
+
+#include <set>
+// #include <tag.hpp>
+
+#include <variant>
+
+namespace fair::graph {
+
+struct SettingsCtx {
+    // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
+    using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
+    std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
+    std::string              context;             /// user-defined multiplexing context for which the setting is valid
+};
+
+template<typename T, typename Node>
+concept Settings = requires(T t, Node& n, std::span<const std::string> parameter_keys, const std::string &parameter_key, const tag_t::map_type &parameters, SettingsCtx ctx) {
+    { init(n, parameters) } -> std::same_as<void>;
+    /**
+     * @brief returns if there are stages settings that haven't been applied yet.
+     */
+    { t.changed() } -> std::same_as<bool>;
+
+    /**
+     * @brief stages new key-value pairs that shall replace the block field-based settings.
+     * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
+     * @return key-value pairs that could not be set
+     */
+    { t.set(parameters, ctx) } -> std::same_as<tag_t::map_type>;
+    { t.set(parameters) } -> std::same_as<tag_t::map_type>;
+
+    /**
+     * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
+     * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
+     */
+    { t.auto_update(parameters, ctx) } -> std::same_as<void>;
+    { t.auto_update(parameters) } -> std::same_as<void>;
+
+    /**
+     * @brief return all available node settings as key-value pairs
+     */
+    { t.get() } -> std::same_as<tag_t::map_type>;
+
+    /**
+     * @brief return key-pmt values map for multiple keys
+     */
+    { t.get(parameter_keys, ctx) } -> std::same_as<tag_t::map_type>;
+    { t.get(parameter_keys) } -> std::same_as<tag_t::map_type>;
+
+    /**
+     * @brief return pmt value for a single key
+     */
+    { t.get(parameter_key, ctx) } -> std::same_as<std::optional<pmtv::pmt>>;
+    { t.get(parameter_key) } -> std::same_as<std::optional<pmtv::pmt>>;
+
+    /**
+     * @brief returns the staged/not-yet-applied new parameters
+     */
+    { t.staged_parameters() } -> std::same_as<const tag_t::map_type>;
+
+    /**
+     * @brief synchronise map-based with actual node field-based settings
+     */
+    { t.apply_staged_parameters() } -> std::same_as<const tag_t::map_type>;
+
+    /**
+     * @brief synchronises the map-based with the node's field-based parameters
+     * (N.B. usually called after the staged parameters have been synchronised)
+     */
+    { t.update_active_parameters() } -> std::same_as<void>;
+};
+
+template<typename Node>
+struct settings_base {
+    Node             *_node = nullptr;
+    std::atomic<bool> _changed{ false };
+
+    settings_base() = delete;
+
+    explicit settings_base(Node &node) : _node(&node) {}
+
+    settings_base(const settings_base &other) noexcept : _node(other._node), _changed(other._changed.load()) {}
+
+    settings_base(settings_base &&other) noexcept : _node(std::exchange(other._node, nullptr)), _changed(other._changed.load()) {}
+
+    virtual ~settings_base() = default;
+
+    settings_base &
+    operator=(const settings_base &other) noexcept {
+        swap(other);
+        return *this;
+    }
+
+    settings_base &
+    operator=(settings_base &&other) noexcept {
+        settings_base temp(std::move(other));
+        swap(temp);
+        return *this;
+    }
+
+    void
+    swap(settings_base &other) noexcept {
+        if (this == &other) {
+            return;
+        }
+        std::swap(_node, other._node);
+        bool changed = _changed.load();
+        _changed.store(other._changed.load());
+        other._settings_changed.store(changed);
+    }
+
+    virtual void
+    init(Node &node, const tag_t::map_type &initial_settings) noexcept
+            = 0;
+
+    /**
+     * @brief returns if there are stages settings that haven't been applied yet.
+     */
+    [[nodiscard]] constexpr bool
+    changed() const noexcept {
+        return _changed;
+    }
+
+    /**
+     * @brief stages new key-value pairs that shall replace the block field-based settings.
+     * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
+     * @return key-value pairs that could not be set
+     */
+    [[nodiscard]] virtual tag_t::map_type
+    set(const tag_t::map_type &parameters, SettingsCtx ctx = {})
+            = 0;
+
+    /**
+     * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
+     * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
+     */
+    virtual void
+    auto_update(const tag_t::map_type &parameters, SettingsCtx = {})
+            = 0;
+
+    /**
+     * @brief return all (or for selected multiple keys) available node settings as key-value pairs
+     */
+    [[nodiscard]] virtual tag_t::map_type
+    get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept
+            = 0;
+
+    [[nodiscard]] virtual std::optional<pmtv::pmt>
+    get(const std::string &parameter_key, SettingsCtx = {}) const noexcept = 0;
+
+    /**
+     * @brief returns the staged/not-yet-applied new parameters
+     */
+    [[nodiscard]] virtual const tag_t::map_type
+    staged_parameters() const
+            = 0;
+
+    [[nodiscard]] virtual std::set<std::string, std::less<>> &
+    auto_update_parameters() noexcept
+            = 0;
+
+    [[nodiscard]] virtual std::set<std::string, std::less<>> &
+    auto_forward_parameters() noexcept
+            = 0;
+
+    /**
+     * @brief synchronise map-based with actual node field-based settings
+     * returns map with key-value tags that should be forwarded
+     * to dependent/child nodes.
+     */
+    [[nodiscard]] virtual tag_t::map_type
+    apply_staged_parameters() noexcept
+            = 0;
+
+    /**
+     * @brief synchronises the map-based with the node's field-based parameters
+     * (N.B. usually called after the staged parameters have been synchronised)
+     */
+    virtual void
+    update_active_parameters() noexcept
+            = 0;
+};
+
+template<typename Node>
+class basic_settings : public settings_base<Node> {
+    mutable std::mutex                 _lock{};
+    tag_t::map_type                    _active{}; // copy of class field settings as pmt-style map
+    tag_t::map_type                    _staged{}; // parameters to become active before the next work() call
+    std::set<std::string, std::less<>> _auto_update{};
+    std::set<std::string, std::less<>> _auto_forward{};
+
+public:
+    basic_settings() = delete;
+
+    explicit constexpr basic_settings(Node &node) noexcept : settings_base<Node>(node) {
+        if constexpr (refl::is_reflectable<Node>()) {
+            meta::tuple_for_each(
+                    [this](auto &&default_tag) {
+                        for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
+                            using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                                if (default_tag.shortKey().ends_with(get_display_name(member))) {
+                                    _auto_forward.emplace(get_display_name(member));
+                                }
+                                _auto_update.emplace(get_display_name(member));
+                            }
+                        });
+                    },
+                    fair::graph::tag::DEFAULT_TAGS);
+        }
+    }
+
+    constexpr basic_settings(const basic_settings &other) noexcept : settings_base<Node>(other) {
+        basic_settings temp(other);
+        swap(temp);
+    }
+
+    constexpr basic_settings(basic_settings &&other) noexcept : settings_base<Node>(std::move(other)) {
+        basic_settings temp(std::move(other));
+        swap(temp);
+    }
+
+    basic_settings &
+    operator=(const basic_settings &other) noexcept {
+        swap(other);
+        return *this;
+    }
+
+    basic_settings &
+    operator=(basic_settings &&other) noexcept {
+        basic_settings temp(std::move(other));
+        swap(temp);
+        return *this;
+    }
+
+    void
+    swap(basic_settings &other) noexcept {
+        if (this == &other) {
+            return;
+        }
+        settings_base<Node>::swap(other);
+        std::scoped_lock lock(_lock, other._lock);
+        std::swap(_active, other._active);
+        std::swap(_staged, other._staged);
+        std::swap(_auto_update, other._auto_update);
+        std::swap(_auto_forward, other._auto_forward);
+    }
+
+    void
+    init(Node &node, const tag_t::map_type &initial_settings) noexcept {
+        settings_base<Node>::_node = &node;
+        update_active_parameters();
+        auto invalid_settings = set(initial_settings);
+        [[maybe_unused]] auto ignore = apply_staged_parameters();
+        update_active_parameters();
+        if (!invalid_settings.empty()) {
+            fmt::print(stderr, "{} could not set {} initial parameter - invalid keys/value types\n", meta::type_name<Node>(), invalid_settings.size());
+            for (auto &[key, value] : invalid_settings) {
+                fmt::print(stderr, "key: {} - value-type: {}\n", key, value.index());
+            }
+        }
+    }
+
+    [[nodiscard]] tag_t::map_type
+    set(const tag_t::map_type &parameters, SettingsCtx = {}) {
+        tag_t::map_type ret;
+        if constexpr (refl::is_reflectable<Node>()) {
+            std::lock_guard lg(_lock);
+            for (const auto &[localKey, localValue] : parameters) {
+                const auto &key    = localKey;
+                const auto &value  = localValue;
+                bool        is_set = false;
+                for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
+                    using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                        if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                            if (_auto_update.contains(key)) {
+                                _auto_update.erase(key);
+                            }
+                            _staged.insert_or_assign(key, value);
+                            settings_base<Node>::_changed.store(true);
+                            is_set = true;
+                        }
+                    }
+                });
+                if (!is_set) {
+                    ret.insert_or_assign(key, pmtv::pmt(value));
+                }
+            }
+        }
+
+        return ret; // N.B. returns those <key:value> parameters that could not be set
+    }
+
+    void
+    auto_update(const tag_t::map_type &parameters, SettingsCtx = {}) {
+        if constexpr (refl::is_reflectable<Node>()) {
+            for (const auto &[localKey, localValue] : parameters) {
+                const auto &key   = localKey;
+                const auto &value = localValue;
+                for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
+                    using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                        if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                            _staged.insert_or_assign(key, value);
+                            settings_base<Node>::_changed.store(true);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    [[nodiscard]] const tag_t::map_type
+    staged_parameters() const noexcept {
+        std::lock_guard lg(_lock);
+        return _staged;
+    }
+
+    [[nodiscard]] tag_t::map_type
+    get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept {
+        std::lock_guard lg(_lock);
+        tag_t::map_type ret;
+        if (parameter_keys.size() == 0) {
+            ret = _active;
+            return ret;
+        }
+        for (const auto &key : parameter_keys) {
+            if (_active.contains(key)) {
+                ret.insert_or_assign(key, _active.at(key));
+            }
+        }
+        return ret;
+    }
+
+    [[nodiscard]] std::optional<pmtv::pmt>
+    get(const std::string &parameter_key, SettingsCtx = {}) const noexcept {
+        if constexpr (refl::is_reflectable<Node>()) {
+            std::lock_guard lg(_lock);
+
+            if (_active.contains(parameter_key)) {
+                return { _active.at(parameter_key) };
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::set<std::string, std::less<>> &
+    auto_update_parameters() noexcept {
+        return _auto_update;
+    }
+
+    [[nodiscard]] std::set<std::string, std::less<>> &
+    auto_forward_parameters() noexcept {
+        return _auto_forward;
+    }
+
+    /**
+     * @brief synchronise map-based with actual node field-based settings
+     * returns map with key-value tags that should be forwarded
+     * to dependent/child nodes.
+     */
+    [[nodiscard]] virtual tag_t::map_type
+    apply_staged_parameters() noexcept {
+        tag_t::map_type forward_parameters; // parameters that should be forwarded to dependent child nodes
+        if constexpr (refl::is_reflectable<Node>()) {
+            std::lock_guard lg(_lock);
+            tag_t::map_type staged;
+            for (const auto &[localKey, localStaged_value] : _staged) {
+                const auto &key          = localKey;
+                const auto &staged_value = localStaged_value;
+                for_each(refl::reflect(*settings_base<Node>::_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                    using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                    if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                        if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
+                            member(*settings_base<Node>::_node) = std::get<Type>(staged_value);
+                            if constexpr (requires { settings_base<Node>::_node->init(/* old settings */ _active, /* new settings */ staged); }) {
+                                staged.insert_or_assign(key, staged_value);
+                            }
+                            if (_auto_forward.contains(get_display_name(member))) {
+                                forward_parameters.insert_or_assign(key, staged_value);
+                            }
+                        }
+                    }
+                });
+            }
+            for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
+                using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+
+                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                    _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
+                }
+            });
+            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+                settings_base<Node>::_node->init(/* old settings */ _active, /* new settings */ staged);
+            }
+            _staged.clear();
+        }
+        return forward_parameters;
+    }
+
+    void
+    update_active_parameters() noexcept {
+        if constexpr (refl::is_reflectable<Node>()) {
+            std::lock_guard lg(_lock);
+            for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
+                using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+
+                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                    _active.insert_or_assign(get_display_name_const(member).str(), member(*settings_base<Node>::_node));
+                }
+            });
+        }
+    }
+};
+
+// static_assert(Setting<basic_settings<int>, int>);
+
+} // namespace fair::graph
+#endif // GRAPH_PROTOTYPE_SETTINGS_HPP
 
 
 namespace fair::graph {
@@ -10583,13 +11020,16 @@ public:
     using node_template_parameters                       = meta::typelist<Arguments...>;
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
 
-private:
+protected:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string        _name{ std::string(fair::meta::type_name<Derived>()) };
-    bool               _input_tags_present  = false;
-    bool               _output_tags_changed = false;
+    std::string                  _name{ std::string(fair::meta::type_name<Derived>()) };
+    bool                         _input_tags_present  = false;
+    bool                         _output_tags_changed = false;
     std::vector<tag_t::map_type> _tags_at_input;
     std::vector<tag_t::map_type> _tags_at_output;
+
+    // intermediate non-real-time<->real-time setting states
+    std::unique_ptr<settings_base<Derived>> _settings = std::make_unique<basic_settings<Derived>>(self());
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -10601,7 +11041,6 @@ private:
         return *static_cast<const Derived *>(this);
     }
 
-protected:
     constexpr bool
     enough_samples_for_output_ports(std::size_t n) {
         return std::apply([n](const auto &...port) noexcept { return ((n >= port.min_buffer_size()) && ... && true); }, output_ports(&self()));
@@ -10613,7 +11052,15 @@ protected:
     }
 
 public:
-    node() : _tags_at_input(traits::node::input_port_types<Derived>::size()), _tags_at_output(traits::node::output_port_types<Derived>::size()){};
+    constexpr node() noexcept : node(self()) {}
+
+    constexpr node(Derived &derived) noexcept
+        : _tags_at_input(traits::node::input_port_types<Derived>::size())
+        , _tags_at_output(traits::node::output_port_types<Derived>::size())
+        , _settings(std::make_unique<basic_settings<Derived>>(derived)) {}
+
+    node(node &&other) noexcept
+        : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
     [[nodiscard]] std::string_view
     name() const noexcept {
@@ -10653,6 +11100,16 @@ public:
     output_tags() noexcept {
         _output_tags_changed = true;
         return { _tags_at_output.data(), _tags_at_output.size() };
+    }
+
+    constexpr settings_base<Derived> &
+    settings() const noexcept {
+        return *_settings;
+    }
+
+    constexpr settings_base<Derived> &
+    settings() noexcept {
+        return *_settings;
     }
 
     template<std::size_t Index, typename Self>
@@ -10779,6 +11236,23 @@ public:
         std::size_t    tags_to_process    = 0;
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
+                              { self().available_samples(d) } -> std::same_as<std::int64_t>;
+                          }) {
+                // the (source) node wants to determine the number of samples to process
+                std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
+                meta::tuple_for_each([&max_buffer](auto&& out){ max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
+                const std::int64_t available_samples = self().available_samples(self());
+                samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
+                if (available_samples < 0 && max_buffer > 0) {
+                    return work_return_t::DONE;
+                }
+                if (not enough_samples_for_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                }
+                if (not space_available_on_output_ports(samples_to_process)) {
+                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                }
+            } else if constexpr (requires(const Derived &d) {
                               { available_samples(d) } -> std::same_as<std::size_t>;
                           }) {
                 // the (source) node wants to determine the number of samples to process
@@ -10827,27 +11301,36 @@ public:
 
         _input_tags_present      = false;
         _output_tags_changed     = false;
+        bool auto_change         = false;
         if (tags_to_process) {
-            _input_tags_present = true;
             tag_t::map_type merged_tag_map;
+            _input_tags_present = true;
             std::size_t                      port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
                     [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
-                        auto tags = input_port.tagReader().get();
+                        auto tags = input_port.tagReader().get(1_UZ);
                         if (tags.size() > 0 && (tags[0].index == input_port.streamReader().position() || tags[0].index == -1)) {
                             _tags_at_input[port_index].clear();
                             for (const auto &[index, map] : tags) {
-                                _tags_at_input[port_index++].insert(map.begin(), map.end());
+                                _tags_at_input[port_index].insert(map.begin(), map.end());
                                 merged_tag_map.insert(map.begin(), map.end());
                             }
-                            input_port.tagReader().consume(1);
+                            input_port.tagReader().consume(1_UZ);
+                            port_index++;
                         }
                     },
                     input_ports(&self()));
 
+            if (_input_tags_present) { // apply tags as new settings if matching
+                if (!merged_tag_map.empty()) {
+                    settings().auto_update(merged_tag_map);
+                    auto_change = true;
+                }
+            }
+
             if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type& tag) { tag = merged_tag_map; });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type &tag) { tag = merged_tag_map; });
                 _output_tags_changed = true;
             }
         }
@@ -10867,7 +11350,7 @@ public:
                         }
                         auto data           = output_port.tagWriter().reserve_output_range(1);
                         data[port_id].index = output_port.streamWriter().position();
-                        data[port_id].map = _tags_at_output[port_id];
+                        data[port_id].map   = _tags_at_output[port_id];
                         data.publish(1);
                         port_id++;
                     },
@@ -10878,6 +11361,15 @@ public:
             std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t::map_type &tag) { tag.clear(); });
             std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t::map_type &tag) { tag.clear(); });
         };
+
+        if (settings().changed()) {
+            const auto forward_parameters = settings().apply_staged_parameters();
+            if (!forward_parameters.empty()) {
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t::map_type &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
+                _output_tags_changed = true;
+            }
+            settings()._changed.store(false);
+        }
 
         // TODO: check here whether a process_one(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> process_one(...) -> auto-handling of streaming tags
@@ -11812,10 +12304,22 @@ public:
 
     template<typename Node, typename... Args>
     auto&
-    make_node(Args&&... args) {
+    make_node(Args&&... args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         return *static_cast<Node*>(new_node_ref->raw());
+    }
+
+    template<typename Node>
+    auto&
+    make_node(const tag_t::map_type& initial_settings) {
+        static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
+        auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
+        auto raw_ref = static_cast<Node*>(new_node_ref->raw());
+        if (!initial_settings.empty()) {
+            static_cast<node<Node>*>(raw_ref)->settings().init(*raw_ref, initial_settings);
+        }
+        return *raw_ref;
     }
 
     template<std::size_t src_port_index, typename Source>
