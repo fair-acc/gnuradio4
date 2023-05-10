@@ -8,6 +8,8 @@ ut_dep = dependency('boost.ut')
 cmake = import('cmake')
 libreflcpp = cmake.subproject('refl-cpp')
 reflcpp_dep = libreflcpp.dependency('refl-cpp')
+libpmtv = subproject('pmt')
+pmt_dep = libpmtv.get_variable('pmt_dep')
 
 subdir('include')
 subdir('src')

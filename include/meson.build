@@ -1,5 +1,5 @@
 
-graph_dep = declare_dependency(include_directories: '.', dependencies : [fmt_dep, reflcpp_dep])
+graph_dep = declare_dependency(include_directories: '.', dependencies : [fmt_dep, reflcpp_dep, pmt_dep])
 
 header_files = [
     'vir/detail.h',

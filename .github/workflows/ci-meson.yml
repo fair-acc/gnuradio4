@@ -104,7 +104,7 @@ jobs:
       shell: bash
       run: |
         source ~/emsdk/emsdk_env.sh
-        meson setup ../build --cross-file ~/emsdk/emscripten-toolchain.ini --cross-file emscripten-build.ini --buildtype=${{ matrix.meson-build-type }} -Db_coverage=false
+        meson setup ../build --cross-file ~/emsdk/emscripten-toolchain.ini --cross-file emscripten-build.ini --buildtype=${{ matrix.meson-build-type }} -Db_coverage=false -Dpmt:enable_python=false -Dpmt:enable_testing=false
 
     - name: Build
       if: matrix.configurations.compiler != 'emscripten'
