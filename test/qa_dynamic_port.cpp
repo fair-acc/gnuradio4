@@ -4,6 +4,7 @@
 #include "buffer.hpp"
 #include "graph.hpp"
 #include "refl.hpp"
+#include "scheduler.hpp"
 
 #include <boost/ut.hpp>
 
@@ -163,9 +164,8 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        auto token = flow.init();
-        expect(token);
-        flow.work(token);
+        fair::graph::scheduler::simple sched{flow};
+        sched.work();
     };
 
 #ifdef ENABLE_DYNAMIC_PORTS

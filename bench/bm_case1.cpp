@@ -7,6 +7,7 @@
 #include "bm_test_helper.hpp"
 
 #include <graph.hpp>
+#include <scheduler.hpp>
 #include <node_traits.hpp>
 
 #include <vir/simd.h>
@@ -488,9 +489,8 @@ invoke_work(auto &flow_graph) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    auto token = flow_graph.init();
-    expect(token);
-    flow_graph.work(token);
+    fg::scheduler::simple sched{flow_graph};
+    sched.work();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
 }
@@ -610,12 +610,11 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
-        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
+        fg::scheduler::simple sched{flow_graph};
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -641,12 +640,11 @@ inline const boost::ut::suite _simd_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
-        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
+        fg::scheduler::simple sched{flow_graph};
+        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -677,12 +675,11 @@ inline const boost::ut::suite _simd_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
-        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
+        fg::scheduler::simple sched{flow_graph};
+        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -709,9 +706,8 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token               = flow_graph.init();
-            expect(token);
-            flow_graph.work(token);
+            fg::scheduler::simple sched{flow_graph};
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -735,9 +731,8 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token               = flow_graph.init();
-            expect(token);
-            flow_graph.work(token);
+            fg::scheduler::simple sched{flow_graph};
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };

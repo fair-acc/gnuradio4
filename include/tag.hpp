@@ -57,7 +57,7 @@ struct alignas(hardware_constructive_interference_size) tag_t {
         return map.at(key);
     }
 
-    const pmtv::pmt &
+    [[nodiscard]] const pmtv::pmt &
     at(const std::string &key) const {
         return map.at(key);
     }

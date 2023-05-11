@@ -3,6 +3,7 @@
 #include <buffer.hpp>
 #include <graph.hpp>
 #include <node.hpp>
+#include <scheduler.hpp>
 #include <reflection.hpp>
 
 #include <fmt/format.h>
@@ -223,11 +224,10 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
+        fair::graph::scheduler::simple sched{flow_graph};
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
-        std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
-        flow_graph.work(token);
+        [[maybe_unused]] auto ret = src.settings().set({ { "sample_rate", 49000.0f } });
+        sched.work();
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
         expect(eq(sink.n_samples_consumed, n_samples)) << "did not consume enough input samples";
 
