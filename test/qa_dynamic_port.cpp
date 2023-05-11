@@ -84,7 +84,8 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
-    using namespace boost::ut;
+    using namespace boost::ut::literals;
+    using boost::ut::expect, boost::ut::eq, boost::ut::ge, boost::ut::nothrow, boost::ut::throws;
     using namespace gr;
     using namespace fair::graph;
 

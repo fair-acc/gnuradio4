@@ -11,7 +11,11 @@ if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
     target_link_options(graph-prototype-options INTERFACE
             "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+            -fwasm-exceptions
     )
+    target_compile_options(graph-prototype-options INTERFACE
+            -fwasm-exceptions
+            )
 endif()
 
 
@@ -36,8 +40,10 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         ut
-        GIT_REPOSITORY https://github.com/boost-ext/ut.git
-        GIT_TAG 265199e173b16a75670fae62fc2446b9dffad39e # head as of 2022-12-19
+        GIT_REPOSITORY https://github.com/wirew0rm/ut.git
+        GIT_TAG emscripten # custom branch to add emscripten support to ut
+        # GIT_REPOSITORY https://github.com/boost-ext/ut.git
+        # GIT_TAG e53a47d37bc594e80bd5f1b8dc1ade8dce4429d3 # head as of 2023-05-10
 )
 
 FetchContent_MakeAvailable(fmt refl-cpp pmt ut)
@@ -50,6 +56,7 @@ add_subdirectory(src)
 
 option(ENABLE_TESTING "Enable Test Builds" ON)
 if (ENABLE_TESTING AND UNIX AND NOT APPLE)
+    list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
     enable_testing()
     message("Building Tests.")
     add_subdirectory(test)
