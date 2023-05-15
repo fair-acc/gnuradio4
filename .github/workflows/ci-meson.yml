@@ -70,7 +70,7 @@ jobs:
         sudo apt install -y clang-16 libc++-16-dev libc++abi-16-dev
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 110
 
-    - name: Install emscripten
+    - name: Install emscripten 
       if: matrix.configurations.compiler == 'emscripten'
       run: |
         cd
