@@ -97,7 +97,7 @@ jobs:
     - name: Configure Meson
       if: matrix.configurations.compiler != 'emscripten'
       shell: bash
-      run: meson setup ../build --buildtype=${{matrix.meson-build-type}} -Db_coverage=${{ matrix.configurations.name == env.REFERENCE_CONFIG &&  matrix.meson-build-type == 'debug'}}
+      run: meson setup ../build --buildtype=${{matrix.meson-build-type}} -Db_coverage=${{ matrix.configurations.name == env.REFERENCE_CONFIG &&  matrix.meson-build-type == 'debug'}} -Dpmt:enable_python=false -Dpmt:enable_testing=false
 
     - name: Configure Meson Emscripten
       if: matrix.configurations.compiler == 'emscripten'
