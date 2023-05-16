@@ -14,6 +14,15 @@ inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
 
+#ifdef __EMSCRIPTEN__
+// constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
+#define EM_CONSTEXPR
+#define EM_CONSTEXPR_STATIC static const
+#else
+#define EM_CONSTEXPR constexpr
+#define EM_CONSTEXPR_STATIC constexpr
+#endif
+
 namespace fair::graph {
 
 enum class tag_propagation_policy_t {
@@ -117,7 +126,7 @@ public:
         return std::string_view(Description);
     }
 
-    [[nodiscard]] constexpr explicit(false) operator std::string() const noexcept { return std::string(_key); }
+    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
 
     template<typename T>
         requires std::is_same_v<value_type, T>
@@ -128,17 +137,16 @@ public:
 };
 
 namespace tag { // definition of default tags and names
-                // TODO: change 'inline static const' to 'inline constexpr' once pmtv supports constexpr
-inline constexpr default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
-inline constexpr default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
-inline constexpr default_tag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
-inline constexpr default_tag<"signal_unit", std::string, "", "signal's physical SI unit">                                            SIGNAL_UNIT;
-inline constexpr default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MIN;
-inline constexpr default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MAX;
-inline constexpr default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
-inline constexpr default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
-inline constexpr default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline constexpr default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
+inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
+inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_unit", std::string, "", "signal's physical SI unit">                                            SIGNAL_UNIT;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MIN;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MAX;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
 
 inline constexpr std::tuple DEFAULT_TAGS = {SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT};
 } // namespace tag
