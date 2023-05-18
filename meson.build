@@ -11,6 +11,14 @@ reflcpp_dep = libreflcpp.dependency('refl-cpp')
 libpmtv = subproject('pmt')
 pmt_dep = libpmtv.get_variable('pmt_dep')
 
+
+graph_prototype_options = []
+if meson.is_cross_build()
+  if meson.get_external_property('EMSCRIPTEN', false)
+    graph_prototype_options = ['-s','ALLOW_MEMORY_GROWTH=1']
+  endif 
+endif
+
 subdir('include')
 subdir('src')
 if (get_option('enable_testing'))
