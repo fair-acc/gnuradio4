@@ -1,14 +1,12 @@
 //import boost.ut;
 #include <boost/ut.hpp>
 
-#include <algorithm>
 #include <complex>
 #include <numeric>
 #include <ranges>
 #include <tuple>
 
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 
 #include <buffer.hpp>
 #include <buffer_skeleton.hpp>
@@ -30,7 +28,7 @@ const boost::ut::suite BasicConceptsTests = [] {
         auto typeName = reflection::type_name<T>();
         // N.B. GE because some buffers need to intrinsically
         // allocate more to meet e.g. page-size requirements
-        expect(eq(buffer.size(), std::size_t{1024})) << "for" << typeName;
+        expect(ge(buffer.size(), std::size_t{ 1024 })) << "for" << typeName;
 
         // compile-time interface tests
         BufferReader auto reader = buffer.new_reader(); // tests matching read concept
@@ -452,7 +450,7 @@ const boost::ut::suite StreamTagConcept = [] {
             const auto tags = tagReader.get();
 
             fmt::print("received {} tags\n", tags.size());
-            for (auto &readTag: tags) {
+            for (auto &readTag : tags) {
                 fmt::print("stream-tag @{:3}: '{}'\n", readTag.index, readTag.data);
             }
 
@@ -462,4 +460,56 @@ const boost::ut::suite StreamTagConcept = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+const boost::ut::suite NonPowerTwoTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    "std::vector<T>"_test = [] {
+        using Type                     = std::vector<int>;
+        constexpr std::size_t typeSize = sizeof(std::vector<int>);
+        expect(not std::has_single_bit(typeSize)) << "type is non-power-of-two";
+        Buffer auto buffer = circular_buffer<Type>(1024);
+        expect(ge(buffer.size(), 1024));
+        expect(buffer.size() % typeSize == 0) << "divisible by the type size";
+        expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0) << "divisible by the memory page size";
+
+        BufferWriter auto writer     = buffer.new_writer();
+        BufferReader auto reader     = buffer.new_reader();
+
+        const auto        genSamples = [&buffer, &writer] {
+            for (int i = 0; i < buffer.size() - 10; i++) { // write-only worker (source) mock-up
+                auto lambda = [](auto vectors) {
+                    static int offset = 0;
+                    for (auto &vector : vectors) {
+                        vector.resize(1);
+                        vector[0] = offset++;
+                    }
+                };
+                writer.publish(lambda); // optional return param.
+            }
+        };
+
+        const auto readSamples = [&reader] {
+            while (reader.available()) {
+                const auto vectorData = reader.get();
+                for (auto &vector : vectorData) {
+                    static int offset = -1;
+                    expect(eq(vector.size(), 1)) << "vector size == 1";
+                    expect(eq(vector[0] - offset, 1)) << "vector offset == 1";
+                    offset = vector[0];
+                }
+                expect(reader.consume(vectorData.size()));
+            }
+        };
+
+        // write-read twice to test wrap-around
+        genSamples();
+        readSamples();
+        genSamples();
+        readSamples();
+    };
+};
+
+int
+main() { /* not needed for UT */
+}
