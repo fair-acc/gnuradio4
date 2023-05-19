@@ -152,7 +152,6 @@ public:
     }
 
     template<typename T>
-    requires (std::has_single_bit(sizeof(T)))
     static inline std::pmr::polymorphic_allocator<T> allocator()
     {
         return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
@@ -192,7 +191,6 @@ public:
  * for more details see
  */
 template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-requires (std::has_single_bit(sizeof(T)))
 class circular_buffer
 {
     using Allocator         = std::pmr::polymorphic_allocator<T>;
@@ -220,7 +218,20 @@ class circular_buffer
 
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
-            return _is_mmap_allocated ? util::round_up(min_size * sizeof(T), static_cast<std::size_t>(getpagesize())) / sizeof(T) : min_size;
+            if (_is_mmap_allocated) {
+                const std::size_t pageSize = static_cast<std::size_t>(getpagesize());
+                const std::size_t elementSize = sizeof(T);
+                // least common multiple (lcm) of elementSize and pageSize
+                std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
+
+                // adjust lcmValue to be larger than min_size
+                while (lcmValue < min_size) {
+                    lcmValue += lcmValue;
+                }
+                return lcmValue;
+            } else {
+                return min_size;
+            }
         }
 #else
         static std::size_t align_with_page_size(const std::size_t min_size, bool) {
