@@ -10,6 +10,7 @@ endfunction()
 add_benchmark(bm_buffer)
 add_benchmark(bm_case0)
 add_benchmark(bm_case1)
+add_benchmark(bm_filter)
 add_benchmark(bm_history_buffer)
 
 add_executable(bm_case1_nosimd bm_case1.cpp)
