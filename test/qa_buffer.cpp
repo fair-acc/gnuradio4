@@ -14,6 +14,12 @@
 #include <sequence.hpp>
 #include <wait_strategy.hpp>
 
+#if defined(__clang__) && __clang_major__ >= 16
+// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
+template <>
+auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
+#endif
+
 template<gr::WaitStrategy auto wait = gr::NoWaitStrategy()>
 struct TestStruct {
     [[nodiscard]] constexpr bool test() const noexcept { return true; }
