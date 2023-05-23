@@ -45,6 +45,14 @@ jobs:
         path: ${{runner.workspace}}/build/_deps
         key: ${{ runner.os }}-${{ matrix.configurations.compiler }}-${{ matrix.meson-build-type }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
+    - name: Install PMT meson build deps
+      run: |
+        DEBIAN_FRONTEND=noninteractive \
+        sudo apt-get install -qy \
+        pybind11-dev \
+        libgtest-dev \
+        python3-numpy
+
     - name: Install gcc-12
       if: matrix.configurations.compiler == 'gcc'
       run: |
