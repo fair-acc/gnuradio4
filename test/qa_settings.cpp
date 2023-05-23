@@ -1,8 +1,12 @@
 #include <boost/ut.hpp>
 
-#include <node.hpp>
+#include <buffer.hpp>
 #include <graph.hpp>
+#include <node.hpp>
 #include <reflection.hpp>
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -11,6 +15,63 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 namespace fair::graph::setting_test {
+
+namespace utils {
+
+std::string
+format_variant(const auto &value) noexcept {
+    return std::visit(
+            [](auto &&arg) {
+                using Type = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) {
+                    return fmt::format("{}", arg);
+                } else if constexpr (std::is_same_v<Type, std::monostate>) {
+                    return fmt::format("monostate");
+                } else if constexpr (std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
+                    return fmt::format("({}, {})", arg.real(), arg.imag());
+                } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
+                    return fmt::format("[");
+                    for (const auto &c : arg) {
+                        return fmt::format("({}, {}), ", c.real(), c.imag());
+                    }
+                    return fmt::format("]");
+                } else if constexpr (std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>> || std::is_same_v<Type, std::vector<unsigned short>>
+                                     || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>> || std::is_same_v<Type, std::vector<signed char>>
+                                     || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>> || std::is_same_v<Type, std::vector<long>>
+                                     || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
+                    return fmt::format("[{}]", fmt::join(arg, ", "));
+                } else {
+                    return fmt::format("not-yet-supported type {}", fair::meta::type_name<Type>());
+                }
+            },
+            value);
+};
+
+void
+printChanges(const tag_t::map_type &oldMap, const tag_t::map_type &newMap) noexcept {
+    for (const auto &[key, newValue] : newMap) {
+        if (!oldMap.contains(key)) {
+            fmt::print("    key added '{}` = {}\n", key, format_variant(newValue));
+        } else {
+            const auto &oldValue = oldMap.at(key);
+            const bool  areEqual = std::visit(
+                    [](auto &&arg1, auto &&arg2) {
+                        if constexpr (std::is_same_v<std::decay_t<decltype(arg1)>, std::decay_t<decltype(arg2)>>) {
+                            // compare values if they are of the same type
+                            return arg1 == arg2;
+                        } else {
+                            return false; // values are of different type
+                        }
+                    },
+                    oldValue, newValue);
+
+            if (!areEqual) {
+                fmt::print("    key value changed: '{}` = {} -> {}\n", key, format_variant(oldValue), format_variant(newValue));
+            }
+        }
+    }
+};
+} // namespace utils
 
 template<typename T>
 struct Source : public node<Source<T>> {
@@ -42,12 +103,26 @@ struct Source : public node<Source<T>> {
 
 template<typename T>
 struct TestBlock : public node<TestBlock<T>> {
-    IN<T>       in;
-    OUT<T>      out;
-    T           scaling_factor = static_cast<T>(1);
-    std::string  context;
-    std::int32_t n_samples_max = -1;
-    float        sample_rate        = 1000.0f;
+    IN<T>          in;
+    OUT<T>         out;
+    T              scaling_factor = static_cast<T>(1);
+    std::string    context;
+    std::int32_t   n_samples_max = -1;
+    float          sample_rate   = 1000.0f;
+    std::vector<T> vector_setting{ T(3), T(2), T(1) };
+    int            update_count = 0;
+    bool           debug        = false;
+
+    void
+    init(const tag_t::map_type &old_setting, const tag_t::map_type &new_setting) noexcept {
+        // optional function that is called whenever settings change
+        update_count++;
+
+        if (debug) {
+            fmt::print("settings changed - update_count: {}\n", update_count);
+            utils::printChanges(old_setting, new_setting);
+        }
+    }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
@@ -90,7 +165,7 @@ struct Sink : public node<Sink<T>> {
 } // namespace fair::graph::setting_test
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
 
 const boost::ut::suite SettingsTests = [] {
@@ -114,7 +189,7 @@ const boost::ut::suite SettingsTests = [] {
 
         block1.context = "Test Context";
         block1.settings().update_active_parameters();
-        expect(eq(block1.settings().auto_update_parameters().size(), 4UL));
+        expect(eq(block1.settings().auto_update_parameters().size(), 5UL));
         expect(eq(block1.settings().auto_forward_parameters().size(), 2UL));
 
         expect(block1.settings().get("context").has_value());
@@ -127,7 +202,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().get(keys1).empty());
         expect(block1.settings().get(keys2).empty());
         expect(block1.settings().get(keys3).empty());
-        expect(eq(block1.settings().get().size(), 4UL));
+        expect(eq(block1.settings().get().size(), 5UL));
 
         // set non-existent setting
         expect(not block1.settings().changed()) << "settings not changed";
@@ -170,6 +245,58 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().auto_update_parameters().contains("sample_rate")) << "block1 retained auto-update flag";
         expect(block2.settings().auto_update_parameters().contains("sample_rate")) << "block1 retained auto-update flag";
         expect(sink.settings().auto_update_parameters().contains("sample_rate")) << "sink retained auto-update flag";
+    };
+
+    "constructor"_test = [] {
+        "empty"_test = [] {
+            auto                  block = TestBlock<float>();
+            [[maybe_unused]] auto _     = block.settings().apply_staged_parameters();
+            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
+        };
+
+#if !defined(__clang_major__) && __clang_major__ <= 15
+        "with init parameter"_test = [] {
+            auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
+            expect(eq(block.settings().staged_parameters().size(), 1));
+            [[maybe_unused]] auto _ = block.settings().apply_staged_parameters();
+            expect(eq(block.settings().staged_parameters().size(), 0));
+            block.settings().update_active_parameters();
+            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(block.scaling_factor, 2.f));
+            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
+        };
+#endif
+
+        "empty via graph"_test = [] {
+            graph flow_graph;
+            auto &block = flow_graph.make_node<TestBlock<float>>();
+            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(block.scaling_factor, 1.f));
+            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
+        };
+
+        "with init parameter via graph"_test = [] {
+            graph flow_graph;
+            auto &block = flow_graph.make_node<TestBlock<float>>({ { "scaling_factor", 2.f } });
+            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(block.scaling_factor, 2.f));
+            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
+        };
+    };
+
+    "vector-type support"_test = [] {
+        graph flow_graph;
+        auto &block = flow_graph.make_node<TestBlock<float>>();
+        block.settings().update_active_parameters();
+        expect(eq(block.settings().get().size(), 5UL));
+
+        block.debug    = true;
+        const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } } });
+        expect(val.empty()) << "unable to stage settings";
+        [[maybe_unused]] auto _ = block.settings().apply_staged_parameters();
+        expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
+        expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
     };
 };
 

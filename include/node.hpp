@@ -229,12 +229,16 @@ protected:
     }
 
 public:
-    constexpr node() noexcept : node(self()) {}
+    node() noexcept : node({}) {}
 
-    constexpr node(Derived &derived) noexcept
+    node(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept
         : _tags_at_input(traits::node::input_port_types<Derived>::size())
         , _tags_at_output(traits::node::output_port_types<Derived>::size())
-        , _settings(std::make_unique<basic_settings<Derived>>(derived)) {}
+        , _settings(std::make_unique<basic_settings<Derived>>(*static_cast<Derived *>(this))) {
+        if (init_parameter.size() != 0) {
+            [[maybe_unused]] auto _ = settings().set(init_parameter);
+        }
+    }
 
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
@@ -492,7 +496,7 @@ public:
                                 _tags_at_input[port_index].insert(map.begin(), map.end());
                                 merged_tag_map.insert(map.begin(), map.end());
                             }
-                            input_port.tagReader().consume(1_UZ);
+                            [[maybe_unused]] auto _ = input_port.tagReader().consume(1_UZ);
                             port_index++;
                         }
                     },
