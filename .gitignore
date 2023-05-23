@@ -51,3 +51,5 @@ CMakeLists.txt.user
 
 # python venv files
 virtualenv/
+
+emscripten-toolchain.ini
