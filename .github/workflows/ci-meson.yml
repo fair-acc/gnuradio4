@@ -1,0 +1,142 @@
+name: Meson
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ created ]
+
+jobs:
+  build:
+    name: "${{ matrix.configurations.name }} | ${{ matrix.meson-build-type }}"
+    environment: configure coverage
+    runs-on: ${{ matrix.configurations.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        configurations:
+          - name: Ubuntu gcc12
+            os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
+            compiler: gcc
+          - name: Ubuntu clang15
+            os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
+            compiler: clang15
+          - name: Ubuntu Latest clang16
+            os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
+            compiler: clang16
+          - name: Ubuntu Latest emscripten
+            os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
+            compiler: emscripten
+        # Customize the meson build type here (Release, Debug, RelWithDebInfo, etc.)
+        meson-build-type: [ release, debug ]
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 100
+
+    - name: Cache
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-fetchContent-cache
+      with:
+        path: ${{runner.workspace}}/build/_deps
+        key: ${{ runner.os }}-${{ matrix.configurations.compiler }}-${{ matrix.meson-build-type }}-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+    - name: Install PMT meson build deps
+      run: |
+        DEBIAN_FRONTEND=noninteractive \
+        sudo apt-get install -qy \
+        pybind11-dev \
+        libgtest-dev \
+        python3-numpy
+
+    - name: Install gcc-12
+      if: matrix.configurations.compiler == 'gcc'
+      run: |
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa # provides newer gcc 12.2.0 instead of 12.1.0
+        sudo apt-get install -y gcc-12 g++-12
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 110 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+
+    - name: Install clang-15
+      if: matrix.configurations.compiler == 'clang15'
+      run: |
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+        sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-15 main'
+        sudo apt update
+        sudo apt install -y clang-15 libc++-15-dev libc++abi-15-dev
+        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-15 110
+
+    - name: Install clang-16
+      if: matrix.configurations.compiler == 'clang16'
+      run: |
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+        sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-16 main'
+        sudo apt update
+        sudo apt install -y clang-16 libc++-16-dev libc++abi-16-dev
+        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 110
+
+    - name: Install emscripten 
+      if: matrix.configurations.compiler == 'emscripten'
+      run: |
+        cd
+        git clone https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        # Download and install the latest SDK tools.
+        ./emsdk install latest
+        # Make the "latest" SDK "active" for the current user. (writes .emscripten file)
+        ./emsdk activate latest
+        # Activate PATH and other environment variables in the current terminal
+        source ./emsdk_env.sh
+        emcc -v
+        tee emscripten-toolchain.ini <<EOF >/dev/null
+        [constants]
+        toolchain = '$(pwd)/${{ env.EM_CACHE_FOLDER }}/upstream/emscripten/'
+        EOF
+
+    - name: Install Meson
+      shell: bash
+      run: |-
+        sudo apt install python3-pip ninja-build
+        pip install meson
+
+    - name: Configure Meson
+      if: matrix.configurations.compiler != 'emscripten'
+      shell: bash
+      run: meson setup ../build --buildtype=${{matrix.meson-build-type}} -Db_coverage=${{ matrix.configurations.name == env.REFERENCE_CONFIG &&  matrix.meson-build-type == 'debug'}} -Dpmt:enable_python=false -Dpmt:enable_testing=false
+
+    - name: Configure Meson Emscripten
+      if: matrix.configurations.compiler == 'emscripten'
+      shell: bash
+      run: |
+        source ~/emsdk/emsdk_env.sh
+        meson setup ../build --cross-file ~/emsdk/emscripten-toolchain.ini --cross-file emscripten-build.ini --buildtype=${{ matrix.meson-build-type }} -Db_coverage=false -Dpmt:enable_python=false -Dpmt:enable_testing=false
+
+    - name: Build
+      if: matrix.configurations.compiler != 'emscripten'
+      shell: bash
+      run: cd ../build && ninja
+
+    - name: Build Emscripten
+      if: matrix.configurations.compiler == 'emscripten'
+      shell: bash
+      run: |
+        source ~/emsdk/emsdk_env.sh
+        cd ../build
+        ninja
+
+    - name: execute binary
+      if: matrix.configurations.compiler != 'emscripten'
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      run: ./src/main
+
+    - name: execute binary
+      if: matrix.configurations.compiler == 'emscripten'
+      working-directory: ${{runner.workspace}}/build
+      shell: bash
+      run: |
+        source ~/emsdk/emsdk_env.sh
+        ${EMSDK_NODE} ./src/main.js
