@@ -7,6 +7,12 @@
 
 #include <boost/ut.hpp>
 
+#if defined(__clang__) && __clang_major__ >= 16
+// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
+template <>
+auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
+#endif
+
 namespace fg = fair::graph;
 
 using namespace std::string_literals;
@@ -84,7 +90,8 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
-    using namespace boost::ut;
+    using namespace boost::ut::literals;
+    using boost::ut::expect, boost::ut::eq, boost::ut::ge, boost::ut::nothrow, boost::ut::throws;
     using namespace gr;
     using namespace fair::graph;
 
