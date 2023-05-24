@@ -1,6 +1,117 @@
 #ifndef GNURADIO_GRAPH_HPP
 #define GNURADIO_GRAPH_HPP
 
+// #include "buffer.hpp"
+#ifndef GNURADIO_BUFFER2_H
+#define GNURADIO_BUFFER2_H
+
+#include <bit>
+#include <cstdint>
+#include <type_traits>
+#include <concepts>
+#include <span>
+
+namespace gr {
+namespace util {
+template <typename T, typename...>
+struct first_template_arg_helper;
+
+template <template <typename...> class TemplateType,
+          typename ValueType,
+          typename... OtherTypes>
+struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
+    using value_type = ValueType;
+};
+
+template <typename T>
+constexpr auto* value_type_helper()
+{
+    if constexpr (requires { typename T::value_type; }) {
+        return static_cast<typename T::value_type*>(nullptr);
+    }
+    else {
+        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
+    }
+}
+
+template <typename T>
+using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
+
+template <typename... A>
+struct test_fallback {
+};
+
+template <typename, typename ValueType>
+struct test_value_type {
+    using value_type = ValueType;
+};
+
+static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
+static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
+static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
+static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
+
+} // namespace util
+
+// clang-format off
+// disable formatting until clang-format (v16) supporting concepts
+template<class T>
+concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
+    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
+    { t.consume(n_items) } -> std::same_as<bool>;
+    { t.position() }       -> std::same_as<std::int64_t>;
+    { t.available() }      -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class Fn, typename T, typename ...Args>
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+
+template<class T, typename ...Args>
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.reserve_output_range(n_items) };
+    { t.available() }         -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class T, typename ...Args>
+concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
+    { T(min_size, args...) };
+    { t.size() }       -> std::same_as<std::size_t>;
+    { t.new_reader() } -> BufferReader;
+    { t.new_writer() } -> BufferWriter;
+};
+
+// compile-time unit-tests
+namespace test {
+template <typename T>
+struct non_compliant_class {
+};
+template <typename T, typename... Args>
+using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
+template <typename T, typename... Args>
+using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
+} // namespace test
+
+static_assert(!Buffer<test::non_compliant_class<int>>);
+static_assert(!BufferReader<test::non_compliant_class<int>>);
+static_assert(!BufferWriter<test::non_compliant_class<int>>);
+
+static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+// clang-format on
+} // namespace gr
+
+#endif // GNURADIO_BUFFER2_H
+
 // #include "circular_buffer.hpp"
 #ifndef GNURADIO_CIRCULAR_BUFFER_HPP
 #define GNURADIO_CIRCULAR_BUFFER_HPP
@@ -3582,7 +3693,10 @@ concept is_instantiation_of = is_instantiation<Template, Class>::value;
 template<typename T>
 concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
 
-namespace stdx   = vir::stdx;
+template<typename T>
+concept vector_type = is_instantiation_of<T, std::vector>;
+
+namespace stdx      = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
@@ -4052,115 +4166,6 @@ using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY
 // #include "sequence.hpp"
 
 // #include "buffer.hpp"
-#ifndef GNURADIO_BUFFER2_H
-#define GNURADIO_BUFFER2_H
-
-#include <bit>
-#include <cstdint>
-#include <type_traits>
-#include <concepts>
-#include <span>
-
-namespace gr {
-namespace util {
-template <typename T, typename...>
-struct first_template_arg_helper;
-
-template <template <typename...> class TemplateType,
-          typename ValueType,
-          typename... OtherTypes>
-struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
-    using value_type = ValueType;
-};
-
-template <typename T>
-constexpr auto* value_type_helper()
-{
-    if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type*>(nullptr);
-    }
-    else {
-        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
-    }
-}
-
-template <typename T>
-using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
-
-template <typename... A>
-struct test_fallback {
-};
-
-template <typename, typename ValueType>
-struct test_value_type {
-    using value_type = ValueType;
-};
-
-static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
-static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
-static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
-static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
-
-} // namespace util
-
-// clang-format off
-// disable formatting until clang-format (v16) supporting concepts
-template<class T>
-concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
-    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
-    { t.consume(n_items) } -> std::same_as<bool>;
-    { t.position() }       -> std::same_as<std::int64_t>;
-    { t.available() }      -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
-
-template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
-
-template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
-    { t.reserve_output_range(n_items) };
-    { t.available() }         -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
-
-template<class T, typename ...Args>
-concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
-    { T(min_size, args...) };
-    { t.size() }       -> std::same_as<std::size_t>;
-    { t.new_reader() } -> BufferReader;
-    { t.new_writer() } -> BufferWriter;
-};
-
-// compile-time unit-tests
-namespace test {
-template <typename T>
-struct non_compliant_class {
-};
-template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
-template <typename T, typename... Args>
-using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
-} // namespace test
-
-static_assert(!Buffer<test::non_compliant_class<int>>);
-static_assert(!BufferReader<test::non_compliant_class<int>>);
-static_assert(!BufferWriter<test::non_compliant_class<int>>);
-
-static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-// clang-format on
-} // namespace gr
-
-#endif // GNURADIO_BUFFER2_H
 
 
 namespace gr {
@@ -4650,26 +4655,16 @@ static_assert(Buffer<circular_buffer<int32_t>>);
 
 #endif // GNURADIO_CIRCULAR_BUFFER_HPP
 
-// #include "buffer.hpp"
-
-// #include "typelist.hpp"
-
-// #include "port.hpp"
-#ifndef GNURADIO_PORT_HPP
-#define GNURADIO_PORT_HPP
-
-#include <complex>
-#include <span>
-#include <variant>
-
-// #include "circular_buffer.hpp"
-
-// #include "tag.hpp"
-#ifndef GRAPH_PROTOTYPE_TAG_HPP
-#define GRAPH_PROTOTYPE_TAG_HPP
+// #include "node.hpp"
+#ifndef GNURADIO_NODE_HPP
+#define GNURADIO_NODE_HPP
 
 #include <map>
-#include <pmtv/pmt.hpp>
+
+// #include <node_traits.hpp>
+#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
+#define GNURADIO_NODE_NODE_TRAITS_HPP
+
 // #include <reflection.hpp>
 #ifndef GRAPH_PROTOTYPE_REFLECTION_HPP
 #define GRAPH_PROTOTYPE_REFLECTION_HPP
@@ -9592,6 +9587,25 @@ REFL_END
 
 #endif //GRAPH_PROTOTYPE_REFLECTION_HPP
 
+
+// #include <port.hpp>
+#ifndef GNURADIO_PORT_HPP
+#define GNURADIO_PORT_HPP
+
+#include <complex>
+#include <span>
+#include <variant>
+
+// #include "circular_buffer.hpp"
+
+// #include "tag.hpp"
+#ifndef GRAPH_PROTOTYPE_TAG_HPP
+#define GRAPH_PROTOTYPE_TAG_HPP
+
+#include <map>
+#include <pmtv/pmt.hpp>
+// #include <reflection.hpp>
+
 // #include <utils.hpp>
 
 
@@ -10144,21 +10158,6 @@ publish_tag(Port auto &port, const tag_t::map_type &tag_data, std::size_t tag_of
 } // namespace fair::graph
 
 #endif // include guard
-
-// #include "node.hpp"
-#ifndef GNURADIO_NODE_HPP
-#define GNURADIO_NODE_HPP
-
-#include <map>
-
-// #include <node_traits.hpp>
-#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
-#define GNURADIO_NODE_NODE_TRAITS_HPP
-
-// #include <reflection.hpp>
-
-
-// #include <port.hpp>
  // localinclude
 // #include <port_traits.hpp>
 #ifndef GNURADIO_NODE_PORT_TRAITS_HPP
@@ -10445,12 +10444,11 @@ struct SettingsCtx {
     // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
     using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
     std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
-    std::string              context;             /// user-defined multiplexing context for which the setting is valid
+    tag_t::map_type          context;             /// user-defined multiplexing context for which the setting is valid
 };
 
 template<typename T, typename Node>
 concept Settings = requires(T t, Node& n, std::span<const std::string> parameter_keys, const std::string &parameter_key, const tag_t::map_type &parameters, SettingsCtx ctx) {
-    { init(n, parameters) } -> std::same_as<void>;
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
@@ -10544,10 +10542,6 @@ struct settings_base {
         other._settings_changed.store(changed);
     }
 
-    virtual void
-    init(Node &node, const tag_t::map_type &initial_settings) noexcept
-            = 0;
-
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
@@ -10633,7 +10627,7 @@ public:
                     [this](auto &&default_tag) {
                         for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
                             using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                                 if (default_tag.shortKey().ends_with(get_display_name(member))) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
@@ -10681,21 +10675,6 @@ public:
         std::swap(_auto_forward, other._auto_forward);
     }
 
-    void
-    init(Node &node, const tag_t::map_type &initial_settings) noexcept {
-        settings_base<Node>::_node = &node;
-        update_active_parameters();
-        auto invalid_settings = set(initial_settings);
-        [[maybe_unused]] auto ignore = apply_staged_parameters();
-        update_active_parameters();
-        if (!invalid_settings.empty()) {
-            fmt::print(stderr, "{} could not set {} initial parameter - invalid keys/value types\n", meta::type_name<Node>(), invalid_settings.size());
-            for (auto &[key, value] : invalid_settings) {
-                fmt::print(stderr, "key: {} - value-type: {}\n", key, value.index());
-            }
-        }
-    }
-
     [[nodiscard]] tag_t::map_type
     set(const tag_t::map_type &parameters, SettingsCtx = {}) {
         tag_t::map_type ret;
@@ -10707,7 +10686,7 @@ public:
                 bool        is_set = false;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
                     using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -10735,7 +10714,7 @@ public:
                 const auto &value = localValue;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
                     using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             settings_base<Node>::_changed.store(true);
@@ -10801,13 +10780,28 @@ public:
         tag_t::map_type forward_parameters; // parameters that should be forwarded to dependent child nodes
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
+
+            tag_t::map_type oldSettings;
+            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+                // take a copy of the field -> map value of the old settings
+                if constexpr (refl::is_reflectable<Node>()) {
+                    for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
+                        using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+
+                        if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                            oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
+                        }
+                    });
+                }
+            }
+
             tag_t::map_type staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key          = localKey;
                 const auto &staged_value = localStaged_value;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                    if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                    if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*settings_base<Node>::_node) = std::get<Type>(staged_value);
                             if constexpr (requires { settings_base<Node>::_node->init(/* old settings */ _active, /* new settings */ staged); }) {
@@ -10823,12 +10817,14 @@ public:
             for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
                 using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
 
-                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
                 }
             });
             if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
-                settings_base<Node>::_node->init(/* old settings */ _active, /* new settings */ staged);
+                if (!staged.empty()) {
+                    settings_base<Node>::_node->init(/* old settings */ oldSettings, /* new settings */ staged);
+                }
             }
             _staged.clear();
         }
@@ -11071,12 +11067,16 @@ protected:
     }
 
 public:
-    constexpr node() noexcept : node(self()) {}
+    node() noexcept : node({}) {}
 
-    constexpr node(Derived &derived) noexcept
+    node(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept
         : _tags_at_input(traits::node::input_port_types<Derived>::size())
         , _tags_at_output(traits::node::output_port_types<Derived>::size())
-        , _settings(std::make_unique<basic_settings<Derived>>(derived)) {}
+        , _settings(std::make_unique<basic_settings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+        if (init_parameter.size() != 0) {
+            std::ignore = settings().set(init_parameter);
+        }
+    }
 
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
@@ -11166,7 +11166,7 @@ public:
                     // limit number of samples to read up to the next tag <-> forces processing from tag to tag|MAX_SIZE
                     // N.B. new tags are thus always on the first readable sample
                     availableSamples = std::min(availableSamples, static_cast<std::size_t>(tag_stream_head_distance));
-                    //TODO: handle corner case where the distance to the next tag is less than the ports MIN_SIZE
+                    // TODO: handle corner case where the distance to the next tag is less than the ports MIN_SIZE
                 }
             }
             if (availableSamples > 0_UZ) at_least_one_input_has_data = true;
@@ -11259,9 +11259,9 @@ public:
                           }) {
                 // the (source) node wants to determine the number of samples to process
                 std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
-                meta::tuple_for_each([&max_buffer](auto&& out){ max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
+                meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
                 const std::int64_t available_samples = self().available_samples(self());
-                samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
+                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (available_samples < 0 && max_buffer > 0) {
                     return work_return_t::DONE;
                 }
@@ -11272,8 +11272,8 @@ public:
                     return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
                 }
             } else if constexpr (requires(const Derived &d) {
-                              { available_samples(d) } -> std::same_as<std::size_t>;
-                          }) {
+                                     { available_samples(d) } -> std::same_as<std::size_t>;
+                                 }) {
                 // the (source) node wants to determine the number of samples to process
                 samples_to_process = available_samples(self());
                 if (not enough_samples_for_output_ports(samples_to_process)) {
@@ -11323,8 +11323,8 @@ public:
         bool auto_change         = false;
         if (tags_to_process) {
             tag_t::map_type merged_tag_map;
-            _input_tags_present = true;
-            std::size_t                      port_index = 0; // TODO absorb this as optional tuple_for_each argument
+            _input_tags_present    = true;
+            std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
                     [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
                         auto tags = input_port.tagReader().get(1_UZ);
@@ -11334,7 +11334,7 @@ public:
                                 _tags_at_input[port_index].insert(map.begin(), map.end());
                                 merged_tag_map.insert(map.begin(), map.end());
                             }
-                            input_port.tagReader().consume(1_UZ);
+                            std::ignore = input_port.tagReader().consume(1_UZ);
                             port_index++;
                         }
                     },
@@ -11359,8 +11359,8 @@ public:
                 return;
             }
             std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
-            //TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
-            //meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
+            // TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
+            // meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
             meta::tuple_for_each(
                     [&port_id, this](auto &output_port) noexcept {
                         if (_tags_at_output[port_id].empty()) {
@@ -11418,10 +11418,9 @@ public:
                                                                                          : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
                 width{};
 
-        if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0)
-                      and ((is_source_node and requires(Derived & d) {
-                                                   { d.process_one_simd(width) };
-                                               }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+        if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
+                                                                                              { d.process_one_simd(width) };
+                                                                                          }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
             // SIMD loop
             std::size_t i = 0;
             for (; i + width <= samples_to_process; i += width) {
@@ -11459,35 +11458,35 @@ public:
 
 template<typename Node>
 concept source_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
-                          {
-                              [](Node &n, auto &inputs) {
-                                  constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
-                                  if constexpr (port_count > 0) {
-                                      return []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) -> decltype(n_inside.process_one(std::get<Is>(tup)...)) {
-                                          return {};
-                                      }(n, inputs, std::make_index_sequence<port_count>());
-                                  } else {
-                                      return n.process_one();
-                                  }
-                              }(node, inputs)
-                          } -> std::same_as<typename traits::node::return_type<Node>>;
-                      };
+    {
+        [](Node &n, auto &inputs) {
+            constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
+            if constexpr (port_count > 0) {
+                return []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) -> decltype(n_inside.process_one(std::get<Is>(tup)...)) {
+                    return {};
+                }(n, inputs, std::make_index_sequence<port_count>());
+            } else {
+                return n.process_one();
+            }
+        }(node, inputs)
+    } -> std::same_as<typename traits::node::return_type<Node>>;
+};
 
 template<typename Node>
 concept sink_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
-                        {
-                            [](Node &n, auto &inputs) {
-                                constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
-                                []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) {
-                                    if constexpr (port_count > 0) {
-                                        auto a [[maybe_unused]] = n_inside.process_one(std::get<Is>(tup)...);
-                                    } else {
-                                        n_inside.process_one(std::get<Is>(tup)...);
-                                    }
-                                }(n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
-                            }(node, inputs)
-                        };
-                    };
+    {
+        [](Node &n, auto &inputs) {
+            constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
+            []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) {
+                if constexpr (port_count > 0) {
+                    std::ignore = n_inside.process_one(std::get<Is>(tup)...);
+                } else {
+                    n_inside.process_one(std::get<Is>(tup)...);
+                }
+            }(n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
+        }(node, inputs)
+    };
+};
 
 template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
 class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
@@ -11558,8 +11557,8 @@ public:
     friend constexpr std::size_t
     available_samples(const merged_node &self) noexcept
         requires requires(const Left &l) {
-                     { available_samples(l) } -> std::same_as<std::size_t>;
-                 }
+            { available_samples(l) } -> std::same_as<std::size_t>;
+        }
     {
         return available_samples(self.left);
     }
@@ -11576,7 +11575,7 @@ public:
     process_one_simd(auto N)
         requires traits::node::can_process_simd<Right>
     {
-        if constexpr (requires(Left & l) {
+        if constexpr (requires(Left &l) {
                           { l.process_one_simd(N) };
                       }) {
             return right.process_one(left.process_one_simd(N));
@@ -11728,6 +11727,10 @@ static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(
 
 #endif // include guard
 
+// #include "port.hpp"
+
+// #include "typelist.hpp"
+
 
 #include <algorithm>
 #include <complex>
@@ -11795,7 +11798,8 @@ class dynamic_port {
                 = 0;
 
         [[nodiscard]] virtual connection_result_t
-        connect(dynamic_port &dst_port) = 0;
+        connect(dynamic_port &dst_port)
+                = 0;
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool
@@ -11894,8 +11898,7 @@ class dynamic_port {
         connect(dynamic_port &dst_port) override {
             if constexpr (T::IS_OUTPUT) {
                 auto src_buffer = _value.writer_handler_internal();
-                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS
-                                                                   : connection_result_t::FAILED;
+                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
             } else {
                 assert(!"This works only on input ports");
                 return connection_result_t::FAILED;
@@ -12057,7 +12060,6 @@ public:
 
 #endif
 
-
 class graph {
 private:
     class node_model {
@@ -12072,8 +12074,7 @@ private:
         work() = 0;
 
         virtual void *
-        raw()
-                = 0;
+        raw() = 0;
     };
 
     template<typename T>
@@ -12103,12 +12104,12 @@ private:
         node_wrapper() {}
 
         template<typename Arg>
-            requires (!std::is_same_v<std::remove_cvref_t<Arg>, T>)
-        node_wrapper(Arg&& arg) : _node(std::forward<Arg>(arg)) {}
+            requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
+        node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {}
 
-        template<typename ...Args>
-            requires (sizeof...(Args) > 1)
-        node_wrapper(Args&&... args) : _node{std::forward<Args>(args)...} {}
+        template<typename... Args>
+            requires(sizeof...(Args) > 1)
+        node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {}
 
         constexpr work_return_t
         work() override {
@@ -12130,13 +12131,13 @@ private:
     public:
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
-        node_model* _src_node;
-        node_model* _dst_node;
-        std::size_t                 _src_port_index;
-        std::size_t                 _dst_port_index;
-        int32_t                     _weight;
-        std::string                 _name; // custom edge name
-        bool                        _connected;
+        node_model *_src_node;
+        node_model *_dst_node;
+        std::size_t _src_port_index;
+        std::size_t _dst_port_index;
+        int32_t     _weight;
+        std::string _name; // custom edge name
+        bool        _connected;
 
     public:
         edge()             = delete;
@@ -12153,14 +12154,8 @@ private:
         operator=(edge &&) noexcept
                 = default;
 
-        edge(node_model* src_node, std::size_t src_port_index, node_model* dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
-            : _src_node(src_node)
-            , _dst_node(dst_node)
-            , _src_port_index(src_port_index)
-            , _dst_port_index(dst_port_index)
-            , _weight(weight)
-            , _name(name) {
-        }
+        edge(node_model *src_node, std::size_t src_port_index, node_model *dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
+            : _src_node(src_node), _dst_node(dst_node), _src_port_index(src_port_index), _dst_port_index(dst_port_index), _weight(weight), _name(name) {}
 
         [[nodiscard]] constexpr int32_t
         weight() const noexcept {
@@ -12193,34 +12188,25 @@ private:
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
-    connect_impl(Source &src_node_raw, SourcePort& source_port, Destination &dst_node_raw, DestinationPort& destination_port,
-            int32_t weight = 0, std::string_view name = "unnamed edge") {
-        static_assert(
-                std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>,
-                "The source port type needs to match the sink port type");
+    connect_impl(Source &src_node_raw, SourcePort &source_port, Destination &dst_node_raw, DestinationPort &destination_port, int32_t weight = 0, std::string_view name = "unnamed edge") {
+        static_assert(std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>, "The source port type needs to match the sink port type");
 
-        if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) {
-            return registered_node->raw() == std::addressof(src_node_raw);
-        })
-            || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) {
-            return registered_node->raw() == std::addressof(dst_node_raw);
-        })) {
+        if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(src_node_raw); })
+            || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(dst_node_raw); })) {
             throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name(), src_port_index, dst_node_raw.name(), dst_port_index));
         }
 
         auto result = source_port.connect(destination_port);
         if (result == connection_result_t::SUCCESS) {
-            auto find_wrapper = [this] (auto* node) {
-                auto it = std::find_if(_nodes.begin(), _nodes.end(), [node] (auto& wrapper) {
-                        return wrapper->raw() == node;
-                    });
+            auto find_wrapper = [this](auto *node) {
+                auto it = std::find_if(_nodes.begin(), _nodes.end(), [node](auto &wrapper) { return wrapper->raw() == node; });
                 if (it == _nodes.end()) {
                     throw fmt::format("This node {} does not belong to this graph\n", node->name());
                 }
                 return it->get();
             };
-            auto* src_node = find_wrapper(&src_node_raw);
-            auto* dst_node = find_wrapper(&dst_node_raw);
+            auto *src_node = find_wrapper(&src_node_raw);
+            auto *dst_node = find_wrapper(&dst_node_raw);
             _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, weight, name);
         }
 
@@ -12232,88 +12218,88 @@ private:
     // Just a dummy class that stores the graph and the source node and port
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
-    template <typename Source, typename Port, std::size_t src_port_index = 1_UZ>
+    template<typename Source, typename Port, std::size_t src_port_index = 1_UZ>
     struct source_connector {
-        graph& self;
-        Source& source;
-        Port& port;
+        graph  &self;
+        Source &source;
+        Port   &port;
 
-        source_connector(graph& _self, Source& _source, Port& _port) : self(_self), source(_source), port(_port) {}
+        source_connector(graph &_self, Source &_source, Port &_port) : self(_self), source(_source), port(_port) {}
 
     private:
-        template <typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
-        [[nodiscard]] constexpr auto to(Destination& destination, DestinationPort& destination_port) {
+        template<typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
+        [[nodiscard]] constexpr auto
+        to(Destination &destination, DestinationPort &destination_port) {
             // Not overly efficient as the node doesn't know the graph it belongs to,
             // but this is not a frequent operation and the check is important.
-            auto is_node_known = [this] (const auto& query_node) {
-                return std::any_of(self._nodes.cbegin(), self._nodes.cend(), [&query_node] (const auto& known_node) {
-                    return known_node->raw() == std::addressof(query_node);
-                        });
-
+            auto is_node_known = [this](const auto &query_node) {
+                return std::any_of(self._nodes.cbegin(), self._nodes.cend(), [&query_node](const auto &known_node) { return known_node->raw() == std::addressof(query_node); });
             };
             if (!is_node_known(source) || !is_node_known(destination)) {
                 throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name(), destination.name());
             }
-            self._connection_definitions.push_back([self = &self, source = &source, source_port = &port, destination = &destination, destination_port = &destination_port] () {
+            self._connection_definitions.push_back([self = &self, source = &source, source_port = &port, destination = &destination, destination_port = &destination_port]() {
                 return self->connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
             });
             return connection_result_t::SUCCESS;
         }
 
     public:
-        template <typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
-        [[nodiscard]] constexpr auto to(Destination& destination, DestinationPort Destination::* member_ptr) {
+        template<typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
+        [[nodiscard]] constexpr auto
+        to(Destination &destination, DestinationPort Destination::*member_ptr) {
             return to<Destination, DestinationPort, dst_port_index>(destination, std::invoke(member_ptr, destination));
         }
 
-        template <std::size_t dst_port_index, typename Destination>
-        [[nodiscard]] constexpr auto to(Destination& destination) {
+        template<std::size_t dst_port_index, typename Destination>
+        [[nodiscard]] constexpr auto
+        to(Destination &destination) {
             auto &destination_port = input_port<dst_port_index>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destination_port)>, dst_port_index>(destination, destination_port);
         }
 
-        template <fixed_string dst_port_name, typename Destination>
-        [[nodiscard]] constexpr auto to(Destination& destination) {
-            using destination_input_ports = typename traits::node::input_ports<Destination>;
+        template<fixed_string dst_port_name, typename Destination>
+        [[nodiscard]] constexpr auto
+        to(Destination &destination) {
+            using destination_input_ports        = typename traits::node::input_ports<Destination>;
             constexpr std::size_t dst_port_index = meta::indexForName<dst_port_name, destination_input_ports>();
             if constexpr (dst_port_index == meta::invalid_index) {
-                meta::print_types<
-                    meta::message_type<"There is no input port with the specified name in this destination node">,
-                    Destination,
-                    meta::message_type<dst_port_name>,
-                    meta::message_type<"These are the known names:">,
-                    traits::node::input_port_names<Destination>,
-                    meta::message_type<"Full ports info:">,
-                    destination_input_ports
-                        > port_not_found_error{};
+                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination node">, Destination, meta::message_type<dst_port_name>,
+                                  meta::message_type<"These are the known names:">, traits::node::input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports>
+                        port_not_found_error{};
             }
             return to<dst_port_index, Destination>(destination);
         }
 
-        source_connector(const source_connector&) = delete;
-        source_connector(source_connector&&) = delete;
-        source_connector& operator=(const source_connector&) = delete;
-        source_connector& operator=(source_connector&&) = delete;
+        source_connector(const source_connector &) = delete;
+        source_connector(source_connector &&)      = delete;
+        source_connector &
+        operator=(const source_connector &)
+                = delete;
+        source_connector &
+        operator=(source_connector &&)
+                = delete;
     };
 
     struct init_proof {
         init_proof(bool _success) : success(_success) {}
+
         bool success = true;
 
         operator bool() const { return success; }
     };
 
     template<std::size_t src_port_index, typename Source>
-    friend
-    auto connect(Source& source);
+    friend auto
+    connect(Source &source);
 
     template<fixed_string src_port_name, typename Source>
-    friend
-    auto connect(Source& source);
+    friend auto
+    connect(Source &source);
 
     template<typename Source, typename Port>
-    friend
-    auto connect(Source& source, Port Source::* member_ptr);
+    friend auto
+    connect(Source &source, Port Source::*member_ptr);
 
 public:
     auto
@@ -12322,65 +12308,62 @@ public:
     }
 
     template<typename Node, typename... Args>
-    auto&
-    make_node(Args&&... args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
+    auto &
+    make_node(Args &&...args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
-        auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
-        return *static_cast<Node*>(new_node_ref->raw());
+        auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
+        auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
+        std::ignore        = raw_ref->settings().apply_staged_parameters();
+        return *raw_ref;
     }
 
     template<typename Node>
-    auto&
-    make_node(const tag_t::map_type& initial_settings) {
+    auto &
+    make_node(const tag_t::map_type &initial_settings) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
-        auto& new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
-        auto raw_ref = static_cast<Node*>(new_node_ref->raw());
-        if (!initial_settings.empty()) {
-            static_cast<node<Node>*>(raw_ref)->settings().init(*raw_ref, initial_settings);
-        }
+        auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
+        auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
+        std::ignore        = raw_ref->settings().set(initial_settings);
+        std::ignore        = raw_ref->settings().apply_staged_parameters();
         return *raw_ref;
     }
 
     template<std::size_t src_port_index, typename Source>
-    [[nodiscard]] auto connect(Source& source) {
+    [[nodiscard]] auto
+    connect(Source &source) {
         auto &port = output_port<src_port_index>(&source);
         return graph::source_connector<Source, std::remove_cvref_t<decltype(port)>, src_port_index>(*this, source, port);
     }
 
     template<fixed_string src_port_name, typename Source>
-    [[nodiscard]] auto connect(Source& source) {
-        using source_output_ports = typename traits::node::output_ports<Source>;
+    [[nodiscard]] auto
+    connect(Source &source) {
+        using source_output_ports            = typename traits::node::output_ports<Source>;
         constexpr std::size_t src_port_index = meta::indexForName<src_port_name, source_output_ports>();
         if constexpr (src_port_index == meta::invalid_index) {
-            meta::print_types<
-                meta::message_type<"There is no output port with the specified name in this source node">,
-                Source,
-                meta::message_type<src_port_name>,
-                meta::message_type<"These are the known names:">,
-                traits::node::output_port_names<Source>,
-                meta::message_type<"Full ports info:">,
-                source_output_ports
-                    > port_not_found_error{};
+            meta::print_types<meta::message_type<"There is no output port with the specified name in this source node">, Source, meta::message_type<src_port_name>,
+                              meta::message_type<"These are the known names:">, traits::node::output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports>
+                    port_not_found_error{};
         }
         return connect<src_port_index, Source>(source);
     }
 
     template<typename Source, typename Port>
-    [[nodiscard]] auto connect(Source& source, Port Source::* member_ptr) {
+    [[nodiscard]] auto
+    connect(Source &source, Port Source::*member_ptr) {
         return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
-    init_proof init() {
+    init_proof
+    init() {
         auto result = init_proof(
-            std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [] (auto& connection_definition) {
-                return connection_definition() == connection_result_t::SUCCESS;
-            }));
+                std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [](auto &connection_definition) { return connection_definition() == connection_result_t::SUCCESS; }));
         _connection_definitions.clear();
         return result;
     }
 
     work_return_t
-    work(init_proof& init) {
+    work(init_proof &init) {
         if (!init) {
             return work_return_t::ERROR;
         }

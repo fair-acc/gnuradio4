@@ -177,7 +177,10 @@ concept is_instantiation_of = is_instantiation<Template, Class>::value;
 template<typename T>
 concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
 
-namespace stdx   = vir::stdx;
+template<typename T>
+concept vector_type = is_instantiation_of<T, std::vector>;
+
+namespace stdx      = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
