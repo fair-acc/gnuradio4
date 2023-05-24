@@ -17,12 +17,11 @@ struct SettingsCtx {
     // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
     using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
     std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
-    std::string              context;             /// user-defined multiplexing context for which the setting is valid
+    tag_t::map_type          context;             /// user-defined multiplexing context for which the setting is valid
 };
 
 template<typename T, typename Node>
 concept Settings = requires(T t, Node& n, std::span<const std::string> parameter_keys, const std::string &parameter_key, const tag_t::map_type &parameters, SettingsCtx ctx) {
-    { init(n, parameters) } -> std::same_as<void>;
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
@@ -116,10 +115,6 @@ struct settings_base {
         other._settings_changed.store(changed);
     }
 
-    virtual void
-    init(Node &node, const tag_t::map_type &initial_settings) noexcept
-            = 0;
-
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
@@ -205,7 +200,7 @@ public:
                     [this](auto &&default_tag) {
                         for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
                             using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                                 if (default_tag.shortKey().ends_with(get_display_name(member))) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
@@ -253,21 +248,6 @@ public:
         std::swap(_auto_forward, other._auto_forward);
     }
 
-    void
-    init(Node &node, const tag_t::map_type &initial_settings) noexcept {
-        settings_base<Node>::_node = &node;
-        update_active_parameters();
-        auto invalid_settings = set(initial_settings);
-        [[maybe_unused]] auto ignore = apply_staged_parameters();
-        update_active_parameters();
-        if (!invalid_settings.empty()) {
-            fmt::print(stderr, "{} could not set {} initial parameter - invalid keys/value types\n", meta::type_name<Node>(), invalid_settings.size());
-            for (auto &[key, value] : invalid_settings) {
-                fmt::print(stderr, "key: {} - value-type: {}\n", key, value.index());
-            }
-        }
-    }
-
     [[nodiscard]] tag_t::map_type
     set(const tag_t::map_type &parameters, SettingsCtx = {}) {
         tag_t::map_type ret;
@@ -279,7 +259,7 @@ public:
                 bool        is_set = false;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
                     using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -307,7 +287,7 @@ public:
                 const auto &value = localValue;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
                     using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) ) {
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             settings_base<Node>::_changed.store(true);
@@ -373,13 +353,28 @@ public:
         tag_t::map_type forward_parameters; // parameters that should be forwarded to dependent child nodes
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
+
+            tag_t::map_type oldSettings;
+            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+                // take a copy of the field -> map value of the old settings
+                if constexpr (refl::is_reflectable<Node>()) {
+                    for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
+                        using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+
+                        if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                            oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
+                        }
+                    });
+                }
+            }
+
             tag_t::map_type staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key          = localKey;
                 const auto &staged_value = localStaged_value;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
-                    if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                    if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*settings_base<Node>::_node) = std::get<Type>(staged_value);
                             if constexpr (requires { settings_base<Node>::_node->init(/* old settings */ _active, /* new settings */ staged); }) {
@@ -395,12 +390,14 @@ public:
             for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
                 using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
 
-                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
                 }
             });
             if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
-                settings_base<Node>::_node->init(/* old settings */ _active, /* new settings */ staged);
+                if (!staged.empty()) {
+                    settings_base<Node>::_node->init(/* old settings */ oldSettings, /* new settings */ staged);
+                }
             }
             _staged.clear();
         }
