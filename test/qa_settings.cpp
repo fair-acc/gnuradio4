@@ -10,7 +10,7 @@
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template <>
+template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
@@ -133,7 +133,7 @@ struct TestBlock : public node<TestBlock<T>> {
 
 template<typename T>
 struct Sink : public node<Sink<T>> {
-    IN<T> in;
+    IN<T>        in;
     std::int32_t n_samples_consumed = 0;
     std::int32_t n_samples_max      = -1;
     int64_t      last_tag_position  = -1;
@@ -183,7 +183,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(src.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
         auto &block1 = flow_graph.make_node<TestBlock<float>>();
         auto &block2 = flow_graph.make_node<TestBlock<float>>();
-        auto &sink  = flow_graph.make_node<Sink<float>>();
+        auto &sink   = flow_graph.make_node<Sink<float>>();
         expect(eq(sink.settings().auto_update_parameters().size(), 4UL));
         expect(eq(sink.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
 
@@ -226,7 +226,7 @@ const boost::ut::suite SettingsTests = [] {
         auto token = flow_graph.init();
         expect(token);
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
-        [[maybe_unused]] auto ret = src.settings().set({ { "sample_rate", 49000.0f } });
+        std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
         flow_graph.work(token);
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
         expect(eq(sink.n_samples_consumed, n_samples)) << "did not consume enough input samples";
@@ -249,8 +249,8 @@ const boost::ut::suite SettingsTests = [] {
 
     "constructor"_test = [] {
         "empty"_test = [] {
-            auto                  block = TestBlock<float>();
-            [[maybe_unused]] auto _     = block.settings().apply_staged_parameters();
+            auto block  = TestBlock<float>();
+            std::ignore = block.settings().apply_staged_parameters();
             expect(eq(block.settings().get().size(), 5UL));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
@@ -259,7 +259,7 @@ const boost::ut::suite SettingsTests = [] {
         "with init parameter"_test = [] {
             auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
             expect(eq(block.settings().staged_parameters().size(), 1));
-            [[maybe_unused]] auto _ = block.settings().apply_staged_parameters();
+            std::ignore = block.settings().apply_staged_parameters();
             expect(eq(block.settings().staged_parameters().size(), 0));
             block.settings().update_active_parameters();
             expect(eq(block.settings().get().size(), 5UL));
@@ -294,7 +294,7 @@ const boost::ut::suite SettingsTests = [] {
         block.debug    = true;
         const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } } });
         expect(val.empty()) << "unable to stage settings";
-        [[maybe_unused]] auto _ = block.settings().apply_staged_parameters();
+        std::ignore = block.settings().apply_staged_parameters();
         expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
     };
