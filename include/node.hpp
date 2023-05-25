@@ -423,14 +423,17 @@ public:
                 std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
                 meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
                 const std::int64_t available_samples = self().available_samples(self());
-                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (available_samples < 0 && max_buffer > 0) {
                     return work_return_t::DONE;
                 }
+                if (available_samples == 0) {
+                    return work_return_t::OK;
+                }
+                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }
-                if (not space_available_on_output_ports(samples_to_process)) {
+                if (samples_to_process == 0) {
                     return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
                 }
             } else if constexpr (requires(const Derived &d) {
@@ -438,6 +441,9 @@ public:
                                  }) {
                 // the (source) node wants to determine the number of samples to process
                 samples_to_process = available_samples(self());
+                if (samples_to_process == 0) {
+                    return work_return_t::OK;
+                }
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }
