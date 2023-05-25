@@ -238,7 +238,7 @@ const boost::ut::suite UserApiExamples = [] {
                 // N.B. lock-free buffer and other writer may add while processing
                 fmt::print("iteration {} - consumed {} elements - still available: {}\n", i, fixedLength.size(), reader.available());
             } else {
-                throw std::runtime_error(fmt::format("could not consume data"));
+                throw std::runtime_error("could not consume data");
             }
         }
     };
@@ -368,10 +368,12 @@ const boost::ut::suite CircularBufferExceptionTests = [] {
         BufferWriter auto writer = buffer.new_writer();
         BufferReader auto reader = buffer.new_reader();
 
+#if not __EMSCRIPTEN__ // expect(throws(..)) not working with UT/Emscripten
         expect(throws<std::exception>([&writer] { writer.publish([](auto &) { throw std::exception(); }); }));
         expect(throws<std::exception>([&writer] { writer.publish([](auto &) { throw ""; }); }));
         expect(throws<std::exception>([&writer] { writer.try_publish([](auto &) { throw std::exception(); }); }));
-        expect(throws<std::runtime_error>([&writer] { writer.try_publish([](auto &) { throw ""; }); }));
+        expect(throws<std::runtime_error>([&writer] { writer.try_publish([](auto &) { throw " "; }); }));
+#endif
 
         expect(eq(reader.available(), std::size_t{ 0 })); // needed otherwise buffer write will not be called
     };
@@ -477,8 +479,10 @@ const boost::ut::suite NonPowerTwoTests = [] {
         expect(not std::has_single_bit(typeSize)) << "type is non-power-of-two";
         Buffer auto buffer = circular_buffer<Type>(1024);
         expect(ge(buffer.size(), 1024));
-        expect(buffer.size() % typeSize == 0) << "divisible by the type size";
-        expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0) << "divisible by the memory page size";
+        if (gr::has_posix_mmap_interface) {
+            expect(buffer.size() % typeSize == 0) << "divisible by the type size";
+            expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0) << "divisible by the memory page size";
+        }
 
         BufferWriter auto writer     = buffer.new_writer();
         BufferReader auto reader     = buffer.new_reader();
