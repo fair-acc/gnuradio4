@@ -17,12 +17,14 @@ endfunction()
 # mask some tests depending on the target
 if (EMSCRIPTEN)
     add_ut_test(qa_dynamic_port)
+    add_ut_test(qa_filter)
     add_ut_test(qa_settings)
     add_ut_test(qa_tags)
     # fails on emscripten for unclear reasons
     # add_ut_test(qa_buffer)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_ut_test(qa_buffer)
+    add_ut_test_no_asan(qa_filter)
     add_ut_test(qa_tags)
     # these tests trigger address sanitizer errors which have to be resolved
     add_ut_test_no_asan(qa_dynamic_port)
@@ -31,6 +33,7 @@ else()
     # these tests trigger address sanitizer errors which have to be resolved
     # clang asan seems to be even more strict
     add_ut_test_no_asan(qa_buffer)
+    add_ut_test_no_asan(qa_filter)
     add_ut_test_no_asan(qa_tags)
     add_ut_test_no_asan(qa_dynamic_port)
     add_ut_test_no_asan(qa_settings)
