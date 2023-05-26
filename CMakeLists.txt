@@ -40,10 +40,8 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         ut
-        GIT_REPOSITORY https://github.com/wirew0rm/ut.git
-        GIT_TAG emscripten # custom branch to add emscripten support to ut
-        # GIT_REPOSITORY https://github.com/boost-ext/ut.git
-        # GIT_TAG e53a47d37bc594e80bd5f1b8dc1ade8dce4429d3 # head as of 2023-05-10
+        GIT_REPOSITORY https://github.com/boost-ext/ut.git
+        GIT_TAG 696c047c368d3324e8e6fedb46d8eed4c9eeba7c# head as of 2023-05-25
 )
 
 FetchContent_MakeAvailable(fmt refl-cpp pmt ut)
