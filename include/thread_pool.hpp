@@ -340,7 +340,7 @@ class BasicThreadPool {
 
     std::mutex                   _threadListMutex;
     std::atomic<std::size_t>     _numThreads = 0U;
-    std::list<std::jthread>      _threads;
+    std::list<std::thread>       _threads;
 
     std::vector<bool>            _affinityMask;
     thread::Policy               _schedulingPolicy   = thread::Policy::OTHER;
@@ -366,6 +366,9 @@ public:
     ~BasicThreadPool() {
         _shutdown = true;
         _condition.notify_all();
+        for (auto &t : _threads) {
+            t.join();
+        }
     }
 
     BasicThreadPool(const BasicThreadPool &) = delete;
@@ -388,6 +391,9 @@ public:
     void                       requestShutdown() {
         _shutdown = true;
         _condition.notify_all();
+        for (auto &t: _threads) {
+            t.join();
+        }
     }
     [[nodiscard]] bool isShutdown() const { return _shutdown; }
 
@@ -397,7 +403,7 @@ public:
 
     void                            setAffinityMask(const std::vector<bool> &threadAffinityMask) {
         _affinityMask.clear();
-        std::ranges::copy(threadAffinityMask, std::back_inserter(_affinityMask));
+        std::copy(threadAffinityMask.begin(), threadAffinityMask.end(), std::back_inserter(_affinityMask));
         cleanupFinishedThreads();
         updateThreadConstraints();
     }
@@ -420,7 +426,7 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
                 throw std::invalid_argument(fmt::format("requested cpuID {} incompatible with set affinity mask({}): [{}]",
-                        cpuID, _affinityMask.size(), fmt::join(_affinityMask, ", ")));
+                        cpuID, _affinityMask.size(), fmt::join(_affinityMask.begin(), _affinityMask.end(), ", ")));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -478,10 +484,10 @@ private:
         std::scoped_lock lock(_threadListMutex);
         // std::erase_if(_threads, [](auto &thread) { return !thread.joinable(); });
 
-        std::ranges::for_each(_threads, [this, threadID = std::size_t{ 0 }](auto &thread) mutable { this->updateThreadConstraints(threadID++, thread); });
+        std::for_each(_threads.begin(), _threads.end(), [this, threadID = std::size_t{ 0 }](auto &thread) mutable { this->updateThreadConstraints(threadID++, thread); });
     }
 
-    void updateThreadConstraints(const std::size_t threadID, std::jthread &thread) const {
+    void updateThreadConstraints(const std::size_t threadID, std::thread &thread) const {
         thread::setThreadName(fmt::format("{}#{}", _poolName, threadID), thread);
         thread::setThreadSchedulingParameter(_schedulingPolicy, _schedulingPriority, thread);
         if (!_affinityMask.empty()) {
@@ -490,7 +496,7 @@ private:
                 return;
             }
             const std::vector<bool> affinityMask = distributeThreadAffinityAcrossCores(_affinityMask, threadID);
-            std::cout << fmt::format("{}#{} affinity mask: {}", _poolName, threadID, fmt::join(affinityMask, ",")) << std::endl;
+            std::cout << fmt::format("{}#{} affinity mask: {}", _poolName, threadID, fmt::join(affinityMask.begin(), affinityMask.end(), ",")) << std::endl;
             thread::setThreadAffinity(affinityMask);
         }
     }
@@ -514,7 +520,7 @@ private:
     void createWorkerThread() {
         std::scoped_lock  lock(_threadListMutex);
         const std::size_t nThreads = numThreads();
-        std::jthread     &thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
+        std::thread      &thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
         updateThreadConstraints(nThreads + 1, thread);
     }
 

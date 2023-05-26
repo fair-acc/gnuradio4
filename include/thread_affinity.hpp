@@ -15,7 +15,7 @@
 
 #if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__))) // UNIX-style OS
 #include <unistd.h>
-#ifdef _POSIX_VERSION // POSIX compliant
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
 #include <pthread.h>
 #include <sched.h>
 #endif
@@ -57,10 +57,10 @@ public:
 };
 
 template<class type>
-concept thread_type = std::is_same_v<type, std::thread> || std::is_same_v<type, std::jthread>;
+concept thread_type = std::is_same_v<type, std::thread>;
 
 namespace detail {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     template<typename Tp, typename... Us>
     constexpr decltype(auto) firstElement(Tp && t, Us && ...) noexcept {
         return std::forward<Tp>(t);
@@ -80,21 +80,21 @@ namespace detail {
         }
         char threadName[THREAD_MAX_NAME_LENGTH];
         if (int rc = pthread_getname_np(handle, threadName, THREAD_MAX_NAME_LENGTH); rc != 0) {
-            throw std::system_error(rc, thread_exception(), fmt::format("getThreadName(thread_type)"));
+            throw std::system_error(rc, thread_exception(), "getThreadName(thread_type)");
         }
         return std::string{ threadName, std::min(strlen(threadName), THREAD_MAX_NAME_LENGTH) };
     }
 
     inline int getPid() { return getpid(); }
 #else
-    int detail::getPid() {
+    int getPid() {
         return 0;
     }
 #endif
 } // namespace detail
 
 inline std::string getProcessName(const int pid = detail::getPid()) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     if (std::ifstream in(fmt::format("/proc/{}/comm", pid), std::ios::in); in.is_open()) {
         std::string fileContent;
         std::getline(in, fileContent, '\n');
@@ -105,10 +105,10 @@ inline std::string getProcessName(const int pid = detail::getPid()) {
 } // namespace detail
 
 inline std::string getThreadName(thread_type auto &...thread) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getThreadName(thread_type)"));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), "getThreadName(thread_type)");
     }
     return detail::getThreadName(handle);
 #else
@@ -117,7 +117,7 @@ inline std::string getThreadName(thread_type auto &...thread) {
 }
 
 inline void setProcessName(const std::string_view &processName, int pid = detail::getPid()) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     std::ofstream out(fmt::format("/proc/{}/comm", pid), std::ios::out);
     if (!out.is_open()) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessName({},{})", processName, pid));
@@ -128,7 +128,7 @@ inline void setProcessName(const std::string_view &processName, int pid = detail
 }
 
 inline void setThreadName(const std::string_view &threadName, thread_type auto &...thread) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle)));
@@ -140,7 +140,7 @@ inline void setThreadName(const std::string_view &threadName, thread_type auto &
 }
 
 namespace detail {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
 inline std::vector<bool> getAffinityMask(const cpu_set_t &cpuSet) {
     std::vector<bool> bitMask(std::min(sizeof(cpu_set_t), static_cast<size_t>(std::thread::hardware_concurrency())));
     for (size_t i = 0; i < bitMask.size(); i++) {
@@ -167,7 +167,7 @@ inline constexpr cpu_set_t getAffinityMask(const T &threadMap) {
 #endif
 } // namespace detail
 
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
 inline std::vector<bool> getThreadAffinity(thread_type auto &...thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
@@ -187,15 +187,15 @@ std::vector<bool> getThreadAffinity(thread_type auto &...) {
 
 template<class T>
 requires requires(T value) { value[0]; }
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
 inline constexpr void setThreadAffinity(const T &threadMap, thread_type auto &...thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), fmt::join(threadMap, ", ")));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", ")));
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = pthread_setaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap, ", "), detail::getThreadName(handle)));
+        throw std::system_error(rc, thread_exception(), fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), detail::getThreadName(handle)));
     }
 }
 #else
@@ -205,7 +205,7 @@ constexpr bool setThreadAffinity(const T &threadMap, thread_type auto &...) {
 #endif
 
 inline std::vector<bool> getProcessAffinity(const int pid = detail::getPid()) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     if (pid <= 0) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getProcessAffinity({}) -- invalid pid", pid));
     }
@@ -222,13 +222,13 @@ inline std::vector<bool> getProcessAffinity(const int pid = detail::getPid()) {
 template<class T>
 requires requires(T value) { std::get<0>(value); }
 inline constexpr bool setProcessAffinity(const T &threadMap, const int pid = detail::getPid()) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     if (pid <= 0) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap, ", "), pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.emd(), ", "), pid));
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = sched_setaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap, ", "), pid));
+        throw std::system_error(rc, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.emd(), ", "), pid));
     }
 
     return true;
@@ -251,7 +251,7 @@ struct SchedulingParameter {
 namespace detail {
 inline Policy getEnumPolicy(const int policy) {
     switch (policy) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     case SCHED_FIFO: return Policy::FIFO;
     case SCHED_RR: return Policy::ROUND_ROBIN;
     case SCHED_OTHER: return Policy::OTHER;
@@ -263,7 +263,7 @@ inline Policy getEnumPolicy(const int policy) {
 } // namespace detail
 
 inline struct SchedulingParameter getProcessSchedulingParameter(const int pid = detail::getPid()) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     if (pid <= 0) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getProcessSchedulingParameter({}) -- invalid pid", pid));
     }
@@ -274,12 +274,12 @@ inline struct SchedulingParameter getProcessSchedulingParameter(const int pid = 
     }
     return SchedulingParameter{ .policy = detail::getEnumPolicy(policy), .priority = param.sched_priority };
 #else
-    return struct SchedulingParameter {};
+    return {};
 #endif
 }
 
 inline void setProcessSchedulingParameter(Policy scheduler, int priority, const int pid = detail::getPid()) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     if (pid <= 0) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid));
     }
@@ -298,7 +298,7 @@ inline void setProcessSchedulingParameter(Policy scheduler, int priority, const 
 }
 
 inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto &...thread) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getThreadSchedulingParameter(thread_type) -- invalid thread"));
@@ -308,14 +308,14 @@ inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto 
     if (int rc = pthread_getschedparam(handle, &policy, &param); rc != 0) {
         throw std::system_error(rc, thread_exception(), fmt::format("getThreadSchedulingParameter({}) - sched_getparam error", detail::getThreadName(handle)));
     }
-    return SchedulingParameter{ .policy = detail::getEnumPolicy(policy), .priority = param.sched_priority };
+    return { .policy = detail::getEnumPolicy(policy), .priority = param.sched_priority };
 #else
-    return struct SchedulingParameter {};
+    return {};
 #endif
 }
 
 inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_type auto &...thread) {
-#ifdef _POSIX_VERSION
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadSchedulingParameter({}, {}, thread_type) -- invalid thread", scheduler, priority));
