@@ -3611,13 +3611,16 @@ operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs
 template<typename T>
 [[nodiscard]] std::string
 type_name() noexcept {
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)
     std::string type_name = typeid(T).name();
     int         status;
     char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
     if (status == 0) {
-        return demangled_name;
+        std::string ret(demangled_name);
+        free(demangled_name);
+        return ret;
     } else {
+        free(demangled_name);
         return typeid(T).name();
     }
 #else
