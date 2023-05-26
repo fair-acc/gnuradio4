@@ -91,7 +91,7 @@ struct Source : public node<Source<T>> {
     constexpr std::int64_t
     available_samples(const Source &self) noexcept {
         const auto ret = static_cast<std::int64_t>(n_samples_max - n_samples_produced);
-        return ret >= 0 ? ret : -1; // '-1' -> DONE, produced enough samples
+        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }
 
     [[nodiscard]] constexpr T
