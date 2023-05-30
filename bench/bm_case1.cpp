@@ -7,6 +7,7 @@
 #include "bm_test_helper.hpp"
 
 #include <graph.hpp>
+#include <scheduler.hpp>
 #include <node_traits.hpp>
 
 #include <vir/simd.h>
@@ -483,14 +484,12 @@ inline const boost::ut::suite _constexpr_bm = [] {
 };
 
 void
-invoke_work(auto &flow_graph) {
+invoke_work(auto &sched) {
     using namespace boost::ut;
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    auto token = flow_graph.init();
-    expect(token);
-    flow_graph.work(token);
+    sched.work();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
 }
@@ -503,12 +502,11 @@ inline const boost::ut::suite _runtime_tests = [] {
         fg::graph flow_graph;
         auto     &src  = flow_graph.make_node<test::source<float>>(N_SAMPLES);
         auto     &sink = flow_graph.make_node<test::sink<float>>();
-
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
-            invoke_work(flow_graph);
-        };
+       fg::scheduler::simple sched{std::move(flow_graph)};
+
+        "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
@@ -520,7 +518,9 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &test::source<float>::out).to<"in">(cpy)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy).to(sink, &test::sink<float>::in)));
 
-        "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() { invoke_work(flow_graph); };
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
@@ -543,9 +543,9 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
 
-        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
-            invoke_work(flow_graph);
-        };
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
@@ -561,9 +561,9 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b2).to<"in">(b3)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b3).to<"in">(sink)));
 
-        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) =
-                [&flow_graph]() { invoke_work(flow_graph); };
-    }
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); }; }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
         fg::graph flow_graph;
@@ -578,9 +578,9 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).template to<"in">(sink)));
 
-        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
-            invoke_work(flow_graph);
-        };
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     };
     templated_cascaded_test(static_cast<float>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - float");
     templated_cascaded_test(static_cast<int>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - int");
@@ -610,12 +610,12 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
-        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -641,12 +641,12 @@ inline const boost::ut::suite _simd_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
-        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -677,12 +677,12 @@ inline const boost::ut::suite _simd_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
-        auto token = flow_graph.init();
-        expect(token);
-        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&flow_graph, &token]() {
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -709,9 +709,8 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token               = flow_graph.init();
-            expect(token);
-            flow_graph.work(token);
+            fg::scheduler::simple sched{std::move(flow_graph)};
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -732,12 +731,12 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).template to<"in">(sink)));
 
-        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
+        fg::scheduler::simple sched{std::move(flow_graph)};
+
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            auto token               = flow_graph.init();
-            expect(token);
-            flow_graph.work(token);
+            sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };

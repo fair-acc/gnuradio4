@@ -336,14 +336,14 @@ public:
 #endif
 
 class graph {
-private:
+public:
     class node_model {
     public:
         virtual ~node_model() = default;
 
         virtual std::string_view
         name() const
-                = 0;
+        = 0;
 
         virtual work_return_t
         work() = 0;
@@ -351,6 +351,10 @@ private:
         virtual void *
         raw() = 0;
     };
+
+    std::vector<std::function<connection_result_t()>> _connection_definitions;
+    std::vector<std::unique_ptr<node_model>> _nodes;
+private:
 
     template<typename T>
     class node_wrapper final : public node_model {
@@ -459,7 +463,6 @@ private:
     };
 
     std::vector<edge>                        _edges;
-    std::vector<std::unique_ptr<node_model>> _nodes;
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
@@ -487,8 +490,6 @@ private:
 
         return result;
     }
-
-    std::vector<std::function<connection_result_t()>> _connection_definitions;
 
     // Just a dummy class that stores the graph and the source node and port
     // to be able to split the connection into two separate calls
@@ -556,14 +557,6 @@ private:
                 = delete;
     };
 
-    struct init_proof {
-        init_proof(bool _success) : success(_success) {}
-
-        bool success = true;
-
-        operator bool() const { return success; }
-    };
-
     template<std::size_t src_port_index, typename Source>
     friend auto
     connect(Source &source);
@@ -629,41 +622,9 @@ public:
         return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
-    init_proof
-    init() {
-        auto result = init_proof(
-                std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [](auto &connection_definition) { return connection_definition() == connection_result_t::SUCCESS; }));
-        _connection_definitions.clear();
-        return result;
-    }
-
-    work_return_t
-    work(init_proof &init) {
-        if (!init) {
-            return work_return_t::ERROR;
-        }
-        bool run = true;
-        while (run) {
-            bool something_happened = false;
-            for (auto &node : _nodes) {
-                auto result = node->work();
-                if (result == work_return_t::ERROR) {
-                    return work_return_t::ERROR;
-                } else if (result == work_return_t::INSUFFICIENT_INPUT_ITEMS) {
-                    // nothing
-                } else if (result == work_return_t::DONE) {
-                    // nothing
-                } else if (result == work_return_t::OK) {
-                    something_happened = true;
-                } else if (result == work_return_t::INSUFFICIENT_OUTPUT_ITEMS) {
-                    something_happened = true;
-                }
-            }
-
-            run = something_happened;
-        }
-
-        return work_return_t::DONE;
+    [[nodiscard]] const std::vector<edge>&
+    get_edges() const {
+        return _edges;
     }
 };
 
