@@ -66,13 +66,14 @@ public:
  * detecting cycles and nodes which can be reached from several source nodes.
  */
 class breadth_first : public node<breadth_first> {
+    using node_t = fair::graph::graph::node_model*;
     init_proof _init;
     fair::graph::graph _graph;
-    using node_t = fair::graph::graph::node_model*;
-    std::map<node_t, std::set<node_t>> _adjacency_list{};
-    std::set<node_t> _source_nodes{};
+    std::vector<node_t> _nodelist;
 public:
     explicit breadth_first(fair::graph::graph &&graph) : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)) {
+        std::map<node_t, std::set<node_t>> _adjacency_list{};
+        std::set<node_t> _source_nodes{};
         // compute the adjacency list
         std::set<fair::graph::graph::node_model *> node_reached;
         for (auto &e : _graph.get_edges()) {
@@ -83,6 +84,28 @@ public:
         for (auto &dst : node_reached) {
             _source_nodes.erase(dst);
         }
+        // traverse graph
+        std::queue<fair::graph::graph::node_model *> queue{};
+        std::set<fair::graph::graph::node_model *>   reached;
+        // add all source nodes to queue
+        for (fair::graph::graph::node_model *source_node : _source_nodes) {
+            queue.push(source_node);
+            reached.insert(source_node);
+        }
+        // process all nodes, adding all unvisited child nodes to the queue
+        while (!queue.empty()) {
+            fair::graph::graph::node_model *node = queue.front();
+            queue.pop();
+            _nodelist.push_back(node);
+            if (_adjacency_list.contains(node)) { // node has outgoing edges
+                for (auto &dst : _adjacency_list.at(node)) {
+                    if (!reached.contains(dst)) { // detect cycles. this could be removed if we guarantee cycle free graphs earlier
+                        queue.push(dst);
+                        reached.insert(dst);
+                    }
+                }
+            }
+        }
     }
 
     work_return_t work() {
@@ -91,27 +114,9 @@ public:
         }
         while (true) {
             bool anything_happened = false;
-            std::queue<fair::graph::graph::node_model *> queue{};
-            std::set<fair::graph::graph::node_model *>   reached;
-            // add all source nodes to queue
-            for (fair::graph::graph::node_model *source_node : _source_nodes) {
-                queue.push(source_node);
-                reached.insert(source_node);
-            }
-            // process all nodes, adding all unvisited child nodes to the queue
-            while (!queue.empty()) {
-                fair::graph::graph::node_model *node = queue.front();
-                queue.pop();
+            for (auto node : _nodelist) {
                 auto res = node->work();
                 anything_happened |= (res == work_return_t::OK || res == work_return_t::INSUFFICIENT_OUTPUT_ITEMS);
-                if (_adjacency_list.contains(node)) { // node has outgoing edges
-                    for (auto &dst : _adjacency_list.at(node)) {
-                        if (!reached.contains(dst)) { // detect cycles. this could be removed if we guarantee cycle free graphs earlier
-                            queue.push(dst);
-                            reached.insert(dst);
-                        }
-                    }
-                }
             }
             if (!anything_happened) {
                 return work_return_t::DONE;
