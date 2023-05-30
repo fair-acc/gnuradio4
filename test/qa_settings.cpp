@@ -224,7 +224,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
 
-        fair::graph::scheduler::simple sched{flow_graph};
+        fair::graph::scheduler::simple sched{std::move(flow_graph)};
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
         [[maybe_unused]] auto ret = src.settings().set({ { "sample_rate", 49000.0f } });
         sched.work();

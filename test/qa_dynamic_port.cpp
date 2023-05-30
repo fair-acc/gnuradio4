@@ -56,7 +56,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
-class expect_sink : public fg::node<expect_sink<T>> {
+class cout_sink : public fg::node<cout_sink<T>> {
 public:
     fg::IN<T> sink;
 
@@ -156,7 +156,7 @@ const boost::ut::suite PortApiTests = [] {
 
         auto& scaled = flow.make_node<scale<int, 2>>();
         auto& added = flow.make_node<adder<int>>();
-        auto& out = flow.make_node<expect_sink<int>>();
+        auto& out = flow.make_node<cout_sink<int>>();
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
         expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
@@ -164,7 +164,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        fair::graph::scheduler::simple sched{flow};
+        fair::graph::scheduler::simple sched{std::move(flow)};
         sched.work();
     };
 
