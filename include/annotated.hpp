@@ -129,25 +129,25 @@ struct Annotated {
     }
 
     // meta-information
-    constexpr std::string_view
-    description() const noexcept {
+    static constexpr std::string_view
+    description() noexcept {
         return std::string_view{ description_ };
     }
 
-    constexpr std::string_view
-    documentation() const noexcept {
+    static constexpr std::string_view
+    documentation() noexcept {
         using Documentation = typename fair::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
         return std::string_view{ Documentation::value };
     }
 
-    constexpr std::string_view
-    unit() const noexcept {
+    static constexpr std::string_view
+    unit() noexcept {
         using PhysicalUnit = typename fair::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
         return std::string_view{ PhysicalUnit::value };
     }
 
-    constexpr bool
-    visible() const noexcept {
+    static constexpr bool
+    visible() noexcept {
         return fair::meta::typelist<Arguments...>::template contains<Visible>;
     }
 };

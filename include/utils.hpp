@@ -291,6 +291,41 @@ indexForName() {
     return helper(std::make_index_sequence<PortList::size>());
 }
 
+// template<template<typename...> typename Type, typename... Items>
+// using find_type = decltype(std::tuple_cat(std::declval<std::conditional_t<is_instantiation_of<Items, Type>, std::tuple<Items>, std::tuple<>>>()...));
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = std::tuple<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = decltype(std::tuple_cat(std::conditional_t<Pred<First>::value, std::tuple<First>, std::tuple<>>(), typename find_type<Pred, Rest...>::type()));
+};
+
+template<template<typename> typename Pred, typename... Items>
+using find_type_t = typename find_type<Pred, Items...>::type;
+
+template<typename Tuple, typename Default = void>
+struct get_first_or_default;
+
+template<typename First, typename... Rest, typename Default>
+struct get_first_or_default<std::tuple<First, Rest...>, Default> {
+    using type = First;
+};
+
+template<typename Default>
+struct get_first_or_default<std::tuple<>, Default> {
+    using type = Default;
+};
+
+template<typename Tuple, typename Default = void>
+using get_first_or_default_t = typename get_first_or_default<Tuple, Default>::type;
+
 template<typename... Lambdas>
 struct overloaded : Lambdas... {
     using Lambdas::operator()...;

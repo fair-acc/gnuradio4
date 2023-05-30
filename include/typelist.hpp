@@ -303,11 +303,20 @@ struct typelist {
     template<template<typename...> typename Pred>
     constexpr static bool none_of = (!Pred<Ts>::value && ...);
 
-    using safe_head = std::remove_pointer_t<decltype([] {
+    template<typename DefaultType>
+    using safe_head_default = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) > 0) {
-            return static_cast<this_t::at<0>*>(nullptr);
+            return static_cast<this_t::at<0> *>(nullptr);
         } else {
-            return static_cast<void*>(nullptr);
+            return static_cast<DefaultType *>(nullptr);
+        }
+    }())>;
+
+    using safe_head         = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) > 0) {
+            return static_cast<this_t::at<0> *>(nullptr);
+        } else {
+            return static_cast<void *>(nullptr);
         }
     }())>;
 
