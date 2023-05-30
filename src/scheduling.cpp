@@ -6,7 +6,7 @@ namespace fg = fair::graph;
 
 // define some example graph nodes
 template<typename T>
-class random_source : public fg::node<random_source<T>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "random">> {
+class count_source : public fg::node<count_source<T>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "random">> {
 public:
 constexpr T
 process_one() {
@@ -25,7 +25,7 @@ public:
 };
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "sink">> {
+class expect_sink : public fg::node<expect_sink<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "sink">> {
     int count = 0;
 public:
     [[nodiscard]] fg::work_return_t
@@ -76,12 +76,12 @@ get_graph() {
     fg::graph flow;
 
 // Generators
-    auto& number = flow.make_node<random_source<int>>();
+    auto& number = flow.make_node<count_source<int>>();
     auto& answer = flow.make_node<random_source2<int>>();
 
     auto& scaled = flow.make_node<scale<int, 2>>();
     auto& added = flow.make_node<adder<int>>();
-    auto& out = flow.make_node<cout_sink<int>>();
+    auto& out = flow.make_node<expect_sink<int>>();
 
     std::ignore = flow.connect<"random">(number).to<"original">(scaled);
     std::ignore = flow.connect<"scaled">(scaled).to<"addend0">(added);
