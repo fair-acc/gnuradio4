@@ -8,7 +8,7 @@
 namespace fg = fair::graph;
 
 template<typename T>
-class random_source : public fg::node<random_source<T>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "random">> {
+class count_source : public fg::node<count_source<T>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "random">> {
 public:
     constexpr T
     process_one() {
@@ -17,7 +17,7 @@ public:
 };
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "sink">> {
+class expect_sink : public fg::node<expect_sink<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "sink">> {
 public:
     void
     process_one(T value) {
@@ -148,14 +148,14 @@ main() {
     { auto delayed = delay<int, 2>{}; }
 
     {
-        auto random = random_source<int>{};
+        auto random = count_source<int>{};
 
-        auto merged = merge_by_index<0, 0>(std::move(random), cout_sink<int>());
+        auto merged = merge_by_index<0, 0>(std::move(random), expect_sink<int>());
         merged.process_one();
     }
 
     {
-        auto random = random_source<int>{};
+        auto random = count_source<int>{};
 
         auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
         merged.process_one();

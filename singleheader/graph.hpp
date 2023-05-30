@@ -9658,12 +9658,12 @@ struct alignas(hardware_constructive_interference_size) tag_t {
     map_type map;
 
     // TODO: do we need the convenience methods below?
-    pmtv::pmt &
+    [[nodiscard]] pmtv::pmt &
     at(const std::string &key) {
         return map.at(key);
     }
 
-    const pmtv::pmt &
+    [[nodiscard]] const pmtv::pmt &
     at(const std::string &key) const {
         return map.at(key);
     }
@@ -11264,14 +11264,17 @@ public:
                 std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
                 meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
                 const std::int64_t available_samples = self().available_samples(self());
-                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (available_samples < 0 && max_buffer > 0) {
                     return work_return_t::DONE;
                 }
+                if (available_samples == 0) {
+                    return work_return_t::OK;
+                }
+                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }
-                if (not space_available_on_output_ports(samples_to_process)) {
+                if (samples_to_process == 0) {
                     return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
                 }
             } else if constexpr (requires(const Derived &d) {
@@ -11279,6 +11282,9 @@ public:
                                  }) {
                 // the (source) node wants to determine the number of samples to process
                 samples_to_process = available_samples(self());
+                if (samples_to_process == 0) {
+                    return work_return_t::OK;
+                }
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }
@@ -12064,14 +12070,14 @@ public:
 #endif
 
 class graph {
-private:
+public:
     class node_model {
     public:
         virtual ~node_model() = default;
 
         virtual std::string_view
         name() const
-                = 0;
+        = 0;
 
         virtual work_return_t
         work() = 0;
@@ -12079,6 +12085,10 @@ private:
         virtual void *
         raw() = 0;
     };
+
+    std::vector<std::function<connection_result_t()>> _connection_definitions;
+    std::vector<std::unique_ptr<node_model>> _nodes;
+private:
 
     template<typename T>
     class node_wrapper final : public node_model {
@@ -12187,7 +12197,6 @@ private:
     };
 
     std::vector<edge>                        _edges;
-    std::vector<std::unique_ptr<node_model>> _nodes;
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
@@ -12215,8 +12224,6 @@ private:
 
         return result;
     }
-
-    std::vector<std::function<connection_result_t()>> _connection_definitions;
 
     // Just a dummy class that stores the graph and the source node and port
     // to be able to split the connection into two separate calls
@@ -12284,14 +12291,6 @@ private:
                 = delete;
     };
 
-    struct init_proof {
-        init_proof(bool _success) : success(_success) {}
-
-        bool success = true;
-
-        operator bool() const { return success; }
-    };
-
     template<std::size_t src_port_index, typename Source>
     friend auto
     connect(Source &source);
@@ -12357,41 +12356,9 @@ public:
         return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
-    init_proof
-    init() {
-        auto result = init_proof(
-                std::all_of(_connection_definitions.begin(), _connection_definitions.end(), [](auto &connection_definition) { return connection_definition() == connection_result_t::SUCCESS; }));
-        _connection_definitions.clear();
-        return result;
-    }
-
-    work_return_t
-    work(init_proof &init) {
-        if (!init) {
-            return work_return_t::ERROR;
-        }
-        bool run = true;
-        while (run) {
-            bool something_happened = false;
-            for (auto &node : _nodes) {
-                auto result = node->work();
-                if (result == work_return_t::ERROR) {
-                    return work_return_t::ERROR;
-                } else if (result == work_return_t::INSUFFICIENT_INPUT_ITEMS) {
-                    // nothing
-                } else if (result == work_return_t::DONE) {
-                    // nothing
-                } else if (result == work_return_t::OK) {
-                    something_happened = true;
-                } else if (result == work_return_t::INSUFFICIENT_OUTPUT_ITEMS) {
-                    something_happened = true;
-                }
-            }
-
-            run = something_happened;
-        }
-
-        return work_return_t::DONE;
+    [[nodiscard]] const std::vector<edge>&
+    get_edges() const {
+        return _edges;
     }
 };
 
