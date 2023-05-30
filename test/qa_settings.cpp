@@ -226,7 +226,7 @@ const boost::ut::suite SettingsTests = [] {
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
-        [[maybe_unused]] auto ret = src.settings().set({ { "sample_rate", 49000.0f } });
+        std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
         sched.work();
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
         expect(eq(sink.n_samples_consumed, n_samples)) << "did not consume enough input samples";

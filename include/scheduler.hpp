@@ -72,29 +72,27 @@ class breadth_first : public node<breadth_first> {
     std::vector<node_t> _nodelist;
 public:
     explicit breadth_first(fair::graph::graph &&graph) : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)) {
-        std::map<node_t, std::set<node_t>> _adjacency_list{};
-        std::set<node_t> _source_nodes{};
+        std::map<node_t, std::vector<node_t>> _adjacency_list{};
+        std::vector<node_t> _source_nodes{};
         // compute the adjacency list
-        std::set<fair::graph::graph::node_model *> node_reached;
+        std::set<node_t> node_reached;
         for (auto &e : _graph.get_edges()) {
-            _adjacency_list[e._src_node].insert(e._dst_node);
-            _source_nodes.insert(e._src_node);
+            _adjacency_list[e._src_node].push_back(e._dst_node);
+            _source_nodes.push_back(e._src_node);
             node_reached.insert(e._dst_node);
         }
-        for (auto &dst : node_reached) {
-            _source_nodes.erase(dst);
-        }
+        _source_nodes.erase(std::remove_if(_source_nodes.begin(), _source_nodes.end(), [&node_reached](auto node) { return node_reached.contains(node); }), _source_nodes.end());
         // traverse graph
-        std::queue<fair::graph::graph::node_model *> queue{};
-        std::set<fair::graph::graph::node_model *>   reached;
+        std::queue<node_t> queue{};
+        std::set<node_t>   reached;
         // add all source nodes to queue
-        for (fair::graph::graph::node_model *source_node : _source_nodes) {
+        for (node_t source_node : _source_nodes) {
             queue.push(source_node);
             reached.insert(source_node);
         }
         // process all nodes, adding all unvisited child nodes to the queue
         while (!queue.empty()) {
-            fair::graph::graph::node_model *node = queue.front();
+            node_t node = queue.front();
             queue.pop();
             _nodelist.push_back(node);
             if (_adjacency_list.contains(node)) { // node has outgoing edges
