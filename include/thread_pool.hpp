@@ -304,7 +304,7 @@ concept ThreadPool = requires(T t, std::function<void()> &&func) {
  *
  * // pool for IO-bound (potentially blocking) tasks with at least 1 and a max of 1000 threads
  * opencmw::BasicThreadPool&lt;opencmw::IO_BOUND&gt;  poolIO("CustomIOPool", 1, 1000);
- * poolIO.keepAliveDuration() = seconds(10);            // keeps idling threads alive for 10 seconds (optional)
+ * poolIO.keepAliveDuration = seconds(10);              // keeps idling threads alive for 10 seconds (optional)
  * poolIO.waitUntilInitialised();                       // wait until the pool is initialised (optional)
  * poolIO.setAffinityMask({ true, true, true, false }); // allows executor threads to run on the first four CPU cores
  *
@@ -350,10 +350,10 @@ class BasicThreadPool {
     const uint32_t               _minThreads;
     const uint32_t               _maxThreads;
 
-    std::chrono::microseconds    _sleepDuration       = std::chrono::milliseconds(1);
-    std::chrono::seconds         _keepAliveDurationIO = std::chrono::seconds(10);
-
 public:
+    std::chrono::microseconds    sleepDuration       = std::chrono::milliseconds(1);
+    std::chrono::milliseconds    keepAliveDuration = std::chrono::seconds(10);
+
     BasicThreadPool(const std::string_view &name = generateName(), uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency())
         : _poolName(name), _minThreads(min), _maxThreads(max) {
         assert(min > 0 && "minimum number of threads must be > 0");
@@ -384,8 +384,6 @@ public:
     [[nodiscard]] std::size_t  numTasksRunning() const noexcept { return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire); }
     [[nodiscard]] std::size_t  numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
     [[nodiscard]] std::size_t  numTasksRecycled() const { return _recycledTasks.size(); }
-    std::chrono::microseconds &sleepDuration() noexcept { return _sleepDuration; }
-    std::chrono::seconds      &keepAliveDuration() noexcept { return _keepAliveDurationIO; }
     [[nodiscard]] bool         isInitialised() const { return _initialised.load(std::memory_order::acquire); }
     void                       waitUntilInitialised() const { _initialised.wait(false); }
     void                       requestShutdown() {
@@ -604,10 +602,10 @@ private:
                 noop_counter = noop_counter / 2;
                 cleanupFinishedThreads();
 
-                _condition.wait_for(lock, _keepAliveDurationIO, [this] { return numTasksQueued() > 0 || isShutdown(); });
+                _condition.wait_for(lock, keepAliveDuration, [this] { return numTasksQueued() > 0 || isShutdown(); });
             }
             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
-        } while (!isShutdown() && (numThreads() <= _minThreads || timeDiffSinceLastUsed < _keepAliveDurationIO));
+        } while (!isShutdown() && (numThreads() <= _minThreads || timeDiffSinceLastUsed < keepAliveDuration));
         auto nThread = _numThreads.fetch_sub(1);
         _numThreads.notify_all();
 

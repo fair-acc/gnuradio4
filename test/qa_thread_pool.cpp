@@ -17,8 +17,8 @@ const boost::ut::suite ThreadPoolTests = [] {
         std::atomic<int>                            enqueueCount{ 0 };
         std::atomic<int>                            executeCount{ 0 };
         fair::thread_pool::BasicThreadPool<fair::thread_pool::IO_BOUND> pool("TestPool", 1, 2);
-        expect(nothrow([&]{ pool.sleepDuration() = std::chrono::milliseconds(1); }));
-        expect(nothrow([&]{ pool.keepAliveDuration() = std::chrono::seconds(10); }));
+        expect(nothrow([&] { pool.sleepDuration = std::chrono::milliseconds(1); }));
+        expect(nothrow([&] { pool.keepAliveDuration = std::chrono::seconds(10); }));
         pool.waitUntilInitialised();
         expect(that % pool.isInitialised());
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
