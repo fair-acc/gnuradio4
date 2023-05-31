@@ -224,11 +224,11 @@ requires requires(T value) { std::get<0>(value); }
 inline constexpr bool setProcessAffinity(const T &threadMap, const int pid = detail::getPid()) {
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
     if (pid <= 0) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.emd(), ", "), pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), pid));
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = sched_setaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.emd(), ", "), pid));
+        throw std::system_error(rc, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), pid));
     }
 
     return true;
