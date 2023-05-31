@@ -57,7 +57,11 @@ public:
 };
 
 template<class type>
-concept thread_type = std::is_same_v<type, std::thread>;
+#ifdef __EMSCRIPTEN__
+    concept thread_type = std::is_same_v<type, std::thread>;
+#else
+    concept thread_type = std::is_same_v<type, std::thread> || std::is_same_v<type, std::jthread>;
+#endif
 
 namespace detail {
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
