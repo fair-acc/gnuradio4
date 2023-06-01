@@ -102,17 +102,24 @@ struct Source : public node<Source<T>> {
     }
 };
 
+using TestBlockDoc = Doc<R""(
+#TestBlock
+
+some test doc documentation
+)"">;
+
 template<typename T>
-struct TestBlock : public node<TestBlock<T>> {
-    IN<T>          in;
-    OUT<T>         out;
-    T              scaling_factor = static_cast<T>(1);
-    std::string    context;
-    std::int32_t   n_samples_max = -1;
-    float          sample_rate   = 1000.0f;
-    std::vector<T> vector_setting{ T(3), T(2), T(1) };
-    int            update_count = 0;
-    bool           debug        = false;
+struct TestBlock : public node<TestBlock<T>, TestBlockDoc> {
+    IN<T>  in;
+    OUT<T> out;
+    // parameters
+    A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">> scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
+    A<std::string, "context information", Visible>                context;
+    std::int32_t                                                  n_samples_max = -1;
+    float                                                         sample_rate   = 1000.0f;
+    std::vector<T>                                                vector_setting{ T(3), T(2), T(1) };
+    int                                                           update_count = 0;
+    bool                                                          debug        = false;
 
     void
     init(const tag_t::map_type &old_setting, const tag_t::map_type &new_setting) noexcept {
@@ -297,6 +304,28 @@ const boost::ut::suite SettingsTests = [] {
         std::ignore = block.settings().apply_staged_parameters();
         expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
+    };
+};
+
+const boost::ut::suite AnnotationTests = [] {
+    using namespace boost::ut;
+    using namespace fair::graph;
+    using namespace fair::graph::setting_test;
+
+    "basic node annotations"_test = [] {
+        graph             flow_graph;
+        TestBlock<float> &block = flow_graph.make_node<TestBlock<float>>();
+        expect(eq(block.description(), std::string_view(TestBlockDoc::value)));
+        expect(block.scaling_factor.visible());
+        expect(eq(block.scaling_factor.description(), std::string_view{ "scaling factor" }));
+        expect(eq(block.scaling_factor.unit(), std::string_view{ "As" }));
+        expect(eq(block.context.unit(), std::string_view{ "" }));
+        expect(block.context.visible());
+
+        block.scaling_factor = 42.f; // test wrapper assignment operator
+        expect(block.scaling_factor == 42) << "the answer to everything failed -- equal operator";
+        expect(eq(block.scaling_factor.value, 42)) << "the answer to everything failed -- by value";
+        expect(eq(block.scaling_factor, 42)) << "the answer to everything failed -- direct";
     };
 };
 

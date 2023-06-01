@@ -3,6 +3,7 @@
 
 #include <map>
 
+#include <annotated.hpp>
 #include <node_traits.hpp>
 #include <port.hpp>
 #include <tag.hpp>
@@ -253,6 +254,12 @@ public:
         _name = std::move(name);
     }
 
+    [[nodiscard]] constexpr std::string_view
+    description() const noexcept {
+        using Description = typename fair::meta::find_type_or_default<is_doc, EmptyDoc, Arguments...>::type;
+        return std::string_view(Description::value);
+    }
+
     [[nodiscard]] constexpr bool
     input_tags_present() const noexcept {
         return _input_tags_present;
@@ -429,7 +436,7 @@ public:
                 if (available_samples == 0) {
                     return work_return_t::OK;
                 }
-                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
+                samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }

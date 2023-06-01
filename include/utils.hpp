@@ -78,6 +78,15 @@ struct fixed_string {
 template<typename CharT, std::size_t N>
 fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
 
+template<typename T>
+struct is_fixed_string : std::false_type {};
+
+template<typename CharT, std::size_t N>
+struct is_fixed_string<fair::meta::fixed_string<CharT, N>> : std::true_type {};
+
+template<typename T>
+concept FixedString = is_fixed_string<T>::value;
+
 template<typename CharT, std::size_t N1, std::size_t N2>
 constexpr fixed_string<CharT, N1 + N2>
 operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
@@ -280,6 +289,31 @@ indexForName() {
     };
     return helper(std::make_index_sequence<PortList::size>());
 }
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = std::tuple<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = decltype(std::tuple_cat(std::conditional_t<Pred<First>::value, std::tuple<First>, std::tuple<>>(), typename find_type<Pred, Rest...>::type()));
+};
+
+template<template<typename> typename Pred, typename... Items>
+using find_type_t = typename find_type<Pred, Items...>::type;
+
+template<template<typename> typename Predicate, typename DefaultType, typename... Ts>
+struct find_type_or_default {
+    using type = DefaultType;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
+struct find_type_or_default<Predicate, DefaultType, Head, Ts...>
+    : std::conditional_t<Predicate<Head>::value, find_type_or_default<Predicate, Head, Ts...>, find_type_or_default<Predicate, DefaultType, Ts...>> {};
 
 template<typename... Lambdas>
 struct overloaded : Lambdas... {
