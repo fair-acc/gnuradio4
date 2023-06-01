@@ -9,12 +9,15 @@ set_project_warnings(graph-prototype-options)
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
+    target_compile_options(graph-prototype-options INTERFACE
+            -fwasm-exceptions
+            -pthread
+            )
     target_link_options(graph-prototype-options INTERFACE
             "SHELL:-s ALLOW_MEMORY_GROWTH=1"
             -fwasm-exceptions
-    )
-    target_compile_options(graph-prototype-options INTERFACE
-            -fwasm-exceptions
+            -pthread
+            "SHELL:-s PTHREAD_POOL_SIZE=30"
             )
 endif()
 
