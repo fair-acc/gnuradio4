@@ -376,9 +376,9 @@ public:
     }
 
     BasicThreadPool(const BasicThreadPool &) = delete;
-    BasicThreadPool(BasicThreadPool &&)      = delete;
+    BasicThreadPool(BasicThreadPool &&)      = default;
     BasicThreadPool           &operator=(const BasicThreadPool &) = delete;
-    BasicThreadPool           &operator=(BasicThreadPool &&) = delete;
+    BasicThreadPool           &operator=(BasicThreadPool &&) = default;
 
     [[nodiscard]] std::string  poolName() const noexcept { return _poolName; }
     [[nodiscard]] uint32_t     minThreads() const noexcept { return _minThreads; };

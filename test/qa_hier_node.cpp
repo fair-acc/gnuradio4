@@ -50,7 +50,7 @@ protected:
 
     using in_port_t                              = fg::IN<T>;
 
-    fg::scheduler::simple _scheduler;
+    fg::scheduler::simple<> _scheduler;
 
     fg::graph
     make_graph() {
@@ -194,7 +194,9 @@ make_graph(std::size_t events_count) {
 
 int
 main() {
-    fg::scheduler::simple scheduler(make_graph(10));
+    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool<fair::thread_pool::CPU_BOUND>>("custom pool", 2,2);
+
+    fg::scheduler::simple scheduler(make_graph(10), thread_pool);
 
     scheduler.work();
 }
