@@ -577,6 +577,7 @@ private:
             _initialised.notify_all();
         }
         _numThreads.notify_one();
+        bool running = true;
         do {
             TaskQueue::TaskContainer currentTaskContainer = popTask();
             if (!currentTaskContainer.empty()) {
@@ -604,16 +605,31 @@ private:
 
                 _condition.wait_for(lock, keepAliveDuration, [this] { return numTasksQueued() > 0 || isShutdown(); });
             }
+            // check if this thread is to be kept
             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
-        } while (!isShutdown() && (numThreads() <= _minThreads || timeDiffSinceLastUsed < keepAliveDuration));
-        auto nThread = _numThreads.fetch_sub(1);
-        _numThreads.notify_all();
-
-        if (nThread == 1) {
-            // cleanup
-            _recycledTasks.clear();
-            _taskQueue.clear();
-        }
+            if (isShutdown()) {
+                auto nThread = _numThreads.fetch_sub(1);
+                _numThreads.notify_all();
+                if (nThread == 1) { // cleanup last thread
+                    _recycledTasks.clear();
+                    _taskQueue.clear();
+                }
+                running = false;
+            } else if (timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
+                unsigned long nThreads = numThreads();
+                while(nThreads > minThreads()) { // compare and swap loop
+                    if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
+                        _numThreads.notify_all();
+                        if (nThreads == 1) { // cleanup last thread
+                            _recycledTasks.clear();
+                            _taskQueue.clear();
+                        }
+                        running = false;
+                        break;
+                    }
+                }
+            }
+        } while (running);
     }
 };
 template<TaskType T>
