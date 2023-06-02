@@ -7,6 +7,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 #include "typelist.hpp"
@@ -295,12 +296,12 @@ struct find_type;
 
 template<template<typename> typename Pred>
 struct find_type<Pred> {
-    using type = std::tuple<>;
+    using type = typelist<>;
 };
 
 template<template<typename> typename Pred, typename First, typename... Rest>
 struct find_type<Pred, First, Rest...> {
-    using type = decltype(std::tuple_cat(std::conditional_t<Pred<First>::value, std::tuple<First>, std::tuple<>>(), typename find_type<Pred, Rest...>::type()));
+    using type = typename std::conditional_t<Pred<First>::value, typelist<First, typename find_type<Pred, Rest...>::type>, typename find_type<Pred, Rest...>::type>;
 };
 
 template<template<typename> typename Pred, typename... Items>
