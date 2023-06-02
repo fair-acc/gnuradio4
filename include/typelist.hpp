@@ -209,16 +209,38 @@ template<template<typename, typename> class Method, typename T0, typename T1, ty
 struct reduce_impl<Method, typelist<T0, T1, Ts...>>
     : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
 
-template<template<typename, typename> class Method, typename T0, typename T1, typename T2,
-         typename T3, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>>
-    : public reduce_impl<
-              Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {
-};
+template<template<typename, typename> class Method, typename T0, typename T1, typename T2, typename T3, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {};
 } // namespace detail
 
 template<template<typename, typename> class Method, typename List>
 using reduce = typename detail::reduce_impl<Method, List>::type;
+
+namespace detail {
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = typelist<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = typename std::conditional_t<Pred<First>::value, typelist<First, typename find_type<Pred, Rest...>::type>, typename find_type<Pred, Rest...>::type>;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename... Ts>
+struct find_type_or_default_impl {
+    using type = DefaultType;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
+struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
+    : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
+
+} // namespace detail
 
 // typelist /////////////////
 template<typename T>
@@ -226,18 +248,30 @@ concept is_typelist_v = requires { typename T::typelist_tag; };
 
 template<typename... Ts>
 struct typelist {
-    using this_t = typelist<Ts...>;
-    using typelist_tag = std::true_type;
+    using this_t                                                                    = typelist<Ts...>;
+    using typelist_tag                                                              = std::true_type;
 
     static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
 
     template<template<typename...> class Other>
     using apply = Other<Ts...>;
 
+    template<class F, std::size_t... Is>
+    static constexpr void
+    apply_impl(F &&f, std::index_sequence<Is...>) {
+        (f(std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
+    }
+
+    template<class F>
+    static constexpr void
+    apply_func(F &&f) {
+        apply_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{});
+    }
+
     template<std::size_t I>
     using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
 
-    template <typename Head>
+    template<typename Head>
     using prepend = typelist<Head, Ts...>;
 
     template<typename... Other>
@@ -278,22 +312,29 @@ struct typelist {
     }())>;
 
     template<typename Matcher = typename this_t::safe_head>
-    constexpr static bool all_same =
-        ((std::is_same_v<Matcher, Ts> && ...));
+    constexpr static bool all_same = ((std::is_same_v<Matcher, Ts> && ...));
 
     template<template<typename...> typename Predicate>
     using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
 
-    using tuple_type    = std::tuple<Ts...>;
-    using tuple_or_type = std::remove_pointer_t<decltype(
-            [] {
-                if constexpr (sizeof...(Ts) == 0) {
-                    return static_cast<void*>(nullptr);
-                } else if constexpr (sizeof...(Ts) == 1) {
-                    return static_cast<at<0>*>(nullptr);
-                } else {
-                    return static_cast<tuple_type*>(nullptr);
-                }
+    template<template<typename> typename Pred>
+    using find = typename detail::find_type<Pred, Ts...>::type;
+
+    template<template<typename> typename Pred, typename DefaultType>
+    using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
+
+    template<typename T>
+    inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
+
+    using tuple_type                      = std::tuple<Ts...>;
+    using tuple_or_type                   = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) == 0) {
+            return static_cast<void *>(nullptr);
+        } else if constexpr (sizeof...(Ts) == 1) {
+            return static_cast<at<0> *>(nullptr);
+        } else {
+            return static_cast<tuple_type *>(nullptr);
+        }
             }())>;
 
 };
@@ -309,4 +350,4 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 
 } // namespace fair::meta
 
-#endif // include guard
+#endif // GNURADIO_TYPELIST_HPP

@@ -254,10 +254,9 @@ public:
         _name = std::move(name);
     }
 
-    [[nodiscard]] constexpr std::string_view
-    description() const noexcept {
-        using Description = typename fair::meta::find_type_or_default<is_doc, EmptyDoc, Arguments...>::type;
-        return std::string_view(Description::value);
+    [[nodiscard]] constexpr bool
+    is_blocking() const noexcept {
+        return std::disjunction_v<std::is_same<BlockingIO, Arguments>...>;
     }
 
     [[nodiscard]] constexpr bool
@@ -630,6 +629,46 @@ public:
         return success ? work_return_t::OK : work_return_t::ERROR;
     } // end: work_return_t work() noexcept { ..}
 };
+
+/**
+ * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
+ */
+template<typename Node>
+[[nodiscard]] /*constexpr*/ std::string_view
+node_description() noexcept {
+    using DerivedNode          = typename Node::derived_t;
+    using ArgumentList         = typename Node::node_template_parameters;
+    using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
+    using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_type_type, DefaultSupportedTypes>;
+    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO>;
+
+    // re-enable once string and constexpr static is supported by all compilers
+    /*constexpr*/ static std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
+                                                       fair::meta::type_name<DerivedNode>(), Description::value,
+                                                       is_blocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
+    fair::meta::typelist<SupportedTypes>::template apply_func([&](auto index, auto &&t) { ret += fmt::format("{}:{} ", index, fair::meta::type_name<decltype(t)>()); });
+    ret += fmt::format("\n**Parameters:**\n");
+    if constexpr (refl::is_reflectable<DerivedNode>()) {
+        for_each(refl::reflect<DerivedNode>().members, [&](auto member) {
+            using RawType = std::remove_cvref_t<typename decltype(member)::value_type>;
+            using Type    = inner_type_t<RawType>;
+
+            if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                if constexpr (is_annotated<RawType>()) {
+                    RawType t;
+                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n", t.visible() ? "" : "_", //
+                                       refl::detail::get_type_name<Type>(), get_display_name_const(member).str(),                      //
+                                       t.description(), t.unit(), t.documentation(),                                                   //
+                                       t.visible() ? "" : "_");
+                } else {
+                    ret += fmt::format("{:10} {:<20}\n", refl::detail::get_type_name<Type>(), get_display_name_const(member).str());
+                }
+            }
+        });
+    }
+    ret += fmt::format("\n~~Ports:~~\ntbd.");
+    return ret;
+}
 
 template<typename Node>
 concept source_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {

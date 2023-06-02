@@ -103,13 +103,11 @@ struct Source : public node<Source<T>> {
 };
 
 using TestBlockDoc = Doc<R""(
-#TestBlock
-
 some test doc documentation
 )"">;
 
 template<typename T>
-struct TestBlock : public node<TestBlock<T>, TestBlockDoc> {
+struct TestBlock : public node<TestBlock<T>, BlockingIO, TestBlockDoc, SupportedTypes<float, double>> {
     IN<T>  in;
     OUT<T> out;
     // parameters
@@ -215,7 +213,7 @@ const boost::ut::suite SettingsTests = [] {
         // set non-existent setting
         expect(not block1.settings().changed()) << "settings not changed";
         auto ret1 = block1.settings().set({ { "unknown", "random value" } });
-        expect(eq(ret1.size(), 1)) << "setting one unknown parameter";
+        expect(eq(ret1.size(), 1U)) << "setting one unknown parameter";
 
         expect(not block1.settings().changed());
         auto ret2 = block1.settings().set({ { "context", "alt context" } });
@@ -315,17 +313,20 @@ const boost::ut::suite AnnotationTests = [] {
     "basic node annotations"_test = [] {
         graph             flow_graph;
         TestBlock<float> &block = flow_graph.make_node<TestBlock<float>>();
-        expect(eq(block.description(), std::string_view(TestBlockDoc::value)));
+        expect(fair::graph::node_description<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
         expect(block.scaling_factor.visible());
         expect(eq(block.scaling_factor.description(), std::string_view{ "scaling factor" }));
         expect(eq(block.scaling_factor.unit(), std::string_view{ "As" }));
         expect(eq(block.context.unit(), std::string_view{ "" }));
         expect(block.context.visible());
+        expect(block.is_blocking());
 
         block.scaling_factor = 42.f; // test wrapper assignment operator
         expect(block.scaling_factor == 42) << "the answer to everything failed -- equal operator";
         expect(eq(block.scaling_factor.value, 42)) << "the answer to everything failed -- by value";
         expect(eq(block.scaling_factor, 42)) << "the answer to everything failed -- direct";
+
+        // fmt::print("description:\n {}", fair::graph::node_description<TestBlock<float>>());
     };
 };
 

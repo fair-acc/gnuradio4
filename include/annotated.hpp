@@ -53,9 +53,28 @@ static_assert(!UnitType<EmptyDoc>);
 static_assert(!Documentation<EmptyUnit>);
 
 /**
- * @brief A simple class to annotate field etc. to denotes that the entity is visible.
+ * @brief Annotates field etc. that the entity is visible.
  */
 struct Visible {};
+
+/**
+ * @brief Annotates node, indicating to calling schedulers that it may block due IO.
+ */
+struct BlockingIO {};
+
+/**
+ * @brief Annotates templated node, indicating which port data types are supported.
+ */
+template<typename... Ts>
+struct SupportedTypes {};
+
+template<typename T>
+struct is_supported_type_type : std::false_type {};
+
+template<typename... Ts>
+struct is_supported_type_type<SupportedTypes<Ts...>> : std::true_type {};
+
+using DefaultSupportedTypes = SupportedTypes<>;
 
 /**
  * @brief Annotated is a template class that acts as a transparent wrapper around another type.
@@ -117,19 +136,19 @@ struct Annotated {
 
     constexpr std::string_view
     documentation() const noexcept {
-        using Documentation = typename fair::meta::find_type_or_default<is_doc, EmptyDoc, Arguments...>::type;
+        using Documentation = typename fair::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
         return std::string_view{ Documentation::value };
     }
 
     constexpr std::string_view
     unit() const noexcept {
-        using PhysicalUnit = typename fair::meta::find_type_or_default<is_unit, EmptyUnit, Arguments...>::type;
+        using PhysicalUnit = typename fair::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
         return std::string_view{ PhysicalUnit::value };
     }
 
     constexpr bool
     visible() const noexcept {
-        return std::disjunction_v<std::is_same<Visible, Arguments>...>;
+        return fair::meta::typelist<Arguments...>::template contains<Visible>;
     }
 };
 
@@ -163,5 +182,8 @@ template<typename T, fair::meta::fixed_string description = "", typename... Argu
 using A = Annotated<T, description, Arguments...>;
 
 } // namespace fair::graph
+
+template<typename... Ts>
+struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
 
 #endif // GRAPH_PROTOTYPE_ANNOTATED_HPP

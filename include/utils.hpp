@@ -291,31 +291,6 @@ indexForName() {
     return helper(std::make_index_sequence<PortList::size>());
 }
 
-template<template<typename> typename Pred, typename... Items>
-struct find_type;
-
-template<template<typename> typename Pred>
-struct find_type<Pred> {
-    using type = typelist<>;
-};
-
-template<template<typename> typename Pred, typename First, typename... Rest>
-struct find_type<Pred, First, Rest...> {
-    using type = typename std::conditional_t<Pred<First>::value, typelist<First, typename find_type<Pred, Rest...>::type>, typename find_type<Pred, Rest...>::type>;
-};
-
-template<template<typename> typename Pred, typename... Items>
-using find_type_t = typename find_type<Pred, Items...>::type;
-
-template<template<typename> typename Predicate, typename DefaultType, typename... Ts>
-struct find_type_or_default {
-    using type = DefaultType;
-};
-
-template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
-struct find_type_or_default<Predicate, DefaultType, Head, Ts...>
-    : std::conditional_t<Predicate<Head>::value, find_type_or_default<Predicate, Head, Ts...>, find_type_or_default<Predicate, DefaultType, Ts...>> {};
-
 template<typename... Lambdas>
 struct overloaded : Lambdas... {
     using Lambdas::operator()...;
