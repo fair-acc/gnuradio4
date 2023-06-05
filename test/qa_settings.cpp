@@ -307,6 +307,19 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
     };
+
+    "unique ID"_test = [] {
+        graph flow_graph;
+        auto &block1 = flow_graph.make_node<TestBlock<float>>();
+        auto &block2 = flow_graph.make_node<TestBlock<float>>();
+        expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
+        expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
+
+        auto merged1 = merge<"out", "in">(TestBlock<float>(), TestBlock<float>());
+        auto merged2 = merge<"out", "in">(TestBlock<float>(), TestBlock<float>());
+        expect(not eq(merged1.unique_id, merged2.unique_id)) << "unique per-type block id (size_t) ";
+        expect(not eq(merged1.unique_name, merged2.unique_name)) << "unique per-type block id (string) ";
+    };
 };
 
 const boost::ut::suite AnnotationTests = [] {
