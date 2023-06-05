@@ -193,11 +193,15 @@ output_ports(Self *self) noexcept {
  */
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
+    static std::atomic<std::size_t> _unique_id_counter;
+
 public:
-    using derived_t                                      = Derived;
-    using node_template_parameters                       = meta::typelist<Arguments...>;
-    using Description                                    = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
-    constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
+    using derived_t                                       = Derived;
+    using node_template_parameters                        = meta::typelist<Arguments...>;
+    using Description                                     = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    constexpr static tag_propagation_policy_t tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
+    const std::size_t                         unique_id   = _unique_id_counter++;
+    const std::string                         unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
 
 protected:
     using setting_map = std::map<std::string, int, std::less<>>;
@@ -636,6 +640,9 @@ public:
     } // end: work_return_t work() noexcept { ..}
 };
 
+template<typename Derived, typename... Arguments>
+inline std::atomic<std::size_t> node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
+
 /**
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
  */
@@ -711,6 +718,12 @@ concept sink_node = requires(Node &node, typename traits::node::input_port_types
 template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
 class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
                                 meta::concat<meta::remove_at<OutId, typename traits::node::output_ports<Left>>, typename traits::node::output_ports<Right>>> {
+    static std::atomic<std::size_t> _unique_id_counter;
+
+public:
+    const std::size_t unique_id   = _unique_id_counter++;
+    const std::string unique_name = fmt::format("merged_node<{}:{},{}:{}>#{}", fair::meta::type_name<Left>(), OutId, fair::meta::type_name<Right>(), InId, unique_id);
+
 private:
     // copy-paste from above, keep in sync
     using base = node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
@@ -854,6 +867,9 @@ public:
         return base::work();
     }
 };
+
+template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
+inline std::atomic<std::size_t> merged_node<Left, Right, OutId, InId>::_unique_id_counter{ 0_UZ };
 
 /**
  * This methods can merge simple blocks that are defined via a single `auto process_one(..)` producing a
