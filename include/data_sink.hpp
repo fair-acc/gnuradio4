@@ -5,6 +5,8 @@
 #include "node.hpp"
 #include "tag.hpp"
 
+#include <any>
+
 namespace fair::graph {
 
 enum class acquisition_mode {
@@ -18,7 +20,9 @@ enum class blocking_mode {
     Blocking
 };
 
-template<typename T>
+class data_sink_registry;
+
+template<typename T, typename R = data_sink_registry>
 class data_sink : public node<data_sink<T>> {
 public:
     IN<T>        in;
@@ -72,6 +76,14 @@ private:
     std::vector<listener> listeners;
 
 public:
+    // TODO sink should register itself on construction, but name is set afterwards via
+    // set_name, which we have no hook into. Maybe the registration should be done by the
+    // graph creating/destroying the sink instead?
+
+    ~data_sink() {
+        R::instance().unregister_sink(this);
+    }
+
     std::shared_ptr<poller> get_streaming_poller(blocking_mode block = blocking_mode::NonBlocking) {
         auto handler = std::make_shared<poller>();
         pending_listeners.list.push_back({
@@ -145,6 +157,70 @@ public:
         }
 
         return work_return_t::OK;
+    }
+};
+
+class data_sink_registry {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::any> sinks;
+
+public:
+    // TODO this shouldn't be a singleton but associated with the flow graph (?)
+    static data_sink_registry& instance() {
+        static data_sink_registry s_instance;
+        return s_instance;
+    }
+
+    template<typename T>
+    void register_sink(data_sink<T, data_sink_registry> *sink) {
+        std::lock_guard lg{mutex};
+        sinks[std::string(sink->name())] = sink;
+    }
+
+    template<typename T>
+    void unregister_sink(data_sink<T, data_sink_registry> *sink) {
+        std::lock_guard lg{mutex};
+        const auto it = sinks.find(std::string(sink->name()));
+        try {
+            if (it != sinks.end() && std::any_cast<data_sink<T, data_sink_registry>*>(it->second) == sink) {
+                sinks.erase(it);
+            }
+        } catch (...) {
+        }
+    }
+
+    template<typename T>
+    std::shared_ptr<typename data_sink<T>::poller> get_streaming_poller(std::string_view name, blocking_mode block = blocking_mode::NonBlocking) {
+        std::lock_guard lg{mutex};
+        auto sink = get_typed_sink<T>(name);
+        return sink ? sink->get_streaming_poller(block) : nullptr;
+    }
+
+    template<typename T, typename Callback>
+    bool register_streaming_callback(std::string_view name, Callback callback) {
+        std::lock_guard lg{mutex};
+        auto sink = get_typed_sink<T>(name);
+        if (!sink) {
+            return false;
+        }
+
+        sink->register_streaming_callback(std::move(callback));
+        return true;
+    }
+
+private:
+    template<typename T>
+    data_sink<T, data_sink_registry>* get_typed_sink(std::string_view name) {
+        const auto it = sinks.find(std::string(name));
+        if (it == sinks.end()) {
+            return {};
+        }
+
+        try {
+            return std::any_cast<data_sink<T, data_sink_registry>*>(it->second);
+        } catch (...) {
+            return {};
+        }
     }
 };
 

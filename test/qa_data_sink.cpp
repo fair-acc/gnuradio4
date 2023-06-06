@@ -63,6 +63,8 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
+        sink.set_name("test_sink");
+        data_sink_registry::instance().register_sink(&sink); // TODO this should be done elsewhere
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         std::size_t samples_seen = 0;
@@ -73,7 +75,7 @@ const boost::ut::suite DataSinkTests = [] {
             samples_seen += buffer.size();
         };
 
-        sink.register_streaming_callback(callback);
+        expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", callback));
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
@@ -88,11 +90,15 @@ const boost::ut::suite DataSinkTests = [] {
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
+        sink.set_name("test_sink");
+        data_sink_registry::instance().register_sink(&sink); // TODO this should be done elsewhere
+
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         std::atomic<std::size_t> samples_seen = 0;
 
-        auto poller = sink.get_streaming_poller(blocking_mode::Blocking);
+        auto poller = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
+        expect(poller);
 
         auto polling = std::async([poller, &samples_seen] {
             while (!poller->finished) {
@@ -120,13 +126,21 @@ const boost::ut::suite DataSinkTests = [] {
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
+        sink.set_name("test_sink");
+        data_sink_registry::instance().register_sink(&sink); // TODO this should be done elsewhere
+
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         std::atomic<std::size_t> samples_seen = 0;
 
-        auto poller = sink.get_streaming_poller();
+        auto invalid_type_poller = data_sink_registry::instance().get_streaming_poller<double>("test_sink");
+        expect(!invalid_type_poller);
+
+        auto poller = data_sink_registry::instance().get_streaming_poller<float>("test_sink");
+        expect(poller);
 
         auto polling = std::async([poller, &samples_seen] {
+            expect(poller.get() != nullptr);
             while (!poller->finished) {
                 using namespace std::chrono_literals;
                 std::this_thread::sleep_for(20ms);
