@@ -139,4 +139,4 @@ jobs:
       shell: bash
       run: |
         source ~/emsdk/emsdk_env.sh
-        ${EMSDK_NODE} ./src/main.js
+        node ./src/main.js
