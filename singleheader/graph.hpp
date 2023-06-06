@@ -767,6 +767,7 @@ public:
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 // #include "typelist.hpp"
@@ -981,16 +982,38 @@ template<template<typename, typename> class Method, typename T0, typename T1, ty
 struct reduce_impl<Method, typelist<T0, T1, Ts...>>
     : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
 
-template<template<typename, typename> class Method, typename T0, typename T1, typename T2,
-         typename T3, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>>
-    : public reduce_impl<
-              Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {
-};
+template<template<typename, typename> class Method, typename T0, typename T1, typename T2, typename T3, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {};
 } // namespace detail
 
 template<template<typename, typename> class Method, typename List>
 using reduce = typename detail::reduce_impl<Method, List>::type;
+
+namespace detail {
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = typelist<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = typename std::conditional_t<Pred<First>::value, typelist<First, typename find_type<Pred, Rest...>::type>, typename find_type<Pred, Rest...>::type>;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename... Ts>
+struct find_type_or_default_impl {
+    using type = DefaultType;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
+struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
+    : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
+
+} // namespace detail
 
 // typelist /////////////////
 template<typename T>
@@ -998,18 +1021,30 @@ concept is_typelist_v = requires { typename T::typelist_tag; };
 
 template<typename... Ts>
 struct typelist {
-    using this_t = typelist<Ts...>;
-    using typelist_tag = std::true_type;
+    using this_t                                                                    = typelist<Ts...>;
+    using typelist_tag                                                              = std::true_type;
 
     static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
 
     template<template<typename...> class Other>
     using apply = Other<Ts...>;
 
+    template<class F, std::size_t... Is>
+    static constexpr void
+    apply_impl(F &&f, std::index_sequence<Is...>) {
+        (f(std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
+    }
+
+    template<class F>
+    static constexpr void
+    apply_func(F &&f) {
+        apply_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{});
+    }
+
     template<std::size_t I>
     using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
 
-    template <typename Head>
+    template<typename Head>
     using prepend = typelist<Head, Ts...>;
 
     template<typename... Other>
@@ -1041,31 +1076,47 @@ struct typelist {
     template<template<typename...> typename Pred>
     constexpr static bool none_of = (!Pred<Ts>::value && ...);
 
-    using safe_head = std::remove_pointer_t<decltype([] {
+    template<typename DefaultType>
+    using safe_head_default = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) > 0) {
-            return static_cast<this_t::at<0>*>(nullptr);
+            return static_cast<this_t::at<0> *>(nullptr);
         } else {
-            return static_cast<void*>(nullptr);
+            return static_cast<DefaultType *>(nullptr);
+        }
+    }())>;
+
+    using safe_head         = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) > 0) {
+            return static_cast<this_t::at<0> *>(nullptr);
+        } else {
+            return static_cast<void *>(nullptr);
         }
     }())>;
 
     template<typename Matcher = typename this_t::safe_head>
-    constexpr static bool all_same =
-        ((std::is_same_v<Matcher, Ts> && ...));
+    constexpr static bool all_same = ((std::is_same_v<Matcher, Ts> && ...));
 
     template<template<typename...> typename Predicate>
     using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
 
-    using tuple_type    = std::tuple<Ts...>;
-    using tuple_or_type = std::remove_pointer_t<decltype(
-            [] {
-                if constexpr (sizeof...(Ts) == 0) {
-                    return static_cast<void*>(nullptr);
-                } else if constexpr (sizeof...(Ts) == 1) {
-                    return static_cast<at<0>*>(nullptr);
-                } else {
-                    return static_cast<tuple_type*>(nullptr);
-                }
+    template<template<typename> typename Pred>
+    using find = typename detail::find_type<Pred, Ts...>::type;
+
+    template<template<typename> typename Pred, typename DefaultType>
+    using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
+
+    template<typename T>
+    inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
+
+    using tuple_type                      = std::tuple<Ts...>;
+    using tuple_or_type                   = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) == 0) {
+            return static_cast<void *>(nullptr);
+        } else if constexpr (sizeof...(Ts) == 1) {
+            return static_cast<at<0> *>(nullptr);
+        } else {
+            return static_cast<tuple_type *>(nullptr);
+        }
             }())>;
 
 };
@@ -1081,7 +1132,7 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 
 } // namespace fair::meta
 
-#endif // include guard
+#endif // GNURADIO_TYPELIST_HPP
 
 // #include "vir/simd.h"
 /*
@@ -3594,6 +3645,15 @@ struct fixed_string {
 template<typename CharT, std::size_t N>
 fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
 
+template<typename T>
+struct is_fixed_string : std::false_type {};
+
+template<typename CharT, std::size_t N>
+struct is_fixed_string<fair::meta::fixed_string<CharT, N>> : std::true_type {};
+
+template<typename T>
+concept FixedString = is_fixed_string<T>::value;
+
 template<typename CharT, std::size_t N1, std::size_t N2>
 constexpr fixed_string<CharT, N1 + N2>
 operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
@@ -3796,6 +3856,41 @@ indexForName() {
     };
     return helper(std::make_index_sequence<PortList::size>());
 }
+
+// template<template<typename...> typename Type, typename... Items>
+// using find_type = decltype(std::tuple_cat(std::declval<std::conditional_t<is_instantiation_of<Items, Type>, std::tuple<Items>, std::tuple<>>>()...));
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = std::tuple<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = decltype(std::tuple_cat(std::conditional_t<Pred<First>::value, std::tuple<First>, std::tuple<>>(), typename find_type<Pred, Rest...>::type()));
+};
+
+template<template<typename> typename Pred, typename... Items>
+using find_type_t = typename find_type<Pred, Items...>::type;
+
+template<typename Tuple, typename Default = void>
+struct get_first_or_default;
+
+template<typename First, typename... Rest, typename Default>
+struct get_first_or_default<std::tuple<First, Rest...>, Default> {
+    using type = First;
+};
+
+template<typename Default>
+struct get_first_or_default<std::tuple<>, Default> {
+    using type = Default;
+};
+
+template<typename Tuple, typename Default = void>
+using get_first_or_default_t = typename get_first_or_default<Tuple, Default>::type;
 
 template<typename... Lambdas>
 struct overloaded : Lambdas... {
@@ -4663,6 +4758,198 @@ static_assert(Buffer<circular_buffer<int32_t>>);
 #define GNURADIO_NODE_HPP
 
 #include <map>
+
+// #include <annotated.hpp>
+#ifndef GRAPH_PROTOTYPE_ANNOTATED_HPP
+#define GRAPH_PROTOTYPE_ANNOTATED_HPP
+
+#include <string_view>
+#include <type_traits>
+// #include <utils.hpp>
+
+
+namespace fair::graph {
+
+/**
+ * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<fair::meta::fixed_string doc_string>
+struct Doc {
+    static constexpr fair::meta::fixed_string value = doc_string;
+};
+
+using EmptyDoc = Doc<"">; // nomen-est-omen
+
+template<typename T>
+struct is_doc : std::false_type {};
+
+template<fair::meta::fixed_string N>
+struct is_doc<Doc<N>> : std::true_type {};
+
+template<typename T>
+concept Documentation = is_doc<T>::value;
+
+/**
+ * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<fair::meta::fixed_string doc_string>
+struct Unit {
+    static constexpr fair::meta::fixed_string value = doc_string;
+};
+
+using EmptyUnit = Unit<"">; // nomen-est-omen
+
+template<typename T>
+struct is_unit : std::false_type {};
+
+template<fair::meta::fixed_string N>
+struct is_unit<Unit<N>> : std::true_type {};
+
+template<typename T>
+concept UnitType = is_unit<T>::value;
+
+static_assert(Documentation<EmptyDoc>);
+static_assert(UnitType<EmptyUnit>);
+static_assert(!UnitType<EmptyDoc>);
+static_assert(!Documentation<EmptyUnit>);
+
+/**
+ * @brief Annotates field etc. that the entity is visible.
+ */
+struct Visible {};
+
+/**
+ * @brief Annotates node, indicating to calling schedulers that it may block due IO.
+ */
+struct BlockingIO {};
+
+/**
+ * @brief Annotates templated node, indicating which port data types are supported.
+ */
+template<typename... Ts>
+struct SupportedTypes {};
+
+template<typename T>
+struct is_supported_types : std::false_type {};
+
+template<typename... Ts>
+struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
+
+using DefaultSupportedTypes = SupportedTypes<>;
+
+static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
+static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
+
+/**
+ * @brief Annotated is a template class that acts as a transparent wrapper around another type.
+ * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
+ * The meta-information is supplied as template parameters.
+ */
+template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
+struct Annotated {
+    using value_type = T;
+    T value;
+
+    Annotated() = default;
+
+    constexpr Annotated(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) : value(value_) {}
+
+    constexpr Annotated(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) : value(std::move(value_)) {}
+
+    // N.B. intentional implicit assignment and conversion operators to have a transparent wrapper
+    // this does not affect the conversion of the wrapped value type 'T' itself
+    constexpr Annotated &
+    operator=(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) {
+        value = value_;
+        return *this;
+    }
+
+    constexpr Annotated &
+    operator=(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) {
+        value = std::move(value_);
+        return *this;
+    }
+
+    inline explicit(false) constexpr
+    operator T &() noexcept {
+        return value;
+    }
+
+    inline explicit(false) constexpr operator const T &() const noexcept { return value; }
+
+    constexpr bool
+    operator==(const Annotated &other) const noexcept {
+        return value == other.value;
+    }
+
+    template<typename U>
+    constexpr bool
+    operator==(const U &other) const noexcept {
+        if constexpr (requires { other.value; }) {
+            return value == other.value;
+        } else {
+            return value == other;
+        }
+    }
+
+    // meta-information
+    static constexpr std::string_view
+    description() noexcept {
+        return std::string_view{ description_ };
+    }
+
+    static constexpr std::string_view
+    documentation() noexcept {
+        using Documentation = typename fair::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
+        return std::string_view{ Documentation::value };
+    }
+
+    static constexpr std::string_view
+    unit() noexcept {
+        using PhysicalUnit = typename fair::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
+        return std::string_view{ PhysicalUnit::value };
+    }
+
+    static constexpr bool
+    visible() noexcept {
+        return fair::meta::typelist<Arguments...>::template contains<Visible>;
+    }
+};
+
+template<typename T>
+struct is_annotated : std::false_type {};
+
+template<typename T, fair::meta::fixed_string str, typename... Args>
+struct is_annotated<fair::graph::Annotated<T, str, Args...>> : std::true_type {};
+
+template<typename T>
+concept AnnotatedType = is_annotated<T>::value;
+
+template<typename T>
+struct unwrap_if_wrapped {
+    using type = T;
+};
+
+template<typename U, fair::meta::fixed_string str, typename... Args>
+struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
+    using type = U;
+};
+
+/**
+ * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
+ * If the given type is not an `Annotated`, it returns the type itself.
+ */
+template<typename T>
+using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
+
+} // namespace fair::graph
+
+template<typename... Ts>
+struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
+
+#endif // GRAPH_PROTOTYPE_ANNOTATED_HPP
 
 // #include <node_traits.hpp>
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
@@ -10629,7 +10916,7 @@ public:
             meta::tuple_for_each(
                     [this](auto &&default_tag) {
                         for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
-                            using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                            using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                             if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                                 if (default_tag.shortKey().ends_with(get_display_name(member))) {
                                     _auto_forward.emplace(get_display_name(member));
@@ -10688,7 +10975,7 @@ public:
                 const auto &value  = localValue;
                 bool        is_set = false;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                    using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
@@ -10716,7 +11003,7 @@ public:
                 const auto &key   = localKey;
                 const auto &value = localValue;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
-                    using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
@@ -10789,7 +11076,7 @@ public:
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
                     for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                        using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                        using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
 
                         if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                             oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
@@ -10803,7 +11090,7 @@ public:
                 const auto &key          = localKey;
                 const auto &staged_value = localStaged_value;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
-                    using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                     if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*settings_base<Node>::_node) = std::get<Type>(staged_value);
@@ -10818,7 +11105,7 @@ public:
                 });
             }
             for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
@@ -10839,7 +11126,7 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
             for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                using Type = std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>;
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*settings_base<Node>::_node));
@@ -11036,6 +11323,7 @@ class node : protected std::tuple<Arguments...> {
 public:
     using derived_t                                      = Derived;
     using node_template_parameters                       = meta::typelist<Arguments...>;
+    using Description                                    = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
 
 protected:
@@ -11092,6 +11380,16 @@ public:
     void
     set_name(std::string name) noexcept {
         _name = std::move(name);
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    description() const noexcept {
+        return std::string_view(Description::value);
+    }
+
+    [[nodiscard]] constexpr bool
+    is_blocking() const noexcept {
+        return std::disjunction_v<std::is_same<BlockingIO, Arguments>...>;
     }
 
     [[nodiscard]] constexpr bool
@@ -11270,7 +11568,7 @@ public:
                 if (available_samples == 0) {
                     return work_return_t::OK;
                 }
-                samples_to_process                   = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
+                samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
                     return work_return_t::INSUFFICIENT_INPUT_ITEMS;
                 }
@@ -11464,6 +11762,46 @@ public:
         return success ? work_return_t::OK : work_return_t::ERROR;
     } // end: work_return_t work() noexcept { ..}
 };
+
+/**
+ * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
+ */
+template<typename Node>
+[[nodiscard]] /*constexpr*/ std::string
+node_description() noexcept {
+    using DerivedNode          = typename Node::derived_t;
+    using ArgumentList         = typename Node::node_template_parameters;
+    using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
+    using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
+    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO>;
+
+    // re-enable once string and constexpr static is supported by all compilers
+    /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
+                                                fair::meta::type_name<DerivedNode>(), Description::value,
+                                                is_blocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
+    fair::meta::typelist<SupportedTypes>::template apply_func([&](auto index, auto &&t) { ret += fmt::format("{}:{} ", index, fair::meta::type_name<decltype(t)>()); });
+    ret += fmt::format("\n**Parameters:**\n");
+    if constexpr (refl::is_reflectable<DerivedNode>()) {
+        for_each(refl::reflect<DerivedNode>().members, [&](auto member) {
+            using RawType = std::remove_cvref_t<typename decltype(member)::value_type>;
+            using Type    = unwrap_if_wrapped_t<RawType>;
+
+            if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                if constexpr (is_annotated<RawType>()) {
+                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n", RawType::visible() ? "" : "_", //
+                                       refl::detail::get_type_name<Type>(), get_display_name_const(member).str(),                             //
+                                       RawType::description(), RawType::unit(), RawType::documentation(),                                     //
+                                       RawType::visible() ? "" : "_");
+                } else {
+                    ret += fmt::format("_{:10} {}_\n", //
+                                       refl::detail::get_type_name<Type>(), get_display_name_const(member).str());
+                }
+            }
+        });
+    }
+    ret += fmt::format("\n~~Ports:~~\ntbd.");
+    return ret;
+}
 
 template<typename Node>
 concept source_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
