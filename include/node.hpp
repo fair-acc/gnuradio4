@@ -645,7 +645,7 @@ node_description() noexcept {
     using DerivedNode          = typename Node::derived_t;
     using ArgumentList         = typename Node::node_template_parameters;
     using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
-    using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_type_type, DefaultSupportedTypes>;
+    using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
     constexpr bool is_blocking = ArgumentList::template contains<BlockingIO>;
 
     // re-enable once string and constexpr static is supported by all compilers

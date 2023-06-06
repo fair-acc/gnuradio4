@@ -69,12 +69,15 @@ template<typename... Ts>
 struct SupportedTypes {};
 
 template<typename T>
-struct is_supported_type_type : std::false_type {};
+struct is_supported_types : std::false_type {};
 
 template<typename... Ts>
-struct is_supported_type_type<SupportedTypes<Ts...>> : std::true_type {};
+struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
 
 using DefaultSupportedTypes = SupportedTypes<>;
+
+static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
+static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
 
 /**
  * @brief Annotated is a template class that acts as a transparent wrapper around another type.
@@ -84,13 +87,13 @@ using DefaultSupportedTypes = SupportedTypes<>;
 template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
 struct Annotated {
     using value_type = T;
-    T value{};
+    T value;
 
     Annotated() = default;
 
-    constexpr Annotated(const T &value_) noexcept : value(value_) {}
+    constexpr Annotated(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) : value(value_) {}
 
-    constexpr Annotated(T &&value_) noexcept : value(std::move(value_)) {}
+    constexpr Annotated(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) : value(std::move(value_)) {}
 
     // N.B. intentional implicit assignment and conversion operators to have a transparent wrapper
     // this does not affect the conversion of the wrapped value type 'T' itself
@@ -106,12 +109,12 @@ struct Annotated {
         return *this;
     }
 
-    inline constexpr
+    inline explicit(false) constexpr
     operator T &() noexcept {
         return value;
     }
 
-    inline constexpr operator const T &() const noexcept { return value; }
+    inline explicit(false) constexpr operator const T &() const noexcept { return value; }
 
     constexpr bool
     operator==(const Annotated &other) const noexcept {
@@ -177,9 +180,6 @@ struct inner_type<fair::graph::Annotated<U, str, Args...>> {
  */
 template<typename T>
 using inner_type_t = typename inner_type<T>::type;
-
-template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
-using A = Annotated<T, description, Arguments...>;
 
 } // namespace fair::graph
 

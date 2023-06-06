@@ -102,6 +102,10 @@ struct Source : public node<Source<T>> {
     }
 };
 
+// optional shortening
+template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
+using A            = Annotated<T, description, Arguments...>;
+
 using TestBlockDoc = Doc<R""(
 some test doc documentation
 )"">;
