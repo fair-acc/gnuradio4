@@ -429,12 +429,12 @@ public:
         std::size_t    tags_to_process    = 0;
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
-                              { self().available_samples(d) } -> std::same_as<std::int64_t>;
+                              { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
                           }) {
                 // the (source) node wants to determine the number of samples to process
                 std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
                 meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
-                const std::int64_t available_samples = self().available_samples(self());
+                const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
                 if (available_samples < 0 && max_buffer > 0) {
                     return work_return_t::DONE;
                 }
