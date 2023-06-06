@@ -3,8 +3,8 @@
 #include <buffer.hpp>
 #include <graph.hpp>
 #include <node.hpp>
-#include <scheduler.hpp>
 #include <reflection.hpp>
+#include <scheduler.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -88,9 +88,9 @@ struct Source : public node<Source<T>> {
         fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
     }
 
-    constexpr std::int64_t
+    constexpr std::make_signed_t<std::size_t>
     available_samples(const Source &self) noexcept {
-        const auto ret = static_cast<std::int64_t>(n_samples_max - n_samples_produced);
+        const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
         return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }
 
@@ -233,7 +233,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
 
-        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
         std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
         sched.work();

@@ -19,7 +19,7 @@
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template <>
+template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
@@ -54,7 +54,7 @@ const boost::ut::suite BasicConceptsTests = [] {
 
                 // runtime interface tests
                 expect(eq(reader.available(), std::size_t{ 0 }));
-                expect(eq(reader.position(), std::int64_t{ -1 }));
+                expect(eq(reader.position(), std::make_signed_t<std::size_t>{ -1 }));
                 expect(nothrow([&reader] { expect(eq(reader.get(std::size_t{ 0 }).size(), std::size_t{ 0 })); })) << typeName << "throws";
                 expect(nothrow([&reader] { expect(reader.consume(std::size_t{ 0 })); }));
 
@@ -80,6 +80,7 @@ const boost::ut::suite SequenceTests = [] {
 
     "Sequence"_test = [] {
         using namespace gr;
+        using signed_index_type = std::make_signed_t<std::size_t>;
         expect(eq(alignof(Sequence), std::size_t{ 64 }));
         expect(eq(-1L, kInitialCursorValue));
         expect(nothrow([] { Sequence(); }));
@@ -89,38 +90,38 @@ const boost::ut::suite SequenceTests = [] {
         expect(eq(s1.value(), kInitialCursorValue));
 
         const auto s2 = Sequence(2);
-        expect(eq(s2.value(), std::int64_t{ 2 }));
+        expect(eq(s2.value(), signed_index_type{ 2 }));
 
         expect(nothrow([&s1] { s1.setValue(3); }));
-        expect(eq(s1.value(), std::int64_t{ 3 }));
+        expect(eq(s1.value(), signed_index_type{ 3 }));
 
         expect(nothrow([&s1] { expect(s1.compareAndSet(3, 4)); }));
-        expect(nothrow([&s1] { expect(eq(s1.value(), std::int64_t{ 4 })); }));
+        expect(nothrow([&s1] { expect(eq(s1.value(), signed_index_type{ 4 })); }));
         expect(nothrow([&s1] { expect(!s1.compareAndSet(3, 5)); }));
-        expect(eq(s1.value(), std::int64_t{ 4 }));
+        expect(eq(s1.value(), signed_index_type{ 4 }));
 
-        expect(eq(s1.incrementAndGet(), std::int64_t{ 5 }));
-        expect(eq(s1.value(), std::int64_t{ 5 }));
-        expect(eq(s1.addAndGet(2), std::int64_t{ 7 }));
-        expect(eq(s1.value(), std::int64_t{ 7 }));
+        expect(eq(s1.incrementAndGet(), signed_index_type{ 5 }));
+        expect(eq(s1.value(), signed_index_type{ 5 }));
+        expect(eq(s1.addAndGet(2), signed_index_type{ 7 }));
+        expect(eq(s1.value(), signed_index_type{ 7 }));
 
         std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> sequences{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
-        expect(eq(gr::detail::getMinimumSequence(*sequences), std::numeric_limits<std::int64_t>::max()));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), std::int64_t{ 2 }));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), std::numeric_limits<signed_index_type>::max()));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), signed_index_type{ 2 }));
         sequences->emplace_back(std::make_shared<Sequence>(4));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), std::int64_t{ 4 }));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 5), std::int64_t{ 4 }));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), std::int64_t{ 2 }));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), signed_index_type{ 4 }));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 5), signed_index_type{ 4 }));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), signed_index_type{ 2 }));
 
         auto cursor = std::make_shared<Sequence>(10);
         auto s3     = std::make_shared<Sequence>(1);
         expect(eq(sequences->size(), std::size_t{ 1 }));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), std::int64_t{ 4 }));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), signed_index_type{ 4 }));
         expect(nothrow([&sequences, &cursor, &s3] { gr::detail::addSequences(sequences, *cursor, { s3 }); }));
         expect(eq(sequences->size(), std::size_t{ 2 }));
         // newly added sequences are set automatically to the cursor/write position
-        expect(eq(s3->value(), std::int64_t{ 10 }));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), std::int64_t{ 4 }));
+        expect(eq(s3->value(), signed_index_type{ 10 }));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), signed_index_type{ 4 }));
 
         expect(nothrow([&sequences, &cursor] { gr::detail::removeSequence(sequences, cursor); }));
         expect(eq(sequences->size(), std::size_t{ 2 }));

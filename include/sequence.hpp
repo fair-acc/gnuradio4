@@ -18,13 +18,13 @@ namespace gr {
 #endif
 
 #ifdef __cpp_lib_hardware_interference_size
-using std::hardware_destructive_interference_size;
 using std::hardware_constructive_interference_size;
+using std::hardware_destructive_interference_size;
 #else
-inline constexpr std::size_t hardware_destructive_interference_size = 64;
+inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::int64_t kInitialCursorValue = -1L;
+static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -35,29 +35,33 @@ static constexpr const std::int64_t kInitialCursorValue = -1L;
 // clang-format off
 class Sequence
 {
-    alignas(hardware_destructive_interference_size) std::atomic<std::int64_t> _fieldsValue{};
+public:
+    using signed_index_type = std::make_signed_t<std::size_t>;
+
+private:
+    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
 
 public:
     Sequence(const Sequence&) = delete;
     Sequence(const Sequence&&) = delete;
     void operator=(const Sequence&) = delete;
-    explicit Sequence(std::int64_t initialValue = kInitialCursorValue) noexcept
+    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept
         : _fieldsValue(initialValue)
     {
     }
 
-    [[nodiscard]] forceinline std::int64_t value() const noexcept
+    [[nodiscard]] forceinline signed_index_type value() const noexcept
     {
         return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
     }
 
-    forceinline void setValue(const std::int64_t value) noexcept
+    forceinline void setValue(const signed_index_type value) noexcept
     {
         std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
     }
 
-    [[nodiscard]] forceinline bool compareAndSet(std::int64_t expectedSequence,
-                                                 std::int64_t nextSequence) noexcept
+    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence,
+                                                 signed_index_type nextSequence) noexcept
     {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
@@ -65,18 +69,20 @@ public:
             &_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline std::int64_t incrementAndGet() noexcept
+    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept
     {
         return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
     }
 
-    [[nodiscard]] forceinline std::int64_t addAndGet(std::int64_t value) noexcept
+    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept
     {
         return std::atomic_fetch_add(&_fieldsValue, value) + value;
     }
 };
 
 namespace detail {
+
+using signed_index_type = Sequence::signed_index_type;
 /**
  * Get the minimum sequence from an array of Sequences.
  *
@@ -84,14 +90,14 @@ namespace detail {
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline std::int64_t getMinimumSequence(
+inline signed_index_type getMinimumSequence(
     const std::vector<std::shared_ptr<Sequence>>& sequences,
-    std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
+    signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept
 {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
     for (const auto& s : sequences) {
-        const std::int64_t v = s->value();
+        const signed_index_type v = s->value();
         if (v < minimum) {
             minimum = v;
         }
@@ -103,7 +109,7 @@ inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>
              const Sequence& cursor,
              const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
 {
-    std::int64_t cursorSequence;
+    signed_index_type cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 

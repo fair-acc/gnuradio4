@@ -9,9 +9,9 @@
 #include <stdexcept>
 #include <vector>
 
-#include "wait_strategy.hpp"
 #include "sequence.hpp"
 #include "utils.hpp"
+#include "wait_strategy.hpp"
 
 namespace gr {
 
@@ -22,15 +22,15 @@ struct NoCapacityException : public std::runtime_error {
 // clang-format off
 
 template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
-        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
+        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
     { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
+    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.publish(sequence) } -> std::same_as<void>;
     { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
+    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
 };
 
 namespace claim_strategy::util {
@@ -40,11 +40,12 @@ constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x 
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
+    using signed_index_type = Sequence::signed_index_type;
     const std::size_t _size;
     Sequence &_cursor;
     WAIT_STRATEGY &_waitStrategy;
-    std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    mutable std::int64_t _cachedValue{ kInitialCursorValue };
+    signed_index_type _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    mutable signed_index_type _cachedValue{ kInitialCursorValue };
 
 public:
     SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
@@ -53,8 +54,8 @@ public:
     SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
     void operator=(const SingleThreadedStrategy &) = delete;
 
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
-        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
+    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type/*cursorValue*/) const noexcept {
+        if (const signed_index_type wrapPoint = (_nextValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
             auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
             _cachedValue     = minSequence;
             if (wrapPoint > minSequence) {
@@ -64,15 +65,15 @@ public:
         return true;
     }
 
-    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
+    signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim = 1) noexcept {
+        assert((n_slots_to_claim > 0 && n_slots_to_claim <= _size) && "n_slots_to_claim must be > 0 and <= bufferSize");
 
-        auto nextSequence = _nextValue + n_slots_to_claim;
-        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
+        auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
+        auto wrapPoint    = nextSequence - static_cast<signed_index_type>(_size);
 
         if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
             SpinWait     spinWait;
-            std::int64_t minSequence;
+            signed_index_type minSequence;
             while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
                 if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
                     _waitStrategy.signalAllWhenBlocking();
@@ -86,27 +87,27 @@ public:
         return nextSequence;
     }
 
-    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
+    signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
         if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
             throw NoCapacityException();
         }
 
-        const auto nextSequence = _nextValue + n_slots_to_claim;
+        const auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
         _nextValue              = nextSequence;
 
         return nextSequence;
     }
 
-    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+    signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
         const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
         const auto produced = _nextValue;
 
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
+        return static_cast<signed_index_type>(_size) - (produced - consumed);
     }
 
-    void publish(std::int64_t sequence) {
+    void publish(signed_index_type sequence) {
         _cursor.setValue(sequence);
         _nextValue = sequence;
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
@@ -114,8 +115,8 @@ public:
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
+    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept { return sequence <= _cursor.value(); }
+    [[nodiscard]] signed_index_type getHighestPublishedSequence(signed_index_type /*nextSequence*/, signed_index_type availableSequence) const noexcept { return availableSequence; }
 };
 
 static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
@@ -131,7 +132,7 @@ template <>
 struct MultiThreadedStrategySizeMembers<std::dynamic_extent>
 {
     explicit MultiThreadedStrategySizeMembers(std::size_t size)
-    : _size(static_cast<std::int32_t>(size)), _indexShift(std::bit_width(size))
+    : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size)))
     {}
 
     const std::int32_t _size;
@@ -156,6 +157,7 @@ class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
     std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
     using MultiThreadedStrategySizeMembers<SIZE>::_size;
     using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
+    using signed_index_type = Sequence::signed_index_type;
 
 public:
     MultiThreadedStrategy() = delete;
@@ -176,8 +178,8 @@ public:
     MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
     void               operator=(const MultiThreadedStrategy &) = delete;
 
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
+    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type cursorValue) const noexcept {
+        const auto wrapPoint = (cursorValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size);
 
         if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
             const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
@@ -190,22 +192,22 @@ public:
         return true;
     }
 
-    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+    [[nodiscard]] signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
-        std::int64_t current;
-        std::int64_t next;
+        signed_index_type current;
+        signed_index_type next;
 
         SpinWait     spinWait;
         do {
-            current                           = _cursor.value();
-            next                              = current + n_slots_to_claim;
+            current = _cursor.value();
+            next = current + static_cast<signed_index_type>(n_slots_to_claim);
 
-            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
-            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
+            signed_index_type wrapPoint            = next - static_cast<signed_index_type>(_size);
+            signed_index_type cachedGatingSequence = _gatingSequenceCache->value();
 
             if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
+                signed_index_type gatingSequence = detail::getMinimumSequence(dependents, current);
 
                 if (wrapPoint > gatingSequence) {
                     if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
@@ -224,15 +226,15 @@ public:
         return next;
     }
 
-    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+    [[nodiscard]] signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
-        std::int64_t current;
-        std::int64_t next;
+        signed_index_type current;
+        signed_index_type next;
 
         do {
             current = _cursor.value();
-            next    = current + n_slots_to_claim;
+            next    = current + static_cast<signed_index_type>(n_slots_to_claim);
 
             if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
                 throw NoCapacityException();
@@ -242,29 +244,29 @@ public:
         return next;
     }
 
-    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+    [[nodiscard]] signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
         const auto produced = _cursor.value();
         const auto consumed = detail::getMinimumSequence(dependents, produced);
 
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
+        return static_cast<signed_index_type>(_size) - (produced - consumed);
     }
 
-    void publish(std::int64_t sequence) {
+    void publish(signed_index_type sequence) {
         setAvailable(sequence);
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
             _waitStrategy.signalAllWhenBlocking();
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
+    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
         const auto index = calculateIndex(sequence);
         const auto flag  = calculateAvailabilityFlag(sequence);
 
         return _availableBuffer[static_cast<std::size_t>(index)] == flag;
     }
 
-    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
-        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
+    [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
+        for (signed_index_type sequence = lowerBound; sequence <= availableSequence; sequence++) {
             if (!isAvailable(sequence)) {
                 return sequence - 1;
             }
@@ -274,10 +276,10 @@ public:
     }
 
 private:
-    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
+    void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
     forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(static_cast<signed_index_type>(sequence) >> _indexShift); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
 };
 
 static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
@@ -296,24 +298,24 @@ enum class ProducerType {
 };
 
 namespace detail {
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
 struct producer_type;
 
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, WaitStrategy WAIT_STRATEGY>
 struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
     using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
 };
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+
+template<std::size_t size, WaitStrategy WAIT_STRATEGY>
 struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
     using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
 };
 
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
 using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
 
 } // namespace detail
 
 } // namespace gr
-
 
 #endif // GNURADIO_CLAIM_STRATEGY_HPP

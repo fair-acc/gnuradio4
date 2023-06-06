@@ -27,14 +27,14 @@ enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
 
 template<class T>
 concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
-                   typename T::value_type;
-                   { t.pmt_type() } -> std::same_as<supported_type>;
-                   { t.type() } -> std::same_as<port_type_t>;
-                   { t.direction() } -> std::same_as<port_direction_t>;
-                   { t.name() } -> std::same_as<std::string_view>;
-                   { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
-                   { t.disconnect() } -> std::same_as<connection_result_t>;
-               };
+    typename T::value_type;
+    { t.pmt_type() } -> std::same_as<supported_type>;
+    { t.type() } -> std::same_as<port_type_t>;
+    { t.direction() } -> std::same_as<port_direction_t>;
+    { t.name() } -> std::same_as<std::string_view>;
+    { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
+    { t.disconnect() } -> std::same_as<connection_result_t>;
+};
 
 /**
  * @brief internal port buffer handler
@@ -42,8 +42,8 @@ concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
  * N.B. void* needed for type-erasure/Python compatibility/wrapping
  */
 struct internal_port_buffers {
-    void* streamHandler;
-    void* tagHandler;
+    void *streamHandler;
+    void *tagHandler;
 };
 
 /**
@@ -257,9 +257,10 @@ public:
     [[nodiscard]] auto
     buffer() {
         struct port_buffers {
-            BufferType streamBuffer;
+            BufferType    streamBuffer;
             TagBufferType tagBufferType;
-        } ;
+        };
+
         return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
     }
 
@@ -398,7 +399,7 @@ publish_tag(Port auto &port, const tag_t::map_type &tag_data, std::size_t tag_of
     port.tagWriter().publish(
             [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
-                tag_output[0].map = tag_data;
+                tag_output[0].map   = tag_data;
             },
             1_UZ);
 }

@@ -47,9 +47,9 @@ enum class tag_propagation_policy_t {
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
-    using map_type = std::map<std::string, pmtv::pmt, std::less<>>;
-    int64_t  index = 0;
-    map_type map;
+    using map_type                        = std::map<std::string, pmtv::pmt, std::less<>>;
+    std::make_signed_t<std::size_t> index = 0;
+    map_type                        map;
 
     // TODO: do we need the convenience methods below?
     [[nodiscard]] pmtv::pmt &
@@ -137,18 +137,18 @@ public:
 };
 
 namespace tag { // definition of default tags and names
-inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
-inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_unit", std::string, "", "signal's physical SI unit">                                            SIGNAL_UNIT;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MIN;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
+inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
+inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string> TRIGGER_NAME;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
+inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
 
-inline constexpr std::tuple DEFAULT_TAGS = {SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT};
+inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT };
 } // namespace tag
 
 } // namespace fair::graph
