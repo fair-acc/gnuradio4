@@ -128,4 +128,11 @@
     ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
 
 
+#define GP_CONCAT_IMPL(x, y) x##y
+#define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
+
+#define GP_REGISTER_NODE(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
+
+
+
 #endif //GRAPH_PROTOTYPE_REFLECTION_HPP
