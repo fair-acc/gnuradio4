@@ -98,13 +98,13 @@ struct Annotated {
     // N.B. intentional implicit assignment and conversion operators to have a transparent wrapper
     // this does not affect the conversion of the wrapped value type 'T' itself
     constexpr Annotated &
-    operator=(const T &value_) noexcept {
+    operator=(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) {
         value = value_;
         return *this;
     }
 
     constexpr Annotated &
-    operator=(T &&value_) noexcept {
+    operator=(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) {
         value = std::move(value_);
         return *this;
     }
@@ -165,12 +165,12 @@ template<typename T>
 concept AnnotatedType = is_annotated<T>::value;
 
 template<typename T>
-struct inner_type {
+struct unwrap_if_wrapped {
     using type = T;
 };
 
 template<typename U, fair::meta::fixed_string str, typename... Args>
-struct inner_type<fair::graph::Annotated<U, str, Args...>> {
+struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
     using type = U;
 };
 
@@ -179,7 +179,7 @@ struct inner_type<fair::graph::Annotated<U, str, Args...>> {
  * If the given type is not an `Annotated`, it returns the type itself.
  */
 template<typename T>
-using inner_type_t = typename inner_type<T>::type;
+using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
 
 } // namespace fair::graph
 

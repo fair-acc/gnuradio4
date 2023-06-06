@@ -199,7 +199,7 @@ public:
             meta::tuple_for_each(
                     [this](auto &&default_tag) {
                         for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
-                            using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                            using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                             if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                                 if (default_tag.shortKey().ends_with(get_display_name(member))) {
                                     _auto_forward.emplace(get_display_name(member));
@@ -258,7 +258,7 @@ public:
                 const auto &value  = localValue;
                 bool        is_set = false;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                    using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
@@ -286,7 +286,7 @@ public:
                 const auto &key   = localKey;
                 const auto &value = localValue;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&](auto member) {
-                    using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
@@ -359,7 +359,7 @@ public:
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
                     for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                        using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                        using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
 
                         if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                             oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
@@ -373,7 +373,7 @@ public:
                 const auto &key          = localKey;
                 const auto &staged_value = localStaged_value;
                 for_each(refl::reflect(*settings_base<Node>::_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
-                    using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
                     if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*settings_base<Node>::_node) = std::get<Type>(staged_value);
@@ -388,7 +388,7 @@ public:
                 });
             }
             for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*settings_base<Node>::_node)));
@@ -409,7 +409,7 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
             for_each(refl::reflect(*settings_base<Node>::_node).members, [&, this](auto member) {
-                using Type = inner_type_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*settings_base<Node>::_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*settings_base<Node>::_node));

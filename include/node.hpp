@@ -657,7 +657,7 @@ node_description() noexcept {
     if constexpr (refl::is_reflectable<DerivedNode>()) {
         for_each(refl::reflect<DerivedNode>().members, [&](auto member) {
             using RawType = std::remove_cvref_t<typename decltype(member)::value_type>;
-            using Type    = inner_type_t<RawType>;
+            using Type    = unwrap_if_wrapped_t<RawType>;
 
             if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
                 if constexpr (is_annotated<RawType>()) {
