@@ -47,10 +47,10 @@ static constexpr bool has_posix_mmap_interface = false;
 }
 #endif
 
-#include "claim_strategy.hpp"
-#include "wait_strategy.hpp"
-#include "sequence.hpp"
 #include "buffer.hpp"
+#include "claim_strategy.hpp"
+#include "sequence.hpp"
+#include "wait_strategy.hpp"
 
 namespace gr {
 
@@ -197,14 +197,13 @@ class circular_buffer
     using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
     using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
     using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
+    using signed_index_type = Sequence::signed_index_type;
 
     struct buffer_impl {
-        using size_type = std::int32_t;
-
         Sequence                    _cursor;
         Allocator                   _allocator{};
         const bool                  _is_mmap_allocated;
-        const size_type             _size; // pre-condition: std::has_single_bit(_size)
+        const std::size_t             _size; // pre-condition: std::has_single_bit(_size)
         std::vector<T, Allocator>   _data;
         WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
         ClaimType                   _claim_strategy;
@@ -250,18 +249,17 @@ class circular_buffer
     template <typename U = T>
     class buffer_writer {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-        using size_type = typename buffer_impl::size_type;
 
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         bool                        _is_mmap_allocated;
-        size_type                   _size;
+        std::size_t                   _size;
         ClaimType*                  _claim_strategy;
 
     class ReservedOutputRange {
         buffer_writer<U>* _parent = nullptr;
         std::size_t       _index = 0;
         std::size_t       _n_slots_to_claim = 0;
-        std::int64_t      _offset = 0;
+        signed_index_type      _offset = 0;
         bool              _published_data = false;
         std::span<T>      _internal_span{};
     public:
@@ -272,8 +270,8 @@ class circular_buffer
     using pointer = typename std::span<T>::reverse_iterator;
 
     explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
-    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, std::int64_t sequence, std::size_t n_slots_to_claim) noexcept :
-        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - n_slots_to_claim), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
+    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t n_slots_to_claim) noexcept :
+        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
     ReservedOutputRange(const ReservedOutputRange&) = delete;
     ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
     explicit ReservedOutputRange(ReservedOutputRange&& other) noexcept
@@ -335,7 +333,7 @@ class circular_buffer
             std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
             std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
         }
-        _parent->_claim_strategy->publish(_offset + n_produced);
+        _parent->_claim_strategy->publish(_offset + static_cast<signed_index_type>(n_produced));
         _n_slots_to_claim -= n_produced;
         _published_data = true;
     }
@@ -365,7 +363,7 @@ class circular_buffer
         [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
             try {
                 const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
-                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
+                const std::size_t index = (static_cast<std::size_t>(sequence) + _size - n_slots_to_claim) % _size;
                 return ReservedOutputRange(this, index, sequence, n_slots_to_claim);
             } catch (const NoCapacityException &) {
                 return ReservedOutputRange(this);
@@ -395,21 +393,21 @@ class circular_buffer
             }
         }
 
-        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _buffer->_cursor.value(); }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
+            return static_cast<std::size_t>(_claim_strategy->getRemainingCapacity(*_buffer->_read_indices));
         }
 
         private:
         template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
+        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
             try {
                 auto& data = _buffer->_data;
-                const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
+                const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
                 std::span<U> writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
+                if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
                 } else {
                     std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
                 }
@@ -435,17 +433,16 @@ class circular_buffer
     class buffer_reader
     {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-        using size_type = typename buffer_impl::size_type;
 
         std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        std::int64_t                _read_index_cached;
+        signed_index_type                _read_index_cached;
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        size_type                   _size; // pre-condition: std::has_single_bit(_size)
+        std::size_t                   _size; // pre-condition: std::has_single_bit(_size)
 
         std::size_t
         buffer_index() const noexcept {
             const auto bitmask = _size - 1;
-            return static_cast<std::size_t>(_read_index_cached & bitmask);
+            return static_cast<std::size_t>(_read_index_cached) & bitmask;
         }
 
     public:
@@ -493,14 +490,14 @@ class circular_buffer
                     return false;
                 }
             }
-            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
+            _read_index_cached = _read_index->addAndGet(static_cast<signed_index_type>(n_elements));
             return true;
         }
 
-        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _read_index_cached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _buffer->_cursor.value() - _read_index_cached;
+            return static_cast<std::size_t>(_buffer->_cursor.value() - _read_index_cached);
         }
     };
 

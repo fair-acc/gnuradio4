@@ -2,42 +2,38 @@
 #define GNURADIO_BUFFER2_H
 
 #include <bit>
-#include <cstdint>
-#include <type_traits>
 #include <concepts>
+#include <cstdint>
 #include <span>
+#include <type_traits>
 
 namespace gr {
 namespace util {
-template <typename T, typename...>
+template<typename T, typename...>
 struct first_template_arg_helper;
 
-template <template <typename...> class TemplateType,
-          typename ValueType,
-          typename... OtherTypes>
+template<template<typename...> class TemplateType, typename ValueType, typename... OtherTypes>
 struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
     using value_type = ValueType;
 };
 
-template <typename T>
-constexpr auto* value_type_helper()
-{
+template<typename T>
+constexpr auto *
+value_type_helper() {
     if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type*>(nullptr);
-    }
-    else {
-        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
+        return static_cast<typename T::value_type *>(nullptr);
+    } else {
+        return static_cast<typename first_template_arg_helper<T>::value_type *>(nullptr);
     }
 }
 
-template <typename T>
+template<typename T>
 using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
 
-template <typename... A>
-struct test_fallback {
-};
+template<typename... A>
+struct test_fallback {};
 
-template <typename, typename ValueType>
+template<typename, typename ValueType>
 struct test_value_type {
     using value_type = ValueType;
 };
@@ -55,20 +51,20 @@ template<class T>
 concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
     { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
     { t.consume(n_items) } -> std::same_as<bool>;
-    { t.position() }       -> std::same_as<std::int64_t>;
+    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.available() }      -> std::same_as<std::size_t>;
     { t.buffer() };
 };
 
 template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::make_signed_t<std::size_t>, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
 
 template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::make_signed_t<std::size_t>> token, Args ...args) {
     { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
     { t.reserve_output_range(n_items) };
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
@@ -88,7 +84,7 @@ template <typename T>
 struct non_compliant_class {
 };
 template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
+using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
 template <typename T, typename... Args>
 using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
 } // namespace test

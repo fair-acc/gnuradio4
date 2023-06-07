@@ -6,42 +6,38 @@
 #define GNURADIO_BUFFER2_H
 
 #include <bit>
-#include <cstdint>
-#include <type_traits>
 #include <concepts>
+#include <cstdint>
 #include <span>
+#include <type_traits>
 
 namespace gr {
 namespace util {
-template <typename T, typename...>
+template<typename T, typename...>
 struct first_template_arg_helper;
 
-template <template <typename...> class TemplateType,
-          typename ValueType,
-          typename... OtherTypes>
+template<template<typename...> class TemplateType, typename ValueType, typename... OtherTypes>
 struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
     using value_type = ValueType;
 };
 
-template <typename T>
-constexpr auto* value_type_helper()
-{
+template<typename T>
+constexpr auto *
+value_type_helper() {
     if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type*>(nullptr);
-    }
-    else {
-        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
+        return static_cast<typename T::value_type *>(nullptr);
+    } else {
+        return static_cast<typename first_template_arg_helper<T>::value_type *>(nullptr);
     }
 }
 
-template <typename T>
+template<typename T>
 using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
 
-template <typename... A>
-struct test_fallback {
-};
+template<typename... A>
+struct test_fallback {};
 
-template <typename, typename ValueType>
+template<typename, typename ValueType>
 struct test_value_type {
     using value_type = ValueType;
 };
@@ -59,20 +55,20 @@ template<class T>
 concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
     { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
     { t.consume(n_items) } -> std::same_as<bool>;
-    { t.position() }       -> std::same_as<std::int64_t>;
+    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.available() }      -> std::same_as<std::size_t>;
     { t.buffer() };
 };
 
 template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::int64_t, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::make_signed_t<std::size_t>, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
 
 template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::int64_t> token, Args ...args) {
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::make_signed_t<std::size_t>> token, Args ...args) {
     { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::int64_t /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
     { t.reserve_output_range(n_items) };
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
@@ -92,7 +88,7 @@ template <typename T>
 struct non_compliant_class {
 };
 template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::int64_t, Args...) { /* */ });
+using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
 template <typename T, typename... Args>
 using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
 } // namespace test
@@ -162,6 +158,8 @@ static constexpr bool has_posix_mmap_interface = false;
 }
 #endif
 
+// #include "buffer.hpp"
+
 // #include "claim_strategy.hpp"
 #ifndef GNURADIO_CLAIM_STRATEGY_HPP
 #define GNURADIO_CLAIM_STRATEGY_HPP
@@ -172,20 +170,6 @@ static constexpr bool has_posix_mmap_interface = false;
 #include <memory>
 #include <span>
 #include <stdexcept>
-#include <vector>
-
-// #include "wait_strategy.hpp"
-#ifndef GNURADIO_WAIT_STRATEGY_HPP
-#define GNURADIO_WAIT_STRATEGY_HPP
-
-#include <condition_variable>
-#include <atomic>
-#include <chrono>
-#include <concepts>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <thread>
 #include <vector>
 
 // #include "sequence.hpp"
@@ -209,13 +193,13 @@ namespace gr {
 #endif
 
 #ifdef __cpp_lib_hardware_interference_size
-using std::hardware_destructive_interference_size;
 using std::hardware_constructive_interference_size;
+using std::hardware_destructive_interference_size;
 #else
-inline constexpr std::size_t hardware_destructive_interference_size = 64;
+inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::int64_t kInitialCursorValue = -1L;
+static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -226,29 +210,33 @@ static constexpr const std::int64_t kInitialCursorValue = -1L;
 // clang-format off
 class Sequence
 {
-    alignas(hardware_destructive_interference_size) std::atomic<std::int64_t> _fieldsValue{};
+public:
+    using signed_index_type = std::make_signed_t<std::size_t>;
+
+private:
+    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
 
 public:
     Sequence(const Sequence&) = delete;
     Sequence(const Sequence&&) = delete;
     void operator=(const Sequence&) = delete;
-    explicit Sequence(std::int64_t initialValue = kInitialCursorValue) noexcept
+    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept
         : _fieldsValue(initialValue)
     {
     }
 
-    [[nodiscard]] forceinline std::int64_t value() const noexcept
+    [[nodiscard]] forceinline signed_index_type value() const noexcept
     {
         return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
     }
 
-    forceinline void setValue(const std::int64_t value) noexcept
+    forceinline void setValue(const signed_index_type value) noexcept
     {
         std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
     }
 
-    [[nodiscard]] forceinline bool compareAndSet(std::int64_t expectedSequence,
-                                                 std::int64_t nextSequence) noexcept
+    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence,
+                                                 signed_index_type nextSequence) noexcept
     {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
@@ -256,18 +244,20 @@ public:
             &_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline std::int64_t incrementAndGet() noexcept
+    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept
     {
         return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
     }
 
-    [[nodiscard]] forceinline std::int64_t addAndGet(std::int64_t value) noexcept
+    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept
     {
         return std::atomic_fetch_add(&_fieldsValue, value) + value;
     }
 };
 
 namespace detail {
+
+using signed_index_type = Sequence::signed_index_type;
 /**
  * Get the minimum sequence from an array of Sequences.
  *
@@ -275,14 +265,14 @@ namespace detail {
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline std::int64_t getMinimumSequence(
+inline signed_index_type getMinimumSequence(
     const std::vector<std::shared_ptr<Sequence>>& sequences,
-    std::int64_t minimum = std::numeric_limits<std::int64_t>::max()) noexcept
+    signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept
 {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
     for (const auto& s : sequences) {
-        const std::int64_t v = s->value();
+        const signed_index_type v = s->value();
         if (v < minimum) {
             minimum = v;
         }
@@ -294,7 +284,7 @@ inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>
              const Sequence& cursor,
              const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
 {
-    std::int64_t cursorSequence;
+    signed_index_type cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
@@ -393,369 +383,6 @@ operator<<(std::ostream &os, const Sequence &v) {
 #endif // FMT_FORMAT_H_
 
 #endif // GNURADIO_SEQUENCE_HPP
-
-
-namespace gr {
-// clang-format off
-/**
- * Wait for the given sequence to be available.  It is possible for this method to return a value less than the sequence number supplied depending on the implementation of the WaitStrategy.
- * A common use for this is to signal a timeout.Any EventProcessor that is using a WaitStrategy to get notifications about message becoming available should remember to handle this case.
- * The BatchEventProcessor<T> explicitly handles this case and will signal a timeout if required.
- *
- * \param sequence sequence to be waited on.
- * \param cursor Ring buffer cursor on which to wait.
- * \param dependentSequence on which to wait.
- * \param barrier barrier the IEventProcessor is waiting on.
- * \returns the sequence that is available which may be greater than the requested sequence.
- */
-template<typename T>
-inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
-};
-static_assert(!isWaitStrategy<int>);
-
-/**
- * signal those waiting that the cursor has advanced.
- */
-template<typename T>
-inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
-    { t.signalAllWhenBlocking() } -> std::same_as<void>;
-};
-static_assert(!hasSignalAllWhenBlocking<int>);
-
-template<typename T>
-concept WaitStrategy = isWaitStrategy<T>;
-
-
-
-/**
- * Blocking strategy that uses a lock and condition variable for IEventProcessor's waiting on a barrier.
- * This strategy should be used when performance and low-latency are not as important as CPU resource.
- */
-class BlockingWaitStrategy {
-    std::recursive_mutex        _gate;
-    std::condition_variable_any _conditionVariable;
-
-public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        if (cursor.value() < sequence) {
-            std::unique_lock uniqueLock(_gate);
-
-            while (cursor.value() < sequence) {
-                // optional: barrier check alert
-                _conditionVariable.wait(uniqueLock);
-            }
-        }
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-
-        return availableSequence;
-    }
-
-    void signalAllWhenBlocking() {
-        std::unique_lock uniqueLock(_gate);
-        _conditionVariable.notify_all();
-    }
-};
-static_assert(WaitStrategy<BlockingWaitStrategy>);
-
-/**
- * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
- * This strategy will use CPU resource to avoid syscalls which can introduce latency jitter.
- * It is best used when threads can be bound to specific CPU cores.
- */
-struct BusySpinWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<BusySpinWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
-
-/**
- * Sleeping strategy that initially spins, then uses a std::this_thread::yield(), and eventually sleep. T
- * his strategy is a good compromise between performance and CPU resource.
- * Latency spikes can occur after quiet periods.
- */
-class SleepingWaitStrategy {
-    static const std::int32_t _defaultRetries = 200;
-    std::int32_t              _retries        = 0;
-
-public:
-    explicit SleepingWaitStrategy(std::int32_t retries = _defaultRetries)
-        : _retries(retries) {
-    }
-
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        auto       counter    = _retries;
-        const auto waitMethod = [&counter]() {
-            // optional: barrier check alert
-
-            if (counter > 100) {
-                --counter;
-            } else if (counter > 0) {
-                --counter;
-                std::this_thread::yield();
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(0));
-            }
-        };
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            waitMethod();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<SleepingWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
-
-struct TimeoutException : public std::runtime_error {
-    TimeoutException() : std::runtime_error("TimeoutException") {}
-};
-
-class TimeoutBlockingWaitStrategy {
-    using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
-    Clock::duration             _timeout;
-    std::recursive_mutex        _gate;
-    std::condition_variable_any _conditionVariable;
-
-public:
-    explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
-        : _timeout(timeout) {}
-
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
-
-        if (cursor.value() < sequence) {
-            std::unique_lock uniqueLock(_gate);
-
-            while (cursor.value() < sequence) {
-                // optional: barrier check alert
-
-                if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
-                    throw TimeoutException();
-                }
-            }
-        }
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-
-        return availableSequence;
-    }
-
-    void signalAllWhenBlocking() {
-        std::unique_lock uniqueLock(_gate);
-        _conditionVariable.notify_all();
-    }
-};
-static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
-static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
-
-/**
- * Yielding strategy that uses a Thread.Yield() for IEventProcessors waiting on a barrier after an initially spinning.
- * This strategy is a good compromise between performance and CPU resource without incurring significant latency spikes.
- */
-class YieldingWaitStrategy {
-    const std::size_t _spinTries = 100;
-
-public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        auto       counter    = _spinTries;
-        const auto waitMethod = [&counter]() {
-            // optional: barrier check alert
-
-            if (counter == 0) {
-                std::this_thread::yield();
-            } else {
-                --counter;
-            }
-        };
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            waitMethod();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<YieldingWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
-
-struct NoWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
-        // wait for nothing
-        return sequence;
-    }
-};
-static_assert(WaitStrategy<NoWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
-
-
-/**
- *
- * SpinWait is meant to be used as a tool for waiting in situations where the thread is not allowed to block.
- *
- * In order to get the maximum performance, the implementation first spins for `YIELD_THRESHOLD` times, and then
- * alternates between yielding, spinning and putting the thread to sleep, to allow other threads to be scheduled
- * by the kernel to avoid potential CPU contention.
- *
- * The number of spins, yielding, and sleeping for either '0 ms' or '1 ms' is controlled by the NTTP constants
- * @tparam YIELD_THRESHOLD
- * @tparam SLEEP_0_EVERY_HOW_MANY_TIMES
- * @tparam SLEEP_1_EVERY_HOW_MANY_TIMES
- */
-template<std::int32_t YIELD_THRESHOLD = 10, std::int32_t SLEEP_0_EVERY_HOW_MANY_TIMES = 5, std::int32_t SLEEP_1_EVERY_HOW_MANY_TIMES = 20>
-class SpinWait {
-    using Clock         = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
-    std::int32_t _count = 0;
-    static void  spinWaitInternal(std::int32_t iterationCount) noexcept {
-        for (auto i = 0; i < iterationCount; i++) {
-            yieldProcessor();
-        }
-    }
-#ifndef __EMSCRIPTEN__
-    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
-#else
-    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-#endif
-
-public:
-    SpinWait() = default;
-
-    [[nodiscard]] std::int32_t count() const noexcept { return _count; }
-    [[nodiscard]] bool         nextSpinWillYield() const noexcept { return _count > YIELD_THRESHOLD; }
-
-    void                       spinOnce() {
-        if (nextSpinWillYield()) {
-            auto num = _count >= YIELD_THRESHOLD ? _count - 10 : _count;
-            if (num % SLEEP_1_EVERY_HOW_MANY_TIMES == SLEEP_1_EVERY_HOW_MANY_TIMES - 1) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            } else {
-                if (num % SLEEP_0_EVERY_HOW_MANY_TIMES == SLEEP_0_EVERY_HOW_MANY_TIMES - 1) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(0));
-                } else {
-                    std::this_thread::yield();
-                }
-            }
-        } else {
-            spinWaitInternal(4 << _count);
-        }
-
-        if (_count == std::numeric_limits<std::int32_t>::max()) {
-            _count = YIELD_THRESHOLD;
-        } else {
-            ++_count;
-        }
-    }
-
-    void reset() noexcept { _count = 0; }
-
-    template<typename T>
-    requires std::is_nothrow_invocable_r_v<bool, T>
-    bool
-    spinUntil(const T &condition) const { return spinUntil(condition, -1); }
-
-    template<typename T>
-    requires std::is_nothrow_invocable_r_v<bool, T>
-    bool
-    spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
-        if (millisecondsTimeout < -1) {
-            throw std::out_of_range("Timeout value is out of range");
-        }
-
-        std::int64_t num = 0;
-        if (millisecondsTimeout != 0 && millisecondsTimeout != -1) {
-            num = getTickCount();
-        }
-
-        SpinWait spinWait;
-        while (!condition()) {
-            if (millisecondsTimeout == 0) {
-                return false;
-            }
-
-            spinWait.spinOnce();
-
-            if (millisecondsTimeout != 1 && spinWait.nextSpinWillYield() && millisecondsTimeout <= (getTickCount() - num)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    [[nodiscard]] static std::int64_t getTickCount() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
-};
-
-/**
- * Spin strategy that uses a SpinWait for IEventProcessors waiting on a barrier.
- * This strategy is a good compromise between performance and CPU resource.
- * Latency spikes can occur after quiet periods.
- */
-struct SpinWaitWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
-        std::int64_t availableSequence;
-
-        SpinWait     spinWait;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
-            // optional: barrier check alert
-            spinWait.spinOnce();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<SpinWaitWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
-
-struct NO_SPIN_WAIT {};
-
-template<typename SPIN_WAIT = NO_SPIN_WAIT>
-class AtomicMutex {
-    std::atomic_flag _lock = ATOMIC_FLAG_INIT;
-    SPIN_WAIT        _spin_wait;
-
-public:
-    AtomicMutex()                    = default;
-    AtomicMutex(const AtomicMutex &) = delete;
-    AtomicMutex &operator=(const AtomicMutex &) = delete;
-
-    //
-    void lock() {
-        while (_lock.test_and_set(std::memory_order_acquire)) {
-            if constexpr (requires { _spin_wait.spin_once(); }) {
-                _spin_wait.spin_once();
-            }
-        }
-        if constexpr (requires { _spin_wait.spin_once(); }) {
-            _spin_wait.reset();
-        }
-    }
-    void unlock() { _lock.clear(std::memory_order::release); }
-};
-
-
-// clang-format on
-} // namespace gr
-
-
-#endif // GNURADIO_WAIT_STRATEGY_HPP
-
-// #include "sequence.hpp"
 
 // #include "utils.hpp"
 #ifndef GNURADIO_GRAPH_UTILS_HPP
@@ -3953,6 +3580,383 @@ static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
 
 #endif // include guard
 
+// #include "wait_strategy.hpp"
+#ifndef GNURADIO_WAIT_STRATEGY_HPP
+#define GNURADIO_WAIT_STRATEGY_HPP
+
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+#include <concepts>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+// #include "sequence.hpp"
+
+
+namespace gr {
+// clang-format off
+/**
+ * Wait for the given sequence to be available.  It is possible for this method to return a value less than the sequence number supplied depending on the implementation of the WaitStrategy.
+ * A common use for this is to signal a timeout.Any EventProcessor that is using a WaitStrategy to get notifications about message becoming available should remember to handle this case.
+ * The BatchEventProcessor<T> explicitly handles this case and will signal a timeout if required.
+ *
+ * \param sequence sequence to be waited on.
+ * \param cursor Ring buffer cursor on which to wait.
+ * \param dependentSequence on which to wait.
+ * \param barrier barrier the IEventProcessor is waiting on.
+ * \returns the sequence that is available which may be greater than the requested sequence.
+ */
+template<typename T>
+inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
+};
+static_assert(!isWaitStrategy<int>);
+
+/**
+ * signal those waiting that the cursor has advanced.
+ */
+template<typename T>
+inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
+    { t.signalAllWhenBlocking() } -> std::same_as<void>;
+};
+static_assert(!hasSignalAllWhenBlocking<int>);
+
+template<typename T>
+concept WaitStrategy = isWaitStrategy<T>;
+
+
+
+/**
+ * Blocking strategy that uses a lock and condition variable for IEventProcessor's waiting on a barrier.
+ * This strategy should be used when performance and low-latency are not as important as CPU resource.
+ */
+class BlockingWaitStrategy {
+    std::recursive_mutex        _gate;
+    std::condition_variable_any _conditionVariable;
+
+public:
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+        if (cursor.value() < sequence) {
+            std::unique_lock uniqueLock(_gate);
+
+            while (cursor.value() < sequence) {
+                // optional: barrier check alert
+                _conditionVariable.wait(uniqueLock);
+            }
+        }
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+
+        return availableSequence;
+    }
+
+    void signalAllWhenBlocking() {
+        std::unique_lock uniqueLock(_gate);
+        _conditionVariable.notify_all();
+    }
+};
+static_assert(WaitStrategy<BlockingWaitStrategy>);
+
+/**
+ * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
+ * This strategy will use CPU resource to avoid syscalls which can introduce latency jitter.
+ * It is best used when threads can be bound to specific CPU cores.
+ */
+struct BusySpinWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<BusySpinWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
+
+/**
+ * Sleeping strategy that initially spins, then uses a std::this_thread::yield(), and eventually sleep. T
+ * his strategy is a good compromise between performance and CPU resource.
+ * Latency spikes can occur after quiet periods.
+ */
+class SleepingWaitStrategy {
+    static const std::int32_t _defaultRetries = 200;
+    std::int32_t              _retries        = 0;
+
+public:
+    explicit SleepingWaitStrategy(std::int32_t retries = _defaultRetries)
+        : _retries(retries) {
+    }
+
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        auto       counter    = _retries;
+        const auto waitMethod = [&counter]() {
+            // optional: barrier check alert
+
+            if (counter > 100) {
+                --counter;
+            } else if (counter > 0) {
+                --counter;
+                std::this_thread::yield();
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(0));
+            }
+        };
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            waitMethod();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<SleepingWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
+
+struct TimeoutException : public std::runtime_error {
+    TimeoutException() : std::runtime_error("TimeoutException") {}
+};
+
+class TimeoutBlockingWaitStrategy {
+    using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
+    Clock::duration             _timeout;
+    std::recursive_mutex        _gate;
+    std::condition_variable_any _conditionVariable;
+
+public:
+    explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
+        : _timeout(timeout) {}
+
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
+
+        if (cursor.value() < sequence) {
+            std::unique_lock uniqueLock(_gate);
+
+            while (cursor.value() < sequence) {
+                // optional: barrier check alert
+
+                if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
+                    throw TimeoutException();
+                }
+            }
+        }
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+
+        return availableSequence;
+    }
+
+    void signalAllWhenBlocking() {
+        std::unique_lock uniqueLock(_gate);
+        _conditionVariable.notify_all();
+    }
+};
+static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
+static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
+
+/**
+ * Yielding strategy that uses a Thread.Yield() for IEventProcessors waiting on a barrier after an initially spinning.
+ * This strategy is a good compromise between performance and CPU resource without incurring significant latency spikes.
+ */
+class YieldingWaitStrategy {
+    const std::size_t _spinTries = 100;
+
+public:
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        auto       counter    = _spinTries;
+        const auto waitMethod = [&counter]() {
+            // optional: barrier check alert
+
+            if (counter == 0) {
+                std::this_thread::yield();
+            } else {
+                --counter;
+            }
+        };
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            waitMethod();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<YieldingWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
+
+struct NoWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
+        // wait for nothing
+        return sequence;
+    }
+};
+static_assert(WaitStrategy<NoWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
+
+
+/**
+ *
+ * SpinWait is meant to be used as a tool for waiting in situations where the thread is not allowed to block.
+ *
+ * In order to get the maximum performance, the implementation first spins for `YIELD_THRESHOLD` times, and then
+ * alternates between yielding, spinning and putting the thread to sleep, to allow other threads to be scheduled
+ * by the kernel to avoid potential CPU contention.
+ *
+ * The number of spins, yielding, and sleeping for either '0 ms' or '1 ms' is controlled by the NTTP constants
+ * @tparam YIELD_THRESHOLD
+ * @tparam SLEEP_0_EVERY_HOW_MANY_TIMES
+ * @tparam SLEEP_1_EVERY_HOW_MANY_TIMES
+ */
+template<std::int32_t YIELD_THRESHOLD = 10, std::int32_t SLEEP_0_EVERY_HOW_MANY_TIMES = 5, std::int32_t SLEEP_1_EVERY_HOW_MANY_TIMES = 20>
+class SpinWait {
+    using Clock         = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
+    std::int32_t _count = 0;
+    static void  spinWaitInternal(std::int32_t iterationCount) noexcept {
+        for (auto i = 0; i < iterationCount; i++) {
+            yieldProcessor();
+        }
+    }
+#ifndef __EMSCRIPTEN__
+    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
+#else
+    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+#endif
+
+public:
+    SpinWait() = default;
+
+    [[nodiscard]] std::int32_t count() const noexcept { return _count; }
+    [[nodiscard]] bool         nextSpinWillYield() const noexcept { return _count > YIELD_THRESHOLD; }
+
+    void                       spinOnce() {
+        if (nextSpinWillYield()) {
+            auto num = _count >= YIELD_THRESHOLD ? _count - 10 : _count;
+            if (num % SLEEP_1_EVERY_HOW_MANY_TIMES == SLEEP_1_EVERY_HOW_MANY_TIMES - 1) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } else {
+                if (num % SLEEP_0_EVERY_HOW_MANY_TIMES == SLEEP_0_EVERY_HOW_MANY_TIMES - 1) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(0));
+                } else {
+                    std::this_thread::yield();
+                }
+            }
+        } else {
+            spinWaitInternal(4 << _count);
+        }
+
+        if (_count == std::numeric_limits<std::int32_t>::max()) {
+            _count = YIELD_THRESHOLD;
+        } else {
+            ++_count;
+        }
+    }
+
+    void reset() noexcept { _count = 0; }
+
+    template<typename T>
+    requires std::is_nothrow_invocable_r_v<bool, T>
+    bool
+    spinUntil(const T &condition) const { return spinUntil(condition, -1); }
+
+    template<typename T>
+    requires std::is_nothrow_invocable_r_v<bool, T>
+    bool
+    spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
+        if (millisecondsTimeout < -1) {
+            throw std::out_of_range("Timeout value is out of range");
+        }
+
+        std::int64_t num = 0;
+        if (millisecondsTimeout != 0 && millisecondsTimeout != -1) {
+            num = getTickCount();
+        }
+
+        SpinWait spinWait;
+        while (!condition()) {
+            if (millisecondsTimeout == 0) {
+                return false;
+            }
+
+            spinWait.spinOnce();
+
+            if (millisecondsTimeout != 1 && spinWait.nextSpinWillYield() && millisecondsTimeout <= (getTickCount() - num)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    [[nodiscard]] static std::int64_t getTickCount() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
+};
+
+/**
+ * Spin strategy that uses a SpinWait for IEventProcessors waiting on a barrier.
+ * This strategy is a good compromise between performance and CPU resource.
+ * Latency spikes can occur after quiet periods.
+ */
+struct SpinWaitWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
+        std::int64_t availableSequence;
+
+        SpinWait     spinWait;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
+            // optional: barrier check alert
+            spinWait.spinOnce();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<SpinWaitWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
+
+struct NO_SPIN_WAIT {};
+
+template<typename SPIN_WAIT = NO_SPIN_WAIT>
+class AtomicMutex {
+    std::atomic_flag _lock = ATOMIC_FLAG_INIT;
+    SPIN_WAIT        _spin_wait;
+
+public:
+    AtomicMutex()                    = default;
+    AtomicMutex(const AtomicMutex &) = delete;
+    AtomicMutex &operator=(const AtomicMutex &) = delete;
+
+    //
+    void lock() {
+        while (_lock.test_and_set(std::memory_order_acquire)) {
+            if constexpr (requires { _spin_wait.spin_once(); }) {
+                _spin_wait.spin_once();
+            }
+        }
+        if constexpr (requires { _spin_wait.spin_once(); }) {
+            _spin_wait.reset();
+        }
+    }
+    void unlock() { _lock.clear(std::memory_order::release); }
+};
+
+
+// clang-format on
+} // namespace gr
+
+
+#endif // GNURADIO_WAIT_STRATEGY_HPP
+
 
 namespace gr {
 
@@ -3963,15 +3967,15 @@ struct NoCapacityException : public std::runtime_error {
 // clang-format off
 
 template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity,
-        const std::int64_t cursorValue, const std::int64_t sequence, const std::int64_t availableSequence, const std::int32_t n_slots_to_claim) {
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
+        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
     { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::int64_t>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::int64_t>;
+    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.publish(sequence) } -> std::same_as<void>;
     { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::int64_t>;
+    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
 };
 
 namespace claim_strategy::util {
@@ -3981,11 +3985,12 @@ constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x 
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
+    using signed_index_type = Sequence::signed_index_type;
     const std::size_t _size;
     Sequence &_cursor;
     WAIT_STRATEGY &_waitStrategy;
-    std::int64_t _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    mutable std::int64_t _cachedValue{ kInitialCursorValue };
+    signed_index_type _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    mutable signed_index_type _cachedValue{ kInitialCursorValue };
 
 public:
     SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
@@ -3994,8 +3999,8 @@ public:
     SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
     void operator=(const SingleThreadedStrategy &) = delete;
 
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const int requiredCapacity, const std::int64_t /*cursorValue*/) const noexcept {
-        if (const std::int64_t wrapPoint = (_nextValue + requiredCapacity) - static_cast<std::int64_t>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
+    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type/*cursorValue*/) const noexcept {
+        if (const signed_index_type wrapPoint = (_nextValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
             auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
             _cachedValue     = minSequence;
             if (wrapPoint > minSequence) {
@@ -4005,15 +4010,15 @@ public:
         return true;
     }
 
-    std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int32_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= static_cast<std::int32_t>(_size)) && "n_slots_to_claim must be > 0 and <= bufferSize");
+    signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim = 1) noexcept {
+        assert((n_slots_to_claim > 0 && n_slots_to_claim <= _size) && "n_slots_to_claim must be > 0 and <= bufferSize");
 
-        auto nextSequence = _nextValue + n_slots_to_claim;
-        auto wrapPoint    = nextSequence - static_cast<std::int64_t>(_size);
+        auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
+        auto wrapPoint    = nextSequence - static_cast<signed_index_type>(_size);
 
         if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
             SpinWait     spinWait;
-            std::int64_t minSequence;
+            signed_index_type minSequence;
             while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
                 if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
                     _waitStrategy.signalAllWhenBlocking();
@@ -4027,27 +4032,27 @@ public:
         return nextSequence;
     }
 
-    std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
+    signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
         if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
             throw NoCapacityException();
         }
 
-        const auto nextSequence = _nextValue + n_slots_to_claim;
+        const auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
         _nextValue              = nextSequence;
 
         return nextSequence;
     }
 
-    std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+    signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
         const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
         const auto produced = _nextValue;
 
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
+        return static_cast<signed_index_type>(_size) - (produced - consumed);
     }
 
-    void publish(std::int64_t sequence) {
+    void publish(signed_index_type sequence) {
         _cursor.setValue(sequence);
         _nextValue = sequence;
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
@@ -4055,8 +4060,8 @@ public:
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] std::int64_t     getHighestPublishedSequence(std::int64_t /*nextSequence*/, std::int64_t availableSequence) const noexcept { return availableSequence; }
+    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept { return sequence <= _cursor.value(); }
+    [[nodiscard]] signed_index_type getHighestPublishedSequence(signed_index_type /*nextSequence*/, signed_index_type availableSequence) const noexcept { return availableSequence; }
 };
 
 static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
@@ -4072,7 +4077,7 @@ template <>
 struct MultiThreadedStrategySizeMembers<std::dynamic_extent>
 {
     explicit MultiThreadedStrategySizeMembers(std::size_t size)
-    : _size(static_cast<std::int32_t>(size)), _indexShift(std::bit_width(size))
+    : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size)))
     {}
 
     const std::int32_t _size;
@@ -4097,6 +4102,7 @@ class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
     std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
     using MultiThreadedStrategySizeMembers<SIZE>::_size;
     using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
+    using signed_index_type = Sequence::signed_index_type;
 
 public:
     MultiThreadedStrategy() = delete;
@@ -4117,8 +4123,8 @@ public:
     MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
     void               operator=(const MultiThreadedStrategy &) = delete;
 
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::int64_t requiredCapacity, const std::int64_t cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + requiredCapacity) - static_cast<std::int64_t>(_size);
+    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type cursorValue) const noexcept {
+        const auto wrapPoint = (cursorValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size);
 
         if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
             const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
@@ -4131,22 +4137,22 @@ public:
         return true;
     }
 
-    [[nodiscard]] std::int64_t next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+    [[nodiscard]] signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
-        std::int64_t current;
-        std::int64_t next;
+        signed_index_type current;
+        signed_index_type next;
 
         SpinWait     spinWait;
         do {
-            current                           = _cursor.value();
-            next                              = current + n_slots_to_claim;
+            current = _cursor.value();
+            next = current + static_cast<signed_index_type>(n_slots_to_claim);
 
-            std::int64_t wrapPoint            = next - static_cast<std::int64_t>(_size);
-            std::int64_t cachedGatingSequence = _gatingSequenceCache->value();
+            signed_index_type wrapPoint            = next - static_cast<signed_index_type>(_size);
+            signed_index_type cachedGatingSequence = _gatingSequenceCache->value();
 
             if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                std::int64_t gatingSequence = detail::getMinimumSequence(dependents, current);
+                signed_index_type gatingSequence = detail::getMinimumSequence(dependents, current);
 
                 if (wrapPoint > gatingSequence) {
                     if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
@@ -4165,15 +4171,15 @@ public:
         return next;
     }
 
-    [[nodiscard]] std::int64_t tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+    [[nodiscard]] signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
         assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
 
-        std::int64_t current;
-        std::int64_t next;
+        signed_index_type current;
+        signed_index_type next;
 
         do {
             current = _cursor.value();
-            next    = current + n_slots_to_claim;
+            next    = current + static_cast<signed_index_type>(n_slots_to_claim);
 
             if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
                 throw NoCapacityException();
@@ -4183,29 +4189,29 @@ public:
         return next;
     }
 
-    [[nodiscard]] std::int64_t getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+    [[nodiscard]] signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
         const auto produced = _cursor.value();
         const auto consumed = detail::getMinimumSequence(dependents, produced);
 
-        return static_cast<std::int64_t>(_size) - (produced - consumed);
+        return static_cast<signed_index_type>(_size) - (produced - consumed);
     }
 
-    void publish(std::int64_t sequence) {
+    void publish(signed_index_type sequence) {
         setAvailable(sequence);
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
             _waitStrategy.signalAllWhenBlocking();
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(std::int64_t sequence) const noexcept {
+    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
         const auto index = calculateIndex(sequence);
         const auto flag  = calculateAvailabilityFlag(sequence);
 
         return _availableBuffer[static_cast<std::size_t>(index)] == flag;
     }
 
-    [[nodiscard]] forceinline std::int64_t getHighestPublishedSequence(const std::int64_t lowerBound, const std::int64_t availableSequence) const noexcept {
-        for (std::int64_t sequence = lowerBound; sequence <= availableSequence; sequence++) {
+    [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
+        for (signed_index_type sequence = lowerBound; sequence <= availableSequence; sequence++) {
             if (!isAvailable(sequence)) {
                 return sequence - 1;
             }
@@ -4215,10 +4221,10 @@ public:
     }
 
 private:
-    void                      setAvailable(std::int64_t sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
+    void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
     forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const std::int64_t sequence) const noexcept { return static_cast<std::int32_t>(static_cast<std::uint64_t>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const std::int64_t sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(static_cast<signed_index_type>(sequence) >> _indexShift); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
 };
 
 static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
@@ -4237,33 +4243,31 @@ enum class ProducerType {
 };
 
 namespace detail {
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
 struct producer_type;
 
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, WaitStrategy WAIT_STRATEGY>
 struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
     using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
 };
-template <std::size_t size, WaitStrategy WAIT_STRATEGY>
+
+template<std::size_t size, WaitStrategy WAIT_STRATEGY>
 struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
     using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
 };
 
-template <std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
 using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
 
 } // namespace detail
 
 } // namespace gr
 
-
 #endif // GNURADIO_CLAIM_STRATEGY_HPP
-
-// #include "wait_strategy.hpp"
 
 // #include "sequence.hpp"
 
-// #include "buffer.hpp"
+// #include "wait_strategy.hpp"
 
 
 namespace gr {
@@ -4411,14 +4415,13 @@ class circular_buffer
     using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
     using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
     using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
+    using signed_index_type = Sequence::signed_index_type;
 
     struct buffer_impl {
-        using size_type = std::int32_t;
-
         Sequence                    _cursor;
         Allocator                   _allocator{};
         const bool                  _is_mmap_allocated;
-        const size_type             _size; // pre-condition: std::has_single_bit(_size)
+        const std::size_t             _size; // pre-condition: std::has_single_bit(_size)
         std::vector<T, Allocator>   _data;
         WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
         ClaimType                   _claim_strategy;
@@ -4464,18 +4467,17 @@ class circular_buffer
     template <typename U = T>
     class buffer_writer {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-        using size_type = typename buffer_impl::size_type;
 
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
         bool                        _is_mmap_allocated;
-        size_type                   _size;
+        std::size_t                   _size;
         ClaimType*                  _claim_strategy;
 
     class ReservedOutputRange {
         buffer_writer<U>* _parent = nullptr;
         std::size_t       _index = 0;
         std::size_t       _n_slots_to_claim = 0;
-        std::int64_t      _offset = 0;
+        signed_index_type      _offset = 0;
         bool              _published_data = false;
         std::span<T>      _internal_span{};
     public:
@@ -4486,8 +4488,8 @@ class circular_buffer
     using pointer = typename std::span<T>::reverse_iterator;
 
     explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
-    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, std::int64_t sequence, std::size_t n_slots_to_claim) noexcept :
-        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - n_slots_to_claim), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
+    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t n_slots_to_claim) noexcept :
+        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
     ReservedOutputRange(const ReservedOutputRange&) = delete;
     ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
     explicit ReservedOutputRange(ReservedOutputRange&& other) noexcept
@@ -4549,7 +4551,7 @@ class circular_buffer
             std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
             std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
         }
-        _parent->_claim_strategy->publish(_offset + n_produced);
+        _parent->_claim_strategy->publish(_offset + static_cast<signed_index_type>(n_produced));
         _n_slots_to_claim -= n_produced;
         _published_data = true;
     }
@@ -4579,7 +4581,7 @@ class circular_buffer
         [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
             try {
                 const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
-                const std::size_t index = (sequence + _size - n_slots_to_claim) % _size;
+                const std::size_t index = (static_cast<std::size_t>(sequence) + _size - n_slots_to_claim) % _size;
                 return ReservedOutputRange(this, index, sequence, n_slots_to_claim);
             } catch (const NoCapacityException &) {
                 return ReservedOutputRange(this);
@@ -4609,21 +4611,21 @@ class circular_buffer
             }
         }
 
-        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _buffer->_cursor.value(); }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _claim_strategy->getRemainingCapacity(*_buffer->_read_indices);
+            return static_cast<std::size_t>(_claim_strategy->getRemainingCapacity(*_buffer->_read_indices));
         }
 
         private:
         template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const std::int64_t publishSequence, const Args&... args) {
+        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
             try {
                 auto& data = _buffer->_data;
-                const std::size_t index = (publishSequence + _size - n_slots_to_claim) % _size;
+                const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
                 std::span<U> writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, std::int64_t, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - n_slots_to_claim, args...);
+                if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
                 } else {
                     std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
                 }
@@ -4649,17 +4651,16 @@ class circular_buffer
     class buffer_reader
     {
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-        using size_type = typename buffer_impl::size_type;
 
         std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        std::int64_t                _read_index_cached;
+        signed_index_type                _read_index_cached;
         BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        size_type                   _size; // pre-condition: std::has_single_bit(_size)
+        std::size_t                   _size; // pre-condition: std::has_single_bit(_size)
 
         std::size_t
         buffer_index() const noexcept {
             const auto bitmask = _size - 1;
-            return static_cast<std::size_t>(_read_index_cached & bitmask);
+            return static_cast<std::size_t>(_read_index_cached) & bitmask;
         }
 
     public:
@@ -4707,14 +4708,14 @@ class circular_buffer
                     return false;
                 }
             }
-            _read_index_cached = _read_index->addAndGet(static_cast<int64_t>(n_elements));
+            _read_index_cached = _read_index->addAndGet(static_cast<signed_index_type>(n_elements));
             return true;
         }
 
-        [[nodiscard]] constexpr std::int64_t position() const noexcept { return _read_index_cached; }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _read_index_cached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return _buffer->_cursor.value() - _read_index_cached;
+            return static_cast<std::size_t>(_buffer->_cursor.value() - _read_index_cached);
         }
     };
 
@@ -9940,9 +9941,9 @@ enum class tag_propagation_policy_t {
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
-    using map_type = std::map<std::string, pmtv::pmt, std::less<>>;
-    int64_t  index = 0;
-    map_type map;
+    using map_type                        = std::map<std::string, pmtv::pmt, std::less<>>;
+    std::make_signed_t<std::size_t> index = 0;
+    map_type                        map;
 
     // TODO: do we need the convenience methods below?
     [[nodiscard]] pmtv::pmt &
@@ -10030,18 +10031,18 @@ public:
 };
 
 namespace tag { // definition of default tags and names
-inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
-inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_unit", std::string, "", "signal's physical SI unit">                                            SIGNAL_UNIT;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MIN;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
+inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
+inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
+inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string> TRIGGER_NAME;
+inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
+inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
 
-inline constexpr std::tuple DEFAULT_TAGS = {SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT};
+inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT };
 } // namespace tag
 
 } // namespace fair::graph
@@ -10069,14 +10070,14 @@ enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
 
 template<class T>
 concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
-                   typename T::value_type;
-                   { t.pmt_type() } -> std::same_as<supported_type>;
-                   { t.type() } -> std::same_as<port_type_t>;
-                   { t.direction() } -> std::same_as<port_direction_t>;
-                   { t.name() } -> std::same_as<std::string_view>;
-                   { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
-                   { t.disconnect() } -> std::same_as<connection_result_t>;
-               };
+    typename T::value_type;
+    { t.pmt_type() } -> std::same_as<supported_type>;
+    { t.type() } -> std::same_as<port_type_t>;
+    { t.direction() } -> std::same_as<port_direction_t>;
+    { t.name() } -> std::same_as<std::string_view>;
+    { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
+    { t.disconnect() } -> std::same_as<connection_result_t>;
+};
 
 /**
  * @brief internal port buffer handler
@@ -10084,8 +10085,8 @@ concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
  * N.B. void* needed for type-erasure/Python compatibility/wrapping
  */
 struct internal_port_buffers {
-    void* streamHandler;
-    void* tagHandler;
+    void *streamHandler;
+    void *tagHandler;
 };
 
 /**
@@ -10299,9 +10300,10 @@ public:
     [[nodiscard]] auto
     buffer() {
         struct port_buffers {
-            BufferType streamBuffer;
+            BufferType    streamBuffer;
             TagBufferType tagBufferType;
-        } ;
+        };
+
         return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
     }
 
@@ -10440,7 +10442,7 @@ publish_tag(Port auto &port, const tag_t::map_type &tag_data, std::size_t tag_of
     port.tagWriter().publish(
             [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
-                tag_output[0].map = tag_data;
+                tag_output[0].map   = tag_data;
             },
             1_UZ);
 }
@@ -11556,12 +11558,12 @@ public:
         std::size_t    tags_to_process    = 0;
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
-                              { self().available_samples(d) } -> std::same_as<std::int64_t>;
+                              { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
                           }) {
                 // the (source) node wants to determine the number of samples to process
                 std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
                 meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
-                const std::int64_t available_samples = self().available_samples(self());
+                const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
                 if (available_samples < 0 && max_buffer > 0) {
                     return work_return_t::DONE;
                 }
