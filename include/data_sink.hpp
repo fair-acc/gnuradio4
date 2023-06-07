@@ -157,6 +157,7 @@ public:
     }
 
     std::shared_ptr<poller> get_streaming_poller(blocking_mode block = blocking_mode::NonBlocking) {
+        std::lock_guard lg(pending_listeners.mutex);
         auto handler = std::make_shared<poller>();
         pending_listeners.list.push_back({
             .mode = acquisition_mode::Continuous,
