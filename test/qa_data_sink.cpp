@@ -64,7 +64,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
         sink.set_name("test_sink");
-        data_sink_registry::instance().register_sink(&sink); // TODO this should be done elsewhere
+
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         std::size_t samples_seen = 0;
@@ -91,18 +91,17 @@ const boost::ut::suite DataSinkTests = [] {
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
         sink.set_name("test_sink");
-        data_sink_registry::instance().register_sink(&sink); // TODO this should be done elsewhere
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         std::atomic<std::size_t> samples_seen = 0;
 
         auto poller = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
-        expect(poller);
+        expect(neq(poller, nullptr));
 
         auto polling = std::async([poller, &samples_seen] {
             while (!poller->finished) {
-                [[maybe_unused]] poller->process([&samples_seen](const auto &data) {
+                [[maybe_unused]] auto r = poller->process([&samples_seen](const auto &data) {
                     samples_seen += data.size();
                 });
             }
@@ -127,7 +126,6 @@ const boost::ut::suite DataSinkTests = [] {
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
         sink.set_name("test_sink");
-        data_sink_registry::instance().register_sink(&sink); // TODO this should be done elsewhere
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 

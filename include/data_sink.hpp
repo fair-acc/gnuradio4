@@ -80,6 +80,10 @@ public:
     // set_name, which we have no hook into. Maybe the registration should be done by the
     // graph creating/destroying the sink instead?
 
+    data_sink() {
+        R::instance().register_sink(this);
+    }
+
     ~data_sink() {
         R::instance().unregister_sink(this);
     }
@@ -162,7 +166,7 @@ public:
 
 class data_sink_registry {
     std::mutex mutex;
-    std::unordered_map<std::string, std::any> sinks;
+    std::vector<std::any> sinks;
 
 public:
     // TODO this shouldn't be a singleton but associated with the flow graph (?)
@@ -174,32 +178,32 @@ public:
     template<typename T>
     void register_sink(data_sink<T, data_sink_registry> *sink) {
         std::lock_guard lg{mutex};
-        sinks[std::string(sink->name())] = sink;
+        sinks.push_back(sink);
     }
 
     template<typename T>
     void unregister_sink(data_sink<T, data_sink_registry> *sink) {
         std::lock_guard lg{mutex};
-        const auto it = sinks.find(std::string(sink->name()));
-        try {
-            if (it != sinks.end() && std::any_cast<data_sink<T, data_sink_registry>*>(it->second) == sink) {
-                sinks.erase(it);
+        std::erase_if(sinks, [sink](const std::any &v) {
+            try {
+                return std::any_cast<data_sink<T, data_sink_registry> *>(v) == sink;
+            } catch (...) {
+                return false;
             }
-        } catch (...) {
-        }
+        });
     }
 
     template<typename T>
     std::shared_ptr<typename data_sink<T>::poller> get_streaming_poller(std::string_view name, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
-        auto sink = get_typed_sink<T>(name);
+        auto sink = find_sink<T>(name);
         return sink ? sink->get_streaming_poller(block) : nullptr;
     }
 
     template<typename T, typename Callback>
     bool register_streaming_callback(std::string_view name, Callback callback) {
         std::lock_guard lg{mutex};
-        auto sink = get_typed_sink<T>(name);
+        auto sink = find_sink<T>(name);
         if (!sink) {
             return false;
         }
@@ -210,17 +214,24 @@ public:
 
 private:
     template<typename T>
-    data_sink<T, data_sink_registry>* get_typed_sink(std::string_view name) {
-        const auto it = sinks.find(std::string(name));
+    data_sink<T, data_sink_registry>* find_sink(std::string_view name) {
+        const auto it = std::find_if(sinks.begin(), sinks.end(), matcher<T>(name));
         if (it == sinks.end()) {
-            return {};
+            return nullptr;
         }
 
-        try {
-            return std::any_cast<data_sink<T, data_sink_registry>*>(it->second);
-        } catch (...) {
-            return {};
-        }
+        return std::any_cast<data_sink<T, data_sink_registry>*>(*it);
+    }
+
+    template<typename T>
+    static auto matcher(std::string_view name) {
+        return [name](const std::any &v) {
+            try {
+                return std::any_cast<data_sink<T, data_sink_registry>*>(v)->name() == name;
+            } catch (...) {
+                return false;
+            }
+        };
     }
 };
 
