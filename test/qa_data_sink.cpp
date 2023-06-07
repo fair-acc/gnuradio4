@@ -132,17 +132,17 @@ const boost::ut::suite DataSinkTests = [] {
         std::atomic<std::size_t> samples_seen = 0;
 
         auto invalid_type_poller = data_sink_registry::instance().get_streaming_poller<double>("test_sink");
-        expect(!invalid_type_poller);
+        expect(eq(invalid_type_poller, nullptr));
 
         auto poller = data_sink_registry::instance().get_streaming_poller<float>("test_sink");
-        expect(poller);
+        expect(neq(poller, nullptr));
 
         auto polling = std::async([poller, &samples_seen] {
-            expect(poller.get() != nullptr);
+            expect(neq(poller, nullptr));
             while (!poller->finished) {
                 using namespace std::chrono_literals;
                 std::this_thread::sleep_for(20ms);
-                [[maybe_unused]] poller->process([&samples_seen](const auto &data) {
+                [[maybe_unused]] auto r = poller->process([&samples_seen](const auto &data) {
                     samples_seen += data.size();
                 });
             }
