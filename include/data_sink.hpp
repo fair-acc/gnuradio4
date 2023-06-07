@@ -148,10 +148,6 @@ private:
     std::vector<listener> listeners;
 
 public:
-    // TODO sink should register itself on construction, but name is set afterwards via
-    // set_name, which we have no hook into. Maybe the registration should be done by the
-    // graph creating/destroying the sink instead?
-
     data_sink() {
         data_sink_registry::instance().register_sink(this);
     }
