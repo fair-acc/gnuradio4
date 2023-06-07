@@ -20,9 +20,81 @@ enum class blocking_mode {
     Blocking
 };
 
-class data_sink_registry;
+template<typename T>
+class data_sink;
 
-template<typename T, typename R = data_sink_registry>
+class data_sink_registry {
+    std::mutex mutex;
+    std::vector<std::any> sinks;
+
+public:
+    // TODO this shouldn't be a singleton but associated with the flow graph (?)
+    static data_sink_registry& instance() {
+        static data_sink_registry s_instance;
+        return s_instance;
+    }
+
+    template<typename T>
+    void register_sink(data_sink<T> *sink) {
+        std::lock_guard lg{mutex};
+        sinks.push_back(sink);
+    }
+
+    template<typename T>
+    void unregister_sink(data_sink<T> *sink) {
+        std::lock_guard lg{mutex};
+        std::erase_if(sinks, [sink](const std::any &v) {
+            try {
+                return std::any_cast<data_sink<T> *>(v) == sink;
+            } catch (...) {
+                return false;
+            }
+        });
+    }
+
+    template<typename T>
+    std::shared_ptr<typename data_sink<T>::poller> get_streaming_poller(std::string_view name, blocking_mode block = blocking_mode::NonBlocking) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        return sink ? sink->get_streaming_poller(block) : nullptr;
+    }
+
+    template<typename T, typename Callback>
+    bool register_streaming_callback(std::string_view name, Callback callback) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        if (!sink) {
+            return false;
+        }
+
+        sink->register_streaming_callback(std::move(callback));
+        return true;
+    }
+
+private:
+    template<typename T>
+    data_sink<T>* find_sink(std::string_view name) {
+        const auto it = std::find_if(sinks.begin(), sinks.end(), matcher<T>(name));
+        if (it == sinks.end()) {
+            return nullptr;
+        }
+
+        return std::any_cast<data_sink<T>*>(*it);
+    }
+
+    template<typename T>
+    static auto matcher(std::string_view name) {
+        return [name](const std::any &v) {
+            try {
+                return std::any_cast<data_sink<T>*>(v)->name() == name;
+            } catch (...) {
+                return false;
+            }
+        };
+    }
+};
+
+template<typename T>
 class data_sink : public node<data_sink<T>> {
 public:
     IN<T>        in;
@@ -81,11 +153,11 @@ public:
     // graph creating/destroying the sink instead?
 
     data_sink() {
-        R::instance().register_sink(this);
+        data_sink_registry::instance().register_sink(this);
     }
 
     ~data_sink() {
-        R::instance().unregister_sink(this);
+        data_sink_registry::instance().unregister_sink(this);
     }
 
     std::shared_ptr<poller> get_streaming_poller(blocking_mode block = blocking_mode::NonBlocking) {
@@ -161,77 +233,6 @@ public:
         }
 
         return work_return_t::OK;
-    }
-};
-
-class data_sink_registry {
-    std::mutex mutex;
-    std::vector<std::any> sinks;
-
-public:
-    // TODO this shouldn't be a singleton but associated with the flow graph (?)
-    static data_sink_registry& instance() {
-        static data_sink_registry s_instance;
-        return s_instance;
-    }
-
-    template<typename T>
-    void register_sink(data_sink<T, data_sink_registry> *sink) {
-        std::lock_guard lg{mutex};
-        sinks.push_back(sink);
-    }
-
-    template<typename T>
-    void unregister_sink(data_sink<T, data_sink_registry> *sink) {
-        std::lock_guard lg{mutex};
-        std::erase_if(sinks, [sink](const std::any &v) {
-            try {
-                return std::any_cast<data_sink<T, data_sink_registry> *>(v) == sink;
-            } catch (...) {
-                return false;
-            }
-        });
-    }
-
-    template<typename T>
-    std::shared_ptr<typename data_sink<T>::poller> get_streaming_poller(std::string_view name, blocking_mode block = blocking_mode::NonBlocking) {
-        std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
-        return sink ? sink->get_streaming_poller(block) : nullptr;
-    }
-
-    template<typename T, typename Callback>
-    bool register_streaming_callback(std::string_view name, Callback callback) {
-        std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
-        if (!sink) {
-            return false;
-        }
-
-        sink->register_streaming_callback(std::move(callback));
-        return true;
-    }
-
-private:
-    template<typename T>
-    data_sink<T, data_sink_registry>* find_sink(std::string_view name) {
-        const auto it = std::find_if(sinks.begin(), sinks.end(), matcher<T>(name));
-        if (it == sinks.end()) {
-            return nullptr;
-        }
-
-        return std::any_cast<data_sink<T, data_sink_registry>*>(*it);
-    }
-
-    template<typename T>
-    static auto matcher(std::string_view name) {
-        return [name](const std::any &v) {
-            try {
-                return std::any_cast<data_sink<T, data_sink_registry>*>(v)->name() == name;
-            } catch (...) {
-                return false;
-            }
-        };
     }
 };
 
