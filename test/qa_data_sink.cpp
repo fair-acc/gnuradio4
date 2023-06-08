@@ -165,8 +165,7 @@ const boost::ut::suite DataSinkTests = [] {
         polling.wait();
 
         expect(eq(sink.n_samples_consumed, n_samples));
-        expect(lt(samples_seen.load(), n_samples));
-        expect(gt(poller->drop_count.load(), 0));
+        expect(eq(samples_seen.load() + poller->drop_count.load(), n_samples));
     };
 };
 
