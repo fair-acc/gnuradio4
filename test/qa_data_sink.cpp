@@ -20,6 +20,8 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 
 namespace fair::graph::data_sink_test {
 
+static constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
+
 template<typename T>
 struct Source : public node<Source<T>> {
     OUT<T>       out;
@@ -59,7 +61,6 @@ const boost::ut::suite DataSinkTests = [] {
 
     "callback continuous mode"_test = [] {
         graph                  flow_graph;
-        constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
 
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
@@ -85,8 +86,6 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling continuous mode"_test = [] {
-        constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
-
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
@@ -96,32 +95,42 @@ const boost::ut::suite DataSinkTests = [] {
 
         std::atomic<std::size_t> samples_seen = 0;
 
-        auto poller = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
-        expect(neq(poller, nullptr));
+        auto poller1 = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
+        expect(neq(poller1, nullptr));
 
-        auto polling = std::async([poller, &samples_seen] {
-            while (!poller->finished) {
-                [[maybe_unused]] auto r = poller->process([&samples_seen](const auto &data) {
-                    samples_seen += data.size();
-                });
-            }
-        });
+        auto poller2 = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
+        expect(neq(poller2, nullptr));
+
+        auto make_runner = [](auto poller) {
+            return std::async([poller] {
+                std::size_t samples_seen = 0;
+                while (!poller->finished) {
+                    [[maybe_unused]] auto r = poller->process([&samples_seen](const auto &data) {
+                        samples_seen += data.size();
+                    });
+                }
+
+                expect(eq(samples_seen, n_samples));
+                expect(eq(poller->drop_count.load(), 0));
+            });
+        };
+
+        auto runner1 = make_runner(poller1);
+        auto runner2 = make_runner(poller2);
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
 
-        poller->finished = true; // TODO this should be done by the block
+        poller1->finished = true; // TODO this should be done by the block
+        poller2->finished = true;
 
-        polling.wait();
+        runner1.wait();
+        runner2.wait();
 
         expect(eq(sink.n_samples_consumed, n_samples));
-        expect(eq(samples_seen.load(), n_samples));
-        expect(eq(poller->drop_count.load(), 0));
     };
 
     "non-blocking polling continuous mode"_test = [] {
-        constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
-
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
