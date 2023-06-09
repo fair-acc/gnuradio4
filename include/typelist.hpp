@@ -3,10 +3,10 @@
 
 #include <bit>
 #include <concepts>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <string_view>
-#include <string>
 
 namespace fair::meta {
 
@@ -60,9 +60,7 @@ struct concat_impl<A, B, C> {
 
 template<typename A, typename B, typename C, typename D, typename... More>
 struct concat_impl<A, B, C, D, More...> {
-    using type =
-            typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type,
-                                 typename concat_impl<More...>::type>::type;
+    using type = typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type, typename concat_impl<More...>::type>::type;
 };
 } // namespace detail
 
@@ -108,24 +106,20 @@ struct splitter<4> {
 
 template<>
 struct splitter<8> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
-             typename T6, typename T7, typename...>
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...>
     using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7>;
 
-    template<typename, typename, typename, typename, typename, typename, typename, typename,
-             typename... Ts>
+    template<typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
     using second = typelist<Ts...>;
 };
 
 template<>
 struct splitter<16> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5,
-             typename T6, typename T7, typename T8, typename T9, typename T10, typename T11,
-             typename T12, typename T13, typename T14, typename T15, typename...>
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12, typename T13,
+             typename T14, typename T15, typename...>
     using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
 
-    template<typename, typename, typename, typename, typename, typename, typename, typename, typename,
-             typename, typename, typename, typename, typename, typename, typename, typename... Ts>
+    template<typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
     using second = typelist<Ts...>;
 };
 
@@ -136,8 +130,7 @@ struct splitter {
     using B                              = splitter<N - FirstSplit>;
 
     template<typename... Ts>
-    using first = concat<typename A::template first<Ts...>,
-                         typename B::template first<typename A::template second<Ts...>>>;
+    using first = concat<typename A::template first<Ts...>, typename B::template first<typename A::template second<Ts...>>>;
 
     template<typename... Ts>
     using second = typename B::template second<typename A::template second<Ts...>>;
@@ -206,8 +199,7 @@ struct reduce_impl<Method, typelist<T0>> {
 };
 
 template<template<typename, typename> class Method, typename T0, typename T1, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, Ts...>>
-    : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
+struct reduce_impl<Method, typelist<T0, T1, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
 
 template<template<typename, typename> class Method, typename T0, typename T1, typename T2, typename T3, typename... Ts>
 struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {};
@@ -285,13 +277,8 @@ struct typelist {
 
     template<typename F, typename Tup>
         requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
-    static constexpr auto
-    construct(Tup &&args_tuple) {
-        return std::apply(
-                []<typename... Args>(Args &&...args) {
-                    return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...);
-                },
-                std::forward<Tup>(args_tuple));
+    static constexpr auto construct(Tup &&args_tuple) {
+        return std::apply([]<typename... Args>(Args &&...args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
     }
 
     template<template<typename> typename Trafo>
@@ -299,6 +286,9 @@ struct typelist {
 
     template<template<typename...> typename Pred>
     constexpr static bool all_of = (Pred<Ts>::value && ...);
+
+    template<template<typename...> typename Pred>
+    constexpr static bool any_of = (Pred<Ts>::value || ...);
 
     template<template<typename...> typename Pred>
     constexpr static bool none_of = (!Pred<Ts>::value && ...);
@@ -344,18 +334,17 @@ struct typelist {
         } else {
             return static_cast<tuple_type *>(nullptr);
         }
-            }())>;
-
+    }())>;
 };
 
-
 namespace detail {
-    template <template <typename...> typename OtherTypelist, typename... Args>
-    meta::typelist<Args...> to_typelist_helper(OtherTypelist<Args...>*);
+template<template<typename...> typename OtherTypelist, typename... Args>
+meta::typelist<Args...>
+to_typelist_helper(OtherTypelist<Args...> *);
 } // namespace detail
 
-template <typename OtherTypelist>
-using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist*>(nullptr)));
+template<typename OtherTypelist>
+using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist *>(nullptr)));
 
 } // namespace fair::meta
 

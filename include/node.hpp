@@ -943,6 +943,16 @@ static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(
 } // namespace test
 #endif
 
+namespace detail {
+template<template<typename> typename NodeTemplate, typename... AllowedTypes>
+struct register_node {
+    template<typename RegisterInstance>
+    register_node(RegisterInstance *plugin_instance, std::string node_type) {
+        plugin_instance->template add_node_type<NodeTemplate, AllowedTypes...>(node_type);
+    }
+};
+} // namespace detail
+
 } // namespace fair::graph
 
 #endif // include guard

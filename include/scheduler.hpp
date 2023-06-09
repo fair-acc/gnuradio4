@@ -8,39 +8,47 @@ namespace fair::graph::scheduler {
 
 struct init_proof {
     init_proof(bool _success) : success(_success) {}
-    init_proof(init_proof && init): init_proof(init.success) {}
+
+    init_proof(init_proof &&init) : init_proof(init.success) {}
+
     bool success = true;
 
-    init_proof& operator=(init_proof &&init)  noexcept {this->success = init; return *this;}
+    init_proof &
+    operator=(init_proof &&init) noexcept {
+        this->success = init;
+        return *this;
+    }
+
     operator bool() const { return success; }
 };
 
-init_proof init(fair::graph::graph &graph) {
-    auto result = init_proof(
-            std::all_of(graph._connection_definitions.begin(), graph._connection_definitions.end(), [] (auto& connection_definition) {
-                return connection_definition() == connection_result_t::SUCCESS;
-            }));
-    graph._connection_definitions.clear();
+init_proof
+init(fair::graph::graph &graph) {
+    auto result = init_proof(std::all_of(graph.connection_definitions().begin(), graph.connection_definitions().end(),
+                                         [](auto &connection_definition) { return connection_definition() == connection_result_t::SUCCESS; }));
+    graph.clear_connection_definitions();
     return result;
 }
 
 /**
  * Trivial loop based scheduler, which iterates over all nodes in definition order in the graph until no node did any processing
  */
-class simple : public node<simple>{
-    init_proof _init;
+class simple : public node<simple> {
+    init_proof         _init;
     fair::graph::graph _graph;
-public:
-    explicit simple(fair::graph::graph &&graph)  : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)) { }
 
-    work_return_t work() {
+public:
+    explicit simple(fair::graph::graph &&graph) : _init{ fair::graph::scheduler::init(graph) }, _graph(std::move(graph)) {}
+
+    work_return_t
+    work() {
         if (!_init) {
             return work_return_t::ERROR;
         }
         bool run = true;
         while (run) {
             bool something_happened = false;
-            for (auto &node : _graph._nodes) {
+            for (auto &node : _graph.nodes()) {
                 auto result = node->work();
                 if (result == work_return_t::ERROR) {
                     return work_return_t::ERROR;
@@ -66,14 +74,15 @@ public:
  * detecting cycles and nodes which can be reached from several source nodes.
  */
 class breadth_first : public node<breadth_first> {
-    using node_t = fair::graph::graph::node_model*;
-    init_proof _init;
-    fair::graph::graph _graph;
+    using node_t = fair::graph::node_model *;
+    init_proof          _init;
+    fair::graph::graph  _graph;
     std::vector<node_t> _nodelist;
+
 public:
-    explicit breadth_first(fair::graph::graph &&graph) : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)) {
+    explicit breadth_first(fair::graph::graph &&graph) : _init{ fair::graph::scheduler::init(graph) }, _graph(std::move(graph)) {
         std::map<node_t, std::vector<node_t>> _adjacency_list{};
-        std::vector<node_t> _source_nodes{};
+        std::vector<node_t>                   _source_nodes{};
         // compute the adjacency list
         std::set<node_t> node_reached;
         for (auto &e : _graph.get_edges()) {
@@ -106,7 +115,8 @@ public:
         }
     }
 
-    work_return_t work() {
+    work_return_t
+    work() {
         if (!_init) {
             return work_return_t::ERROR;
         }
@@ -122,6 +132,6 @@ public:
         }
     }
 };
-}
+} // namespace fair::graph::scheduler
 
 #endif // GRAPH_PROTOTYPE_SCHEDULER_HPP
