@@ -187,13 +187,21 @@ class dynamic_port {
     }
 
 public:
-    using value_type         = void; // a sterile port
+    using value_type                      = void; // a sterile port
 
-    constexpr dynamic_port() = delete;
+    constexpr dynamic_port()              = delete;
 
-    template<Port T>
-    constexpr dynamic_port(const T &arg) = delete;
+    dynamic_port(const dynamic_port &arg) = delete;
+    dynamic_port &
+    operator=(const dynamic_port &arg)
+            = delete;
 
+    dynamic_port(dynamic_port &&arg) = default;
+    dynamic_port &
+    operator=(dynamic_port &&arg)
+            = default;
+
+    // TODO: Make owning versus non-owning API more explicit
     template<Port T>
     explicit constexpr dynamic_port(T &arg) noexcept : _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
 
@@ -335,76 +343,148 @@ public:
 
 #endif
 
-class graph {
+class node_model {
+protected:
+    using dynamic_ports                 = std::vector<fair::graph::dynamic_port>;
+    bool          _dynamic_ports_loaded = false;
+    dynamic_ports _dynamic_input_ports;
+    dynamic_ports _dynamic_output_ports;
+
+    node_model(){};
+
 public:
-    class node_model {
-    public:
-        virtual ~node_model() = default;
+    node_model(const node_model &) = delete;
+    node_model &
+    operator=(const node_model &)
+            = delete;
+    node_model(node_model &&other) = delete;
+    node_model &
+    operator=(node_model &&other)
+            = delete;
 
-        virtual std::string_view
-        name() const
-        = 0;
+    fair::graph::dynamic_port &
+    dynamic_input_port(std::size_t index) {
+        assert(_dynamic_ports_loaded);
+        return _dynamic_input_ports[index];
+    }
 
-        virtual work_return_t
-        work() = 0;
+    fair::graph::dynamic_port &
+    dynamic_output_port(std::size_t index) {
+        assert(_dynamic_ports_loaded);
+        return _dynamic_output_ports[index];
+    }
 
-        virtual void *
-        raw() = 0;
-    };
+    auto
+    dynamic_input_ports_size() const {
+        assert(_dynamic_ports_loaded);
+        return _dynamic_input_ports.size();
+    }
 
-    std::vector<std::function<connection_result_t()>> _connection_definitions;
-    std::vector<std::unique_ptr<node_model>> _nodes;
+    auto
+    dynamic_output_ports_size() const {
+        assert(_dynamic_ports_loaded);
+        return _dynamic_output_ports.size();
+    }
+
+    virtual ~node_model() = default;
+
+    virtual std::string_view
+    name() const
+            = 0;
+
+    virtual work_return_t
+    work() = 0;
+
+    virtual void *
+    raw() = 0;
+};
+
+template<typename T>
+class node_wrapper : public node_model {
 private:
+    static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
+    T _node;
 
-    template<typename T>
-    class node_wrapper final : public node_model {
-    private:
-        static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
-        T _node;
-
-    public:
-        node_wrapper(const node_wrapper &other) = delete;
-
-        node_wrapper &
-        operator=(const node_wrapper &other)
-                = delete;
-
-        node_wrapper(node_wrapper &&other) : _node(std::exchange(other._node, nullptr)) {}
-
-        node_wrapper &
-        operator=(node_wrapper &&other) {
-            auto tmp = std::move(other);
-            std::swap(_node, tmp._node);
-            return *this;
+    [[nodiscard]] constexpr const auto &
+    node_ref() const noexcept {
+        if constexpr (requires { *_node; }) {
+            return *_node;
+        } else {
+            return _node;
         }
+    }
 
-        ~node_wrapper() override = default;
-
-        node_wrapper() {}
-
-        template<typename Arg>
-            requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
-        node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {}
-
-        template<typename... Args>
-            requires(sizeof...(Args) > 1)
-        node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {}
-
-        constexpr work_return_t
-        work() override {
-            return _node.work();
+    [[nodiscard]] constexpr auto &
+    node_ref() noexcept {
+        if constexpr (requires { *_node; }) {
+            return *_node;
+        } else {
+            return _node;
         }
+    }
 
-        std::string_view
-        name() const override {
-            return _node.name();
-        }
+    void
+    init_dynamic_ports() {
+        using Node                             = std::remove_cvref_t<decltype(node_ref())>;
 
-        void *
-        raw() override {
-            return std::addressof(_node);
-        }
-    };
+        constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
+        [this]<std::size_t... Is>(std::index_sequence<Is...>) { (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...); }
+        (std::make_index_sequence<input_port_count>());
+
+        constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
+        [this]<std::size_t... Is>(std::index_sequence<Is...>) { (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...); }
+        (std::make_index_sequence<output_port_count>());
+
+        static_assert(input_port_count + output_port_count > 0);
+        _dynamic_ports_loaded = true;
+    }
+
+public:
+    node_wrapper(const node_wrapper &other) = delete;
+    node_wrapper(node_wrapper &&other)      = delete;
+    node_wrapper &
+    operator=(const node_wrapper &other)
+            = delete;
+    node_wrapper &
+    operator=(node_wrapper &&other)
+            = delete;
+
+    ~node_wrapper() override = default;
+
+    node_wrapper() { init_dynamic_ports(); }
+
+    template<typename Arg>
+        requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
+    node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
+        init_dynamic_ports();
+    }
+
+    template<typename... Args>
+        requires(sizeof...(Args) > 1)
+    node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
+        init_dynamic_ports();
+    }
+
+    constexpr work_return_t
+    work() override {
+        return node_ref().work();
+    }
+
+    std::string_view
+    name() const override {
+        return node_ref().name();
+    }
+
+    void *
+    raw() override {
+        return std::addressof(node_ref());
+    }
+};
+
+class graph {
+private:
+    std::vector<std::function<connection_result_t()>> _connection_definitions;
+    std::vector<std::unique_ptr<node_model>>          _nodes;
 
     class edge {
     public:
@@ -462,7 +542,34 @@ private:
         }
     };
 
-    std::vector<edge>                        _edges;
+    std::vector<edge> _edges;
+
+    template<typename Node>
+    std::unique_ptr<node_model> &
+    find_node(Node &what) {
+        auto it = [&, this] {
+            if constexpr (std::is_same_v<Node, node_model>) {
+                return std::find_if(_nodes.begin(), _nodes.end(), [&](const auto &node) { return node.get() == &what; });
+            } else {
+                return std::find_if(_nodes.begin(), _nodes.end(), [&](const auto &node) { return node->raw() == &what; });
+            }
+        }();
+
+        if (it == _nodes.end()) throw fmt::format("No such node in this graph");
+        return *it;
+    }
+
+    template<typename Node>
+    [[nodiscard]] dynamic_port &
+    dynamic_output_port(Node &node, std::size_t index) {
+        return find_node(node)->dynamic_output_port(index);
+    }
+
+    template<typename Node>
+    [[nodiscard]] dynamic_port &
+    dynamic_input_port(Node &node, std::size_t index) {
+        return find_node(node)->dynamic_input_port(index);
+    }
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
@@ -575,6 +682,12 @@ public:
         return _edges.size();
     }
 
+    node_model &
+    add_node(std::unique_ptr<node_model> node) {
+        auto &new_node_ref = _nodes.emplace_back(std::move(node));
+        return *new_node_ref.get();
+    }
+
     template<typename Node, typename... Args>
     auto &
     make_node(Args &&...args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
@@ -622,9 +735,30 @@ public:
         return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
-    [[nodiscard]] const std::vector<edge>&
+    [[nodiscard]] const std::vector<edge> &
     get_edges() const {
         return _edges;
+    }
+
+    template<typename Source, typename Sink>
+    connection_result_t
+    dynamic_connect(Source &source, std::size_t source_index, Sink &sink, std::size_t sink_index) {
+        return dynamic_output_port(source, source_index).connect(dynamic_input_port(sink, sink_index));
+    }
+
+    const std::vector<std::function<connection_result_t()>> &
+    connection_definitions() {
+        return _connection_definitions;
+    }
+
+    void
+    clear_connection_definitions() {
+        _connection_definitions.clear();
+    }
+
+    auto &
+    nodes() {
+        return _nodes;
     }
 };
 

@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.19)
 project(graph-prototype CXX)
 set(CMAKE_CXX_STANDARD 20)
 
+# Mainly for FMT
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+
 add_library(graph-prototype-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(graph-prototype-options)
