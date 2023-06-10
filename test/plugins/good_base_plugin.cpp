@@ -3,17 +3,27 @@
 #include <charconv>
 #include <vector>
 
+#include <pmtv/pmt.hpp>
+
 GP_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
 namespace fg = fair::graph;
 
 template<typename T>
+struct pt;
+
+template<typename T>
 auto
-total_count(fair::graph::node_construction_params params) {
-    T    total_count = 1;
-    auto value       = params.value("total_count"sv);
-    std::ignore      = std::from_chars(value.begin(), value.end(), total_count);
+total_count(const fair::graph::node_construction_params &params) {
+    T total_count = 1;
+    if (auto it = params.find("total_count"s); it != params.end()) {
+        auto &variant = it->second;
+        auto *ptr     = std::get_if<T>(&variant);
+        if (ptr) {
+            total_count = *ptr;
+        }
+    }
     return total_count;
 }
 
@@ -24,7 +34,7 @@ class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
 public:
     cout_sink() {}
 
-    explicit cout_sink(fair::graph::node_construction_params params) : _remaining(total_count<std::size_t>(params)) {}
+    explicit cout_sink(const fair::graph::node_construction_params &params) : _remaining(total_count<std::size_t>(params)) {}
 
     void
     process_one(T value) {

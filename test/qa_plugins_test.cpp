@@ -18,6 +18,8 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 using namespace std::chrono_literals;
+using namespace fair::literals;
+
 namespace fg = fair::graph;
 
 struct test_context {
@@ -120,17 +122,19 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
     };
 
     "LongerPipeline"_test = [] {
-        auto        node_source = context().loader.instantiate(names::fixed_source, "double");
+        auto                                  node_source = context().loader.instantiate(names::fixed_source, "double");
 
-        std::array  node_multiply_params{ fair::graph::node_construction_param{ "factor", "2" } };
-        auto        node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
+        fair::graph::node_construction_params node_multiply_params;
+        node_multiply_params["factor"]                      = 2.0;
+        auto                                  node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
 
-        std::size_t repeats       = 10;
-        auto        node_sink     = context().loader.instantiate(names::cout_sink, "double");
-        std::array  node_sink_params{ fair::graph::node_construction_param{ "total_count", "10" } };
+        std::size_t                           repeats       = 10;
+        fair::graph::node_construction_params node_sink_params;
+        node_sink_params["total_count"] = 100_UZ;
+        auto node_sink                  = context().loader.instantiate(names::cout_sink, "double");
 
-        auto        connection_1 = node_source->dynamic_output_port(0).connect(node_multiply->dynamic_input_port(0));
-        auto        connection_2 = node_multiply->dynamic_output_port(0).connect(node_sink->dynamic_input_port(0));
+        auto connection_1               = node_source->dynamic_output_port(0).connect(node_multiply->dynamic_input_port(0));
+        auto connection_2               = node_multiply->dynamic_output_port(0).connect(node_sink->dynamic_input_port(0));
 
         expect(connection_1 == fg::connection_result_t::SUCCESS);
         expect(connection_2 == fg::connection_result_t::SUCCESS);
@@ -143,24 +147,25 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
     };
 
     "Graph"_test = [] {
-        fg::graph   flow_graph;
+        fg::graph                             flow_graph;
 
-        auto        node_source_load     = context().loader.instantiate(names::fixed_source, "double");
-        auto       &node_source          = flow_graph.add_node(std::move(node_source_load));
+        auto                                  node_source_load     = context().loader.instantiate(names::fixed_source, "double");
+        auto                                 &node_source          = flow_graph.add_node(std::move(node_source_load));
 
-        auto       &node_multiply_1      = flow_graph.make_node<builtin_multiply<double>>(2.0);
+        auto                                 &node_multiply_1      = flow_graph.make_node<builtin_multiply<double>>(2.0);
 
-        auto        node_multiply_2_load = context().loader.instantiate(names::builtin_multiply, "double");
-        auto       &node_multiply_2      = flow_graph.add_node(std::move(node_multiply_2_load));
+        auto                                  node_multiply_2_load = context().loader.instantiate(names::builtin_multiply, "double");
+        auto                                 &node_multiply_2      = flow_graph.add_node(std::move(node_multiply_2_load));
 
-        std::size_t repeats              = 10;
-        std::array  node_sink_params{ fair::graph::node_construction_param{ "total_count", "10" } };
-        auto        node_sink_load = context().loader.instantiate(names::cout_sink, "double", node_sink_params);
-        auto       &node_sink      = flow_graph.add_node(std::move(node_sink_load));
+        std::size_t                           repeats              = 10;
+        fair::graph::node_construction_params node_sink_params;
+        node_sink_params["total_count"] = 100_UZ;
+        auto  node_sink_load            = context().loader.instantiate(names::cout_sink, "double", node_sink_params);
+        auto &node_sink                 = flow_graph.add_node(std::move(node_sink_load));
 
-        auto        connection_1   = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
-        auto        connection_2   = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
-        auto        connection_3   = flow_graph.dynamic_connect(node_multiply_2, 0, node_sink, 0);
+        auto  connection_1              = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
+        auto  connection_2              = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
+        auto  connection_3              = flow_graph.dynamic_connect(node_multiply_2, 0, node_sink, 0);
 
         expect(connection_1 == fg::connection_result_t::SUCCESS);
         expect(connection_2 == fg::connection_result_t::SUCCESS);

@@ -174,7 +174,7 @@ public:
     }
 
     std::unique_ptr<fair::graph::node_model>
-    instantiate(std::string name, std::string_view type, node_construction_params params = {}) {
+    instantiate(std::string name, std::string_view type, const node_construction_params &params = {}) {
         // Try to create a node from the global registry
         if (auto result = _global_registry->create_node(name, type, params)) {
             return result;
