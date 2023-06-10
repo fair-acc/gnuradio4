@@ -14,7 +14,7 @@
 #include <graph.hpp>
 #include <plugin.hpp>
 
-using plugin_create_function_t  = gp_plugin_base *(*) ();
+using plugin_create_function_t  = void (*)(gp_plugin_base **);
 using plugin_destroy_function_t = void (*)(gp_plugin_base *);
 
 namespace fair::graph {
@@ -71,7 +71,7 @@ public:
             return;
         }
 
-        _instance = _create_fn();
+        _create_fn(&_instance);
         if (!_instance) {
             _status = "Failed to create an instance of the plugin";
             release();

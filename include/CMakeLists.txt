@@ -8,3 +8,20 @@ install(
         EXPORT graphTargets
         PUBLIC_HEADER DESTINATION include/
 )
+
+if (NOT EMSCRIPTEN)
+    add_library(graph-prototype-plugin SHARED plugin.cpp)
+    target_include_directories(graph-prototype-plugin PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include/>)
+    target_include_directories(graph-prototype-plugin PRIVATE ${CMAKE_BINARY_DIR}/include)
+    target_link_libraries(graph-prototype-plugin PUBLIC graph-prototype graph-prototype-options pmtv fmt)
+
+    include(GenerateExportHeader)
+    generate_export_header(graph-prototype-plugin)
+    # TODO install exported headers
+
+    install(
+            TARGETS graph-prototype-plugin
+            EXPORT graphPluginTargets
+            PUBLIC_HEADER DESTINATION include/
+    )
+endif ()
