@@ -91,7 +91,7 @@ main(int argc, char *argv[]) {
     using namespace gr;
 
     for (const auto &plugin : context.loader.plugins()) {
-        assert(plugin->metadata().plugin_name.starts_with("Good"));
+        assert(plugin->metadata->plugin_name.starts_with("Good"));
     }
 
     for (const auto &plugin : context.loader.failed_plugins()) {

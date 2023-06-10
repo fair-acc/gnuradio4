@@ -73,7 +73,7 @@ const boost::ut::suite PluginLoaderTests = [] {
     "GoodPlugins"_test = [] {
         expect(!context().loader.plugins().empty());
         for (const auto &plugin : context().loader.plugins()) {
-            expect(plugin->metadata().plugin_name.starts_with("Good"));
+            expect(plugin->metadata->plugin_name.starts_with("Good"));
         }
     };
 
@@ -126,7 +126,7 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         auto        node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
 
         std::size_t repeats       = 10;
-        auto        node_sink    = context().loader.instantiate(names::cout_sink, "double");
+        auto        node_sink     = context().loader.instantiate(names::cout_sink, "double");
         std::array  node_sink_params{ fair::graph::node_construction_param{ "total_count", "10" } };
 
         auto        connection_1 = node_source->dynamic_output_port(0).connect(node_multiply->dynamic_input_port(0));

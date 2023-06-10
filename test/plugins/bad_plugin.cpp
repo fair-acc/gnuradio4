@@ -19,11 +19,6 @@ public:
         return 0;
     }
 
-    const gp_plugin_metadata &
-    metadata() const override {
-        return plugin_metadata;
-    }
-
     std::span<const std::string>
     provided_nodes() const override {
         return node_types;
@@ -33,12 +28,12 @@ public:
 } // namespace
 
 extern "C" {
-gp_plugin_base *
-gp_plugin_make() {
-    return nullptr;
+void GRAPH_PROTOTYPE_PLUGIN_EXPORT
+gp_plugin_make(gp_plugin_base **plugin) {
+    *plugin = nullptr;
 }
 
-void
+void GRAPH_PROTOTYPE_PLUGIN_EXPORT
 gp_plugin_free(gp_plugin_base *plugin) {
     delete plugin;
 }
