@@ -6,7 +6,9 @@
 #include <annotated.hpp>
 #include <node_traits.hpp>
 #include <port.hpp>
+#include <sequence.hpp>
 #include <tag.hpp>
+#include <thread_pool.hpp>
 #include <typelist.hpp>
 #include <utils.hpp>
 
@@ -14,6 +16,11 @@
 #include <refl.hpp>
 #include <reflection.hpp>
 #include <settings.hpp>
+
+#ifdef FMT_FORMAT_H_
+#include <fmt/core.h>
+#include <limits>
+#endif
 
 namespace fair::graph {
 
@@ -133,6 +140,40 @@ concept NodeType = requires(T t, std::size_t requested_work) {
     // requires !std::is_move_assignable_v<T>;
 };
 
+namespace detail {
+class WorkCounter {
+    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<std::uint32_t>::max()) << 32 };
+
+public:
+    void
+    increment(std::size_t workRequestedInc, std::size_t workDoneInc) {
+        uint64_t oldCounter;
+        uint64_t newCounter;
+        do {
+            oldCounter         = encodedCounter;
+            auto workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+            auto workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+            if (workRequested != std::numeric_limits<std::uint32_t>::max()) {
+                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())));
+            }
+            workDone += static_cast<std::uint32_t>(workDoneInc);
+            newCounter = (static_cast<uint64_t>(workRequested) << 32) | workDone;
+        } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
+    }
+
+    std::pair<std::size_t, std::size_t>
+    getAndReset() {
+        uint64_t oldCounter    = encodedCounter.exchange(0);
+        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+        }
+        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+    }
+};
+} // namespace detail
+
 template<typename Derived>
 concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
@@ -149,7 +190,7 @@ static_assert(ConsumableSpan<traits::node::detail::dummy_input_span<float>>);
 
 template<typename T>
 concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
-                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0); };
+                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0_UZ); };
 
 static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
 
@@ -243,16 +284,24 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class node : protected std::tuple<Arguments...> {
+struct node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, fair::meta::fixed_string description = "", typename... Args>
-    using A = Annotated<T, description, Args...>;
+    using A                        = Annotated<T, description, Args...>;
 
-public:
     using base_t                   = node<Derived, Arguments...>;
     using derived_t                = Derived;
     using node_template_parameters = meta::typelist<Arguments...>;
     using Description              = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+
+    alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadRunning{ false };
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
+    alignas(hardware_destructive_interference_size) detail::WorkCounter ioWorkDone{};
+    alignas(hardware_destructive_interference_size) std::atomic<work_return_status_t> ioLastWorkStatus{ work_return_status_t::OK };
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
+            "node_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ);
+
     constexpr static tag_propagation_policy_t                                                                      tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
     const std::size_t                                                                                              unique_id   = _unique_id_counter++;
     const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
@@ -260,7 +309,7 @@ public:
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
     constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
 
-protected:
+private:
     bool               _input_tags_present  = false;
     bool               _output_tags_changed = false;
     std::vector<tag_t> _tags_at_input;
@@ -304,12 +353,18 @@ public:
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
+    ~node() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+        std::atomic_store_explicit(&ioThreadRunning, false, std::memory_order_release);
+        ioThreadRunning.notify_all();
+    }
+
     void
-    init() {
-        std::ignore = settings().apply_staged_parameters();
+    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool_) {
+        progress     = progress_;
+        ioThreadPool = ioThreadPool_;
+        std::ignore  = settings().apply_staged_parameters();
         // TODO: expand on this init function:
         //  * store initial setting -> needed for `reset()` call
-        //  * push settings that cannot be applied to block parameters to meta-information
         //  * ...
     }
 
@@ -733,8 +788,25 @@ public:
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
         constexpr bool is_blocking = node_template_parameters::template contains<BlockingIO>;
         if constexpr (is_blocking) {
-            return work_internal(requested_work);
-            // static_assert(fair::meta::always_false<derived_t>, "not yet implemented");
+            std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
+            if (bool expectedThreadState = false; ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
+                ioThreadPool->execute([this]() {
+                    while (ioThreadRunning) {
+                        auto [work_requested, work_done, last_status] = work_internal(ioRequestedWork.load(std::memory_order_relaxed));
+                        ioWorkDone.increment(work_requested, work_done);
+                        ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
+
+                        std::ignore = progress->incrementAndGet();
+                        progress->notify_all();
+                        if (last_status == work_return_status_t::DONE) {
+                            ioThreadRunning.exchange(false, std::memory_order_relaxed);
+                        }
+                    }
+                });
+            }
+            const work_return_status_t lastStatus                 = ioLastWorkStatus.exchange(work_return_status_t::OK, std::memory_order_relaxed);
+            const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
+            return { accumulatedRequestedWork, performedWork, performedWork > 0 ? work_return_status_t::OK : lastStatus };
         } else {
             return work_internal(requested_work);
         }
@@ -782,9 +854,9 @@ node_description() noexcept {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                                        RawType::visible() ? "" : "_", //
                                        type_name,
-                                       member_name,                   //
+                                       member_name, //
                                        RawType::description(), RawType::unit(),
-                                       RawType::documentation(),      //
+                                       RawType::documentation(), //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
@@ -1080,5 +1152,50 @@ struct register_node {
 } // namespace detail
 
 } // namespace fair::graph
+
+#ifdef FMT_FORMAT_H_
+
+template<>
+struct fmt::formatter<fair::graph::work_return_status_t> {
+    static constexpr auto
+    parse(const format_parse_context &ctx) {
+        const auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::work_return_status_t &status, FormatContext &ctx) {
+        using enum fair::graph::work_return_status_t;
+        switch (status) {
+        case ERROR: return fmt::format_to(ctx.out(), "ERROR");
+        case INSUFFICIENT_OUTPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_OUTPUT_ITEMS");
+        case INSUFFICIENT_INPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_INPUT_ITEMS");
+        case DONE: return fmt::format_to(ctx.out(), "DONE");
+        case OK: return fmt::format_to(ctx.out(), "OK");
+        default: return fmt::format_to(ctx.out(), "UNKNOWN");
+        }
+        return fmt::format_to(ctx.out(), "UNKNOWN");
+    }
+};
+
+template<>
+struct fmt::formatter<fair::graph::work_return_t> {
+    static constexpr auto
+    parse(const format_parse_context &ctx) {
+        const auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::work_return_t &work_return, FormatContext &ctx) {
+        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
+    }
+};
+
+#endif // FMT_FORMAT_H_
 
 #endif // include guard
