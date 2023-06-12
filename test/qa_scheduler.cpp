@@ -20,10 +20,10 @@ trace(trace_vector &traceVector, std::string_view id) {
 }
 
 // define some example graph nodes
-template<typename T, std::int64_t N>
+template<typename T, std::size_t N>
 class count_source : public fg::node<count_source<T, N>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "out">> {
     trace_vector &tracer;
-    std::int64_t  count = 0;
+    std::size_t   count = 0;
 
 public:
     count_source(trace_vector &trace, std::string_view name) : tracer{ trace } { this->_name = name; }

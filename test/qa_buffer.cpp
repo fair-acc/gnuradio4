@@ -197,7 +197,7 @@ const boost::ut::suite UserApiExamples = [] {
             expect(eq(localReader.available(), std::size_t{ 0 }));
 
             auto lambda = [](auto w) { // test writer generating consecutive samples
-                static int offset = 1;
+                static std::size_t offset = 1;
                 std::iota(w.begin(), w.end(), offset);
                 offset += w.size();
             };
@@ -217,7 +217,7 @@ const boost::ut::suite UserApiExamples = [] {
         // populate with some more data
         for (std::size_t i = 0; i < 3; i++) {
             const auto demoWriter = [](auto w) {
-                static int offset = 1;
+                static std::size_t offset = 1;
                 std::iota(w.begin(), w.end(), offset);
                 offset += w.size();
             };
@@ -260,8 +260,8 @@ const boost::ut::suite CircularBufferTests = [] {
                 BufferReader auto reader = buffer.new_reader();
                 expect(nothrow([&reader] { expect(eq(reader.buffer().n_readers(), std::size_t{ 1 })); })); // created one reader
 
-                int  offset = 1;
-                auto lambda = [&offset](auto w) {
+                std::size_t offset = 1;
+                auto        lambda = [&offset](auto w) {
                     std::iota(w.begin(), w.end(), offset);
                     offset += w.size();
                 };
@@ -443,7 +443,7 @@ const boost::ut::suite StreamTagConcept = [] {
 
         for (int i = 0; i < 3; i++) { // write-only worker (source) mock-up
             auto lambda = [&tagWriter](auto w, std::int64_t writePosition) {
-                static int offset = 1;
+                static std::size_t offset = 1;
                 std::iota(w.begin(), w.end(), offset);
                 offset += w.size();
 
@@ -489,7 +489,7 @@ const boost::ut::suite NonPowerTwoTests = [] {
         BufferReader auto reader     = buffer.new_reader();
 
         const auto        genSamples = [&buffer, &writer] {
-            for (int i = 0; i < buffer.size() - 10; i++) { // write-only worker (source) mock-up
+            for (std::size_t i = 0; i < buffer.size() - 10; i++) { // write-only worker (source) mock-up
                 auto lambda = [](auto vectors) {
                     static int offset = 0;
                     for (auto &vector : vectors) {

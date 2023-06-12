@@ -78,7 +78,7 @@ main(int argc, char *argv[]) {
         paths.push_back("test/plugins");
         paths.push_back("plugins");
     } else {
-        for (std::size_t i = 1; i < argc; ++i) {
+        for (int i = 1; i < argc; ++i) {
             paths.push_back(argv[i]);
         }
     }
@@ -119,11 +119,11 @@ main(int argc, char *argv[]) {
 
     auto  node_counter_load = context.loader.instantiate(names::builtin_counter, "double");
     assert(node_counter_load);
-    auto &node_counter   = flow_graph.add_node(std::move(node_counter_load));
+    auto             &node_counter = flow_graph.add_node(std::move(node_counter_load));
 
-    const std::size_t repeats = 100;
-    std::array node_sink_params{ fair::graph::node_construction_param{ "total_count", "100" } };
-    auto  node_sink_load = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
+    const std::size_t repeats      = 100;
+    std::array        node_sink_params{ fair::graph::node_construction_param{ "total_count", "100" } };
+    auto              node_sink_load = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
     assert(node_sink_load);
     auto &node_sink    = flow_graph.add_node(std::move(node_sink_load));
 

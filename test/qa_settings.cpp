@@ -326,9 +326,9 @@ const boost::ut::suite AnnotationTests = [] {
         expect(block.is_blocking());
 
         block.scaling_factor = 42.f; // test wrapper assignment operator
-        expect(block.scaling_factor == 42) << "the answer to everything failed -- equal operator";
-        expect(eq(block.scaling_factor.value, 42)) << "the answer to everything failed -- by value";
-        expect(eq(block.scaling_factor, 42)) << "the answer to everything failed -- direct";
+        expect(block.scaling_factor == 42.f) << "the answer to everything failed -- equal operator";
+        expect(eq(block.scaling_factor.value, 42.f)) << "the answer to everything failed -- by value";
+        expect(eq(block.scaling_factor, 42.f)) << "the answer to everything failed -- direct";
 
         // fmt::print("description:\n {}", fair::graph::node_description<TestBlock<float>>());
     };
