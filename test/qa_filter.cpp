@@ -22,7 +22,7 @@ estimate_settling_time(const Range &step_response, std::size_t offset = 0, T ste
     const T lower_bound = step_value - threshold;
     const T upper_bound = step_value + threshold;
 
-    auto    begin       = step_response.begin() + offset;
+    auto    begin       = step_response.begin() + static_cast<typename Range::difference_type>(offset);
     auto    end         = step_response.end();
 
     auto    it          = std::find_if(begin, end, [lower_bound, upper_bound](T sample) { return sample >= lower_bound && sample <= upper_bound; });
@@ -43,7 +43,7 @@ estimate_settling_time(const Range &step_response, std::size_t offset = 0, T ste
     }
 
     // Return the settling time (or index)
-    return std::distance(begin, it);
+    return static_cast<std::size_t>(std::distance(begin, it));
 }
 
 const boost::ut::suite SequenceTests = [] {

@@ -45,7 +45,7 @@ template<typename T, std::size_t N = std::dynamic_extent, typename Allocator = s
 class history_buffer {
     using signed_index_type = std::make_signed_t<std::size_t>;
     using buffer_type       = typename std::conditional_t<N == std::dynamic_extent, std::vector<T, Allocator>, std::array<T, N * 2>>;
-    using size_type   = typename std::conditional_t<N == std::dynamic_extent, std::size_t, std::size_t>;
+    using size_type         = typename std::conditional_t<N == std::dynamic_extent, std::size_t, std::size_t>;
 
     buffer_type _buffer;
     std::size_t _capacity = N;
@@ -58,9 +58,9 @@ class history_buffer {
     constexpr inline std::size_t
     map_index(signed_index_type index) const noexcept {
         if constexpr (N == std::dynamic_extent) {
-            return (_write_position + _capacity - 1 + index) % _capacity;
+            return static_cast<std::size_t>((static_cast<signed_index_type>(_write_position + _capacity - 1) + index)) % _capacity;
         } else {
-            return (_write_position + N - 1 + index) % N;
+            return static_cast<std::size_t>((static_cast<signed_index_type>(_write_position + N - 1) + index)) % N;
         }
     }
 
@@ -154,48 +154,48 @@ public:
      */
     [[nodiscard]] constexpr std::span<const T>
     get_span(signed_index_type index, std::size_t length = std::dynamic_extent) const /*noexcept*/ {
-        length = std::clamp(length, 0LU, std::max(0UL, static_cast<std::size_t>(size() + index)));
-        return std::span<const T>(cend() + index - length, length);
+        length = std::clamp(length, 0LU, std::max(0UL, static_cast<std::size_t>(static_cast<signed_index_type>(size()) + index)));
+        return std::span<const T>(cend() + static_cast<typename buffer_type::difference_type>(index - static_cast<signed_index_type>(length)), length);
     }
 
     [[nodiscard]] auto
     begin() noexcept {
-        return _buffer.begin() + _write_position + _capacity - _size;
+        return _buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity - _size);
     }
 
     [[nodiscard]] constexpr auto
     begin() const {
-        return _buffer.begin() + _write_position + _capacity - _size;
+        return _buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity - _size);
     }
 
     [[nodiscard]] constexpr auto
     cbegin() const {
-        return _buffer.cbegin() + _write_position + _capacity - _size;
+        return _buffer.cbegin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity - _size);
     }
 
     [[nodiscard]] auto
     end() noexcept {
-        return _buffer.begin() + _write_position + _capacity;
+        return _buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity);
     }
 
     [[nodiscard]] constexpr auto
     end() const noexcept {
-        return _buffer.begin() + _write_position + _capacity;
+        return _buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity);
     }
 
     [[nodiscard]] constexpr auto
     cend() const noexcept {
-        return _buffer.cbegin() + _write_position + _capacity;
+        return _buffer.cbegin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity);
     }
 
     [[nodiscard]] auto
     rbegin() noexcept {
-        return std::make_reverse_iterator(_buffer.begin() + static_cast<signed_index_type>(_write_position + _capacity));
+        return std::make_reverse_iterator(_buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity));
     }
 
     [[nodiscard]] constexpr auto
     rbegin() const noexcept {
-        return std::make_reverse_iterator(_buffer.begin() + static_cast<signed_index_type>(_write_position + _capacity));
+        return std::make_reverse_iterator(_buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity));
     }
 
     [[nodiscard]] constexpr auto
@@ -205,12 +205,12 @@ public:
 
     [[nodiscard]] auto
     rend() noexcept {
-        return std::make_reverse_iterator(_buffer.begin() + static_cast<signed_index_type>(_write_position + _capacity - _size));
+        return std::make_reverse_iterator(_buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity - _size));
     }
 
     [[nodiscard]] constexpr auto
     rend() const noexcept {
-        return std::make_reverse_iterator(_buffer.begin() + static_cast<signed_index_type>(_write_position + _capacity - _size));
+        return std::make_reverse_iterator(_buffer.begin() + static_cast<typename buffer_type::difference_type>(_write_position + _capacity - _size));
     }
 
     [[nodiscard]] constexpr auto

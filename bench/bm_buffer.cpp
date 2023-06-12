@@ -30,7 +30,7 @@ setCpuAffinity(const int cpuID) // N.B. pthread is not portable
     // fmt::print("set CPU affinity to core {}\n", cpuID % nCPU);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(cpuID % nCPU, &cpuset);
+    CPU_SET(static_cast<size_t>(cpuID) % nCPU, &cpuset);
     int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
         constexpr auto fmt = "pthread_setaffinity_np({} of {}): {} - {}\n";
@@ -47,31 +47,29 @@ void
 setCpuAffinity(const int cpuID) {}
 #endif
 
-enum class WriteApi {
-    via_lambda, via_split_request_publish_RAII };
-
+enum class WriteApi { via_lambda, via_split_request_publish_RAII };
 
 template<WriteApi PublisherAPI = WriteApi::via_lambda, typename T = int>
-void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const int nProducer,
-           const int nConsumer, const std::string_view name) {
+void
+testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const std::size_t nProducer, const std::size_t nConsumer, const std::string_view name) {
     fair::meta::precondition(nProducer > 0);
     fair::meta::precondition(nConsumer > 0);
 
     constexpr int n_repeat = 8;
 
-    std::barrier barrier(nProducer + nConsumer + 1);
+    std::barrier  barrier(static_cast<std::ptrdiff_t>(nProducer + nConsumer + 1));
 
     // init producers
-    std::atomic<int> threadID = 0;
+    std::atomic<int>         threadID = 0;
     std::vector<std::thread> producers;
-    for (int i = 0; i < nProducer; i++) {
+    for (std::size_t i = 0; i < nProducer; i++) {
         producers.emplace_back([&]() {
             // set thread affinity
             setCpuAffinity(threadID++);
             barrier.arrive_and_wait();
             for (int rep = 0; rep < n_repeat; ++rep) {
-                BufferWriter auto writer = buffer.new_writer();
-                std::size_t nSamplesProduced = 0;
+                BufferWriter auto writer           = buffer.new_writer();
+                std::size_t       nSamplesProduced = 0;
                 barrier.arrive_and_wait();
                 while (nSamplesProduced <= (min_samples + nProducer - 1) / nProducer) {
                     if constexpr (PublisherAPI == WriteApi::via_lambda) {
@@ -92,13 +90,13 @@ void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std:
 
     // init consumers
     std::vector<std::thread> consumers;
-    for (int i = 0; i < nConsumer; i++) {
+    for (std::size_t i = 0; i < nConsumer; i++) {
         consumers.emplace_back([&]() {
             setCpuAffinity(threadID++);
             barrier.arrive_and_wait();
             for (int rep = 0; rep < n_repeat; ++rep) {
-                BufferReader auto reader = buffer.new_reader();
-                std::size_t nSamplesConsumed = 0;
+                BufferReader auto reader           = buffer.new_reader();
+                std::size_t       nSamplesConsumed = 0;
                 barrier.arrive_and_wait();
                 while (nSamplesConsumed < min_samples) {
                     if (reader.available() < vector_length) {
@@ -118,13 +116,10 @@ void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std:
 
     // all producers and consumer are ready, waiting to give the sign
     barrier.arrive_and_wait();
-    ::benchmark::benchmark<n_repeat>(fmt::format("{:>8}: {} producers -<{:^4}>-> {} consumers", name, nProducer,
-                                                 vector_length, nConsumer),
-                                     min_samples)
-            = [&]() {
-                  barrier.arrive_and_wait();
-                  barrier.arrive_and_wait();
-              };
+    ::benchmark::benchmark<n_repeat>(fmt::format("{:>8}: {} producers -<{:^4}>-> {} consumers", name, nProducer, vector_length, nConsumer), min_samples) = [&]() {
+        barrier.arrive_and_wait();
+        barrier.arrive_and_wait();
+    };
 
     // clean up
     for (std::thread &thread : producers) thread.join();
@@ -132,22 +127,18 @@ void testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std:
 }
 
 inline const boost::ut::suite _buffer_tests = [] {
-    const uint64_t samples = 10'000'000; // minimum number of samples
-    enum class BufferStrategy
-    {
-      posix,
-      portable
-    };
+    const std::size_t samples = 10'000'000; // minimum number of samples
+    enum class BufferStrategy { posix, portable };
 
-    for (WriteApi writerAPI : { WriteApi::via_lambda,  WriteApi::via_split_request_publish_RAII }) {
+    for (WriteApi writerAPI : { WriteApi::via_lambda, WriteApi::via_split_request_publish_RAII }) {
         for (BufferStrategy strategy : { /*BufferStrategy::posix,*/ BufferStrategy::portable }) {
-            for (int veclen : { 1, 1024 }) {
-                if (not(strategy == BufferStrategy::posix and veclen == 1)) {
+            for (std::size_t veclen : { 1UL, 1024UL }) {
+                if (not(strategy == BufferStrategy::posix and veclen == 1UL)) {
                     benchmark::results::add_separator();
                 }
-                for (int nP = 1; nP <= 4; nP *= 2) {
-                    for (int nR = 1; nR <= 4; nR *= 2) {
-                        const std::size_t size      = std::max(4096, veclen) * nR * 10;
+                for (std::size_t nP = 1; nP <= 4; nP *= 2) {
+                    for (std::size_t nR = 1; nR <= 4; nR *= 2) {
+                        const std::size_t size      = std::max(4096UL, veclen) * nR * 10UL;
                         auto              allocator = std::pmr::polymorphic_allocator<int32_t>();
                         const bool        is_posix  = strategy == BufferStrategy::posix;
                         auto              invoke    = [&](auto buffer) {
@@ -156,9 +147,7 @@ inline const boost::ut::suite _buffer_tests = [] {
                                 testNewAPI<WriteApi::via_split_request_publish_RAII>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - RAII writer" : "portable - RAII writer");
                                 break;
                             case WriteApi::via_lambda:
-                            default:
-                                testNewAPI<WriteApi::via_lambda>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX" : "portable");
-                                break;
+                            default: testNewAPI<WriteApi::via_lambda>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX" : "portable"); break;
                             }
                         };
                         if (nP == 1) {

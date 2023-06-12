@@ -336,7 +336,7 @@ public:
                 auto tag_stream_head_distance = tagData[0].index - port.streamReader().position();
                 assert(tag_stream_head_distance >= 0 && "negative tag vs. stream distance");
 
-                if (tag_stream_head_distance > 0 && availableSamples > tag_stream_head_distance) {
+                if (tag_stream_head_distance > 0 && availableSamples > static_cast<std::size_t>(tag_stream_head_distance)) {
                     // limit number of samples to read up to the next tag <-> forces processing from tag to tag|MAX_SIZE
                     // N.B. new tags are thus always on the first readable sample
                     availableSamples = std::min(availableSamples, static_cast<std::size_t>(tag_stream_head_distance));

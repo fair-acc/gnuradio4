@@ -7,15 +7,15 @@
 #include "bm_test_helper.hpp"
 
 #include <graph.hpp>
-#include <scheduler.hpp>
 #include <node_traits.hpp>
+#include <scheduler.hpp>
 
 #include <vir/simd.h>
 
-namespace fg                           = fair::graph;
+namespace fg                        = fair::graph;
 
-inline constexpr std::size_t N_ITER    = 10;
-//inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
+inline constexpr std::size_t N_ITER = 10;
+// inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
 inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000, 1024);
 
 template<typename T, char op>
@@ -424,60 +424,42 @@ inline const boost::ut::suite _constexpr_bm = [] {
     using fair::graph::merge;
 
     {
-        auto merged_node = merge<"out", "in">(test::source<float>(N_SAMPLES), test::sink<float>());
+        auto merged_node                                            = merge<"out", "in">(test::source<float>(N_SAMPLES), test::sink<float>());
         "merged src->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_work(merged_node); };
     }
 
     {
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), copy<float>()),
-                                              test::sink<float>());
-        "merged src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
-            loop_over_process_one(merged_node);
-        };
-        "merged src->copy->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
-            loop_over_work(merged_node);
-        };
+        auto merged_node                                                  = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), copy<float>()), test::sink<float>());
+        "merged src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES)      = [&merged_node]() { loop_over_process_one(merged_node); };
+        "merged src->copy->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_work(merged_node); };
     }
 
     {
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES),
-                                                                 test::cascade<10, copy<float>>(copy<float>())),
-                                              test::sink<float>());
-        "merged src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
-            loop_over_process_one(merged_node);
-        };
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), test::cascade<10, copy<float>>(copy<float>())), test::sink<float>());
+        "merged src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
     }
 
     {
         auto merged_node = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(test::source<float, 1024, 1024>(N_SAMPLES), copy<float, 0, 128>()), copy<float, 0, 1024>()),
                                                                  copy<float, 32, 128>()),
                                               test::sink<float>());
-        "merged src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES)
-                = [&merged_node]() { loop_over_process_one(merged_node); };
+        "merged src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
     }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
         auto gen_mult_block                                                = [&factor] { return merge<"out", "in">(multiply<T>(factor), merge<"out", "in">(divide<T>(factor), add<T, -1>())); };
         auto merged_node                                                   = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), gen_mult_block()), test::sink<T>());
-        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
-            loop_over_process_one(merged_node);
-        };
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
     };
     templated_cascaded_test(static_cast<float>(2.0), "merged src->mult(2.0)->divide(2.0)->add(-1)->sink - float");
     templated_cascaded_test(static_cast<int>(2.0), "merged src->mult(2.0)->divide(2.0)->add(-1)->sink - int");
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char *test_name) {
-        auto gen_mult_block = [&factor] {
-            return merge<"out", "in">(multiply<T>(factor), merge<"out", "in">(divide<T>(factor), add<T, -1>()));
-        };
-        auto merged_node
-                = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), //
-                                                        test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(),
-                                                                                                      gen_mult_block)),
-                                     test::sink<T>());
-        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() {
-            loop_over_process_one(merged_node);
-        };
+        auto gen_mult_block                                                = [&factor] { return merge<"out", "in">(multiply<T>(factor), merge<"out", "in">(divide<T>(factor), add<T, -1>())); };
+        auto merged_node                                                   = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), //
+                                                                 test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(), gen_mult_block)),
+                                              test::sink<T>());
+        ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
     };
     templated_cascaded_test_10(static_cast<float>(2.0), "merged src->(mult(2.0)->div(2.0)->add(-1))^10->sink - float");
     templated_cascaded_test_10(static_cast<int>(2.0), "merged src->(mult(2.0)->div(2.0)->add(-1))^10->sink - int");
@@ -504,7 +486,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &sink = flow_graph.make_node<test::sink<float>>();
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-       fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -518,7 +500,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &test::source<float>::out).to<"in">(cpy)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(cpy).to(sink, &test::sink<float>::in)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -543,7 +525,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -561,9 +543,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b2).to<"in">(b3)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(b3).to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
-        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); }; }
+        "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
+    }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
         fg::graph flow_graph;
@@ -578,7 +561,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).template to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     };
@@ -610,7 +593,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
@@ -641,7 +624,7 @@ inline const boost::ut::suite _simd_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(mult2).to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
@@ -677,7 +660,7 @@ inline const boost::ut::suite _simd_tests = [] {
         }
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
@@ -709,7 +692,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&flow_graph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            fg::scheduler::simple sched{std::move(flow_graph)};
+            fg::scheduler::simple sched{ std::move(flow_graph) };
             sched.work();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
@@ -723,7 +706,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         auto     &src  = flow_graph.make_node<test::source<T>>(N_SAMPLES);
         auto     &mult = flow_graph.make_node<multiply_bulk<T>>(factor);
         auto     &div  = flow_graph.make_node<divide_bulk<T>>(factor);
-        auto     &add1 = flow_graph.make_node<add_bulk<T>>(-1);
+        auto     &add1 = flow_graph.make_node<add_bulk<T>>(static_cast<T>(-1.f));
         auto     &sink = flow_graph.make_node<test::sink<T>>();
 
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).template to<"in">(mult)));
@@ -731,7 +714,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(add1).template to<"in">(sink)));
 
-        fg::scheduler::simple sched{std::move(flow_graph)};
+        fg::scheduler::simple sched{ std::move(flow_graph) };
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
