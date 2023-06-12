@@ -11,11 +11,11 @@ const boost::ut::suite ThreadPoolTests = [] {
     using namespace boost::ut;
 
     "Basic ThreadPool tests"_test = [] {
-        expect(nothrow([] { fair::thread_pool::BasicThreadPool("test", fair::thread_pool::IO_BOUND); }));
-        expect(nothrow([] { fair::thread_pool::BasicThreadPool("test2", fair::thread_pool::CPU_BOUND); }));
+        expect(nothrow([] { fair::thread_pool::BasicThreadPool("test", fair::thread_pool::IO_BOUND, 4UL); }));
+        expect(nothrow([] { fair::thread_pool::BasicThreadPool("test2", fair::thread_pool::CPU_BOUND, 4UL); }));
 
-        std::atomic<int> enqueueCount{0};
-        std::atomic<int> executeCount{0};
+        std::atomic<int>                   enqueueCount{ 0 };
+        std::atomic<int>                   executeCount{ 0 };
         fair::thread_pool::BasicThreadPool pool("TestPool", fair::thread_pool::IO_BOUND, 1, 2);
         expect(nothrow([&] { pool.sleepDuration = std::chrono::milliseconds(1); }));
         expect(nothrow([&] { pool.keepAliveDuration = std::chrono::seconds(10); }));
@@ -55,11 +55,10 @@ const boost::ut::suite ThreadPoolTests = [] {
 #endif
 
         expect(nothrow([&] { pool.setAffinityMask(pool.getAffinityMask()); }));
-        expect(nothrow(
-                [&] { pool.setThreadSchedulingPolicy(pool.getSchedulingPolicy(), pool.getSchedulingPriority()); }));
+        expect(nothrow([&] { pool.setThreadSchedulingPolicy(pool.getSchedulingPolicy(), pool.getSchedulingPriority()); }));
     };
     "contention tests"_test = [] {
-        std::atomic<int> counter{0};
+        std::atomic<int>                   counter{ 0 };
         fair::thread_pool::BasicThreadPool pool("contention", fair::thread_pool::IO_BOUND, 1, 4);
         pool.waitUntilInitialised();
         expect(that % pool.isInitialised());
@@ -85,18 +84,12 @@ const boost::ut::suite ThreadPoolTests = [] {
         struct bounds_def {
             std::uint32_t min, max;
         };
-        std::array<bounds_def, 5> bounds{
-                bounds_def{1, 1},
-                bounds_def{1, 4},
-                bounds_def{2, 2},
-                bounds_def{2, 8},
-                bounds_def{4, 8}
-        };
+        std::array<bounds_def, 5> bounds{ bounds_def{ 1, 1 }, bounds_def{ 1, 4 }, bounds_def{ 2, 2 }, bounds_def{ 2, 8 }, bounds_def{ 4, 8 } };
 
-        for (const auto [minThreads, maxThreads]: bounds) {
-            for (const auto taskCount: {2, 8, 32}) {
+        for (const auto [minThreads, maxThreads] : bounds) {
+            for (const auto taskCount : { 2, 8, 32 }) {
                 fmt::print("## Test with min={} and max={} and taskCount={}\n", minThreads, maxThreads, taskCount);
-                std::atomic<int> counter{0};
+                std::atomic<int> counter{ 0 };
 
                 // Pool with min and max thread count
                 fair::thread_pool::BasicThreadPool pool("count_test", fair::thread_pool::IO_BOUND, minThreads, maxThreads);
@@ -112,7 +105,7 @@ const boost::ut::suite ThreadPoolTests = [] {
                 }
                 expect(that % pool.numThreads() >= minThreads);
                 // the maximum number of threads is not a hard limit, if there is a burst of execute calls, it will spwawn more than maxThreads trheads.
-                //expect(that % pool.numThreads() == std::min(std::uint32_t(taskCount), maxThreads));
+                // expect(that % pool.numThreads() == std::min(std::uint32_t(taskCount), maxThreads));
 
                 for (int i = 0; i < taskCount; ++i) {
                     counter.wait(i);

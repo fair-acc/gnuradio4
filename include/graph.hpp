@@ -5,7 +5,9 @@
 #include "circular_buffer.hpp"
 #include "node.hpp"
 #include "port.hpp"
+#include "sequence.hpp"
 #include "typelist.hpp"
+#include <thread_pool.hpp>
 
 #include <algorithm>
 #include <complex>
@@ -175,7 +177,29 @@ public:
      * @brief to be called by scheduler->graph to initialise block
      */
     virtual void
-    init() = 0;
+    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool)
+            = 0;
+
+    /**
+     * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
+     */
+    [[nodiscard]] virtual constexpr bool
+    is_blocking() const noexcept
+            = 0;
+
+    /**
+     * @brief number of available readable samples at the block's input ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &) const noexcept
+            = 0;
+
+    /**
+     * @brief number of available writable samples at the block's output ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &) const noexcept
+            = 0;
 
     /**
      * @brief user defined name
@@ -305,13 +329,28 @@ public:
     }
 
     void
-    init() override {
-        return node_ref().init();
+    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool) override {
+        return node_ref().init(progress, ioThreadPool);
     }
 
     [[nodiscard]] constexpr work_return_t
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return node_ref().work(requested_work);
+    }
+
+    [[nodiscard]] constexpr bool
+    is_blocking() const noexcept override {
+        return node_ref().is_blocking();
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &data) const noexcept override {
+        return node_ref().available_input_samples(data);
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &data) const noexcept override {
+        return node_ref().available_output_samples(data);
     }
 
     [[nodiscard]] std::string_view
@@ -427,7 +466,11 @@ public:
     }
 };
 
-class graph {
+struct graph {
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
+            "graph_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+
 private:
     std::vector<std::function<connection_result_t(graph &)>> _connection_definitions;
     std::vector<std::unique_ptr<node_model>>                 _nodes;
@@ -591,8 +634,7 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
-        new_node_ref->init();
-        ;
+        new_node_ref->init(progress, ioThreadPool);
         return *new_node_ref.get();
     }
 
@@ -602,8 +644,7 @@ public:
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
-        raw_ref->init();
-        ;
+        raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
 
@@ -614,7 +655,7 @@ public:
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
         std::ignore        = raw_ref->settings().set(initial_settings);
-        raw_ref->init();
+        raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
 

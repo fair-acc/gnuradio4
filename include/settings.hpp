@@ -214,7 +214,7 @@ public:
                 if constexpr (requires(Node t) { t.meta_information; }) {
                     static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_node->meta_information)>, property_map>);
                     if constexpr (requires(Node t) { t.description; }) {
-                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(_node->description)>>, std::string_view>);
+                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(Node::description)>>, std::string_view>);
                         _node->meta_information.value["description"] = std::string(_node->description);
                     }
 
@@ -456,6 +456,7 @@ public:
             }
             _staged.clear();
         }
+        settings_base::_changed.store(false);
         return forward_parameters;
     }
 
