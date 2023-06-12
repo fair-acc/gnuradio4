@@ -139,13 +139,8 @@ private:
         std::weak_ptr<poller> polling_handler;
     };
 
-    struct {
-        std::atomic<bool> dirty = false;
-        std::mutex mutex;
-        std::vector<listener> list;
-    } pending_listeners;
-
     std::vector<listener> listeners;
+    std::mutex listener_mutex;
 
 public:
     data_sink() {
@@ -157,27 +152,25 @@ public:
     }
 
     std::shared_ptr<poller> get_streaming_poller(blocking_mode block = blocking_mode::NonBlocking) {
-        std::lock_guard lg(pending_listeners.mutex);
+        std::lock_guard lg(listener_mutex);
         auto handler = std::make_shared<poller>();
-        pending_listeners.list.push_back({
+        listeners.push_back({
             .mode = acquisition_mode::Continuous,
             .block = block == blocking_mode::Blocking,
             .buffer = gr::circular_buffer<T>(0),
             .polling_handler = handler
         });
-        pending_listeners.dirty = true;
         return handler;
     }
 
     template<typename Callback>
     void register_streaming_callback(Callback callback) {
-        std::lock_guard lg(pending_listeners.mutex);
-        pending_listeners.list.push_back({
+        std::lock_guard lg(listener_mutex);
+        listeners.push_back({
             .mode = acquisition_mode::Continuous,
             .buffer = gr::circular_buffer<T>(0),
             .callback = std::move(callback)
         });
-        pending_listeners.dirty = true;
     }
 
     [[nodiscard]] work_return_t work() {
@@ -192,33 +185,30 @@ public:
         const auto noutput_items = std::min(listener_buffer_size, n_readable);
         const auto in_data = reader.get(noutput_items);
 
-        if (pending_listeners.dirty) {
-            std::lock_guard lg(pending_listeners.mutex);
-            listeners = pending_listeners.list;
-            pending_listeners.dirty = false;
-        }
-
-        for (auto &listener : listeners) {
-            if (listener.mode == acquisition_mode::Continuous) {
-                if (auto poller = listener.polling_handler.lock()) {
-                    auto writer = poller->buffer.new_writer();
-                    const auto read_data = reader.get(noutput_items);
-                    if (listener.block) {
-                        auto write_data = writer.reserve_output_range(noutput_items);
-                        std::copy(read_data.begin(), read_data.end(), write_data.begin());
-                        write_data.publish(write_data.size());
-                    } else {
-                        const auto can_write = writer.available();
-                        const auto to_write = std::min(read_data.size(), can_write);
-                        poller->drop_count += read_data.size() - can_write;
-                        if (to_write > 0) {
-                            auto write_data = writer.reserve_output_range(to_write);
-                            std::copy(read_data.begin(), read_data.begin() + to_write - 1, write_data.begin());
+        {
+            std::lock_guard lg(listener_mutex);
+            for (auto &listener : listeners) {
+                if (listener.mode == acquisition_mode::Continuous) {
+                    if (auto poller = listener.polling_handler.lock()) {
+                        auto writer = poller->buffer.new_writer();
+                        const auto read_data = reader.get(noutput_items);
+                        if (listener.block) {
+                            auto write_data = writer.reserve_output_range(noutput_items);
+                            std::copy(read_data.begin(), read_data.end(), write_data.begin());
                             write_data.publish(write_data.size());
+                        } else {
+                            const auto can_write = writer.available();
+                            const auto to_write = std::min(read_data.size(), can_write);
+                            poller->drop_count += read_data.size() - can_write;
+                            if (to_write > 0) {
+                                auto write_data = writer.reserve_output_range(to_write);
+                                std::copy(read_data.begin(), read_data.begin() + to_write - 1, write_data.begin());
+                                write_data.publish(write_data.size());
+                            }
                         }
+                    } else if (listener.callback) {
+                        listener.callback(in_data);
                     }
-                } else if (listener.callback) {
-                    listener.callback(in_data);
                 }
             }
         }
