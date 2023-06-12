@@ -211,6 +211,11 @@ public:
             } else if (result.status == work_return_status_t::OK || result.status == work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
+            if (currentNode->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
+                std::vector<std::size_t> available_input_samples(20);
+                std::ignore = currentNode->available_input_samples(available_input_samples);
+                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
+            }
         }
         return { requested_work, performed_work, something_happened ? work_return_status_t::OK : work_return_status_t::DONE };
     }
@@ -343,7 +348,14 @@ public:
             } else if (result.status == work_return_status_t::OK || result.status == work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
+
+            if (currentNode->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
+                std::vector<std::size_t> available_input_samples(20);
+                std::ignore = currentNode->available_input_samples(available_input_samples);
+                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
+            }
         }
+
         return { requested_work, performed_work, something_happened ? work_return_status_t::OK : work_return_status_t::DONE };
     }
 

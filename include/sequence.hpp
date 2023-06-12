@@ -32,9 +32,7 @@ static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L
  * Also attempts to be more efficient with regards to false sharing by adding padding
  * around the volatile field.
  */
-// clang-format off
-class Sequence
-{
+class Sequence {
 public:
     using signed_index_type = std::make_signed_t<std::size_t>;
 
@@ -42,47 +40,56 @@ private:
     alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
 
 public:
-    Sequence(const Sequence&) = delete;
-    Sequence(const Sequence&&) = delete;
-    void operator=(const Sequence&) = delete;
-    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept
-        : _fieldsValue(initialValue)
-    {
-    }
+    Sequence(const Sequence &)  = delete;
+    Sequence(const Sequence &&) = delete;
+    void
+    operator=(const Sequence &)
+            = delete;
 
-    [[nodiscard]] forceinline signed_index_type value() const noexcept
-    {
+    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+
+    [[nodiscard]] forceinline signed_index_type
+    value() const noexcept {
         return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
     }
 
-    forceinline void setValue(const signed_index_type value) noexcept
-    {
+    forceinline void
+    setValue(const signed_index_type value) noexcept {
         std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
     }
 
-    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence,
-                                                 signed_index_type nextSequence) noexcept
-    {
+    [[nodiscard]] forceinline bool
+    compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(
-            &_fieldsValue, &expectedSequence, nextSequence);
+        return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept
-    {
+    [[nodiscard]] forceinline signed_index_type
+    incrementAndGet() noexcept {
         return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
     }
 
-    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept
-    {
+    [[nodiscard]] forceinline signed_index_type
+    addAndGet(signed_index_type value) noexcept {
         return std::atomic_fetch_add(&_fieldsValue, value) + value;
+    }
+
+    void
+    wait(signed_index_type oldValue) const noexcept {
+        atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire);
+    }
+
+    void
+    notify_all() noexcept {
+        _fieldsValue.notify_all();
     }
 };
 
 namespace detail {
 
 using signed_index_type = Sequence::signed_index_type;
+
 /**
  * Get the minimum sequence from an array of Sequences.
  *
@@ -90,13 +97,11 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type getMinimumSequence(
-    const std::vector<std::shared_ptr<Sequence>>& sequences,
-    signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept
-{
+inline signed_index_type
+getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
-    for (const auto& s : sequences) {
+    for (const auto &s : sequences) {
         const signed_index_type v = s->value();
         if (v < minimum) {
             minimum = v;
@@ -105,11 +110,9 @@ inline signed_index_type getMinimumSequence(
     return minimum;
 }
 
-inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
-             const Sequence& cursor,
-             const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
-{
-    signed_index_type cursorSequence;
+inline void
+addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &sequencesToAdd) {
+    signed_index_type                                       cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
@@ -125,8 +128,8 @@ inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>
 
         cursorSequence = cursor.value();
 
-        auto index = currentSequences->size();
-        for (auto&& sequence : sequencesToAdd) {
+        auto index     = currentSequences->size();
+        for (auto &&sequence : sequencesToAdd) {
             sequence->setValue(cursorSequence);
             (*updatedSequences)[index] = sequence;
             index++;
@@ -135,14 +138,14 @@ inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>
 
     cursorSequence = cursor.value();
 
-    for (auto&& sequence : sequencesToAdd) {
+    for (auto &&sequence : sequencesToAdd) {
         sequence->setValue(cursorSequence);
     }
 }
 
-inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence)
-{
-    std::uint32_t numToRemove;
+inline bool
+removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const std::shared_ptr<Sequence> &sequence) {
+    std::uint32_t                                           numToRemove;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
 
@@ -158,11 +161,10 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
         }
 
         auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
-        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(
-            oldSize - numToRemove);
+        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(oldSize - numToRemove);
 
         for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto& testSequence = (*oldSequences)[i];
+            const auto &testSequence = (*oldSequences)[i];
             if (sequence != testSequence) {
                 (*newSequences)[pos] = testSequence;
                 pos++;
@@ -172,8 +174,6 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
     return numToRemove != 0;
 }
-
-// clang-format on
 
 } // namespace detail
 

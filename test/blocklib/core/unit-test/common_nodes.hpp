@@ -113,7 +113,7 @@ public:
     }
 
     void
-    init() override {}
+    init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<fair::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
 
     [[nodiscard]] std::string_view
     name() const override {
@@ -123,6 +123,21 @@ public:
     std::string_view
     type_name() const override {
         return _type_name;
+    }
+
+    constexpr bool
+    is_blocking() const noexcept override {
+        return false;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &) const noexcept override {
+        return 0_UZ;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &) const noexcept override {
+        return 0_UZ;
     }
 
     // TODO: integrate with node::work

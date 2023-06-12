@@ -62,9 +62,9 @@ struct fixed_string {
 
     [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return { _data, N }; }
 
-    [[nodiscard]] explicit           operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
 
-    [[nodiscard]]                    operator const char *() const noexcept { return _data; }
+    [[nodiscard]] operator const char *() const noexcept { return _data; }
 
     [[nodiscard]] constexpr bool
     operator==(const fixed_string &other) const noexcept {
@@ -168,18 +168,8 @@ precondition(bool cond) {
  */
 template<typename T>
 concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
-                                                            { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
-                                                        };
-
-static_assert(!tuple_like<int>);
-static_assert(!tuple_like<std::tuple<>>);
-static_assert(tuple_like<std::tuple<int>>);
-static_assert(tuple_like<std::tuple<int &>>);
-static_assert(tuple_like<std::tuple<const int &>>);
-static_assert(tuple_like<std::tuple<const int>>);
-static_assert(!tuple_like<std::array<int, 0>>);
-static_assert(tuple_like<std::array<int, 2>>);
-static_assert(tuple_like<std::pair<int, short>>);
+    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+};
 
 template<template<typename...> class Template, typename Class>
 struct is_instantiation : std::false_type {};
@@ -193,9 +183,21 @@ template<typename T>
 concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
 
 template<typename T>
-concept vector_type = is_instantiation_of<T, std::vector>;
+concept vector_type = is_instantiation_of<std::remove_cv_t<T>, std::vector>;
 
-namespace stdx      = vir::stdx;
+template<typename T>
+struct is_std_array_type : std::false_type {};
+
+template<typename T, std::size_t N>
+struct is_std_array_type<std::array<T, N>> : std::true_type {};
+
+template<typename T>
+concept array_type = is_std_array_type<std::remove_cv_t<T>>::value;
+
+template<typename T, typename V = void>
+concept array_or_vector_type = (vector_type<T> || array_type<T>) &&(std::same_as<V, void> || std::same_as<typename T::value_type, V>);
+
+namespace stdx               = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
@@ -372,9 +374,7 @@ safe_pair_min(Arg &&arg, Args &&...args) {
     if constexpr (sizeof...(Args) == 0) {
         return arg;
     } else {
-        return std::make_pair(
-                std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first ...),
-                std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second ...));
+        return std::make_pair(std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first...), std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second...));
     }
 }
 

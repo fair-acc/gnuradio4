@@ -6,7 +6,9 @@
 
 #include <node_traits.hpp>
 #include <port.hpp>
+#include <sequence.hpp>
 #include <tag.hpp>
+#include <thread_pool.hpp>
 #include <typelist.hpp>
 #include <utils.hpp>
 
@@ -14,6 +16,11 @@
 #include <refl.hpp>
 #include <reflection.hpp>
 #include <settings.hpp>
+
+#ifdef FMT_FORMAT_H_
+#include <fmt/core.h>
+#include <limits>
+#endif
 
 namespace fair::graph {
 
@@ -133,6 +140,51 @@ concept NodeType = requires(T t, std::size_t requested_work) {
     // requires !std::is_move_assignable_v<T>;
 };
 
+namespace detail {
+class WorkCounter {
+    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<std::uint32_t>::max()) << 32 };
+
+public:
+    void
+    increment(std::size_t workRequestedInc, std::size_t workDoneInc) {
+        uint64_t oldCounter;
+        uint64_t newCounter;
+        do {
+            oldCounter         = encodedCounter;
+            auto workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+            auto workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+            if (workRequested != std::numeric_limits<std::uint32_t>::max()) {
+                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())));
+            }
+            workDone += static_cast<std::uint32_t>(workDoneInc);
+            newCounter = (static_cast<uint64_t>(workRequested) << 32) | workDone;
+        } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
+    }
+
+    std::pair<std::size_t, std::size_t>
+    getAndReset() {
+        uint64_t oldCounter    = encodedCounter.exchange(0);
+        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+        }
+        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+    }
+
+    std::pair<std::size_t, std::size_t>
+    get() {
+        uint64_t oldCounter    = encodedCounter.load();
+        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+        }
+        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+    }
+};
+} // namespace detail
+
 template<typename Derived>
 concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
@@ -149,7 +201,7 @@ static_assert(ConsumableSpan<traits::node::detail::dummy_input_span<float>>);
 
 template<typename T>
 concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
-                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0); };
+                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0_UZ); };
 
 static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
 
@@ -243,16 +295,25 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class node : protected std::tuple<Arguments...> {
+struct node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, fair::meta::fixed_string description = "", typename... Args>
-    using A = Annotated<T, description, Args...>;
+    using A                        = Annotated<T, description, Args...>;
 
-public:
-    using base_t                                         = node<Derived, Arguments...>;
-    using derived_t                                      = Derived;
-    using node_template_parameters                       = meta::typelist<Arguments...>;
-    using Description                                    = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    using base_t                   = node<Derived, Arguments...>;
+    using derived_t                = Derived;
+    using node_template_parameters = meta::typelist<Arguments...>;
+    using Description              = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+
+    alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
+    alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadShallRun{ false };
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
+    alignas(hardware_destructive_interference_size) detail::WorkCounter ioWorkDone{};
+    alignas(hardware_destructive_interference_size) std::atomic<work_return_status_t> ioLastWorkStatus{ work_return_status_t::OK };
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
+            "node_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
     A<std::size_t, "numerator", Doc<"The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">>      numerator   = 1_UZ;
     A<std::size_t, "denominator", Doc<"The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">> denominator = 1_UZ;
@@ -270,15 +331,15 @@ public:
         std::size_t in_available{ std::numeric_limits<std::size_t>::max() };           // min of `port.streamReader().available()` of all input ports
         std::size_t in_samples_to_next_tag{ std::numeric_limits<std::size_t>::max() }; // min of `port.samples_to_next_tag` of all input ports
 
-        std::size_t out_min_samples{ std::numeric_limits<std::size_t>::min() };        // max of `port.min_buffer_size()` of all output ports
-        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() };        // min of `port.max_buffer_size()` of all output ports
-        std::size_t out_available{ std::numeric_limits<std::size_t>::max() };          // min of `port.streamWriter().available()` of all input ports
+        std::size_t out_min_samples{ std::numeric_limits<std::size_t>::min() }; // max of `port.min_buffer_size()` of all output ports
+        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() }; // min of `port.max_buffer_size()` of all output ports
+        std::size_t out_available{ std::numeric_limits<std::size_t>::max() };   // min of `port.streamWriter().available()` of all input ports
 
-        std::size_t in_samples{ 0 };                                                   // number of input samples to process
-        std::size_t out_samples{ 0 };                                                  // number of output samples, calculated based on `numerator` and `denominator`
+        std::size_t in_samples{ 0 };  // number of input samples to process
+        std::size_t out_samples{ 0 }; // number of output samples, calculated based on `numerator` and `denominator`
 
-        bool        in_at_least_one_port_has_data{ false };                            // at least one port has data
-        bool        in_at_least_one_tag_available{ false };                            // at least one port has a tag
+        bool        in_at_least_one_port_has_data{ false }; // at least one port has data
+        bool        in_at_least_one_tag_available{ false }; // at least one port has a tag
 
         constexpr bool
         enough_samples_for_output_ports(std::size_t n) {
@@ -363,13 +424,56 @@ public:
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
+    ~node() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+        stop();
+    }
+
     void
-    init() {
-        std::ignore = settings().apply_staged_parameters();
+    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool_) {
+        progress     = std::move(progress_);
+        ioThreadPool = std::move(ioThreadPool_);
+        std::ignore  = settings().apply_staged_parameters();
         // TODO: expand on this init function:
         //  * store initial setting -> needed for `reset()` call
-        //  * push settings that cannot be applied to block parameters to meta-information
         //  * ...
+    }
+
+    void
+    stop() {
+        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
+        ioThreadShallRun.notify_all();
+        // wait for done
+        for (auto running = ioThreadRunning.load(); running > 0; running = ioThreadRunning.load()) {
+            ioThreadRunning.wait(running);
+        }
+    }
+
+    template<fair::meta::array_or_vector_type Container>
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(Container &data) const noexcept {
+        if constexpr (fair::meta::vector_type<Container>) {
+            data.resize(traits::node::input_port_types<Derived>::size);
+        } else if constexpr (fair::meta::array_type<Container>) {
+            static_assert(std::tuple_size<Container>::value >= traits::node::input_port_types<Derived>::size);
+        } else {
+            static_assert(fair::meta::always_false<Container>, "type not supported");
+        }
+        meta::tuple_for_each_enumerate([&data](auto index, auto &input_port) { data[index] = input_port.streamReader().available(); }, input_ports(&self()));
+        return traits::node::input_port_types<Derived>::size;
+    }
+
+    template<fair::meta::array_or_vector_type Container>
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(Container &data) const noexcept {
+        if constexpr (fair::meta::vector_type<Container>) {
+            data.resize(traits::node::output_port_types<Derived>::size);
+        } else if constexpr (fair::meta::array_type<Container>) {
+            static_assert(std::tuple_size<Container>::value >= traits::node::output_port_types<Derived>::size);
+        } else {
+            static_assert(fair::meta::always_false<Container>, "type not supported");
+        }
+        meta::tuple_for_each_enumerate([&data](auto index, auto &output_port) { data[index] = output_port.streamWriter().available(); }, output_ports(&self()));
+        return traits::node::output_port_types<Derived>::size;
     }
 
     [[nodiscard]] constexpr bool
@@ -526,7 +630,7 @@ protected:
      * @return struct { std::size_t produced_work, work_return_t}
      */
     work_return_t
-    work_internal(std::size_t requested_work) noexcept {
+    work_internal(std::size_t requested_work) {
         using fair::graph::work_return_status_t;
         using input_types             = traits::node::input_port_types<Derived>;
         using output_types            = traits::node::output_port_types<Derived>;
@@ -541,7 +645,7 @@ protected:
             static_assert(HasProcessBulkFunction<Derived>,
                           "Blocks which allow decimation/interpolation must implement process_bulk(...) method. Remove 'PerformDecimationInterpolation' from the block definition.");
         } else {
-            if (numerator != 1 || denominator != 1) {
+            if (numerator != 1_UZ || denominator != 1_UZ) {
                 throw std::runtime_error(
                         fmt::format("Block is not defined as `PerformDecimationInterpolation`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
@@ -550,7 +654,7 @@ protected:
         if constexpr (node_template_parameters::template contains<PerformStride>) {
             static_assert(!is_source_node, "Stride is not available for source blocks. Remove 'PerformStride' from the block definition.");
         } else {
-            if (stride != 0) {
+            if (stride != 0_UZ) {
                 throw std::runtime_error(fmt::format("Block is not defined as `PerformStride`, but stride = {}, it must equal to 0.", stride));
             }
         }
@@ -833,8 +937,55 @@ public:
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
         constexpr bool is_blocking = node_template_parameters::template contains<BlockingIO>;
         if constexpr (is_blocking) {
-            return work_internal(requested_work);
-            // static_assert(fair::meta::always_false<derived_t>, "not yet implemented");
+            std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
+            if (bool expectedThreadState = false; ioThreadShallRun.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
+                ioThreadPool->execute([this]() {
+#ifdef _DEBUG
+                    fmt::print("starting thread for {} count {}\n", name, ioThreadRunning.fetch_add(1));
+#else
+                    ioThreadRunning.fetch_add(1);
+#endif
+                    for (int retryCount = 1; ioThreadShallRun && retryCount > 0; retryCount--) {
+                        while (ioThreadShallRun && retryCount) {
+                            auto [work_requested, work_done, last_status] = work_internal(ioRequestedWork.load(std::memory_order_relaxed));
+                            ioWorkDone.increment(work_requested, work_done);
+                            if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == work_return_status_t::DONE && incWorkDone > 0) {
+                                // finished local iteration but need to report more work to be done until
+                                // external scheduler loop acknowledged all samples being processed
+                                // via the 'ioWorkDone.getAndReset()' call
+                                last_status = work_return_status_t::OK;
+                            }
+                            ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
+
+                            std::ignore = progress->incrementAndGet();
+                            progress->notify_all();
+                            if (last_status == work_return_status_t::DONE) {
+                                break;
+                            } else {
+                                // processed data before shutting down wait (see below) and retry (here: once)
+                                retryCount = 1;
+                            }
+                        }
+                        // delayed shut-down in case there are more tasks to be processed
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
+                    std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
+                    ioThreadShallRun.notify_all();
+#ifdef _DEBUG
+                    fmt::print("shutting down thread for {} count {}\n", name, ioThreadRunning.fetch_sub(1));
+#else
+                    ioThreadRunning.fetch_sub(1);
+#endif
+                    ioThreadRunning.notify_all();
+                });
+            }
+            const work_return_status_t lastStatus                 = ioLastWorkStatus.exchange(work_return_status_t::OK, std::memory_order_relaxed);
+            const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
+            // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
+#if defined(__EMSCRIPTEN__)
+            std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+#endif
+            return { accumulatedRequestedWork, performedWork, performedWork > 0 ? work_return_status_t::OK : lastStatus };
         } else {
             return work_internal(requested_work);
         }
@@ -882,9 +1033,9 @@ node_description() noexcept {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                                        RawType::visible() ? "" : "_", //
                                        type_name,
-                                       member_name,                   //
+                                       member_name, //
                                        RawType::description(), RawType::unit(),
-                                       RawType::documentation(),      //
+                                       RawType::documentation(), //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
@@ -1180,5 +1331,50 @@ struct register_node {
 } // namespace detail
 
 } // namespace fair::graph
+
+#ifdef FMT_FORMAT_H_
+
+template<>
+struct fmt::formatter<fair::graph::work_return_status_t> {
+    static constexpr auto
+    parse(const format_parse_context &ctx) {
+        const auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::work_return_status_t &status, FormatContext &ctx) {
+        using enum fair::graph::work_return_status_t;
+        switch (status) {
+        case ERROR: return fmt::format_to(ctx.out(), "ERROR");
+        case INSUFFICIENT_OUTPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_OUTPUT_ITEMS");
+        case INSUFFICIENT_INPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_INPUT_ITEMS");
+        case DONE: return fmt::format_to(ctx.out(), "DONE");
+        case OK: return fmt::format_to(ctx.out(), "OK");
+        default: return fmt::format_to(ctx.out(), "UNKNOWN");
+        }
+        return fmt::format_to(ctx.out(), "UNKNOWN");
+    }
+};
+
+template<>
+struct fmt::formatter<fair::graph::work_return_t> {
+    static constexpr auto
+    parse(const format_parse_context &ctx) {
+        const auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::work_return_t &work_return, FormatContext &ctx) {
+        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
+    }
+};
+
+#endif // FMT_FORMAT_H_
 
 #endif // include guard
