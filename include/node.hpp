@@ -193,7 +193,7 @@ output_ports(Self *self) noexcept {
  */
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
-    static std::atomic<std::size_t> _unique_id_counter;
+    static std::atomic_size_t _unique_id_counter;
 
 public:
     using derived_t                                       = Derived;
@@ -641,7 +641,7 @@ public:
 };
 
 template<typename Derived, typename... Arguments>
-inline std::atomic<std::size_t> node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
+inline std::atomic_size_t node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
 
 /**
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
@@ -718,7 +718,7 @@ concept sink_node = requires(Node &node, typename traits::node::input_port_types
 template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
 class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
                                 meta::concat<meta::remove_at<OutId, typename traits::node::output_ports<Left>>, typename traits::node::output_ports<Right>>> {
-    static std::atomic<std::size_t> _unique_id_counter;
+    static std::atomic_size_t _unique_id_counter;
 
 public:
     const std::size_t unique_id   = _unique_id_counter++;
@@ -869,7 +869,7 @@ public:
 };
 
 template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
-inline std::atomic<std::size_t> merged_node<Left, Right, OutId, InId>::_unique_id_counter{ 0_UZ };
+inline std::atomic_size_t merged_node<Left, Right, OutId, InId>::_unique_id_counter{ 0_UZ };
 
 /**
  * This methods can merge simple blocks that are defined via a single `auto process_one(..)` producing a
