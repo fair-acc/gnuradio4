@@ -7,7 +7,6 @@
 #include "tag.hpp"
 
 #include <any>
-#include <ranges>
 
 namespace fair::graph {
 
@@ -263,14 +262,13 @@ public:
         const auto history_view = std::span(history.begin(), history_available);
         // TODO I'm not sure why the +1 in "reader.position() + 1". Bug or do I misunderstand?
         assert(reader_position == n_samples_consumed);
-        assert(n_samples_consumed == std::round(in_data[0]));
 
         auto &tag_reader = in_port.tagReader();
         const auto n_tags = tag_reader.available();
         const auto tag_data = tag_reader.get(n_tags);
         std::vector<tag_t> tags(tag_data.begin(), tag_data.end());
         auto out_of_range = [end_pos = reader_position + noutput_items](const auto &tag) {
-            return tag.index > end_pos;
+            return tag.index > static_cast<tag_t::index_type>(end_pos);
         };
         std::erase_if(tags, out_of_range);
         tag_reader.consume(tags.size());
@@ -281,8 +279,10 @@ public:
                 if (listener.mode == acquisition_mode::Continuous) {
                     write_to_listener(listener, std::vector<std::span<const T>>{in_data});
                 }  else if (listener.mode == acquisition_mode::Triggered || listener.mode == acquisition_mode::PostMortem) {
-                    namespace views = std::ranges::views;
-                    auto filtered = tags | views::filter(listener.trigger_predicate);
+                    auto filtered = tags; // should use views::filter once that is working everywhere
+                    std::erase_if(filtered, [&p = listener.trigger_predicate](const auto &tag) {
+                        return !p(tag);
+                    });
                     for (const auto &trigger : filtered) {
                         // TODO fill dataset with metadata etc.
                         DataSet<T> dataset;
