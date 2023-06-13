@@ -1,16 +1,16 @@
 #include <fmt/ranges.h>
 
-#include "utils.hpp"
 #include "buffer.hpp"
 #include "graph.hpp"
 #include "refl.hpp"
 #include "scheduler.hpp"
+#include "utils.hpp"
 
 #include <boost/ut.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template <>
+template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
@@ -29,7 +29,7 @@ public:
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 class scale : public fg::node<scale<T, Scale, R>> {
 public:
-    fg::IN<T> original;
+    fg::IN<T>  original;
     fg::OUT<R> scaled;
 
     template<fair::meta::t_or_simd<T> V>
@@ -38,13 +38,14 @@ public:
         return a * Scale;
     }
 };
+
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public fg::node<adder<T>> {
 public:
-    fg::IN<T> addend0;
-    fg::IN<T> addend1;
+    fg::IN<T>  addend0;
+    fg::IN<T>  addend1;
     fg::OUT<T> sum;
 
     template<fair::meta::t_or_simd<T> V>
@@ -53,6 +54,7 @@ public:
         return a + b;
     }
 };
+
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
@@ -65,12 +67,13 @@ public:
         fmt::print("Sinking a value: {}\n", value);
     }
 };
+
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10_UZ>
 class repeater_source : public fg::node<repeater_source<T, val>> {
 public:
-    fg::OUT<T> value;
+    fg::OUT<T>  value;
     std::size_t _counter = 0;
 
     fair::graph::work_return_t
@@ -79,7 +82,7 @@ public:
             _counter++;
             auto &writer = output_port<"value">(this).streamWriter();
             auto  data   = writer.reserve_output_range(1);
-            data[0]            = val;
+            data[0]      = val;
             data.publish(1);
 
             return fair::graph::work_return_t::OK;
@@ -88,6 +91,7 @@ public:
         }
     }
 };
+
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
@@ -125,7 +129,7 @@ const boost::ut::suite PortApiTests = [] {
         auto lambda = [&offset](auto &w) {
             std::iota(w.begin(), w.end(), offset);
             fmt::print("typed-port connected output vector: {}\n", w);
-            offset += w.size();
+            offset += static_cast<int>(w.size());
         };
 
         expect(writer.try_publish(lambda, 32_UZ));
@@ -133,9 +137,9 @@ const boost::ut::suite PortApiTests = [] {
 
     "RuntimePortApi"_test = [] {
         // declare in block
-        OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out">         out;
-        IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">           in;
-        std::vector<dynamic_port> port_list;
+        OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out"> out;
+        IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">   in;
+        std::vector<dynamic_port>                                     port_list;
 
         port_list.emplace_back(out);
         port_list.emplace_back(in);
@@ -151,12 +155,12 @@ const boost::ut::suite PortApiTests = [] {
         graph flow;
 
         // Generators
-        auto& answer = flow.make_node<repeater_source<int, 42>>();
-        auto& number = flow.make_node<repeater_source<int, 6>>();
+        auto &answer = flow.make_node<repeater_source<int, 42>>();
+        auto &number = flow.make_node<repeater_source<int, 6>>();
 
-        auto& scaled = flow.make_node<scale<int, 2>>();
-        auto& added = flow.make_node<adder<int>>();
-        auto& out = flow.make_node<cout_sink<int>>();
+        auto &scaled = flow.make_node<scale<int, 2>>();
+        auto &added  = flow.make_node<adder<int>>();
+        auto &out    = flow.make_node<cout_sink<int>>();
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
         expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
@@ -164,7 +168,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        fair::graph::scheduler::simple sched{std::move(flow)};
+        fair::graph::scheduler::simple sched{ std::move(flow) };
         sched.work();
     };
 
