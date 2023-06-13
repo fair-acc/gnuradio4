@@ -203,7 +203,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
-            src.tags.push_back(tag_t{60000L + static_cast<int64_t>(i), {{"TYPE", "TRIGGER"}}});
+            src.tags.push_back(tag_t{static_cast<tag_t::index_type>(60000 + i), {{"TYPE", "TRIGGER"}}});
         }
 
         auto &sink = flow_graph.make_node<data_sink<float>>();
@@ -222,14 +222,16 @@ const boost::ut::suite DataSinkTests = [] {
         std::vector<float> received_data;
 
         auto polling = std::async([poller, &received_data, &m] {
-            while (!poller->finished) {
-                using namespace std::chrono_literals;
-                [[maybe_unused]] auto r = poller->process([&received_data, &m](const auto &dataset) {
+            bool seen_finished = false;
+            while (!seen_finished) {
+                // TODO make finished vs. pending data handling actually thread-safe
+                seen_finished = poller->finished.load();
+                while (poller->process([&received_data, &m](const auto &dataset) {
                     std::lock_guard lg{m};
                     expect(eq(dataset.signal_values.size(), 5000));
                     received_data.push_back(dataset.signal_values.front());
                     received_data.push_back(dataset.signal_values.back());
-                });
+                })) {}
             }
         });
 
