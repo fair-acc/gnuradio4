@@ -212,7 +212,7 @@ protected:
     std::vector<tag_t::map_type> _tags_at_output;
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<settings_base<Derived>> _settings = std::make_unique<basic_settings<Derived>>(self());
+    std::unique_ptr<settings_base> _settings = std::make_unique<basic_settings<Derived>>(self());
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -299,12 +299,12 @@ public:
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    constexpr settings_base<Derived> &
+    constexpr settings_base &
     settings() const noexcept {
         return *_settings;
     }
 
-    constexpr settings_base<Derived> &
+    constexpr settings_base &
     settings() noexcept {
         return *_settings;
     }
