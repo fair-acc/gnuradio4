@@ -14,6 +14,7 @@ endfunction()
 
 add_ut_test(qa_buffer)
 add_ut_test(qa_dynamic_port)
+add_ut_test(qa_dynamic_node)
 add_ut_test(qa_filter)
 add_ut_test(qa_settings)
 add_ut_test(qa_tags)

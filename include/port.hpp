@@ -88,16 +88,16 @@ public:
     using port_tag                  = std::true_type;
 
     template<fixed_string NewName>
-    using with_name = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
+    using with_name     = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
+
+    using ReaderType    = decltype(std::declval<BufferType>().new_reader());
+    using WriterType    = decltype(std::declval<BufferType>().new_writer());
+    using IoType        = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
+    using TagReaderType = decltype(std::declval<TagBufferType>().new_reader());
+    using TagWriterType = decltype(std::declval<TagBufferType>().new_writer());
+    using TagIoType     = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
 
 private:
-    using ReaderType           = decltype(std::declval<BufferType>().new_reader());
-    using WriterType           = decltype(std::declval<BufferType>().new_writer());
-    using IoType               = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
-    using TagReaderType        = decltype(std::declval<TagBufferType>().new_reader());
-    using TagWriterType        = decltype(std::declval<TagBufferType>().new_writer());
-    using TagIoType            = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
-
     std::string  _name         = static_cast<std::string>(PortName);
     std::int16_t _priority     = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t  _min_samples  = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
