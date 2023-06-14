@@ -125,15 +125,16 @@ public:
 
     static constexpr std::size_t listener_buffer_size = 65536;
 
-    struct poller {
+    template<typename Payload>
+    struct poller_t {
         std::atomic<bool> finished = false;
         std::atomic<std::size_t> drop_count = 0;
-        gr::circular_buffer<T> buffer = gr::circular_buffer<T>(listener_buffer_size);
+        gr::circular_buffer<Payload> buffer = gr::circular_buffer<Payload>(listener_buffer_size);
         decltype(buffer.new_reader()) reader = buffer.new_reader();
         decltype(buffer.new_writer()) writer = buffer.new_writer();
 
         template<typename Handler>
-        [[nodiscard]] bool process(Handler fnc) {
+        [[nodiscard]] bool process_bulk(Handler fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -144,17 +145,9 @@ public:
             reader.consume(available);
             return true;
         }
-    };
-
-    struct dataset_poller {
-        std::atomic<bool> finished = false;
-        std::atomic<std::size_t> drop_count = 0;
-        gr::circular_buffer<DataSet<T>> buffer = gr::circular_buffer<DataSet<T>>(listener_buffer_size); // TODO use other size?
-        decltype(buffer.new_reader()) reader = buffer.new_reader();
-        decltype(buffer.new_writer()) writer = buffer.new_writer();
 
         template<typename Handler>
-        [[nodiscard]] bool process(Handler fnc) {
+        [[nodiscard]] bool process_one(Handler fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -166,6 +159,9 @@ public:
             return true;
         }
     };
+
+    using poller = poller_t<T>;
+    using dataset_poller = poller_t<DataSet<T>>;
 
 private:
     struct pending_window_t {

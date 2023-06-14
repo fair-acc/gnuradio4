@@ -136,7 +136,7 @@ const boost::ut::suite DataSinkTests = [] {
                 while (!seen_finished) {
                     // TODO make finished vs. pending data handling actually thread-safe
                     seen_finished = poller->finished.load();
-                    while (poller->process([&received](const auto &data) {
+                    while (poller->process_bulk([&received](const auto &data) {
                         received.insert(received.end(), data.begin(), data.end());
                     })) {}
                 }
@@ -188,7 +188,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto polling = std::async([poller, &received_data, &m] {
             while (!poller->finished) {
                 using namespace std::chrono_literals;
-                [[maybe_unused]] auto r = poller->process([&received_data, &m](const auto &dataset) {
+                [[maybe_unused]] auto r = poller->process_one([&received_data, &m](const auto &dataset) {
                     std::lock_guard lg{m};
                     received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
                 });
@@ -240,7 +240,7 @@ const boost::ut::suite DataSinkTests = [] {
             while (!seen_finished) {
                 // TODO make finished vs. pending data handling actually thread-safe
                 seen_finished = poller->finished.load();
-                while (poller->process([&received_data, &m](const auto &dataset) {
+                while (poller->process_one([&received_data, &m](const auto &dataset) {
                     std::lock_guard lg{m};
                     expect(eq(dataset.signal_values.size(), 5000));
                     received_data.push_back(dataset.signal_values.front());
@@ -332,7 +332,7 @@ const boost::ut::suite DataSinkTests = [] {
                 std::this_thread::sleep_for(20ms);
 
                 seen_finished = poller->finished.load();
-                while (poller->process([&samples_seen](const auto &data) {
+                while (poller->process_bulk([&samples_seen](const auto &data) {
                     samples_seen += data.size();
                 })) {}
             }
