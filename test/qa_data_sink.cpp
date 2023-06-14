@@ -264,6 +264,50 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(poller->drop_count.load(), 0));
     };
 
+    "callback trigger mode overlapping"_test = [] {
+        constexpr std::int32_t n_samples = 2000000;
+        constexpr std::size_t n_triggers = 5000;
+
+        graph flow_graph;
+        auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+
+        for (std::size_t i = 0; i < n_triggers; ++i) {
+            src.tags.push_back(tag_t{static_cast<tag_t::index_type>(60000 + i), {{"TYPE", "TRIGGER"}}});
+        }
+
+        auto &sink = flow_graph.make_node<data_sink<float>>();
+        sink.set_name("test_sink");
+
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+
+        auto is_trigger = [](const tag_t &tag) {
+            return true;
+        };
+
+        std::mutex m;
+        std::vector<float> received_data;
+
+        auto callback = [&received_data, &m](auto &&dataset) {
+            std::lock_guard lg{m};
+            expect(eq(dataset.signal_values.size(), 5000));
+            received_data.push_back(dataset.signal_values.front());
+            received_data.push_back(dataset.signal_values.back());
+        };
+
+        data_sink_registry::instance().register_trigger_callback<float>("test_sink", is_trigger, 3000, 2000, callback);
+
+        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        sched.work();
+
+        sink.stop(); // TODO the scheduler should call this
+
+        std::lock_guard lg{m};
+        auto expected_start = std::vector<float>{57000, 61999, 57001, 62000, 57002};
+        expect(eq(sink.n_samples_consumed, n_samples));
+        expect(eq(received_data.size(), 2 * n_triggers));
+        expect(eq(std::vector(received_data.begin(), received_data.begin() + 5), expected_start));
+    };
+
     "non-blocking polling continuous mode"_test = [] {
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });

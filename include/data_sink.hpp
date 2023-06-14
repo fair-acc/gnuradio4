@@ -79,6 +79,18 @@ public:
         return true;
     }
 
+    template<typename T, typename TriggerPredicate, typename Callback>
+    bool register_trigger_callback(std::string_view name, TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        if (!sink) {
+            return false;
+        }
+
+        sink->register_trigger_callback(std::move(p), pre_samples, post_samples, std::move(callback));
+        return true;
+    }
+
 private:
     template<typename T>
     data_sink<T>* find_sink(std::string_view name) {
@@ -163,7 +175,7 @@ private:
     };
 
     // TODO we might want to use separate template types for different { acquisition mode x polling/callback } combinations and ship
-    // our own type erasure instead of using std::function
+    // our own type erasure/or just virtuals instead of using std::function
     struct listener_t {
         acquisition_mode mode = acquisition_mode::Triggered;
         bool block = false;
@@ -179,7 +191,8 @@ private:
         std::function<bool(fair::graph::tag_t)> trigger_predicate = {};
         std::deque<pending_window_t> pending_trigger_windows; // triggers that still didn't receive all their data
 
-        std::function<void(std::span<const T>)> callback = {}; // TODO we might want to pass back stats here like drop_count
+        std::function<void(std::span<const T>)> callback = {}; // TODO we might want to optionally pass back stats here like drop_count
+        std::function<void(DataSet<T>&&)> dataset_callback = {};
         std::weak_ptr<dataset_poller> dataset_polling_handler = {};
         std::weak_ptr<poller> polling_handler = {};
         int64_t drop_count = 0;
@@ -222,6 +235,18 @@ public:
         });
         history.resize(std::max(pre_samples, history.size()));
         return handler;
+    }
+
+    template<typename TriggerPredicate, typename Callback>
+    void register_trigger_callback(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+        std::lock_guard lg(listener_mutex);
+        listeners.push_back({
+            .mode = acquisition_mode::Triggered,
+            .pre_samples = pre_samples,
+            .post_samples = post_samples,
+            .trigger_predicate = std::move(p),
+            .dataset_callback = std::move(callback)
+        });
     }
 
     template<typename Callback>
@@ -373,8 +398,8 @@ private:
                     poller->drop_count++;
                 }
             }
-        } else { // if callback...
-            // TODO call callback
+        } else if (l.dataset_callback) {
+            l.dataset_callback(std::move(data));
         }
     }
 
