@@ -78,8 +78,8 @@ concept Settings = requires(T t, Node& n, std::span<const std::string> parameter
 
 template<typename Node>
 struct settings_base {
-    Node             *_node = nullptr;
-    std::atomic<bool> _changed{ false };
+    Node            *_node = nullptr;
+    std::atomic_bool _changed{ false };
 
     settings_base() = delete;
 

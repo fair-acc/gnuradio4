@@ -327,19 +327,23 @@ class BasicThreadPool {
     using TaskQueue = thread_pool::detail::TaskQueue;
     static std::atomic<uint64_t> _globalPoolId;
     static std::atomic<uint64_t> _taskID;
-    static std::string           generateName() { return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1)); }
 
-    std::atomic<bool>            _initialised = ATOMIC_FLAG_INIT;
+    static std::string
+    generateName() {
+        return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1));
+    }
+
+    std::atomic_bool             _initialised = ATOMIC_FLAG_INIT;
     bool                         _shutdown    = false;
 
     std::condition_variable      _condition;
-    std::atomic<std::size_t>     _numTaskedQueued = 0U; // cache for _taskQueue.size()
-    std::atomic<std::size_t>     _numTasksRunning = 0U;
+    std::atomic_size_t           _numTaskedQueued = 0U; // cache for _taskQueue.size()
+    std::atomic_size_t           _numTasksRunning = 0U;
     TaskQueue                    _taskQueue;
     TaskQueue                    _recycledTasks;
 
     std::mutex                   _threadListMutex;
-    std::atomic<std::size_t>     _numThreads = 0U;
+    std::atomic_size_t           _numThreads = 0U;
     std::list<std::thread>       _threads;
 
     std::vector<bool>            _affinityMask;
