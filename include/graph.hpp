@@ -388,8 +388,23 @@ public:
 
     virtual ~node_model() = default;
 
+    /**
+     * @brief user defined name
+     */
     virtual std::string_view
     name() const
+            = 0;
+
+    /**
+     * @brief process-wide unique name
+     * N.B. can be used to disambiguate in case user provided the same 'name()' for several blocks.
+     */
+    virtual std::string_view
+    unique_name() const
+            = 0;
+
+    virtual settings_base &
+    settings() const
             = 0;
 
     virtual work_return_t
@@ -399,7 +414,7 @@ public:
     raw() = 0;
 };
 
-template<typename T>
+template<NodeType T>
 class node_wrapper : public node_model {
 private:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
@@ -475,9 +490,91 @@ public:
         return node_ref().name();
     }
 
+    std::string_view
+    unique_name() const override {
+        return node_ref().name();
+    }
+
+    settings_base &
+    settings() const override {
+        return node_ref().settings();
+    }
+
     void *
     raw() override {
         return std::addressof(node_ref());
+    }
+};
+
+class edge {
+public: // TODO: consider making this private and to use accessors (that can be safely used by users)
+    using port_direction_t::INPUT;
+    using port_direction_t::OUTPUT;
+    node_model *_src_node;
+    node_model *_dst_node;
+    std::size_t _src_port_index;
+    std::size_t _dst_port_index;
+    std::size_t _min_buffer_size;
+    int32_t     _weight;
+    std::string _name; // custom edge name
+    bool        _connected;
+
+public:
+    edge()             = delete;
+
+    edge(const edge &) = delete;
+
+    edge &
+    operator=(const edge &)
+            = delete;
+
+    edge(edge &&) noexcept = default;
+
+    edge &
+    operator=(edge &&) noexcept
+            = default;
+
+    edge(node_model *src_node, std::size_t src_port_index, node_model *dst_node, std::size_t dst_port_index, std::size_t min_buffer_size, int32_t weight, std::string_view name)
+        : _src_node(src_node), _dst_node(dst_node), _src_port_index(src_port_index), _dst_port_index(dst_port_index), _min_buffer_size(min_buffer_size), _weight(weight), _name(name) {}
+
+    [[nodiscard]] constexpr const node_model &
+    src_node() const noexcept {
+        return *_src_node;
+    }
+
+    [[nodiscard]] constexpr const node_model &
+    dst_node() const noexcept {
+        return *_dst_node;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    src_port_index() const noexcept {
+        return _src_port_index;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    dst_port_index() const noexcept {
+        return _dst_port_index;
+    }
+
+    [[nodiscard]] constexpr std::string_view
+    name() const noexcept {
+        return _name;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    min_buffer_size() const noexcept {
+        return _min_buffer_size;
+    }
+
+    [[nodiscard]] constexpr int32_t
+    weight() const noexcept {
+        return _weight;
+    }
+
+    [[nodiscard]] constexpr bool
+    is_connected() const noexcept {
+        return _connected;
     }
 };
 
@@ -485,64 +582,7 @@ class graph {
 private:
     std::vector<std::function<connection_result_t()>> _connection_definitions;
     std::vector<std::unique_ptr<node_model>>          _nodes;
-
-    class edge {
-    public:
-        using port_direction_t::INPUT;
-        using port_direction_t::OUTPUT;
-        node_model *_src_node;
-        node_model *_dst_node;
-        std::size_t _src_port_index;
-        std::size_t _dst_port_index;
-        int32_t     _weight;
-        std::string _name; // custom edge name
-        bool        _connected;
-
-    public:
-        edge()             = delete;
-
-        edge(const edge &) = delete;
-
-        edge &
-        operator=(const edge &)
-                = delete;
-
-        edge(edge &&) noexcept = default;
-
-        edge &
-        operator=(edge &&) noexcept
-                = default;
-
-        edge(node_model *src_node, std::size_t src_port_index, node_model *dst_node, std::size_t dst_port_index, int32_t weight, std::string_view name)
-            : _src_node(src_node), _dst_node(dst_node), _src_port_index(src_port_index), _dst_port_index(dst_port_index), _weight(weight), _name(name) {}
-
-        [[nodiscard]] constexpr int32_t
-        weight() const noexcept {
-            return _weight;
-        }
-
-        [[nodiscard]] constexpr std::string_view
-        name() const noexcept {
-            return _name;
-        }
-
-        [[nodiscard]] constexpr bool
-        connected() const noexcept {
-            return _connected;
-        }
-
-        [[nodiscard]] connection_result_t
-        connect() noexcept {
-            return connection_result_t::FAILED;
-        }
-
-        [[nodiscard]] connection_result_t
-        disconnect() noexcept { /* return _dst_node->port<INPUT>(_dst_port_index).value()->disconnect(); */
-            return connection_result_t::FAILED;
-        }
-    };
-
-    std::vector<edge> _edges;
+    std::vector<edge>                                 _edges;
 
     template<typename Node>
     std::unique_ptr<node_model> &
@@ -573,7 +613,8 @@ private:
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
-    connect_impl(Source &src_node_raw, SourcePort &source_port, Destination &dst_node_raw, DestinationPort &destination_port, int32_t weight = 0, std::string_view name = "unnamed edge") {
+    connect_impl(Source &src_node_raw, SourcePort &source_port, Destination &dst_node_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, int32_t weight = 0,
+                 std::string_view name = "unnamed edge") {
         static_assert(std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>, "The source port type needs to match the sink port type");
 
         if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(src_node_raw); })
@@ -592,7 +633,7 @@ private:
             };
             auto *src_node = find_wrapper(&src_node_raw);
             auto *dst_node = find_wrapper(&dst_node_raw);
-            _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, weight, name);
+            _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, min_buffer_size, weight, name);
         }
 
         return result;
@@ -677,9 +718,21 @@ private:
     connect(Source &source, Port Source::*member_ptr);
 
 public:
-    auto
-    edges_count() const {
-        return _edges.size();
+    /**
+     * @return a list of all blocks contained in this graph
+     * N.B. some 'blocks' may be (sub-)graphs themselves
+     */
+    [[nodiscard]] std::span<std::unique_ptr<node_model>>
+    blocks() noexcept {
+        return { _nodes };
+    }
+
+    /**
+     * @return a list of all edges in this graph connecting blocks
+     */
+    [[nodiscard]] std::span<edge>
+    edges() noexcept {
+        return { _edges };
     }
 
     node_model &
@@ -688,7 +741,7 @@ public:
         return *new_node_ref.get();
     }
 
-    template<typename Node, typename... Args>
+    template<NodeType Node, typename... Args>
     auto &
     make_node(Args &&...args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
@@ -698,7 +751,7 @@ public:
         return *raw_ref;
     }
 
-    template<typename Node>
+    template<NodeType Node>
     auto &
     make_node(const tag_t::map_type &initial_settings) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
@@ -735,11 +788,6 @@ public:
         return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
-    [[nodiscard]] const std::vector<edge> &
-    get_edges() const {
-        return _edges;
-    }
-
     template<typename Source, typename Sink>
     connection_result_t
     dynamic_connect(Source &source, std::size_t source_index, Sink &sink, std::size_t sink_index) {
@@ -754,11 +802,6 @@ public:
     void
     clear_connection_definitions() {
         _connection_definitions.clear();
-    }
-
-    auto &
-    nodes() {
-        return _nodes;
     }
 };
 

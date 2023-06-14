@@ -48,7 +48,7 @@ public:
         bool run = true;
         while (run) {
             bool something_happened = false;
-            for (auto &node : _graph.nodes()) {
+            for (const auto &node : _graph.blocks()) {
                 auto result = node->work();
                 if (result == work_return_t::ERROR) {
                     return work_return_t::ERROR;
@@ -85,7 +85,7 @@ public:
         std::vector<node_t>                   _source_nodes{};
         // compute the adjacency list
         std::set<node_t> node_reached;
-        for (auto &e : _graph.get_edges()) {
+        for (auto &e : _graph.edges()) {
             _adjacency_list[e._src_node].push_back(e._dst_node);
             _source_nodes.push_back(e._src_node);
             node_reached.insert(e._dst_node);
