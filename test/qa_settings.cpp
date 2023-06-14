@@ -141,6 +141,10 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO, TestBlockDoc, Supported
     }
 };
 
+static_assert(NodeType<TestBlock<int>>);
+static_assert(NodeType<TestBlock<float>>);
+static_assert(NodeType<TestBlock<double>>);
+
 template<typename T>
 struct Sink : public node<Sink<T>> {
     IN<T>        in;

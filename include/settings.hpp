@@ -95,7 +95,7 @@ struct settings_base {
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
-    [[nodiscard]] constexpr bool
+    [[nodiscard]] bool
     changed() const noexcept {
         return _changed;
     }
