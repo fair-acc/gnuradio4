@@ -68,14 +68,14 @@ public:
     }
 
     template<typename T, typename Callback>
-    bool register_streaming_callback(std::string_view name, Callback callback) {
+    bool register_streaming_callback(std::string_view name, std::size_t max_chunk_size, Callback callback) {
         std::lock_guard lg{mutex};
         auto sink = find_sink<T>(name);
         if (!sink) {
             return false;
         }
 
-        sink->register_streaming_callback(std::move(callback));
+        sink->register_streaming_callback(max_chunk_size, std::move(callback));
         return true;
     }
 
@@ -118,6 +118,7 @@ public:
         std::atomic<std::size_t> drop_count = 0;
         gr::circular_buffer<T> buffer = gr::circular_buffer<T>(listener_buffer_size);
         decltype(buffer.new_reader()) reader = buffer.new_reader();
+        decltype(buffer.new_writer()) writer = buffer.new_writer();
 
         template<typename Handler>
         [[nodiscard]] bool process(Handler fnc) {
@@ -161,14 +162,23 @@ private:
         std::size_t pending_post_samples = 0;
     };
 
+    // TODO we might want to use separate template types for different { acquisition mode x polling/callback } combinations and ship
+    // our own type erasure instead of using std::function
     struct listener_t {
         acquisition_mode mode = acquisition_mode::Triggered;
+        bool block = false;
+
+        // Continuous/Callback
+        std::size_t buffer_fill = 0;
+        std::vector<T> buffer;
+
+        // Triggered-only
         std::size_t pre_samples = 0;
         std::size_t post_samples = 0;
-        bool block = false;
+
         std::function<bool(fair::graph::tag_t)> trigger_predicate = {};
-        gr::circular_buffer<T> buffer = gr::circular_buffer<T>(0);
         std::deque<pending_window_t> pending_trigger_windows; // triggers that still didn't receive all their data
+
         std::function<void(std::span<const T>)> callback = {}; // TODO we might want to pass back stats here like drop_count
         std::weak_ptr<dataset_poller> dataset_polling_handler = {};
         std::weak_ptr<poller> polling_handler = {};
@@ -204,9 +214,9 @@ public:
         auto handler = std::make_shared<dataset_poller>();
         listeners.push_back({
             .mode = acquisition_mode::Triggered,
+            .block = block == blocking_mode::Blocking,
             .pre_samples = pre_samples,
             .post_samples = post_samples,
-            .block = block == blocking_mode::Blocking,
             .trigger_predicate = std::move(p),
             .dataset_polling_handler = handler
         });
@@ -215,10 +225,11 @@ public:
     }
 
     template<typename Callback>
-    void register_streaming_callback(Callback callback) {
+    void register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
         std::lock_guard lg(listener_mutex);
         listeners.push_back({
             .mode = acquisition_mode::Continuous,
+            .buffer = std::vector<T>(max_chunk_size),
             .callback = std::move(callback)
         });
     }
@@ -238,10 +249,11 @@ public:
                 }
             } else if (listener.mode == acquisition_mode::Continuous) {
                 if (auto p = listener.polling_handler.lock()) {
-                    // TODO pass remaining data
                     p->finished = true;
                 }  else {
-                    // TODO pass remaining data to callback
+                    if (!listener.buffer.empty()) {
+                        listener.callback(std::span(std::span(listener.buffer).first(listener.buffer_fill)));
+                    }
                 }
             }
         }
@@ -277,7 +289,7 @@ public:
             std::lock_guard lg(listener_mutex);
             for (auto &listener : listeners) {
                 if (listener.mode == acquisition_mode::Continuous) {
-                    write_to_listener(listener, std::vector<std::span<const T>>{in_data});
+                    write_continuous_data(listener, in_data);
                 }  else if (listener.mode == acquisition_mode::Triggered || listener.mode == acquisition_mode::PostMortem) {
                     auto filtered = tags; // should use views::filter once that is working everywhere
                     std::erase_if(filtered, [&p = listener.trigger_predicate](const auto &tag) {
@@ -334,7 +346,6 @@ public:
             history.assign(history_data.begin(), history_data.end());
         }
 
-
         n_samples_consumed += noutput_items;
 
         if (!reader.consume(noutput_items)) {
@@ -367,48 +378,52 @@ private:
         }
     }
 
-    inline void write_to_listener(listener_t &l, const std::vector<std::span<const T>> &spans) {
-        std::size_t total_size = 0;
-        for (const auto &i : spans) {
-            total_size += i.size();
-        }
-
-        if (total_size == 0) {
+    inline void write_continuous_data(listener_t &l, std::span<const T> data) {
+        if (data.empty()) {
             return;
         }
 
         if (auto poller = l.polling_handler.lock()) {
-            auto writer = poller->buffer.new_writer();
+            auto &writer = poller->writer;
             if (l.block) {
-                auto write_data = writer.reserve_output_range(total_size);
-                auto target = write_data.begin();
-                for (const auto &in_data : spans) {
-                    std::copy(in_data.begin(), in_data.end(), target);
-                    target += in_data.size();
-                }
+                auto write_data = writer.reserve_output_range(data.size());
+                std::copy(data.begin(), data.end(), write_data.begin());
                 write_data.publish(write_data.size());
             } else {
                 const auto can_write = writer.available();
-                auto to_write = std::min(total_size, can_write);
-                poller->drop_count += total_size - can_write;
+                auto to_write = std::min(data.size(), can_write);
+                poller->drop_count += data.size() - can_write;
                 if (to_write > 0) {
                     auto write_data = writer.reserve_output_range(to_write);
-                    std::size_t written = 0;
-                    for (const auto &in_data : spans) {
-                        const auto n = std::min(in_data.size(), to_write - written);
-                        std::copy(in_data.begin(), in_data.begin() + n, write_data.begin() + written);
-                        written += n;
-                        if (written == to_write) {
-                            break;
-                        }
-                    }
+                    const auto sub = data.first(to_write);
+                    std::copy(sub.begin(), sub.end(), write_data.begin());
                     write_data.publish(write_data.size());
                 }
             }
         } else if (l.callback) {
-            // TODO use buffer/make this one call
-            for (const auto &data : spans) {
-                l.callback(data);
+            // if there's pending data, fill buffer and send out
+            if (l.buffer_fill > 0) {
+                const auto n = std::min(data.size(), l.buffer.size() - l.buffer_fill);
+                std::copy(data.begin(), data.begin() + n, l.buffer.begin() + l.buffer_fill);
+                l.buffer_fill += n;
+                if (l.buffer_fill == l.buffer.size()) {
+                    l.callback(std::span(l.buffer));
+                    l.buffer_fill = 0;
+                }
+
+                data = data.last(data.size() - n);
+            }
+
+            // send out complete chunks directly
+            while (data.size() > l.buffer.size()) {
+                l.callback(data.first(l.buffer.size()));
+                data = data.last(data.size() - l.buffer.size());
+            }
+
+            // write remaining data to the buffer
+            if (!data.empty()) {
+                std::copy(data.begin(), data.end(), l.buffer.begin());
+                l.buffer_fill = data.size();
             }
         }
     }

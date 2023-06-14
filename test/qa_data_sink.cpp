@@ -73,6 +73,9 @@ const boost::ut::suite DataSinkTests = [] {
     "callback continuous mode"_test = [] {
         graph                  flow_graph;
 
+        static constexpr std::int32_t n_samples = 200005;
+        static constexpr std::size_t chunk_size = 1000;
+
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
         sink.set_name("test_sink");
@@ -80,18 +83,29 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
         std::size_t samples_seen = 0;
-        auto callback = [&samples_seen](std::span<const float> buffer) {
+        std::size_t chunks_seen = 0;
+        auto callback = [&samples_seen, &chunks_seen](std::span<const float> buffer) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
                 expect(eq(buffer[i], static_cast<float>(samples_seen + i)));
             }
+
             samples_seen += buffer.size();
+            chunks_seen++;
+            if (chunks_seen < 201) {
+                expect(eq(buffer.size(), chunk_size));
+            } else {
+                expect(eq(buffer.size(), 5));
+            }
         };
 
-        expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", callback));
+        expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", chunk_size, callback));
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
 
+        sink.stop(); // TODO the scheduler should call this
+
+        expect(eq(chunks_seen, 201));
         expect(eq(sink.n_samples_consumed, n_samples));
         expect(eq(samples_seen, n_samples));
     };
