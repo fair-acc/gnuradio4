@@ -17,11 +17,11 @@ struct SettingsCtx {
     // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
     using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
     std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
-    tag_t::map_type          context;             /// user-defined multiplexing context for which the setting is valid
+    property_map             context;             /// user-defined multiplexing context for which the setting is valid
 };
 
 template<typename T>
-concept Settings = requires(T t, std::span<const std::string> parameter_keys, const std::string &parameter_key, const tag_t::map_type &parameters, SettingsCtx ctx) {
+concept Settings = requires(T t, std::span<const std::string> parameter_keys, const std::string &parameter_key, const property_map &parameters, SettingsCtx ctx) {
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
@@ -32,8 +32,8 @@ concept Settings = requires(T t, std::span<const std::string> parameter_keys, co
      * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
      * @return key-value pairs that could not be set
      */
-    { t.set(parameters, ctx) } -> std::same_as<tag_t::map_type>;
-    { t.set(parameters) } -> std::same_as<tag_t::map_type>;
+    { t.set(parameters, ctx) } -> std::same_as<property_map>;
+    { t.set(parameters) } -> std::same_as<property_map>;
 
     /**
      * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
@@ -45,13 +45,13 @@ concept Settings = requires(T t, std::span<const std::string> parameter_keys, co
     /**
      * @brief return all available node settings as key-value pairs
      */
-    { t.get() } -> std::same_as<tag_t::map_type>;
+    { t.get() } -> std::same_as<property_map>;
 
     /**
      * @brief return key-pmt values map for multiple keys
      */
-    { t.get(parameter_keys, ctx) } -> std::same_as<tag_t::map_type>;
-    { t.get(parameter_keys) } -> std::same_as<tag_t::map_type>;
+    { t.get(parameter_keys, ctx) } -> std::same_as<property_map>;
+    { t.get(parameter_keys) } -> std::same_as<property_map>;
 
     /**
      * @brief return pmt value for a single key
@@ -62,12 +62,12 @@ concept Settings = requires(T t, std::span<const std::string> parameter_keys, co
     /**
      * @brief returns the staged/not-yet-applied new parameters
      */
-    { t.staged_parameters() } -> std::same_as<const tag_t::map_type>;
+    { t.staged_parameters() } -> std::same_as<const property_map>;
 
     /**
      * @brief synchronise map-based with actual node field-based settings
      */
-    { t.apply_staged_parameters() } -> std::same_as<const tag_t::map_type>;
+    { t.apply_staged_parameters() } -> std::same_as<const property_map>;
 
     /**
      * @brief synchronises the map-based with the node's field-based parameters
@@ -105,8 +105,8 @@ struct settings_base {
      * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
      * @return key-value pairs that could not be set
      */
-    [[nodiscard]] virtual tag_t::map_type
-    set(const tag_t::map_type &parameters, SettingsCtx ctx = {})
+    [[nodiscard]] virtual property_map
+    set(const property_map &parameters, SettingsCtx ctx = {})
             = 0;
 
     /**
@@ -114,13 +114,13 @@ struct settings_base {
      * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
      */
     virtual void
-    auto_update(const tag_t::map_type &parameters, SettingsCtx = {})
+    auto_update(const property_map &parameters, SettingsCtx = {})
             = 0;
 
     /**
      * @brief return all (or for selected multiple keys) available node settings as key-value pairs
      */
-    [[nodiscard]] virtual tag_t::map_type
+    [[nodiscard]] virtual property_map
     get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept
             = 0;
 
@@ -130,7 +130,7 @@ struct settings_base {
     /**
      * @brief returns the staged/not-yet-applied new parameters
      */
-    [[nodiscard]] virtual const tag_t::map_type
+    [[nodiscard]] virtual const property_map
     staged_parameters() const
             = 0;
 
@@ -147,7 +147,7 @@ struct settings_base {
      * returns map with key-value tags that should be forwarded
      * to dependent/child nodes.
      */
-    [[nodiscard]] virtual const tag_t::map_type
+    [[nodiscard]] virtual const property_map
     apply_staged_parameters() noexcept
             = 0;
 
@@ -164,8 +164,8 @@ template<typename Node>
 class basic_settings : public settings_base {
     Node                              *_node = nullptr;
     mutable std::mutex                 _lock{};
-    tag_t::map_type                    _active{}; // copy of class field settings as pmt-style map
-    tag_t::map_type                    _staged{}; // parameters to become active before the next work() call
+    property_map                       _active{}; // copy of class field settings as pmt-style map
+    property_map                       _staged{}; // parameters to become active before the next work() call
     std::set<std::string, std::less<>> _auto_update{};
     std::set<std::string, std::less<>> _auto_forward{};
 
@@ -228,9 +228,9 @@ public:
         std::swap(_auto_forward, other._auto_forward);
     }
 
-    [[nodiscard]] tag_t::map_type
-    set(const tag_t::map_type &parameters, SettingsCtx = {}) override {
-        tag_t::map_type ret;
+    [[nodiscard]] property_map
+    set(const property_map &parameters, SettingsCtx = {}) override {
+        property_map ret;
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
             for (const auto &[localKey, localValue] : parameters) {
@@ -260,7 +260,7 @@ public:
     }
 
     void
-    auto_update(const tag_t::map_type &parameters, SettingsCtx = {}) override {
+    auto_update(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<Node>()) {
             for (const auto &[localKey, localValue] : parameters) {
                 const auto &key   = localKey;
@@ -278,16 +278,16 @@ public:
         }
     }
 
-    [[nodiscard]] const tag_t::map_type
+    [[nodiscard]] const property_map
     staged_parameters() const noexcept override {
         std::lock_guard lg(_lock);
         return _staged;
     }
 
-    [[nodiscard]] tag_t::map_type
+    [[nodiscard]] property_map
     get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept override {
         std::lock_guard lg(_lock);
-        tag_t::map_type ret;
+        property_map    ret;
         if (parameter_keys.empty()) {
             ret = _active;
             return ret;
@@ -328,14 +328,14 @@ public:
      * returns map with key-value tags that should be forwarded
      * to dependent/child nodes.
      */
-    [[nodiscard]] const tag_t::map_type
+    [[nodiscard]] const property_map
     apply_staged_parameters() noexcept override {
-        tag_t::map_type forward_parameters; // parameters that should be forwarded to dependent child nodes
+        property_map forward_parameters; // parameters that should be forwarded to dependent child nodes
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
 
-            tag_t::map_type oldSettings;
-            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+            property_map    oldSettings;
+            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
                     for_each(refl::reflect(*_node).members, [&, this](auto member) {
@@ -348,7 +348,7 @@ public:
                 }
             }
 
-            tag_t::map_type staged;
+            property_map staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key          = localKey;
                 const auto &staged_value = localStaged_value;
@@ -374,7 +374,7 @@ public:
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             });
-            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
                 if (!staged.empty()) {
                     _node->init(/* old settings */ oldSettings, /* new settings */ staged);
                 }

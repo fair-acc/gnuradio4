@@ -37,7 +37,7 @@ public:
     virtual std::span<const std::string>
     provided_nodes() const = 0;
     virtual std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, const fair::graph::node_construction_params &params) = 0;
+    create_node(std::string_view name, std::string_view type, const fair::graph::property_map &params) = 0;
 };
 
 namespace fair::graph {
@@ -60,7 +60,7 @@ public:
     }
 
     std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, const node_construction_params &params) override {
+    create_node(std::string_view name, std::string_view type, const property_map &params) override {
         return registry.create_node(name, type, params);
     }
 

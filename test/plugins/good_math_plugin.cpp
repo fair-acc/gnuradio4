@@ -10,7 +10,7 @@ namespace fg = fair::graph;
 
 template<typename T>
 auto
-factor(const fair::graph::node_construction_params &params) {
+factor(const fair::graph::property_map &params) {
     T factor = 1;
     if (auto it = params.find("factor"s); it != params.end()) {
         auto &variant = it->second;
@@ -33,7 +33,7 @@ public:
 
     math_base() = delete;
 
-    explicit math_base(const fair::graph::node_construction_params &params) : _factor(factor<T>(params)) {}
+    explicit math_base(const fair::graph::property_map &params) : _factor(factor<T>(params)) {}
 };
 
 template<typename T>

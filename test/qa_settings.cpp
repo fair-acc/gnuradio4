@@ -49,7 +49,7 @@ format_variant(const auto &value) noexcept {
 };
 
 void
-printChanges(const tag_t::map_type &oldMap, const tag_t::map_type &newMap) noexcept {
+printChanges(const property_map &oldMap, const property_map &newMap) noexcept {
     for (const auto &[key, newValue] : newMap) {
         if (!oldMap.contains(key)) {
             fmt::print("    key added '{}` = {}\n", key, format_variant(newValue));
@@ -83,7 +83,7 @@ struct Source : public node<Source<T>> {
     float        sample_rate        = 1000.0f;
 
     void
-    init(const tag_t::map_type &old_settings, const tag_t::map_type &new_settings) {
+    init(const property_map &old_settings, const property_map &new_settings) {
         // optional init function that is called after construction and whenever settings change
         fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
     }
@@ -124,7 +124,7 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO, TestBlockDoc, Supported
     bool                                                          debug        = false;
 
     void
-    init(const tag_t::map_type &old_setting, const tag_t::map_type &new_setting) noexcept {
+    init(const property_map &old_setting, const property_map &new_setting) noexcept {
         // optional function that is called whenever settings change
         update_count++;
 
