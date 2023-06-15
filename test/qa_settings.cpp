@@ -186,6 +186,7 @@ const boost::ut::suite SettingsTests = [] {
     using namespace boost::ut;
     using namespace fair::graph;
     using namespace fair::graph::setting_test;
+    using namespace std::string_view_literals;
 
     "basic node settings tag"_test = [] {
         graph                  flow_graph;
@@ -323,6 +324,16 @@ const boost::ut::suite SettingsTests = [] {
         auto merged2 = merge<"out", "in">(TestBlock<float>(), TestBlock<float>());
         expect(not eq(merged1.unique_id, merged2.unique_id)) << "unique per-type block id (size_t) ";
         expect(not eq(merged1.unique_name, merged2.unique_name)) << "unique per-type block id (string) ";
+    };
+
+    "run-time type-erased node setter/getter"_test = [] {
+        auto wrapped1 = node_wrapper<TestBlock<float>>();
+        wrapped1.set_name("test_name");
+        expect(eq(wrapped1.name(), "test_name"sv)) << "node_model wrapper name";
+        expect(not wrapped1.unique_name().empty()) << "unique name";
+        wrapped1.settings().set({ { "context", "a string" } });
+        (wrapped1.meta_information())["key"] = "value";
+        expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "node_model meta-information";
     };
 };
 

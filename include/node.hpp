@@ -114,6 +114,8 @@ concept NodeType = requires(T t, std::string str, std::size_t index) {
 
     { t.work() } -> std::same_as<work_return_t>;
 
+    { t.meta_information() } -> std::same_as<tag_t::map_type &>;
+
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
     requires !std::is_copy_assignable_v<T>;
@@ -224,7 +226,8 @@ public:
 
 protected:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string                  _name{ std::string(fair::meta::type_name<Derived>()) };
+    std::string                  _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
+    tag_t::map_type              _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
     bool                         _input_tags_present  = false;
     bool                         _output_tags_changed = false;
     std::vector<tag_t::map_type> _tags_at_input;
@@ -268,14 +271,30 @@ public:
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
+    /**
+     * @brief user-defined name
+     * N.B. may not be unique -> ::unique_name
+     */
     [[nodiscard]] std::string_view
     name() const noexcept {
         return _name;
     }
 
+    /**
+     * @brief user-defined name
+     * N.B. may not be unique -> ::unique_name
+     */
     void
     set_name(std::string name) noexcept {
         _name = std::move(name);
+    }
+
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] tag_t::map_type &
+    meta_information() noexcept {
+        return _meta_information;
     }
 
     [[nodiscard]] constexpr std::string_view
