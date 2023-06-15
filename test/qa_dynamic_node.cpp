@@ -13,6 +13,21 @@ protected:
     std::list<in_port_t> _input_ports;
     fg::OUT<T>           _output_port;
 
+private:
+    static std::atomic_size_t _unique_id_counter;
+    const std::size_t         _unique_id   = _unique_id_counter++;
+    const std::string         _unique_name = fmt::format("multi_adder#{}", _unique_id);
+
+protected:
+    using setting_map                        = std::map<std::string, int, std::less<>>;
+    std::string                        _name = "multi_adder";
+    fg::property_map                   _meta_information; /// used to store non-graph-processing information like UI block position etc.
+    bool                               _input_tags_present  = false;
+    bool                               _output_tags_changed = false;
+    std::vector<fg::property_map>      _tags_at_input;
+    std::vector<fg::property_map>      _tags_at_output;
+    std::unique_ptr<fg::settings_base> _settings = std::make_unique<fg::basic_settings<multi_adder<T>>>(*this);
+
 public:
     multi_adder(std::size_t input_ports_size) {
         _input_ports.resize(input_ports_size);
@@ -27,7 +42,7 @@ public:
 
     std::string_view
     name() const override {
-        return "";
+        return _unique_name;
     }
 
     virtual fg::work_return_t
@@ -76,7 +91,28 @@ public:
         _input_ports.push_back({});
         _dynamic_input_ports.emplace_back(_input_ports.back());
     }
+
+    void
+    set_name(std::string name) noexcept override {}
+
+    [[nodiscard]] fg::property_map &
+    meta_information() noexcept override {
+        return _meta_information;
+    }
+
+    [[nodiscard]] fg::settings_base &
+    settings() const override {
+        return *_settings;
+    }
+
+    [[nodiscard]] std::string_view
+    unique_name() const override {
+        return _unique_name;
+    }
 };
+
+template<typename T>
+std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
 
 template<typename T>
 class fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {

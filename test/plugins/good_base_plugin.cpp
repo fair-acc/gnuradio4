@@ -15,7 +15,7 @@ struct pt;
 
 template<typename T>
 auto
-total_count(const fair::graph::node_construction_params &params) {
+total_count(const fair::graph::property_map &params) {
     T total_count = 1;
     if (auto it = params.find("total_count"s); it != params.end()) {
         auto &variant = it->second;
@@ -34,7 +34,7 @@ class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
 public:
     cout_sink() {}
 
-    explicit cout_sink(const fair::graph::node_construction_params &params) : _remaining(total_count<std::size_t>(params)) {}
+    explicit cout_sink(const fair::graph::property_map &params) : _remaining(total_count<std::size_t>(params)) {}
 
     void
     process_one(T value) {

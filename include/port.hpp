@@ -385,7 +385,7 @@ static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::stati
 static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
 
 constexpr void
-publish_tag(Port auto &port, tag_t::map_type &&tag_data, std::size_t tag_offset = 0) noexcept {
+publish_tag(Port auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
             [&port, data = std::move(tag_data), &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
@@ -395,7 +395,7 @@ publish_tag(Port auto &port, tag_t::map_type &&tag_data, std::size_t tag_offset 
 }
 
 constexpr void
-publish_tag(Port auto &port, const tag_t::map_type &tag_data, std::size_t tag_offset = 0) noexcept {
+publish_tag(Port auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
             [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;

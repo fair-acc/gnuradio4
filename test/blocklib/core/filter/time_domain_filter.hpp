@@ -25,7 +25,7 @@ struct fir_filter : node<fir_filter<T>> {
     history_buffer<T> inputHistory{ 32 };
 
     void
-    init(const tag_t::map_type & /*old_settings*/, const tag_t::map_type &new_settings) noexcept {
+    init(const property_map & /*old_settings*/, const property_map &new_settings) noexcept {
         if (new_settings.contains("b") && b.size() >= inputHistory.capacity()) {
             inputHistory = history_buffer<T>(std::bit_ceil(b.size()));
         }
@@ -63,7 +63,7 @@ struct iir_filter : node<iir_filter<T, form>> {
     history_buffer<T> outputHistory{ 32 };
 
     void
-    init(const tag_t::map_type & /*old_settings*/, const tag_t::map_type &new_settings) noexcept {
+    init(const property_map & /*old_settings*/, const property_map &new_settings) noexcept {
         const auto new_size = std::max(a.size(), b.size());
         if ((new_settings.contains("b") || new_settings.contains("a")) && (new_size >= inputHistory.capacity() || new_size >= inputHistory.capacity())) {
             inputHistory  = history_buffer<T>(std::bit_ceil(new_size));

@@ -122,14 +122,14 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
     };
 
     "LongerPipeline"_test = [] {
-        auto                                  node_source = context().loader.instantiate(names::fixed_source, "double");
+        auto                      node_source = context().loader.instantiate(names::fixed_source, "double");
 
-        fair::graph::node_construction_params node_multiply_params;
-        node_multiply_params["factor"]                      = 2.0;
-        auto                                  node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
+        fair::graph::property_map node_multiply_params;
+        node_multiply_params["factor"]          = 2.0;
+        auto                      node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
 
-        std::size_t                           repeats       = 10;
-        fair::graph::node_construction_params node_sink_params;
+        std::size_t               repeats       = 10;
+        fair::graph::property_map node_sink_params;
         node_sink_params["total_count"] = 100_UZ;
         auto node_sink                  = context().loader.instantiate(names::cout_sink, "double");
 
@@ -147,18 +147,18 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
     };
 
     "Graph"_test = [] {
-        fg::graph                             flow_graph;
+        fg::graph                 flow_graph;
 
-        auto                                  node_source_load     = context().loader.instantiate(names::fixed_source, "double");
-        auto                                 &node_source          = flow_graph.add_node(std::move(node_source_load));
+        auto                      node_source_load     = context().loader.instantiate(names::fixed_source, "double");
+        auto                     &node_source          = flow_graph.add_node(std::move(node_source_load));
 
-        auto                                 &node_multiply_1      = flow_graph.make_node<builtin_multiply<double>>(2.0);
+        auto                     &node_multiply_1      = flow_graph.make_node<builtin_multiply<double>>(2.0);
 
-        auto                                  node_multiply_2_load = context().loader.instantiate(names::builtin_multiply, "double");
-        auto                                 &node_multiply_2      = flow_graph.add_node(std::move(node_multiply_2_load));
+        auto                      node_multiply_2_load = context().loader.instantiate(names::builtin_multiply, "double");
+        auto                     &node_multiply_2      = flow_graph.add_node(std::move(node_multiply_2_load));
 
-        std::size_t                           repeats              = 10;
-        fair::graph::node_construction_params node_sink_params;
+        std::size_t               repeats              = 10;
+        fair::graph::property_map node_sink_params;
         node_sink_params["total_count"] = 100_UZ;
         auto  node_sink_load            = context().loader.instantiate(names::cout_sink, "double", node_sink_params);
         auto &node_sink                 = flow_graph.add_node(std::move(node_sink_load));

@@ -122,10 +122,10 @@ main(int argc, char *argv[]) {
 
     auto  node_counter_load = context.loader.instantiate(names::builtin_counter, "double");
     assert(node_counter_load);
-    auto                                 &node_counter = flow_graph.add_node(std::move(node_counter_load));
+    auto                     &node_counter = flow_graph.add_node(std::move(node_counter_load));
 
-    const std::size_t                     repeats      = 100;
-    fair::graph::node_construction_params node_sink_params;
+    const std::size_t         repeats      = 100;
+    fair::graph::property_map node_sink_params;
     node_sink_params["total_count"] = 100_UZ;
     auto node_sink_load             = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
 
