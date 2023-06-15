@@ -194,7 +194,7 @@ private:
         int64_t drop_count = 0;
     };
 
-    std::vector<listener_t> listeners;
+    std::deque<listener_t> listeners;
     std::mutex listener_mutex;
 
 public:
@@ -209,7 +209,7 @@ public:
     std::shared_ptr<poller> get_streaming_poller(blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg(listener_mutex);
         auto handler = std::make_shared<poller>();
-        listeners.push_back({
+        add_listener({
             .mode = acquisition_mode::Continuous,
             .block = block == blocking_mode::Blocking,
             .polling_handler = handler
@@ -221,7 +221,7 @@ public:
     std::shared_ptr<dataset_poller> get_trigger_poller(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg(listener_mutex);
         auto handler = std::make_shared<dataset_poller>();
-        listeners.push_back({
+        add_listener({
             .mode = acquisition_mode::Triggered,
             .block = block == blocking_mode::Blocking,
             .pre_samples = pre_samples,
@@ -236,7 +236,7 @@ public:
     template<typename TriggerPredicate, typename Callback>
     void register_trigger_callback(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
         std::lock_guard lg(listener_mutex);
-        listeners.push_back({
+        add_listener({
             .mode = acquisition_mode::Triggered,
             .pre_samples = pre_samples,
             .post_samples = post_samples,
@@ -248,7 +248,7 @@ public:
     template<typename Callback>
     void register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
         std::lock_guard lg(listener_mutex);
-        listeners.push_back({
+        add_listener({
             .mode = acquisition_mode::Continuous,
             .buffer = std::vector<T>(max_chunk_size),
             .callback = std::move(callback)
@@ -379,6 +379,14 @@ public:
 private:
     std::vector<T> history;
     std::size_t history_available = 0;
+
+    void add_listener(listener_t&& l) {
+        if (l.block) {
+            listeners.push_back(std::move(l));
+        } else {
+            listeners.push_front(std::move(l));
+        }
+    }
 
     inline void publish_dataset(listener_t &l, DataSet<T> &&data) {
         if (auto poller = l.dataset_polling_handler.lock()) {
