@@ -102,6 +102,25 @@ output_ports(Self *self) noexcept {
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(output_port<Idx>(self)...); }(std::make_index_sequence<traits::node::output_ports<Self>::size>());
 }
 
+template<typename T>
+concept NodeType = requires(T t, std::string str, std::size_t index) {
+    { t.name() } -> std::same_as<std::string_view>;
+    { t.set_name(std::move(str)) } noexcept -> std::same_as<void>;
+    { t.settings() } -> std::same_as<settings_base &>;
+
+    { t.description() } noexcept -> std::same_as<std::string_view>;
+    { t.is_blocking() } noexcept -> std::same_as<bool>;
+    { t.unique_name } -> std::same_as<const std::string &>;
+
+    { t.work() } -> std::same_as<work_return_t>;
+
+    // N.B. TODO discuss these requirements
+    requires !std::is_copy_constructible_v<T>;
+    requires !std::is_copy_assignable_v<T>;
+    // requires !std::is_move_constructible_v<T>;
+    // requires !std::is_move_assignable_v<T>;
+};
+
 /**
  * @brief The 'node<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -212,7 +231,7 @@ protected:
     std::vector<tag_t::map_type> _tags_at_output;
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<settings_base<Derived>> _settings = std::make_unique<basic_settings<Derived>>(self());
+    std::unique_ptr<settings_base> _settings = std::make_unique<basic_settings<Derived>>(self());
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -299,12 +318,12 @@ public:
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    constexpr settings_base<Derived> &
+    constexpr settings_base &
     settings() const noexcept {
         return *_settings;
     }
 
-    constexpr settings_base<Derived> &
+    constexpr settings_base &
     settings() noexcept {
         return *_settings;
     }
@@ -646,7 +665,7 @@ inline std::atomic_size_t node<Derived, Arguments...>::_unique_id_counter{ 0_UZ 
 /**
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
  */
-template<typename Node>
+template<NodeType Node>
 [[nodiscard]] /*constexpr*/ std::string
 node_description() noexcept {
     using DerivedNode          = typename Node::derived_t;
