@@ -13,7 +13,7 @@
 #include "typelist.hpp"
 #include "vir/simd.h"
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER)
 #include <cxxabi.h>
 #include <iostream>
 #include <typeinfo>
@@ -105,7 +105,7 @@ operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs
 template<typename T>
 [[nodiscard]] std::string
 type_name() noexcept {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(_MSC_VER)
     std::string type_name = typeid(T).name();
     int         status;
     char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);

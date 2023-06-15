@@ -851,7 +851,7 @@ operator<<(std::ostream &os, const port_domain_t &value) {
     return os << static_cast<int>(value);
 }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !(defined(_MSC_VER) && defined(__clang__)) //clang-cl doesn't have source location yet
 auto
 this_source_location(std::source_location l = std::source_location::current()) {
     return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
