@@ -391,26 +391,41 @@ public:
     /**
      * @brief user defined name
      */
-    virtual std::string_view
+    [[nodiscard]] virtual std::string_view
     name() const
+            = 0;
+
+    /**
+     * @brief user-defined name
+     * N.B. may not be unique -> ::unique_name
+     */
+    virtual void
+    set_name(std::string name) noexcept
+            = 0;
+
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] virtual tag_t::map_type &
+    meta_information() noexcept
             = 0;
 
     /**
      * @brief process-wide unique name
      * N.B. can be used to disambiguate in case user provided the same 'name()' for several blocks.
      */
-    virtual std::string_view
+    [[nodiscard]] virtual std::string_view
     unique_name() const
             = 0;
 
-    virtual settings_base &
+    [[nodiscard]] virtual settings_base &
     settings() const
             = 0;
 
-    virtual work_return_t
+    [[nodiscard]] virtual work_return_t
     work() = 0;
 
-    virtual void *
+    [[nodiscard]] virtual void *
     raw() = 0;
 };
 
@@ -480,27 +495,37 @@ public:
         init_dynamic_ports();
     }
 
-    constexpr work_return_t
+    [[nodiscard]] constexpr work_return_t
     work() override {
         return node_ref().work();
     }
 
-    std::string_view
+    [[nodiscard]] std::string_view
     name() const override {
         return node_ref().name();
     }
 
-    std::string_view
+    void
+    set_name(std::string name) noexcept override {
+        return node_ref().set_name(std::move(name));
+    }
+
+    [[nodiscard]] tag_t::map_type &
+    meta_information() noexcept override {
+        return node_ref().meta_information();
+    }
+
+    [[nodiscard]] std::string_view
     unique_name() const override {
         return node_ref().name();
     }
 
-    settings_base &
+    [[nodiscard]] settings_base &
     settings() const override {
         return node_ref().settings();
     }
 
-    void *
+    [[nodiscard]] void *
     raw() override {
         return std::addressof(node_ref());
     }
