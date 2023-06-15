@@ -28,18 +28,10 @@ endif()
 
 
 include(FetchContent)
-
-#Windows complains about intrinsic missing
-if(NOT WIN32)
-set(FMT_TAG 8.1.1)
-else()
-set(FMT_TAG 10.0.0)
-endif()
-
 FetchContent_Declare(
         fmt
         GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-        GIT_TAG ${FMT_TAG}
+        GIT_TAG 10.0.0
 )
 
 
