@@ -4,6 +4,12 @@
 
 namespace fg = fair::graph;
 
+// TODO: Unify nodes with static and dynamic ports
+//  - Port to fg::node
+//  - add init to type-erased nodes (node_model)
+//  - use init(old_setting, new_setting) instead of getting input_ports_size
+//    via constructor
+//  - use node::set_name instead of returning an empty name
 template<typename T>
 class multi_adder : public fg::node_model {
 protected:
@@ -45,6 +51,7 @@ public:
         return _unique_name;
     }
 
+    // TODO: integrate with node::work
     virtual fg::work_return_t
     work() override {
         // TODO: Rewrite with ranges once we can use them
