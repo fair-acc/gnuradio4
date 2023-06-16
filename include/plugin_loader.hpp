@@ -14,7 +14,7 @@
 #include <graph.hpp>
 #include <plugin.hpp>
 
-using plugin_create_function_t  = gp_plugin_base *(*) ();
+using plugin_create_function_t  = void (*)(gp_plugin_base **);
 using plugin_destroy_function_t = void (*)(gp_plugin_base *);
 
 namespace fair::graph {
@@ -71,7 +71,7 @@ public:
             return;
         }
 
-        _instance = _create_fn();
+        _create_fn(&_instance);
         if (!_instance) {
             _status = "Failed to create an instance of the plugin";
             release();
@@ -174,7 +174,7 @@ public:
     }
 
     std::unique_ptr<fair::graph::node_model>
-    instantiate(std::string name, std::string_view type, node_construction_params params = {}) {
+    instantiate(std::string name, std::string_view type, const property_map &params = {}) {
         // Try to create a node from the global registry
         if (auto result = _global_registry->create_node(name, type, params)) {
             return result;

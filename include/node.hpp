@@ -114,7 +114,7 @@ concept NodeType = requires(T t, std::string str, std::size_t index) {
 
     { t.work() } -> std::same_as<work_return_t>;
 
-    { t.meta_information() } -> std::same_as<tag_t::map_type &>;
+    { t.meta_information() } -> std::same_as<property_map &>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
@@ -226,12 +226,12 @@ public:
 
 protected:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string                  _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
-    tag_t::map_type              _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
-    bool                         _input_tags_present  = false;
-    bool                         _output_tags_changed = false;
-    std::vector<tag_t::map_type> _tags_at_input;
-    std::vector<tag_t::map_type> _tags_at_output;
+    std::string               _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
+    property_map              _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
+    bool                      _input_tags_present  = false;
+    bool                      _output_tags_changed = false;
+    std::vector<property_map> _tags_at_input;
+    std::vector<property_map> _tags_at_output;
 
     // intermediate non-real-time<->real-time setting states
     std::unique_ptr<settings_base> _settings = std::make_unique<basic_settings<Derived>>(self());
@@ -292,7 +292,7 @@ public:
     /**
      * @brief used to store non-graph-processing information like UI block position etc.
      */
-    [[nodiscard]] tag_t::map_type &
+    [[nodiscard]] property_map &
     meta_information() noexcept {
         return _meta_information;
     }
@@ -321,17 +321,17 @@ public:
         return false;
     };
 
-    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    [[nodiscard]] constexpr std::span<const property_map>
     input_tags() const noexcept {
         return { _tags_at_input.data(), _tags_at_input.size() };
     }
 
-    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    [[nodiscard]] constexpr std::span<const property_map>
     output_tags() const noexcept {
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    [[nodiscard]] constexpr std::span<tag_t::map_type>
+    [[nodiscard]] constexpr std::span<property_map>
     output_tags() noexcept {
         _output_tags_changed = true;
         return { _tags_at_output.data(), _tags_at_output.size() };
@@ -544,7 +544,7 @@ public:
         _output_tags_changed     = false;
         bool auto_change         = false;
         if (tags_to_process) {
-            tag_t::map_type merged_tag_map;
+            property_map merged_tag_map;
             _input_tags_present    = true;
             std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
@@ -571,7 +571,7 @@ public:
 
             if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type &tag) { tag = merged_tag_map; });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](property_map &tag) { tag = merged_tag_map; });
                 _output_tags_changed = true;
             }
         }
@@ -599,14 +599,14 @@ public:
             // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
             _input_tags_present  = false;
             _output_tags_changed = false;
-            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t::map_type &tag) { tag.clear(); });
-            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t::map_type &tag) { tag.clear(); });
+            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](property_map &tag) { tag.clear(); });
+            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](property_map &tag) { tag.clear(); });
         };
 
         if (settings().changed()) {
             const auto forward_parameters = settings().apply_staged_parameters();
             if (!forward_parameters.empty()) {
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t::map_type &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](property_map &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
                 _output_tags_changed = true;
             }
             settings()._changed.store(false);

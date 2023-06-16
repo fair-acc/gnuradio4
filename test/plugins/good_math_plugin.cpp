@@ -10,10 +10,15 @@ namespace fg = fair::graph;
 
 template<typename T>
 auto
-factor(fair::graph::node_construction_params params) {
-    T    factor = 1;
-    auto value  = params.value("factor"sv);
-    std::ignore = std::from_chars(value.begin(), value.end(), factor);
+factor(const fair::graph::property_map &params) {
+    T factor = 1;
+    if (auto it = params.find("factor"s); it != params.end()) {
+        auto &variant = it->second;
+        auto *ptr     = std::get_if<T>(&variant);
+        if (ptr) {
+            factor = *ptr;
+        }
+    }
     return factor;
 }
 
@@ -28,7 +33,7 @@ public:
 
     math_base() = delete;
 
-    explicit math_base(fair::graph::node_construction_params params) : _factor(factor<T>(params)) {}
+    explicit math_base(const fair::graph::property_map &params) : _factor(factor<T>(params)) {}
 };
 
 template<typename T>

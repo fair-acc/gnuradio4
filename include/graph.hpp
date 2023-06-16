@@ -406,7 +406,7 @@ public:
     /**
      * @brief used to store non-graph-processing information like UI block position etc.
      */
-    [[nodiscard]] virtual tag_t::map_type &
+    [[nodiscard]] virtual property_map &
     meta_information() noexcept
             = 0;
 
@@ -458,12 +458,14 @@ private:
         using Node                             = std::remove_cvref_t<decltype(node_ref())>;
 
         constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) { (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...); }
-        (std::make_index_sequence<input_port_count>());
+        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...);
+        }(std::make_index_sequence<input_port_count>());
 
         constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) { (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...); }
-        (std::make_index_sequence<output_port_count>());
+        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...);
+        }(std::make_index_sequence<output_port_count>());
 
         static_assert(input_port_count + output_port_count > 0);
         _dynamic_ports_loaded = true;
@@ -510,7 +512,7 @@ public:
         return node_ref().set_name(std::move(name));
     }
 
-    [[nodiscard]] tag_t::map_type &
+    [[nodiscard]] property_map &
     meta_information() noexcept override {
         return node_ref().meta_information();
     }
@@ -763,6 +765,7 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
+        std::ignore        = new_node_ref->settings().apply_staged_parameters();
         return *new_node_ref.get();
     }
 
@@ -778,7 +781,7 @@ public:
 
     template<NodeType Node>
     auto &
-    make_node(const tag_t::map_type &initial_settings) {
+    make_node(const property_map &initial_settings) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());

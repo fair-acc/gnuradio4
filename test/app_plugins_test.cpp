@@ -1,5 +1,6 @@
 #include <node_registry.hpp>
 #include <plugin_loader.hpp>
+#include <utils.hpp>
 
 #include <array>
 #include <cassert>
@@ -9,6 +10,8 @@
 #include <fmt/ranges.h>
 
 using namespace std::chrono_literals;
+using namespace fair::literals;
+
 namespace fg = fair::graph;
 
 struct test_context {
@@ -91,7 +94,7 @@ main(int argc, char *argv[]) {
     using namespace gr;
 
     for (const auto &plugin : context.loader.plugins()) {
-        assert(plugin->metadata().plugin_name.starts_with("Good"));
+        assert(plugin->metadata->plugin_name.starts_with("Good"));
     }
 
     for (const auto &plugin : context.loader.failed_plugins()) {
@@ -119,11 +122,13 @@ main(int argc, char *argv[]) {
 
     auto  node_counter_load = context.loader.instantiate(names::builtin_counter, "double");
     assert(node_counter_load);
-    auto             &node_counter = flow_graph.add_node(std::move(node_counter_load));
+    auto                     &node_counter = flow_graph.add_node(std::move(node_counter_load));
 
-    const std::size_t repeats      = 100;
-    std::array        node_sink_params{ fair::graph::node_construction_param{ "total_count", "100" } };
-    auto              node_sink_load = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
+    const std::size_t         repeats      = 100;
+    fair::graph::property_map node_sink_params;
+    node_sink_params["total_count"] = 100_UZ;
+    auto node_sink_load             = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
+
     assert(node_sink_load);
     auto &node_sink    = flow_graph.add_node(std::move(node_sink_load));
 

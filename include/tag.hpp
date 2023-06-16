@@ -36,6 +36,15 @@ enum class tag_propagation_policy_t {
                        application-specific forwarding behaviour. */
 };
 
+namespace detail {
+struct transparent_less : public std::less<void> {
+    using is_transparent = void;
+};
+
+} // namespace detail
+
+using property_map = std::map<std::string, pmtv::pmt, detail::transparent_less>;
+
 /**
  * @brief 'tag_t' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
  * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
@@ -47,9 +56,8 @@ enum class tag_propagation_policy_t {
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
-    using map_type                        = std::map<std::string, pmtv::pmt, std::less<>>;
     std::make_signed_t<std::size_t> index = 0;
-    map_type                        map;
+    property_map                    map;
 
     // TODO: do we need the convenience methods below?
     [[nodiscard]] pmtv::pmt &

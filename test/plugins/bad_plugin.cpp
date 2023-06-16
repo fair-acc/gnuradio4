@@ -10,18 +10,13 @@ private:
 
 public:
     std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, fair::graph::node_construction_params) override {
+    create_node(std::string_view name, std::string_view type, const fair::graph::property_map &) override {
         return {};
     }
 
     std::uint8_t
     abi_version() const override {
         return 0;
-    }
-
-    const gp_plugin_metadata &
-    metadata() const override {
-        return plugin_metadata;
     }
 
     std::span<const std::string>
@@ -33,12 +28,12 @@ public:
 } // namespace
 
 extern "C" {
-gp_plugin_base *
-gp_plugin_make() {
-    return nullptr;
+void GRAPH_PROTOTYPE_PLUGIN_EXPORT
+gp_plugin_make(gp_plugin_base **plugin) {
+    *plugin = nullptr;
 }
 
-void
+void GRAPH_PROTOTYPE_PLUGIN_EXPORT
 gp_plugin_free(gp_plugin_base *plugin) {
     delete plugin;
 }

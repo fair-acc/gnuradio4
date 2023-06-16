@@ -9926,6 +9926,15 @@ enum class tag_propagation_policy_t {
                        application-specific forwarding behaviour. */
 };
 
+namespace detail {
+struct transparent_less : public std::less<void> {
+    using is_transparent = void;
+};
+
+} // namespace detail
+
+using property_map = std::map<std::string, pmtv::pmt, detail::transparent_less>;
+
 /**
  * @brief 'tag_t' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
  * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
@@ -9937,9 +9946,8 @@ enum class tag_propagation_policy_t {
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
-    using map_type                        = std::map<std::string, pmtv::pmt, std::less<>>;
     std::make_signed_t<std::size_t> index = 0;
-    map_type                        map;
+    property_map                    map;
 
     // TODO: do we need the convenience methods below?
     [[nodiscard]] pmtv::pmt &
@@ -10127,16 +10135,16 @@ public:
     using port_tag                  = std::true_type;
 
     template<fixed_string NewName>
-    using with_name = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
+    using with_name     = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
+
+    using ReaderType    = decltype(std::declval<BufferType>().new_reader());
+    using WriterType    = decltype(std::declval<BufferType>().new_writer());
+    using IoType        = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
+    using TagReaderType = decltype(std::declval<TagBufferType>().new_reader());
+    using TagWriterType = decltype(std::declval<TagBufferType>().new_writer());
+    using TagIoType     = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
 
 private:
-    using ReaderType           = decltype(std::declval<BufferType>().new_reader());
-    using WriterType           = decltype(std::declval<BufferType>().new_writer());
-    using IoType               = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
-    using TagReaderType        = decltype(std::declval<TagBufferType>().new_reader());
-    using TagWriterType        = decltype(std::declval<TagBufferType>().new_writer());
-    using TagIoType            = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
-
     std::string  _name         = static_cast<std::string>(PortName);
     std::int16_t _priority     = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t  _min_samples  = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
@@ -10424,7 +10432,7 @@ static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::stati
 static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
 
 constexpr void
-publish_tag(Port auto &port, tag_t::map_type &&tag_data, std::size_t tag_offset = 0) noexcept {
+publish_tag(Port auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
             [&port, data = std::move(tag_data), &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
@@ -10434,7 +10442,7 @@ publish_tag(Port auto &port, tag_t::map_type &&tag_data, std::size_t tag_offset 
 }
 
 constexpr void
-publish_tag(Port auto &port, const tag_t::map_type &tag_data, std::size_t tag_offset = 0) noexcept {
+publish_tag(Port auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
             [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
@@ -10732,11 +10740,11 @@ struct SettingsCtx {
     // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
     using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
     std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
-    tag_t::map_type          context;             /// user-defined multiplexing context for which the setting is valid
+    property_map             context;             /// user-defined multiplexing context for which the setting is valid
 };
 
 template<typename T>
-concept Settings = requires(T t, std::span<const std::string> parameter_keys, const std::string &parameter_key, const tag_t::map_type &parameters, SettingsCtx ctx) {
+concept Settings = requires(T t, std::span<const std::string> parameter_keys, const std::string &parameter_key, const property_map &parameters, SettingsCtx ctx) {
     /**
      * @brief returns if there are stages settings that haven't been applied yet.
      */
@@ -10747,8 +10755,8 @@ concept Settings = requires(T t, std::span<const std::string> parameter_keys, co
      * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
      * @return key-value pairs that could not be set
      */
-    { t.set(parameters, ctx) } -> std::same_as<tag_t::map_type>;
-    { t.set(parameters) } -> std::same_as<tag_t::map_type>;
+    { t.set(parameters, ctx) } -> std::same_as<property_map>;
+    { t.set(parameters) } -> std::same_as<property_map>;
 
     /**
      * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
@@ -10760,13 +10768,13 @@ concept Settings = requires(T t, std::span<const std::string> parameter_keys, co
     /**
      * @brief return all available node settings as key-value pairs
      */
-    { t.get() } -> std::same_as<tag_t::map_type>;
+    { t.get() } -> std::same_as<property_map>;
 
     /**
      * @brief return key-pmt values map for multiple keys
      */
-    { t.get(parameter_keys, ctx) } -> std::same_as<tag_t::map_type>;
-    { t.get(parameter_keys) } -> std::same_as<tag_t::map_type>;
+    { t.get(parameter_keys, ctx) } -> std::same_as<property_map>;
+    { t.get(parameter_keys) } -> std::same_as<property_map>;
 
     /**
      * @brief return pmt value for a single key
@@ -10777,12 +10785,12 @@ concept Settings = requires(T t, std::span<const std::string> parameter_keys, co
     /**
      * @brief returns the staged/not-yet-applied new parameters
      */
-    { t.staged_parameters() } -> std::same_as<const tag_t::map_type>;
+    { t.staged_parameters() } -> std::same_as<const property_map>;
 
     /**
      * @brief synchronise map-based with actual node field-based settings
      */
-    { t.apply_staged_parameters() } -> std::same_as<const tag_t::map_type>;
+    { t.apply_staged_parameters() } -> std::same_as<const property_map>;
 
     /**
      * @brief synchronises the map-based with the node's field-based parameters
@@ -10820,8 +10828,8 @@ struct settings_base {
      * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
      * @return key-value pairs that could not be set
      */
-    [[nodiscard]] virtual tag_t::map_type
-    set(const tag_t::map_type &parameters, SettingsCtx ctx = {})
+    [[nodiscard]] virtual property_map
+    set(const property_map &parameters, SettingsCtx ctx = {})
             = 0;
 
     /**
@@ -10829,13 +10837,13 @@ struct settings_base {
      * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
      */
     virtual void
-    auto_update(const tag_t::map_type &parameters, SettingsCtx = {})
+    auto_update(const property_map &parameters, SettingsCtx = {})
             = 0;
 
     /**
      * @brief return all (or for selected multiple keys) available node settings as key-value pairs
      */
-    [[nodiscard]] virtual tag_t::map_type
+    [[nodiscard]] virtual property_map
     get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept
             = 0;
 
@@ -10845,7 +10853,7 @@ struct settings_base {
     /**
      * @brief returns the staged/not-yet-applied new parameters
      */
-    [[nodiscard]] virtual const tag_t::map_type
+    [[nodiscard]] virtual const property_map
     staged_parameters() const
             = 0;
 
@@ -10862,7 +10870,7 @@ struct settings_base {
      * returns map with key-value tags that should be forwarded
      * to dependent/child nodes.
      */
-    [[nodiscard]] virtual const tag_t::map_type
+    [[nodiscard]] virtual const property_map
     apply_staged_parameters() noexcept
             = 0;
 
@@ -10879,8 +10887,8 @@ template<typename Node>
 class basic_settings : public settings_base {
     Node                              *_node = nullptr;
     mutable std::mutex                 _lock{};
-    tag_t::map_type                    _active{}; // copy of class field settings as pmt-style map
-    tag_t::map_type                    _staged{}; // parameters to become active before the next work() call
+    property_map                       _active{}; // copy of class field settings as pmt-style map
+    property_map                       _staged{}; // parameters to become active before the next work() call
     std::set<std::string, std::less<>> _auto_update{};
     std::set<std::string, std::less<>> _auto_forward{};
 
@@ -10943,9 +10951,9 @@ public:
         std::swap(_auto_forward, other._auto_forward);
     }
 
-    [[nodiscard]] tag_t::map_type
-    set(const tag_t::map_type &parameters, SettingsCtx = {}) override {
-        tag_t::map_type ret;
+    [[nodiscard]] property_map
+    set(const property_map &parameters, SettingsCtx = {}) override {
+        property_map ret;
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
             for (const auto &[localKey, localValue] : parameters) {
@@ -10975,7 +10983,7 @@ public:
     }
 
     void
-    auto_update(const tag_t::map_type &parameters, SettingsCtx = {}) override {
+    auto_update(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<Node>()) {
             for (const auto &[localKey, localValue] : parameters) {
                 const auto &key   = localKey;
@@ -10993,16 +11001,16 @@ public:
         }
     }
 
-    [[nodiscard]] const tag_t::map_type
+    [[nodiscard]] const property_map
     staged_parameters() const noexcept override {
         std::lock_guard lg(_lock);
         return _staged;
     }
 
-    [[nodiscard]] tag_t::map_type
+    [[nodiscard]] property_map
     get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept override {
         std::lock_guard lg(_lock);
-        tag_t::map_type ret;
+        property_map    ret;
         if (parameter_keys.empty()) {
             ret = _active;
             return ret;
@@ -11043,14 +11051,14 @@ public:
      * returns map with key-value tags that should be forwarded
      * to dependent/child nodes.
      */
-    [[nodiscard]] const tag_t::map_type
+    [[nodiscard]] const property_map
     apply_staged_parameters() noexcept override {
-        tag_t::map_type forward_parameters; // parameters that should be forwarded to dependent child nodes
+        property_map forward_parameters; // parameters that should be forwarded to dependent child nodes
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
 
-            tag_t::map_type oldSettings;
-            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+            property_map    oldSettings;
+            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
                     for_each(refl::reflect(*_node).members, [&, this](auto member) {
@@ -11063,7 +11071,7 @@ public:
                 }
             }
 
-            tag_t::map_type staged;
+            property_map staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key          = localKey;
                 const auto &staged_value = localStaged_value;
@@ -11089,7 +11097,7 @@ public:
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             });
-            if constexpr (requires(Node d, const tag_t::map_type &map) { d.init(map, map); }) {
+            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
                 if (!staged.empty()) {
                     _node->init(/* old settings */ oldSettings, /* new settings */ staged);
                 }
@@ -11219,7 +11227,7 @@ concept NodeType = requires(T t, std::string str, std::size_t index) {
 
     { t.work() } -> std::same_as<work_return_t>;
 
-    { t.meta_information() } -> std::same_as<tag_t::map_type &>;
+    { t.meta_information() } -> std::same_as<property_map &>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
@@ -11331,12 +11339,12 @@ public:
 
 protected:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string                  _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
-    tag_t::map_type              _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
-    bool                         _input_tags_present  = false;
-    bool                         _output_tags_changed = false;
-    std::vector<tag_t::map_type> _tags_at_input;
-    std::vector<tag_t::map_type> _tags_at_output;
+    std::string               _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
+    property_map              _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
+    bool                      _input_tags_present  = false;
+    bool                      _output_tags_changed = false;
+    std::vector<property_map> _tags_at_input;
+    std::vector<property_map> _tags_at_output;
 
     // intermediate non-real-time<->real-time setting states
     std::unique_ptr<settings_base> _settings = std::make_unique<basic_settings<Derived>>(self());
@@ -11397,7 +11405,7 @@ public:
     /**
      * @brief used to store non-graph-processing information like UI block position etc.
      */
-    [[nodiscard]] tag_t::map_type &
+    [[nodiscard]] property_map &
     meta_information() noexcept {
         return _meta_information;
     }
@@ -11426,17 +11434,17 @@ public:
         return false;
     };
 
-    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    [[nodiscard]] constexpr std::span<const property_map>
     input_tags() const noexcept {
         return { _tags_at_input.data(), _tags_at_input.size() };
     }
 
-    [[nodiscard]] constexpr std::span<const tag_t::map_type>
+    [[nodiscard]] constexpr std::span<const property_map>
     output_tags() const noexcept {
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    [[nodiscard]] constexpr std::span<tag_t::map_type>
+    [[nodiscard]] constexpr std::span<property_map>
     output_tags() noexcept {
         _output_tags_changed = true;
         return { _tags_at_output.data(), _tags_at_output.size() };
@@ -11649,7 +11657,7 @@ public:
         _output_tags_changed     = false;
         bool auto_change         = false;
         if (tags_to_process) {
-            tag_t::map_type merged_tag_map;
+            property_map merged_tag_map;
             _input_tags_present    = true;
             std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
@@ -11676,7 +11684,7 @@ public:
 
             if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t::map_type &tag) { tag = merged_tag_map; });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](property_map &tag) { tag = merged_tag_map; });
                 _output_tags_changed = true;
             }
         }
@@ -11704,14 +11712,14 @@ public:
             // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
             _input_tags_present  = false;
             _output_tags_changed = false;
-            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t::map_type &tag) { tag.clear(); });
-            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t::map_type &tag) { tag.clear(); });
+            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](property_map &tag) { tag.clear(); });
+            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](property_map &tag) { tag.clear(); });
         };
 
         if (settings().changed()) {
             const auto forward_parameters = settings().apply_staged_parameters();
             if (!forward_parameters.empty()) {
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t::map_type &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](property_map &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
                 _output_tags_changed = true;
             }
             settings()._changed.store(false);
@@ -12520,7 +12528,7 @@ public:
     /**
      * @brief used to store non-graph-processing information like UI block position etc.
      */
-    [[nodiscard]] virtual tag_t::map_type &
+    [[nodiscard]] virtual property_map &
     meta_information() noexcept
             = 0;
 
@@ -12572,12 +12580,14 @@ private:
         using Node                             = std::remove_cvref_t<decltype(node_ref())>;
 
         constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) { (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...); }
-        (std::make_index_sequence<input_port_count>());
+        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...);
+        }(std::make_index_sequence<input_port_count>());
 
         constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) { (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...); }
-        (std::make_index_sequence<output_port_count>());
+        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...);
+        }(std::make_index_sequence<output_port_count>());
 
         static_assert(input_port_count + output_port_count > 0);
         _dynamic_ports_loaded = true;
@@ -12624,7 +12634,7 @@ public:
         return node_ref().set_name(std::move(name));
     }
 
-    [[nodiscard]] tag_t::map_type &
+    [[nodiscard]] property_map &
     meta_information() noexcept override {
         return node_ref().meta_information();
     }
@@ -12877,6 +12887,7 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
+        std::ignore        = new_node_ref->settings().apply_staged_parameters();
         return *new_node_ref.get();
     }
 
@@ -12892,7 +12903,7 @@ public:
 
     template<NodeType Node>
     auto &
-    make_node(const tag_t::map_type &initial_settings) {
+    make_node(const property_map &initial_settings) {
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
