@@ -6,14 +6,11 @@ namespace fg = fair::graph;
 
 // TODO: Unify nodes with static and dynamic ports
 //  - Port to fg::node
-//  - add init to type-erased nodes (node_model)
-//  - use init(old_setting, new_setting) instead of getting input_ports_size
-//    via constructor
 //  - use node::set_name instead of returning an empty name
 template<typename T>
 class multi_adder : public fg::node_model {
 public:
-    std::size_t input_port_count;
+    int input_port_count;
 
 protected:
     using in_port_t = fg::IN<T>;
@@ -175,10 +172,10 @@ public:
 
 int
 main() {
-    constexpr const std::size_t sources_count = 10;
-    constexpr const std::size_t events_count  = 5;
+    constexpr const int sources_count = 10;
+    constexpr const int events_count  = 5;
 
-    fg::graph                   flow_graph;
+    fg::graph           flow_graph;
 
     // Adder has sources_count inputs in total, but let's create
     // sources_count / 2 inputs on construction, and change the number
@@ -188,7 +185,7 @@ main() {
 
     // Function that adds a new source node to the graph, and connects
     // it to one of adder's ports
-    std::ignore = adder.settings().set({ { "input_port_count", sources_count } });
+    std::ignore = adder.settings().set({ { "input_port_count", 10 } });
     std::ignore = adder.settings().apply_staged_parameters();
 
     std::vector<fixed_source<double> *> sources;
