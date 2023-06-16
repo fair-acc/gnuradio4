@@ -10,15 +10,31 @@
 
 namespace fair::graph {
 
-enum class acquisition_mode {
-    Continuous,
-    Triggered,
-    PostMortem
-};
-
 enum class blocking_mode {
     NonBlocking,
     Blocking
+};
+
+enum class trigger_observer_state {
+    Start, ///< Start a new dataset
+    Stop, ///< Finish dataset
+    StopAndStart, ///< Finish pending dataset, start a new one
+    Ignore ///< Ignore tag
+};
+
+template<typename T>
+concept TriggerPredicate = requires(T p, tag_t tag) {
+    {p(tag)} -> std::convertible_to<bool>;
+};
+
+template<typename T>
+concept TriggerObserver = requires(T o, tag_t tag) {
+    {o(tag)} -> std::convertible_to<trigger_observer_state>;
+};
+
+template<typename T>
+concept TriggerObserverFactory = requires(T f) {
+    {f()}; // TODO how assert that operator() must fullfill TriggerObserver?
 };
 
 template<typename T>
@@ -60,11 +76,18 @@ public:
         return sink ? sink->get_streaming_poller(block) : nullptr;
     }
 
-    template<typename T, typename TriggerPredicate>
-    std::shared_ptr<typename data_sink<T>::dataset_poller> get_trigger_poller(std::string_view name, TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
+    template<typename T, TriggerPredicate P>
+    std::shared_ptr<typename data_sink<T>::dataset_poller> get_trigger_poller(std::string_view name, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
         auto sink = find_sink<T>(name);
         return sink ? sink->get_trigger_poller(std::move(p), pre_samples, post_samples, block) : nullptr;
+    }
+
+    template<typename T, TriggerObserverFactory F>
+    std::shared_ptr<typename data_sink<T>::dataset_poller> get_multiplexed_poller(std::string_view name, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::NonBlocking) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        return sink ? sink->get_multiplexed_poller(std::forward<F>(triggerObserverFactory), maximum_window_size, block) : nullptr;
     }
 
     template<typename T, typename Callback>
@@ -79,8 +102,8 @@ public:
         return true;
     }
 
-    template<typename T, typename TriggerPredicate, typename Callback>
-    bool register_trigger_callback(std::string_view name, TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+    template<typename T, TriggerPredicate P, typename Callback>
+    bool register_trigger_callback(std::string_view name, P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
         std::lock_guard lg{mutex};
         auto sink = find_sink<T>(name);
         if (!sink) {
@@ -88,6 +111,18 @@ public:
         }
 
         sink->register_trigger_callback(std::move(p), pre_samples, post_samples, std::move(callback));
+        return true;
+    }
+
+    template<typename T, TriggerObserver O, typename Callback>
+    bool register_multiplexed_callback(std::string_view name, std::size_t maximum_window_size, Callback callback) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        if (!sink) {
+            return false;
+        }
+
+        sink->template register_multiplexed_callback<O, Callback>(maximum_window_size, std::move(callback));
         return true;
     }
 
@@ -316,65 +351,154 @@ private:
 
         void process_bulk(std::span<const T> history, std::span<const T> in_data, int64_t reader_position, const std::vector<tag_t> &tags) override {
             auto filtered = tags; // should use views::filter once that is working everywhere
-                std::erase_if(filtered, [this](const auto &tag) {
-                    return !trigger_predicate(tag);
-                });
-                for (const auto &trigger : filtered) {
-                    // TODO fill dataset with metadata etc.
-                    DataSet<T> dataset;
-                    dataset.timing_events = {{trigger}};
-                    dataset.signal_values.reserve(pre_samples + post_samples); // TODO maybe make the circ. buffer smaller but preallocate these
-                    pending_trigger_windows.push_back({.trigger = trigger, .dataset = std::move(dataset), .pending_post_samples = post_samples});
+            std::erase_if(filtered, [this](const auto &tag) {
+                return !trigger_predicate(tag);
+            });
+            for (const auto &trigger : filtered) {
+                // TODO fill dataset with metadata etc.
+                DataSet<T> dataset;
+                dataset.timing_events = {{trigger}};
+                dataset.signal_values.reserve(pre_samples + post_samples); // TODO maybe make the circ. buffer smaller but preallocate these
+                pending_trigger_windows.push_back({.trigger = trigger, .dataset = std::move(dataset), .pending_post_samples = post_samples});
+            }
+
+            auto window = pending_trigger_windows.begin();
+            while (window != pending_trigger_windows.end()) {
+                auto &dataset = window->dataset;
+                const auto window_offset = window->trigger.index - reader_position;
+
+                if (window_offset >= 0 && dataset.signal_values.empty()) { // new trigger, write history
+                    // old history: pre-trigger data from previous in_data (if available)
+                    const auto old_history_size = std::max(static_cast<std::int64_t>(pre_samples) - window_offset, std::int64_t{0});
+                    const auto available = std::min(static_cast<std::size_t>(old_history_size), history.size());
+                    const auto old_history_view = history.last(available);
+                    dataset.signal_values.insert(dataset.signal_values.end(), old_history_view.begin(), old_history_view.end());
+
+                    // new history: pre-trigger samples from the current in_data
+                    const auto new_history_size = pre_samples - old_history_size;
+                    const auto new_history_view = in_data.subspan(window_offset - new_history_size, new_history_size);
+                    dataset.signal_values.insert(dataset.signal_values.end(), new_history_view.begin(), new_history_view.end());
                 }
 
-                auto window = pending_trigger_windows.begin();
-                while (window != pending_trigger_windows.end()) {
-                    auto &dataset = window->dataset;
-                    const auto window_offset = window->trigger.index - reader_position;
+                // write missing post-samples
+                const auto previous_post_samples = post_samples - window->pending_post_samples;
+                const auto first_requested = window_offset + previous_post_samples;
+                const auto last_requested = window_offset + post_samples - 1;
+                const auto last_available = std::min(last_requested, in_data.size() - 1);
+                const auto post_sample_view = in_data.subspan(first_requested, last_available - first_requested + 1);
+                dataset.signal_values.insert(dataset.signal_values.end(), post_sample_view.begin(), post_sample_view.end());
+                window->pending_post_samples -= post_sample_view.size();
 
-                    if (window_offset >= 0 && dataset.signal_values.empty()) { // new trigger, write history
-                        // old history: pre-trigger data from previous in_data (if available)
-                        const auto old_history_size = std::max(static_cast<std::int64_t>(pre_samples) - window_offset, std::int64_t{0});
-                        const auto available = std::min(static_cast<std::size_t>(old_history_size), history.size());
-                        const auto old_history_view = history.last(available);
-                        dataset.signal_values.insert(dataset.signal_values.end(), old_history_view.begin(), old_history_view.end());
+                if (window->pending_post_samples == 0) {
+                    publish_dataset(std::move(dataset));
+                    window = pending_trigger_windows.erase(window);
+                } else {
+                    ++window;
+                }
+            }
+        }
 
-                        // new history: pre-trigger samples from the current in_data
-                        const auto new_history_size = pre_samples - old_history_size;
-                        const auto new_history_view = in_data.subspan(window_offset - new_history_size, new_history_size);
-                        dataset.signal_values.insert(dataset.signal_values.end(), new_history_view.begin(), new_history_view.end());
-                    }
+        void flush() override {
+            for (auto &window : pending_trigger_windows) {
+                if (!window.dataset.signal_values.empty()) {
+                    publish_dataset(std::move(window.dataset));
+                }
+            }
+            pending_trigger_windows.clear();
+            if (auto p = polling_handler.lock()) {
+                p->finished = true;
+            }
+        }
+    };
 
-                    // write missing post-samples
-                    const auto previous_post_samples = post_samples - window->pending_post_samples;
-                    const auto first_requested = window_offset + previous_post_samples;
-                    const auto last_requested = window_offset + post_samples - 1;
-                    const auto last_available = std::min(last_requested, in_data.size() - 1);
-                    const auto post_sample_view = in_data.subspan(first_requested, last_available - first_requested + 1);
-                    dataset.signal_values.insert(dataset.signal_values.end(), post_sample_view.begin(), post_sample_view.end());
-                    window->pending_post_samples -= post_sample_view.size();
+    template<typename Callback, TriggerObserverFactory F>
+    struct multiplexed_listener_t : public abstract_listener_t {
+        bool block = false;
+        F observerFactory;
+        decltype(observerFactory()) observer;
+        std::optional<DataSet<T>> pending_dataset;
+        std::size_t maximum_window_size;
+        std::weak_ptr<dataset_poller> polling_handler = {};
+        Callback callback;
 
-                    if (window->pending_post_samples == 0) {
-                        publish_dataset(std::move(dataset));
-                        window = pending_trigger_windows.erase(window);
+        explicit multiplexed_listener_t(F factory, std::size_t max_window_size, Callback cb) : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), callback(cb) {}
+        explicit multiplexed_listener_t(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block) : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), polling_handler{std::move(handler)}, block(do_block) {}
+
+        inline void publish_dataset(DataSet<T> &&data) {
+            if constexpr (!std::is_same_v<Callback, bool>) {
+                callback(std::move(data));
+            } else {
+                auto poller = polling_handler.lock();
+                if (!poller) {
+                    return;
+                }
+
+                auto write_data = poller->writer.reserve_output_range(1);
+                if (block) {
+                    write_data[0] = std::move(data);
+                    write_data.publish(1);
+                } else {
+                    if (poller->writer.available() > 0) {
+                        write_data[0] = std::move(data);
+                        write_data.publish(1);
                     } else {
-                        ++window;
+                        poller->drop_count++;
                     }
                 }
             }
+        }
 
-            void flush() override {
-                for (auto &window : pending_trigger_windows) {
-                    if (!window.dataset.signal_values.empty()) {
-                        publish_dataset(std::move(window.dataset));
+        inline void fill_pending_dataset(std::span<const T> in_data, int64_t reader_position, int64_t last_sample) {
+            const auto max_samples = static_cast<int64_t>(maximum_window_size - pending_dataset->signal_values.size());
+            const auto first_sample = std::max(pending_dataset->timing_events[0][0].index - reader_position, int64_t{0});
+            const auto actual_last_sample = std::min(first_sample + max_samples - 1, last_sample);
+            if (actual_last_sample >= first_sample) {
+                pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), in_data.begin() + first_sample, in_data.begin() + actual_last_sample + 1);
+            }
+        }
+
+        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, const std::vector<tag_t> &tags) override {
+            for (const auto &tag :tags) {
+                const auto obsr = observer(tag);
+                // TODO set proper error state instead of throwing
+                if (obsr == trigger_observer_state::Stop || obsr == trigger_observer_state::StopAndStart) {
+                    if (obsr == trigger_observer_state::Stop && !pending_dataset) {
+                        throw std::runtime_error("multiplexed: Stop without start");
                     }
+
+                    pending_dataset->timing_events[0].push_back(tag);
+                    fill_pending_dataset(in_data, reader_position, tag.index - reader_position - 1);
+                    publish_dataset(std::move(*pending_dataset));
+                    pending_dataset.reset();
                 }
-                pending_trigger_windows.clear();
-                if (auto p = polling_handler.lock()) {
-                    p->finished = true;
+                if (obsr == trigger_observer_state::Start || obsr == trigger_observer_state::StopAndStart) {
+                    if (obsr == trigger_observer_state::Start && pending_dataset) {
+                        throw std::runtime_error("multiplexed: Two starts without stop");
+                    }
+                    pending_dataset = DataSet<T>();
+                    pending_dataset->signal_values.reserve(maximum_window_size); // TODO might be too much?
+                    pending_dataset->timing_events = {{tag}};
                 }
             }
-        };
+            if (pending_dataset) {
+                fill_pending_dataset(in_data, reader_position, in_data.size() - 1);
+                if (pending_dataset->signal_values.size() == maximum_window_size) {
+                    publish_dataset(std::move(*pending_dataset));
+                    pending_dataset.reset();
+                }
+            }
+        }
+
+        void flush() override {
+            if (pending_dataset) {
+                    publish_dataset(std::move(*pending_dataset));
+                    pending_dataset.reset();
+            }
+            if (auto p = polling_handler.lock()) {
+                p->finished = true;
+            }
+        }
+    };
 
     std::deque<std::unique_ptr<abstract_listener_t>> listeners;
     std::mutex listener_mutex;
@@ -406,16 +530,30 @@ public:
         return handler;
     }
 
-    template<typename TriggerPredicate, typename Callback>
-    void register_trigger_callback(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+    template<TriggerObserverFactory F>
+    std::shared_ptr<dataset_poller> get_multiplexed_poller(F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::NonBlocking) {
         std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<trigger_listener_t<Callback, TriggerPredicate>>(std::forward<TriggerPredicate>(p), pre_samples, post_samples, std::forward<Callback>(callback)), false);
-        history.resize(std::max(pre_samples, history.size()));
+        const auto block = block_mode == blocking_mode::Blocking;
+        auto handler = std::make_shared<dataset_poller>();
+        add_listener(std::make_unique<multiplexed_listener_t<bool, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
+        return handler;
     }
 
     template<typename Callback>
     void register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
         add_listener(std::make_unique<continuous_listener_t<Callback>>(max_chunk_size, std::forward<Callback>(callback)), false);
+    }
+
+    template<TriggerPredicate P, typename Callback>
+    void register_trigger_callback(P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+        add_listener(std::make_unique<trigger_listener_t<Callback, P>>(std::forward<P>(p), pre_samples, post_samples, std::forward<Callback>(callback)), false);
+        history.resize(std::max(pre_samples, history.size()));
+    }
+
+    template<TriggerObserverFactory F, typename Callback>
+    void register_multiplexed_callback(F triggerObserverFactory, std::size_t maximum_window_size, Callback callback) {
+        std::lock_guard lg(listener_mutex);
+        add_listener(std::make_unique<multiplexed_listener_t>(std::move(triggerObserverFactory), maximum_window_size, std::forward<Callback>(callback)), false);
     }
 
     // TODO this code should be called at the end of graph processing

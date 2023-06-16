@@ -61,6 +61,114 @@ struct Source : public node<Source<T>> {
     }
 };
 
+struct Observer {
+    std::optional<int> year;
+    std::optional<int> month;
+    std::optional<int> day;
+    std::optional<std::tuple<int, int, int>> last_seen;
+    bool last_matched = false;
+
+    explicit Observer(std::optional<int> y, std::optional<int> m, std::optional<int> d) : year(y), month(m), day(d) {}
+
+    static inline bool same(int x, std::optional<int> other) {
+        return other && x == *other;
+    }
+    static inline bool changed(int x, std::optional<int> other) {
+        return !same(x, other);
+    }
+
+    trigger_observer_state operator()(const tag_t &tag) {
+        const auto ty = tag.get("Y");
+        const auto tm = tag.get("M");
+        const auto td = tag.get("D");
+        if (!ty || !tm || !td) {
+            return trigger_observer_state::Ignore;
+        }
+
+        const auto tup = std::make_tuple(std::get<int>(ty->get()), std::get<int>(tm->get()), std::get<int>(td->get()));
+        const auto &[y, m, d] = tup;
+        const auto ly = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
+        const auto lm = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
+        const auto ld = last_seen ? std::optional<int>(std::get<2>(*last_seen)) : std::nullopt;
+
+        const auto year_restart = year && *year == -1 && changed(y, ly);
+        const auto year_matches = !year || *year == -1 || same(y, year);
+        const auto month_restart = month && *month == -1 && changed(m, lm);
+        const auto month_matches = !month || *month == -1 || same(m, month);
+        const auto day_restart = day && *day == -1 && changed(d, ld);
+        const auto day_matches = !day || *day == -1 || same(d, day);
+        const auto matches = year_matches && month_matches && day_matches;
+        const auto restart = year_restart || month_restart || day_restart;
+
+        trigger_observer_state r = trigger_observer_state::Ignore;
+
+        if (last_matched && !matches) {
+            r = trigger_observer_state::Stop;
+        } else if (!last_matched && matches) {
+            r = trigger_observer_state::Start;
+        } else if ((!last_seen || last_matched) && matches && restart) {
+            r = trigger_observer_state::StopAndStart;
+        }
+
+        last_seen = tup;
+        last_matched = matches;
+        return r;
+    }
+};
+
+static tag_t make_tag(tag_t::index_type index, int y, int m, int d) {
+    tag_t::map_type map;
+    return tag_t{index, {{"Y", y}, {"M", m}, {"D", d}}};
+}
+
+static std::vector<tag_t> make_test_tags(tag_t::index_type first_index, tag_t::index_type interval) {
+    std::vector<tag_t> tags;
+    for (int y = 1; y <= 3; ++y) {
+        for (int m = 1; m <= 2; ++m) {
+            for (int d = 1; d <= 3; ++d) {
+                tags.push_back(make_tag(first_index, y, m, d));
+                first_index += interval;
+            }
+        }
+    }
+    return tags;
+}
+
+static std::string to_ascii_art(std::span<trigger_observer_state> states) {
+    bool started = false;
+    std::string r;
+    for (auto s : states) {
+        switch (s) {
+        case trigger_observer_state::Start:
+            r += started ? "E" : "|#";
+            started = true;
+            break;
+        case trigger_observer_state::Stop:
+            r += started ? "|_" : "E";
+            started = false;
+            break;
+        case trigger_observer_state::StopAndStart:
+            r += started ? "||#" : "|#";
+            started = true;
+            break;
+        case trigger_observer_state::Ignore:
+            r += started ? "#" : "_";
+            break;
+        }
+    };
+    return r;
+}
+
+template<TriggerObserver O>
+std::string run_observer_test(std::span<const tag_t> tags, O o) {
+   std::vector<trigger_observer_state> r;
+    r.reserve(tags.size());
+    for (const auto &tag : tags) {
+        r.push_back(o(tag));
+    }
+    return to_ascii_art(r);
+}
+
 } // namespace fair::graph::data_sink_test
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
@@ -69,6 +177,7 @@ const boost::ut::suite DataSinkTests = [] {
     using namespace boost::ut;
     using namespace fair::graph;
     using namespace fair::graph::data_sink_test;
+    using namespace std::string_literals;
 
     "callback continuous mode"_test = [] {
         graph                  flow_graph;
@@ -186,7 +295,9 @@ const boost::ut::suite DataSinkTests = [] {
         std::vector<float> received_data;
 
         auto polling = std::async([poller, &received_data, &m] {
-            while (!poller->finished) {
+            bool seen_finished = false;
+            while (!seen_finished) {
+                seen_finished = poller->finished;
                 using namespace std::chrono_literals;
                 [[maybe_unused]] auto r = poller->process_one([&received_data, &m](const auto &dataset) {
                     std::lock_guard lg{m};
@@ -207,6 +318,86 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(received_data.size(), 10));
         expect(eq(received_data, std::vector<float>{2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001}));
         expect(eq(poller->drop_count.load(), 0));
+    };
+
+    "blocking polling multiplexed mode"_test = [] {
+        const auto tags = make_test_tags(0, 10000);
+
+        const std::int32_t n_samples = tags.size() * 10000 + 100000;
+        graph flow_graph;
+        auto &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        src.tags = std::deque<tag_t>(tags.begin(), tags.end());
+        auto &sink = flow_graph.make_node<data_sink<int32_t>>();
+        sink.set_name("test_sink");
+
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+
+        {
+            const auto t = std::span(tags);
+
+            // Test the test observer
+            expect(eq(run_observer_test(t, Observer({}, -1, {})), "|###||###||###||###||###||###"s));
+            expect(eq(run_observer_test(t, Observer(-1, {}, {})), "|######||######||######"s));
+            expect(eq(run_observer_test(t, Observer(1, {}, {})), "|######|____________"s));
+            expect(eq(run_observer_test(t, Observer(1, {}, 2)), "_|#|__|#|_____________"s));
+            expect(eq(run_observer_test(t, Observer({}, {}, 1)), "|#|__|#|__|#|__|#|__|#|__|#|__"s));
+        }
+
+        auto observer_factory = [](std::optional<int> y, std::optional<int> m, std::optional<int> d) {
+            return [y, m, d]() {
+                return Observer(y, m, d);
+            };
+        };
+        const auto factories = std::array{observer_factory({}, -1, {}),
+                                          observer_factory(-1, {}, {}),
+                                          observer_factory(1, {}, {}),
+                                          observer_factory(1, {}, 2),
+                                          observer_factory({}, {}, 1)};
+
+        // Following the patterns above, where each #/_ is 10000 samples
+        const auto expected = std::array<std::vector<int32_t>, factories.size()>{{
+            {0, 29999, 30000, 59999, 60000, 89999, 90000, 119999, 120000, 149999, 150000, 249999},
+            {0, 59999, 60000, 119999, 120000, 219999},
+            {0, 59999},
+            {10000, 19999, 40000, 49999},
+            {0, 9999, 30000, 39999, 60000, 69999, 90000, 99999, 120000, 129999, 150000, 159999}
+        }};
+        std::vector<std::shared_ptr<data_sink<int32_t>::dataset_poller>> pollers;
+
+        for (const auto &f : factories) {
+            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>("test_sink", f, 100000, blocking_mode::Blocking);
+            expect(neq(poller, nullptr));
+            pollers.push_back(poller);
+        }
+
+        std::vector<std::future<std::vector<int32_t>>> results;
+
+        for (std::size_t i = 0; i < pollers.size(); ++i) {
+            auto f = std::async([poller = pollers[i]] {
+                std::vector<int32_t> ranges;
+                bool seen_finished = false;
+                while (!seen_finished) {
+                    seen_finished = poller->finished.load();
+                    using namespace std::chrono_literals;
+                    while (poller->process_one([&ranges](const auto &dataset) {
+                        ranges.push_back(dataset.signal_values.front());
+                        ranges.push_back(dataset.signal_values.back());
+                    })) {}
+                }
+                return ranges;
+            });
+            results.push_back(std::move(f));
+        }
+
+        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        sched.work();
+
+        sink.stop(); // TODO the scheduler should call this
+
+        for (std::size_t i = 0; i < results.size(); ++i) {
+            expect(eq(results[i].get(), expected[i]));
+        }
+        expect(eq(sink.n_samples_consumed, n_samples));
     };
 
     "blocking polling trigger mode overlapping"_test = [] {
