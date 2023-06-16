@@ -765,6 +765,7 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
+        std::ignore        = new_node_ref->settings().apply_staged_parameters();
         return *new_node_ref.get();
     }
 
