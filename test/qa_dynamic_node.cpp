@@ -12,6 +12,9 @@ namespace fg = fair::graph;
 //  - use node::set_name instead of returning an empty name
 template<typename T>
 class multi_adder : public fg::node_model {
+public:
+    std::size_t input_port_count;
+
 protected:
     using in_port_t = fg::IN<T>;
     // std::list because ports don't like to change in-memory address
@@ -34,17 +37,31 @@ protected:
     std::vector<fg::property_map>      _tags_at_output;
     std::unique_ptr<fg::settings_base> _settings = std::make_unique<fg::basic_settings<multi_adder<T>>>(*this);
 
-public:
-    multi_adder(std::size_t input_ports_size) {
-        _input_ports.resize(input_ports_size);
+    void
+    apply_input_count() {
+        if (_input_ports.size() == input_port_count) return;
+
+        _input_ports.resize(input_port_count);
+
+        _dynamic_input_ports.clear();
         for (auto &input_port : _input_ports) {
             _dynamic_input_ports.emplace_back(input_port);
         }
-        _dynamic_output_ports.emplace_back(_output_port);
+        if (_dynamic_output_ports.empty()) {
+            _dynamic_output_ports.emplace_back(_output_port);
+        }
         _dynamic_ports_loaded = true;
-    };
+    }
+
+public:
+    multi_adder(std::size_t input_ports_size) : input_port_count(input_ports_size) { apply_input_count(); };
 
     ~multi_adder() override = default;
+
+    void
+    init(const fg::property_map &old_setting, const fg::property_map &new_setting) noexcept {
+        apply_input_count();
+    }
 
     std::string_view
     name() const override {
@@ -94,12 +111,6 @@ public:
     }
 
     void
-    add_new_input_port() {
-        _input_ports.push_back({});
-        _dynamic_input_ports.emplace_back(_input_ports.back());
-    }
-
-    void
     set_name(std::string name) noexcept override {}
 
     [[nodiscard]] fg::property_map &
@@ -117,6 +128,8 @@ public:
         return _unique_name;
     }
 };
+
+ENABLE_REFLECTION_FOR_TEMPLATE(multi_adder, input_port_count);
 
 template<typename T>
 std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
@@ -168,30 +181,24 @@ main() {
     fg::graph                   flow_graph;
 
     // Adder has sources_count inputs in total, but let's create
-    // sources_count - 1 inputs on construction, and add an additional one
-    // later
-    auto &adder = flow_graph.add_node(std::make_unique<multi_adder<double>>(sources_count - 1));
+    // sources_count / 2 inputs on construction, and change the number
+    // via settings
+    auto &adder = flow_graph.add_node(std::make_unique<multi_adder<double>>(sources_count / 2));
     auto &sink  = flow_graph.make_node<cout_sink<double>>(events_count);
-
-    //
-    std::vector<fixed_source<double> *> sources;
 
     // Function that adds a new source node to the graph, and connects
     // it to one of adder's ports
-    auto add_source = [&] {
+    std::ignore = adder.settings().set({ { "input_port_count", sources_count } });
+    std::ignore = adder.settings().apply_staged_parameters();
+
+    std::vector<fixed_source<double> *> sources;
+    for (std::size_t i = 0; i < sources_count; ++i) {
         auto &source = flow_graph.make_node<fixed_source<double>>();
         sources.push_back(&source);
         flow_graph.dynamic_connect(source, 0, adder, sources.size() - 1);
-    };
-
-    for (std::size_t i = 0; i < sources_count - 1; ++i) {
-        add_source();
     }
 
     flow_graph.dynamic_connect(adder, 0, sink, 0);
-
-    static_cast<multi_adder<double> &>(adder).add_new_input_port();
-    add_source();
 
     for (std::size_t i = 0; i < events_count; ++i) {
         for (auto *source : sources) {
