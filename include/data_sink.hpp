@@ -7,6 +7,7 @@
 #include "tag.hpp"
 
 #include <any>
+#include <chrono>
 
 namespace fair::graph {
 
@@ -23,7 +24,7 @@ enum class trigger_observer_state {
 };
 
 template<typename T>
-concept TriggerPredicate = requires(T p, tag_t tag) {
+concept TriggerPredicate = requires(const T p, tag_t tag) {
     {p(tag)} -> std::convertible_to<bool>;
 };
 
@@ -34,7 +35,7 @@ concept TriggerObserver = requires(T o, tag_t tag) {
 
 template<typename T>
 concept TriggerObserverFactory = requires(T f) {
-    {f()}; // TODO how assert that operator() must fullfill TriggerObserver?
+    {f()} -> TriggerObserver;
 };
 
 template<typename T>
@@ -80,7 +81,7 @@ public:
     std::shared_ptr<typename data_sink<T>::dataset_poller> get_trigger_poller(std::string_view name, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
         auto sink = find_sink<T>(name);
-        return sink ? sink->get_trigger_poller(std::move(p), pre_samples, post_samples, block) : nullptr;
+        return sink ? sink->get_trigger_poller(std::forward<P>(p), pre_samples, post_samples, block) : nullptr;
     }
 
     template<typename T, TriggerObserverFactory F>
@@ -88,6 +89,13 @@ public:
         std::lock_guard lg{mutex};
         auto sink = find_sink<T>(name);
         return sink ? sink->get_multiplexed_poller(std::forward<F>(triggerObserverFactory), maximum_window_size, block) : nullptr;
+    }
+
+    template<typename T, TriggerPredicate P>
+    std::shared_ptr<typename data_sink<T>::dataset_poller> get_snapshot_poller(std::string_view name, P p, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::NonBlocking) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        return sink ? sink->get_snapshot_poller(std::forward<P>(p), delay, block) : nullptr;
     }
 
     template<typename T, typename Callback>
@@ -98,7 +106,7 @@ public:
             return false;
         }
 
-        sink->register_streaming_callback(max_chunk_size, std::move(callback));
+        sink->register_streaming_callback(max_chunk_size, std::forward<Callback>(callback));
         return true;
     }
 
@@ -110,7 +118,7 @@ public:
             return false;
         }
 
-        sink->register_trigger_callback(std::move(p), pre_samples, post_samples, std::move(callback));
+        sink->register_trigger_callback(std::forward<P>(p), pre_samples, post_samples, std::forward<Callback>(callback));
         return true;
     }
 
@@ -123,6 +131,18 @@ public:
         }
 
         sink->template register_multiplexed_callback<O, Callback>(maximum_window_size, std::move(callback));
+        return true;
+    }
+
+    template<typename T, TriggerPredicate P, typename Callback>
+    bool register_snapshot_callback(std::string_view name, P p, std::chrono::nanoseconds delay, Callback callback) {
+        std::lock_guard lg{mutex};
+        auto sink = find_sink<T>(name);
+        if (!sink) {
+            return false;
+        }
+
+        sink->template register_snapshot_callback<P, Callback>(std::forward<P>(p), delay, std::forward<Callback>(callback));
         return true;
     }
 
@@ -154,9 +174,7 @@ class data_sink : public node<data_sink<T>> {
 public:
     IN<T>        in;
     std::size_t  n_samples_consumed = 0;
-    std::size_t  n_samples_max      = -1;
-    int64_t      last_tag_position  = -1;
-    float        sample_rate        = -1.0f;
+    float        sample_rate        = 10000;
 
     static constexpr std::size_t listener_buffer_size = 65536;
 
@@ -168,8 +186,7 @@ public:
         decltype(buffer.new_reader()) reader = buffer.new_reader();
         decltype(buffer.new_writer()) writer = buffer.new_writer();
 
-        template<typename Handler>
-        [[nodiscard]] bool process_bulk(Handler fnc) {
+        [[nodiscard]] bool process_bulk(std::invocable<std::span<Payload>> auto fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -181,8 +198,7 @@ public:
             return true;
         }
 
-        template<typename Handler>
-        [[nodiscard]] bool process_one(Handler fnc) {
+        [[nodiscard]] bool process_one(std::invocable<Payload> auto fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -207,6 +223,7 @@ private:
 
     struct abstract_listener_t {
         virtual ~abstract_listener_t() = default;
+        virtual void set_sample_rate(float) {}
         virtual void process_bulk(std::span<const T> history, std::span<const T> data, int64_t reader_position, const std::vector<tag_t> &tags) = 0;
         virtual void flush() = 0;
     };
@@ -298,33 +315,36 @@ private:
         }
     };
 
-    template<typename Callback, typename TriggerPredicate>
+    template<typename Callback, TriggerPredicate P>
     struct trigger_listener_t : public abstract_listener_t {
         bool block = false;
         std::size_t pre_samples = 0;
         std::size_t post_samples = 0;
 
-        TriggerPredicate trigger_predicate = {};
+        P trigger_predicate = {};
         std::deque<pending_window_t> pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<dataset_poller> polling_handler = {};
 
         Callback callback;
 
-        explicit trigger_listener_t(TriggerPredicate predicate, std::shared_ptr<dataset_poller> handler, std::size_t pre, std::size_t post, bool do_block)
+        explicit trigger_listener_t(P predicate, std::shared_ptr<dataset_poller> handler, std::size_t pre, std::size_t post, bool do_block)
             : block(do_block)
             , pre_samples(pre)
             , post_samples(post)
-            , trigger_predicate(std::forward<TriggerPredicate>(predicate))
+            , trigger_predicate(std::forward<P>(predicate))
             , polling_handler{std::move(handler)}
         {}
 
-        explicit trigger_listener_t(TriggerPredicate predicate, std::size_t pre, std::size_t post, Callback cb)
+        explicit trigger_listener_t(P predicate, std::size_t pre, std::size_t post, Callback cb)
             : pre_samples(pre)
             , post_samples(post)
-            , trigger_predicate(std::forward<TriggerPredicate>(predicate))
+            , trigger_predicate(std::forward<P>(predicate))
             , callback{std::forward<Callback>(cb)}
         {}
 
+        // TODO all the dataset-based listeners could share publish_dataset and parts of flush (closing pollers),
+        // but if we want to use different datastructures/pass additional info, this might become moot again, so
+        // I leave it as is for now.
         inline void publish_dataset(DataSet<T> &&data) {
             if constexpr (!std::is_same_v<Callback, bool>) {
                 callback(std::move(data));
@@ -500,6 +520,91 @@ private:
         }
     };
 
+    struct pending_snapshot {
+        tag_t tag;
+        tag_t::index_type requested_sample;
+    };
+
+    template<typename Callback, TriggerPredicate P>
+    struct snapshot_listener_t : public abstract_listener_t {
+        bool block = false;
+        std::chrono::nanoseconds time_delay;
+        tag_t::index_type sample_delay = 0;
+        P trigger_predicate = {};
+        std::deque<pending_snapshot> pending;
+        std::weak_ptr<dataset_poller> polling_handler = {};
+        Callback callback;
+
+        explicit snapshot_listener_t(P p, std::chrono::nanoseconds delay, std::shared_ptr<dataset_poller> poller, bool do_block) : block(do_block), time_delay(delay), trigger_predicate(std::forward<P>(p)), polling_handler{std::move(poller)} {}
+        explicit snapshot_listener_t(P p, std::chrono::nanoseconds delay, Callback cb) : trigger_predicate(std::forward<P>(p)), time_delay(std::forward<Callback>(cb)) {}
+
+        inline void publish_dataset(DataSet<T> &&data) {
+            if constexpr (!std::is_same_v<Callback, bool>) {
+                callback(std::move(data));
+            } else {
+                auto poller = polling_handler.lock();
+                if (!poller) {
+                    return;
+                }
+
+                auto write_data = poller->writer.reserve_output_range(1);
+                if (block) {
+                    write_data[0] = std::move(data);
+                    write_data.publish(1);
+                } else {
+                    if (poller->writer.available() > 0) {
+                        write_data[0] = std::move(data);
+                        write_data.publish(1);
+                    } else {
+                        poller->drop_count++;
+                    }
+                }
+            }
+        }
+
+        void set_sample_rate(float r) override {
+            sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * r);
+        }
+
+        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, const std::vector<tag_t> &tags) override {
+            auto triggers = tags; // should use views::filter once that is working everywhere
+            std::erase_if(triggers, [this](const auto &tag) {
+                return !trigger_predicate(tag);
+            });
+
+            if (!triggers.empty()) {
+                for (const auto &trigger : triggers) {
+                    pending.push_back({trigger, trigger.index + sample_delay});
+                }
+                // can be unsorted if sample_delay changed. Alternative: iterate the whole list below
+                std::stable_sort(pending.begin(), pending.end(), [](const auto &lhs, const auto &rhs) { return lhs.requested_sample < rhs.requested_sample; });
+            }
+
+            auto it = pending.begin();
+            while (it != pending.end()) {
+                const auto rel_pos = it->requested_sample - reader_position;
+                assert(rel_pos >= 0);
+                if (rel_pos >= in_data.size()) {
+                    break;
+                }
+
+                DataSet<T> dataset;
+                dataset.timing_events = {{it->tag}};
+                dataset.signal_values = {in_data[rel_pos]};
+                publish_dataset(std::move(dataset));
+
+                it = pending.erase(it);
+            }
+        }
+
+        void flush() override {
+            pending.clear();
+            if (auto p = polling_handler.lock()) {
+                p->finished = true;
+            }
+        }
+    };
+
     std::deque<std::unique_ptr<abstract_listener_t>> listeners;
     std::mutex listener_mutex;
 
@@ -539,6 +644,15 @@ public:
         return handler;
     }
 
+    template<TriggerPredicate P>
+    std::shared_ptr<dataset_poller> get_snapshot_poller(P p, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::NonBlocking) {
+        const auto block = block_mode == blocking_mode::Blocking;
+        auto handler = std::make_shared<dataset_poller>();
+        std::lock_guard lg(listener_mutex);
+        add_listener(std::make_unique<snapshot_listener_t<bool, P>>(std::forward<P>(p), delay, handler, block), block);
+        return handler;
+    }
+
     template<typename Callback>
     void register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
         add_listener(std::make_unique<continuous_listener_t<Callback>>(max_chunk_size, std::forward<Callback>(callback)), false);
@@ -554,6 +668,12 @@ public:
     void register_multiplexed_callback(F triggerObserverFactory, std::size_t maximum_window_size, Callback callback) {
         std::lock_guard lg(listener_mutex);
         add_listener(std::make_unique<multiplexed_listener_t>(std::move(triggerObserverFactory), maximum_window_size, std::forward<Callback>(callback)), false);
+    }
+
+    template<TriggerPredicate P, typename Callback>
+    void register_snapshot_callback(P p, std::chrono::nanoseconds delay, Callback callback) {
+        std::lock_guard lg(listener_mutex);
+        add_listener(std::make_unique<snapshot_listener_t>(std::forward<P>(p), delay, std::forward<Callback>(callback)), false);
     }
 
     // TODO this code should be called at the end of graph processing
@@ -617,6 +737,7 @@ private:
     std::size_t history_available = 0;
 
     void add_listener(std::unique_ptr<abstract_listener_t>&& l, bool block) {
+        l->set_sample_rate(sample_rate); // TODO also call when sample_rate changes
         if (block) {
             listeners.push_back(std::move(l));
         } else {
@@ -627,6 +748,6 @@ private:
 
 }
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, n_samples_consumed, sample_rate);
 
 #endif

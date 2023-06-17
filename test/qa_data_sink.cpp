@@ -298,7 +298,6 @@ const boost::ut::suite DataSinkTests = [] {
             bool seen_finished = false;
             while (!seen_finished) {
                 seen_finished = poller->finished;
-                using namespace std::chrono_literals;
                 [[maybe_unused]] auto r = poller->process_one([&received_data, &m](const auto &dataset) {
                     std::lock_guard lg{m};
                     received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
@@ -317,6 +316,52 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(sink.n_samples_consumed, n_samples));
         expect(eq(received_data.size(), 10));
         expect(eq(received_data, std::vector<float>{2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001}));
+        expect(eq(poller->drop_count.load(), 0));
+    };
+
+    "blocking polling snapshot mode"_test = [] {
+        constexpr std::int32_t n_samples = 200000;
+
+        graph flow_graph;
+        auto &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        src.tags = {{3000, {{"TYPE", "TRIGGER"}}}, tag_t{8000, {{"TYPE", "NO_TRIGGER"}}}, {180000, {{"TYPE", "TRIGGER"}}}};
+        auto &sink = flow_graph.make_node<data_sink<int32_t>>();
+        sink.set_name("test_sink");
+
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+
+        auto is_trigger = [](const tag_t &tag) {
+            const auto v = tag.get("TYPE");
+            return v && std::get<std::string>(v->get()) == "TRIGGER";
+        };
+
+        const auto delay = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
+        auto poller = data_sink_registry::instance().get_snapshot_poller<int32_t>("test_sink", is_trigger, delay, blocking_mode::Blocking);
+        expect(neq(poller, nullptr));
+
+        auto poller_result = std::async([poller] {
+            std::vector<int32_t> received_data;
+
+            bool seen_finished = false;
+            while (!seen_finished) {
+                seen_finished = poller->finished;
+                [[maybe_unused]] auto r = poller->process_one([&received_data](const auto &dataset) {
+                    received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                });
+            }
+
+            return received_data;
+        });
+
+        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        sched.work();
+
+        sink.stop(); // TODO the scheduler should call this
+
+        const auto received_data = poller_result.get();
+
+        expect(eq(sink.n_samples_consumed, n_samples));
+        expect(eq(received_data, std::vector<int32_t>{8000, 185000}));
         expect(eq(poller->drop_count.load(), 0));
     };
 
@@ -378,7 +423,6 @@ const boost::ut::suite DataSinkTests = [] {
                 bool seen_finished = false;
                 while (!seen_finished) {
                     seen_finished = poller->finished.load();
-                    using namespace std::chrono_literals;
                     while (poller->process_one([&ranges](const auto &dataset) {
                         ranges.push_back(dataset.signal_values.front());
                         ranges.push_back(dataset.signal_values.back());
