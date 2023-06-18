@@ -291,18 +291,16 @@ const boost::ut::suite DataSinkTests = [] {
         auto poller = data_sink_registry::instance().get_trigger_poller<float>("test_sink", is_trigger, 3, 2, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
-        std::mutex m;
-        std::vector<float> received_data;
-
-        auto polling = std::async([poller, &received_data, &m] {
+        auto polling = std::async([poller] {
+            std::vector<float> received_data;
             bool seen_finished = false;
             while (!seen_finished) {
                 seen_finished = poller->finished;
-                [[maybe_unused]] auto r = poller->process_one([&received_data, &m](const auto &dataset) {
-                    std::lock_guard lg{m};
+                [[maybe_unused]] auto r = poller->process_one([&received_data](const auto &dataset) {
                     received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
                 });
             }
+            return received_data;
         });
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
@@ -310,9 +308,8 @@ const boost::ut::suite DataSinkTests = [] {
 
         sink.stop(); // TODO the scheduler should call this
 
-        polling.wait();
+        const auto received_data = polling.get();
 
-        std::lock_guard lg{m};
         expect(eq(sink.n_samples_consumed, n_samples));
         expect(eq(received_data.size(), 10));
         expect(eq(received_data, std::vector<float>{2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001}));
@@ -467,21 +464,19 @@ const boost::ut::suite DataSinkTests = [] {
         auto poller = data_sink_registry::instance().get_trigger_poller<float>("test_sink", is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
-        std::mutex m;
-        std::vector<float> received_data;
-
-        auto polling = std::async([poller, &received_data, &m] {
+        auto polling = std::async([poller] {
+            std::vector<float> received_data;
             bool seen_finished = false;
             while (!seen_finished) {
                 // TODO make finished vs. pending data handling actually thread-safe
                 seen_finished = poller->finished.load();
-                while (poller->process_one([&received_data, &m](const auto &dataset) {
-                    std::lock_guard lg{m};
+                while (poller->process_one([&received_data](const auto &dataset) {
                     expect(eq(dataset.signal_values.size(), 5000));
                     received_data.push_back(dataset.signal_values.front());
                     received_data.push_back(dataset.signal_values.back());
                 })) {}
             }
+            return received_data;
         });
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
@@ -489,9 +484,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         sink.stop(); // TODO the scheduler should call this
 
-        polling.wait();
-
-        std::lock_guard lg{m};
+        const auto received_data = polling.get();
         auto expected_start = std::vector<float>{57000, 61999, 57001, 62000, 57002};
         expect(eq(sink.n_samples_consumed, n_samples));
         expect(eq(received_data.size(), 2 * n_triggers));
@@ -572,7 +565,7 @@ const boost::ut::suite DataSinkTests = [] {
                 })) {}
             }
 
-            expect(eq(samples_seen + poller->drop_count.load(), n_samples));
+            expect(eq(samples_seen + poller->drop_count, n_samples));
         });
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
