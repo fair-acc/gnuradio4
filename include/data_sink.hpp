@@ -23,6 +23,9 @@ enum class trigger_observer_state {
     Ignore ///< Ignore tag
 };
 
+// TODO is the scope where want these?
+struct null_type {};
+
 template<typename T>
 concept TriggerPredicate = requires(const T p, tag_t tag) {
     {p(tag)} -> std::convertible_to<bool>;
@@ -251,7 +254,7 @@ private:
         {}
 
         void process_bulk(std::span<const T>, std::span<const T> data, int64_t /*reader_position*/, const std::vector<tag_t> &tags) override {
-            if constexpr (!std::is_same_v<Callback, bool>) {
+            if constexpr (!std::is_same_v<Callback, null_type>) {
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
                     const auto n = std::min(data.size(), buffer.size() - buffer_fill);
@@ -302,7 +305,7 @@ private:
         }
 
         void flush() override {
-            if constexpr (!std::is_same_v<Callback, bool>) {
+            if constexpr (!std::is_same_v<Callback, null_type>) {
                 if (buffer_fill > 0) {
                     callback(std::span(buffer).first(buffer_fill));
                     buffer_fill = 0;
@@ -346,7 +349,7 @@ private:
         // but if we want to use different datastructures/pass additional info, this might become moot again, so
         // I leave it as is for now.
         inline void publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, bool>) {
+            if constexpr (!std::is_same_v<Callback, null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -445,7 +448,7 @@ private:
         explicit multiplexed_listener_t(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block) : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), polling_handler{std::move(handler)}, block(do_block) {}
 
         inline void publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, bool>) {
+            if constexpr (!std::is_same_v<Callback, null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -539,7 +542,7 @@ private:
         explicit snapshot_listener_t(P p, std::chrono::nanoseconds delay, Callback cb) : trigger_predicate(std::forward<P>(p)), time_delay(std::forward<Callback>(cb)) {}
 
         inline void publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, bool>) {
+            if constexpr (!std::is_same_v<Callback, null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -621,7 +624,7 @@ public:
         std::lock_guard lg(listener_mutex);
         const auto block = block_mode == blocking_mode::Blocking;
         auto handler = std::make_shared<poller>();
-        add_listener(std::make_unique<continuous_listener_t<bool>>(handler, block), block);
+        add_listener(std::make_unique<continuous_listener_t<null_type>>(handler, block), block);
         return handler;
     }
 
@@ -630,7 +633,7 @@ public:
         const auto block = block_mode == blocking_mode::Blocking;
         auto handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<trigger_listener_t<bool, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
+        add_listener(std::make_unique<trigger_listener_t<null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
         history.resize(std::max(pre_samples, history.size()));
         return handler;
     }
@@ -640,7 +643,7 @@ public:
         std::lock_guard lg(listener_mutex);
         const auto block = block_mode == blocking_mode::Blocking;
         auto handler = std::make_shared<dataset_poller>();
-        add_listener(std::make_unique<multiplexed_listener_t<bool, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
+        add_listener(std::make_unique<multiplexed_listener_t<null_type, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
         return handler;
     }
 
@@ -649,7 +652,7 @@ public:
         const auto block = block_mode == blocking_mode::Blocking;
         auto handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<snapshot_listener_t<bool, P>>(std::forward<P>(p), delay, handler, block), block);
+        add_listener(std::make_unique<snapshot_listener_t<null_type, P>>(std::forward<P>(p), delay, handler, block), block);
         return handler;
     }
 
