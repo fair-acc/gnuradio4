@@ -191,16 +191,41 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        std::size_t samples_seen = 0;
-        std::size_t chunks_seen = 0;
-        auto callback = [&samples_seen, &chunks_seen](std::span<const float> buffer) {
+        std::atomic<std::size_t> samples_seen1 = 0;
+        std::atomic<std::size_t> chunks_seen1 = 0;
+        auto callback = [&samples_seen1, &chunks_seen1](std::span<const float> buffer) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
-                expect(eq(buffer[i], static_cast<float>(samples_seen + i)));
+                expect(eq(buffer[i], static_cast<float>(samples_seen1 + i)));
             }
 
-            samples_seen += buffer.size();
-            chunks_seen++;
-            if (chunks_seen < 201) {
+            samples_seen1 += buffer.size();
+            chunks_seen1++;
+            if (chunks_seen1 < 201) {
+                expect(eq(buffer.size(), chunk_size));
+            } else {
+                expect(eq(buffer.size(), 5));
+            }
+        };
+
+        std::mutex m2;
+        std::size_t samples_seen2 = 0;
+        std::size_t chunks_seen2 = 0;
+        std::vector<tag_t> received_tags;
+        auto callback_with_tags = [&samples_seen2, &chunks_seen2, &m2, &received_tags](std::span<const float> buffer, std::span<const tag_t> tags) {
+            for (std::size_t i = 0; i < buffer.size(); ++i) {
+                expect(eq(buffer[i], static_cast<float>(samples_seen2 + i)));
+            }
+
+            for (const auto &tag : tags) {
+                ge(tag.index, static_cast<tag_t::index_type>(samples_seen2));
+                lt(tag.index, samples_seen2 + buffer.size());
+            }
+
+            auto lg = std::lock_guard{m2};
+            received_tags.insert(received_tags.end(), tags.begin(), tags.end());
+            samples_seen2 += buffer.size();
+            chunks_seen2++;
+            if (chunks_seen2 < 201) {
                 expect(eq(buffer.size(), chunk_size));
             } else {
                 expect(eq(buffer.size(), 5));
@@ -208,15 +233,20 @@ const boost::ut::suite DataSinkTests = [] {
         };
 
         expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", chunk_size, callback));
+        expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", chunk_size, callback_with_tags));
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
 
         sink.stop(); // TODO the scheduler should call this
 
-        expect(eq(chunks_seen, 201));
+        auto lg = std::lock_guard{m2};
+        expect(eq(chunks_seen1.load(), 201));
+        expect(eq(chunks_seen2, 201));
         expect(eq(sink.n_samples_consumed, n_samples));
-        expect(eq(samples_seen, n_samples));
+        expect(eq(samples_seen1.load(), n_samples));
+        expect(eq(samples_seen2, n_samples));
+        expect(eq(received_tags.size(), src.tags.size()));
     };
 
     "blocking polling continuous mode"_test = [] {

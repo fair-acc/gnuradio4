@@ -172,6 +172,17 @@ private:
     }
 };
 
+namespace detail {
+    template<typename T, typename P>
+    std::span<T> find_matching_prefix(std::span<T> s, P predicate) {
+        const auto nm = std::find_if_not(s.begin(), s.end(), predicate);
+        if (nm == s.end()) {
+            return s;
+        }
+        return s.first(std::distance(s.begin(), nm));
+    }
+}
+
 template<typename T>
 class data_sink : public node<data_sink<T>> {
 public:
@@ -233,10 +244,17 @@ private:
 
     template<typename Callback>
     struct continuous_listener_t : public abstract_listener_t {
+        static constexpr auto has_callback = !std::is_same_v<Callback, null_type>;
+        static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>;
+
+        std::optional<int64_t> first_sample_seen;
         bool block = false;
+        std::size_t samples_written = 0;
+
         // callback-only
         std::size_t buffer_fill = 0;
         std::vector<T> buffer;
+        std::vector<tag_t> tag_buffer;
 
         // polling-only
         std::weak_ptr<poller> polling_handler = {};
@@ -253,16 +271,46 @@ private:
             , polling_handler{std::move(poller)}
         {}
 
-        void process_bulk(std::span<const T>, std::span<const T> data, int64_t /*reader_position*/, const std::vector<tag_t> &tags) override {
-            if constexpr (!std::is_same_v<Callback, null_type>) {
+        void process_bulk(std::span<const T>, std::span<const T> data, int64_t reader_position, const std::vector<tag_t> &tags_) override {
+            using namespace fair::graph::detail;
+            if (!first_sample_seen) {
+                first_sample_seen = reader_position;
+            }
+
+            auto tags = std::vector(tags_.begin(), tags_.end());
+            // send indices relative to first sample the user received
+            for (tag_t &tag : tags) {
+                tag.index -= *first_sample_seen;
+            }
+
+            auto tag_view = std::span(tags);
+
+            auto match_before = [](int64_t last_index) {
+                return [&last_index](const tag_t &tag) {
+                    return tag.index < last_index;
+                };
+            };
+
+            if constexpr (has_callback) {
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
                     const auto n = std::min(data.size(), buffer.size() - buffer_fill);
                     std::copy(data.begin(), data.begin() + n, buffer.begin() + buffer_fill);
+                    if constexpr (callback_takes_tags) {
+                        const auto ts = find_matching_prefix(tag_view, match_before(samples_written + n));
+                        tag_buffer.insert(tag_buffer.end(), ts.begin(), ts.end());
+                        tag_view = tag_view.last(tag_view.size() - ts.size());
+                    }
                     buffer_fill += n;
                     if (buffer_fill == buffer.size()) {
-                        callback(std::span(buffer));
+                        if constexpr (callback_takes_tags) {
+                            callback(std::span(buffer), std::span(tag_buffer));
+                        } else {
+                            callback(std::span(buffer));
+                        }
+                        samples_written += buffer.size();
                         buffer_fill = 0;
+                        tag_buffer.clear();
                     }
 
                     data = data.last(data.size() - n);
@@ -270,7 +318,14 @@ private:
 
                 // send out complete chunks directly
                 while (data.size() > buffer.size()) {
-                    callback(data.first(buffer.size()));
+                    if constexpr (callback_takes_tags) {
+                        const auto ts = find_matching_prefix(tag_view, match_before(samples_written + buffer.size()));
+                        tag_view = tag_view.last(tag_view.size() - ts.size());
+                        callback(data.first(buffer.size()), ts);
+                    } else {
+                        callback(data.first(buffer.size()));
+                    }
+                    samples_written += buffer.size();
                     data = data.last(data.size() - buffer.size());
                 }
 
@@ -278,6 +333,9 @@ private:
                 if (!data.empty()) {
                     std::copy(data.begin(), data.end(), buffer.begin());
                     buffer_fill = data.size();
+                    if constexpr (callback_takes_tags) {
+                        tag_buffer.insert(tag_buffer.end(), tag_view.begin(), tag_view.end());
+                    }
                 }
             } else {
                 auto poller = polling_handler.lock();
@@ -305,9 +363,14 @@ private:
         }
 
         void flush() override {
-            if constexpr (!std::is_same_v<Callback, null_type>) {
+            if constexpr (has_callback) {
                 if (buffer_fill > 0) {
-                    callback(std::span(buffer).first(buffer_fill));
+                    if constexpr (callback_takes_tags) {
+                        callback(std::span(buffer).first(buffer_fill), std::span(tag_buffer));
+                        tag_buffer.clear();
+                    } else {
+                        callback(std::span(buffer).first(buffer_fill));
+                    }
                     buffer_fill = 0;
                 }
             } else {
