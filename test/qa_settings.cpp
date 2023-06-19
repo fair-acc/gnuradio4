@@ -83,13 +83,13 @@ struct Source : public node<Source<T>> {
     float        sample_rate        = 1000.0f;
 
     void
-    init(const property_map &old_settings, const property_map &new_settings) {
+    init(const property_map &/*old_settings*/, const property_map &/*new_settings*/) {
         // optional init function that is called after construction and whenever settings change
-        fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
+        fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t >(n_tag_offset));
     }
 
     constexpr std::make_signed_t<std::size_t>
-    available_samples(const Source &self) noexcept {
+    available_samples(const Source &/*self*/) noexcept {
         const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
         return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }
@@ -170,7 +170,7 @@ struct Sink : public node<Sink<T>> {
         */
 
         if constexpr (fair::meta::any_simd<V>) {
-            n_samples_consumed += V::size();
+            n_samples_consumed += static_cast<std::int32_t>(V::size());
         } else {
             n_samples_consumed++;
         }
@@ -230,7 +230,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().changed()) << "settings changed";
         auto forwarding_parameter = block1.settings().apply_staged_parameters();
-        expect(eq(forwarding_parameter.size(), 1)) << "initial forward declarations";
+        expect(eq(forwarding_parameter.size(), 1u)) << "initial forward declarations";
         block1.settings().update_active_parameters();
 
         // src -> block1 -> block2 -> sink
@@ -272,9 +272,9 @@ const boost::ut::suite SettingsTests = [] {
 #if !defined(__clang_major__) && __clang_major__ <= 15
         "with init parameter"_test = [] {
             auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
-            expect(eq(block.settings().staged_parameters().size(), 1));
+            expect(eq(block.settings().staged_parameters().size(), 1u));
             std::ignore = block.settings().apply_staged_parameters();
-            expect(eq(block.settings().staged_parameters().size(), 0));
+            expect(eq(block.settings().staged_parameters().size(), 0u));
             block.settings().update_active_parameters();
             expect(eq(block.settings().get().size(), 5UL));
             expect(eq(block.scaling_factor, 2.f));

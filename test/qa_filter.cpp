@@ -83,9 +83,9 @@ const boost::ut::suite SequenceTests = [] {
         const std::size_t fir_settling_time  = estimate_settling_time<double>(fir_response);
         const std::size_t iir_settling_time1 = estimate_settling_time<double>(iir_response1);
         const std::size_t iir_settling_time2 = estimate_settling_time<double>(iir_response2);
-        expect(eq(fir_settling_time, 10)) << "FIR settling time";
-        expect(eq(iir_settling_time1, 5)) << "IIR (I) settling time";
-        expect(eq(iir_settling_time2, 5)) << "IIR (II) settling time";
+        expect(eq(fir_settling_time, 10u)) << "FIR settling time";
+        expect(eq(iir_settling_time1, 5u)) << "IIR (I) settling time";
+        expect(eq(iir_settling_time2, 5u)) << "IIR (II) settling time";
 
         //        fmt::print("FIR      filter settling time: {} ms\n", fir_settling_time);
         //        fmt::print("IIR (I)  filter settling time: {} ms\n", iir_settling_time1);

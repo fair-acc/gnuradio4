@@ -595,11 +595,11 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
             static constexpr std::array si_prefixes{'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M',
                                                     'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'};
-            static constexpr double base = 1000.0;
+            static constexpr long double base = 1000.0l;
             long double value = value_base;
 
-            std::size_t exponent = 10;
-            if (value == 0) {
+            std::size_t exponent = 10u;
+            if (value == 0.0l) {
                 return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ",
                                    si_prefixes[exponent], unit);
             }
@@ -607,22 +607,22 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
                 value /= base;
                 ++exponent;
             }
-            while (value < 1.0 && exponent > 0) {
+            while (value < 1.0l && exponent > 0u) {
                 value *= base;
                 --exponent;
             }
             if (significant_digits == 0 && exponent > 10) {
-              if (value < 10.0) {
-                significant_digits = 2;
-              } else if (value < 100.0) {
-                significant_digits = 1;
+              if (value < 10.0l) {
+                significant_digits = 2u;
+              } else if (value < 100.0l) {
+                significant_digits = 1u;
               }
-            } else if (significant_digits == 1 && value >= 100.0) {
+            } else if (significant_digits == 1 && value >= 100.0l) {
               --significant_digits;
-            } else if (significant_digits >= 2) {
-              if (value >= 100.0) {
-                significant_digits -= 2;
-              } else if (value >= 10.0) {
+            } else if (significant_digits >= 2u) {
+              if (value >= 100.0l) {
+                significant_digits -= 2u;
+              } else if (value >= 10.0l) {
                 --significant_digits;
               }
             }
@@ -789,7 +789,7 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
                 // not time-critical post-processing starts here
                 const auto time_differences_ns = utils::diff<N_ITERATIONS, long double>(stop_iter, start);
                 const auto ns = stop_iter[N_ITERATIONS - 1] - start;
-                const long double duration_s = 1e-9 * static_cast<long double>(ns.count());
+                const long double duration_s = 1e-9l * static_cast<long double>(ns.count());
 
                 const auto add_statistics = [&]<typename T>(ResultMap &map, const T &time_diff) {
                     if constexpr (N_ITERATIONS != 1) {

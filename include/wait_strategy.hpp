@@ -344,7 +344,7 @@ struct NO_SPIN_WAIT {};
 
 template<typename SPIN_WAIT = NO_SPIN_WAIT>
 class AtomicMutex {
-    std::atomic_flag _lock = ATOMIC_FLAG_INIT;
+    std::atomic_flag _lock{};
     SPIN_WAIT        _spin_wait;
 
 public:

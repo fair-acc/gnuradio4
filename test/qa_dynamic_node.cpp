@@ -10,7 +10,7 @@ namespace fg = fair::graph;
 template<typename T>
 class multi_adder : public fg::node_model {
 public:
-    int input_port_count;
+    std::int32_t input_port_count;
 
 protected:
     using in_port_t = fg::IN<T>;
@@ -36,9 +36,9 @@ protected:
 
     void
     apply_input_count() {
-        if (_input_ports.size() == input_port_count) return;
+        if (_input_ports.size() == static_cast<std::size_t>(input_port_count)) return;
 
-        _input_ports.resize(input_port_count);
+        _input_ports.resize(static_cast<std::size_t>(input_port_count));
 
         _dynamic_input_ports.clear();
         for (auto &input_port : _input_ports) {
@@ -51,25 +51,25 @@ protected:
     }
 
 public:
-    multi_adder(std::size_t input_ports_size) : input_port_count(input_ports_size) { apply_input_count(); };
+    explicit multi_adder(std::int32_t input_ports_size) : input_port_count(input_ports_size) { apply_input_count(); };
 
     ~multi_adder() override = default;
 
     void
-    init(const fg::property_map &old_setting, const fg::property_map &new_setting) noexcept {
+    init(const fg::property_map &/*old_setting*/, const fg::property_map &/*new_setting*/) noexcept {
         apply_input_count();
     }
 
-    std::string_view
+    [[nodiscard]] std::string_view
     name() const override {
         return _unique_name;
     }
 
     // TODO: integrate with node::work
-    virtual fg::work_return_t
+    fg::work_return_t
     work() override {
         // TODO: Rewrite with ranges once we can use them
-        std::size_t available_samples = -1;
+        std::size_t available_samples = static_cast<size_t>(-1);
         for (const auto &input_port : _input_ports) {
             auto available_samples_for_port = input_port.streamReader().available();
             if (available_samples_for_port < available_samples) {
@@ -102,13 +102,13 @@ public:
         return fg::work_return_t::OK;
     }
 
-    virtual void *
+    void *
     raw() override {
         return this;
     }
 
     void
-    set_name(std::string name) noexcept override {}
+    set_name(std::string /*name*/) noexcept override {}
 
     [[nodiscard]] fg::property_map &
     meta_information() noexcept override {
@@ -134,7 +134,7 @@ std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
 template<typename T>
 class fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {
 public:
-    fixed_source() {}
+    fixed_source() = default;
 
     T value = 1;
 
@@ -157,7 +157,7 @@ class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
     std::size_t _remaining = 0;
 
 public:
-    cout_sink() {}
+    cout_sink() = default;
 
     explicit cout_sink(std::size_t count) : _remaining(count) {}
 
@@ -172,8 +172,8 @@ public:
 
 int
 main() {
-    constexpr const int sources_count = 10;
-    constexpr const int events_count  = 5;
+    constexpr const std::size_t sources_count = 10;
+    constexpr const std::size_t events_count  = 5;
 
     fg::graph           flow_graph;
 
@@ -181,7 +181,7 @@ main() {
     // sources_count / 2 inputs on construction, and change the number
     // via settings
     auto &adder = flow_graph.add_node(std::make_unique<multi_adder<double>>(sources_count / 2));
-    auto &sink  = flow_graph.make_node<cout_sink<double>>(events_count);
+    auto &sink  = flow_graph.make_node<cout_sink<double>>(static_cast<std::size_t>(events_count));
 
     // Function that adds a new source node to the graph, and connects
     // it to one of adder's ports
@@ -201,7 +201,7 @@ main() {
         for (auto *source : sources) {
             source->work();
         }
-        adder.work();
-        sink.work();
+        std::ignore = adder.work();
+        std::ignore = sink.work();
     }
 }

@@ -2,7 +2,7 @@
 #include <vector>
 
 namespace {
-gp_plugin_metadata plugin_metadata{ "Bad Plugin", "Unknown", "Public Domain", "v0" };
+gp_plugin_metadata plugin_metadata [[maybe_unused]]{ "Bad Plugin", "Unknown", "Public Domain", "v0" };
 
 class bad_plugin : public gp_plugin_base {
 private:
@@ -10,16 +10,16 @@ private:
 
 public:
     std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, const fair::graph::property_map &) override {
+    create_node(std::string_view /*name*/, std::string_view /*type*/, const fair::graph::property_map &) override {
         return {};
     }
 
-    std::uint8_t
+    [[nodiscard]] std::uint8_t
     abi_version() const override {
         return 0;
     }
 
-    std::span<const std::string>
+    [[nodiscard]] std::span<const std::string>
     provided_nodes() const override {
         return node_types;
     }

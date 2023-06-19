@@ -48,8 +48,8 @@ public:
         bool run = true;
         while (run) {
             bool something_happened = false;
-            for (const auto &node : _graph.blocks()) {
-                auto result = node->work();
+            for (const auto &current_node : _graph.blocks()) {
+                auto result = current_node->work();
                 if (result == work_return_t::ERROR) {
                     return work_return_t::ERROR;
                 } else if (result == work_return_t::INSUFFICIENT_INPUT_ITEMS) {
@@ -90,7 +90,7 @@ public:
             _source_nodes.push_back(e._src_node);
             node_reached.insert(e._dst_node);
         }
-        _source_nodes.erase(std::remove_if(_source_nodes.begin(), _source_nodes.end(), [&node_reached](auto node) { return node_reached.contains(node); }), _source_nodes.end());
+        _source_nodes.erase(std::remove_if(_source_nodes.begin(), _source_nodes.end(), [&node_reached](auto current_node) { return node_reached.contains(current_node); }), _source_nodes.end());
         // traverse graph
         std::queue<node_t> queue{};
         std::set<node_t>   reached;
@@ -101,11 +101,11 @@ public:
         }
         // process all nodes, adding all unvisited child nodes to the queue
         while (!queue.empty()) {
-            node_t node = queue.front();
+            node_t current_node = queue.front();
             queue.pop();
-            _nodelist.push_back(node);
-            if (_adjacency_list.contains(node)) { // node has outgoing edges
-                for (auto &dst : _adjacency_list.at(node)) {
+            _nodelist.push_back(current_node);
+            if (_adjacency_list.contains(current_node)) { // current_node has outgoing edges
+                for (auto &dst : _adjacency_list.at(current_node)) {
                     if (!reached.contains(dst)) { // detect cycles. this could be removed if we guarantee cycle free graphs earlier
                         queue.push(dst);
                         reached.insert(dst);
@@ -122,8 +122,8 @@ public:
         }
         while (true) {
             bool anything_happened = false;
-            for (auto node : _nodelist) {
-                auto res = node->work();
+            for (auto current_node : _nodelist) {
+                auto res = current_node->work();
                 anything_happened |= (res == work_return_t::OK || res == work_return_t::INSUFFICIENT_OUTPUT_ITEMS);
             }
             if (!anything_happened) {

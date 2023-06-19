@@ -8,7 +8,7 @@ namespace fg = fair::graph;
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
 class scale : public fg::node<scale<T, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
 public:
-    scale(std::string_view name = "") { this->_name = name; }
+    explicit scale(std::string_view name = "") { this->_name = name; }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -21,7 +21,7 @@ template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>()
 class adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">,
                               fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
 public:
-    adder(std::string_view name = "") { this->_name = name; }
+    explicit adder(std::string_view name = "") { this->_name = name; }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -58,8 +58,8 @@ protected:
         auto     &left_scale_block  = graph.make_node<scale<double>>();
         auto     &right_scale_block = graph.make_node<scale<double>>();
 
-        graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
-        graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
+        std::ignore = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
+        std::ignore = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
 
         _dynamic_input_ports.emplace_back(fg::input_port<0>(&left_scale_block));
         _dynamic_input_ports.emplace_back(fg::input_port<0>(&right_scale_block));
@@ -74,23 +74,23 @@ public:
 
     ~hier_node() override = default;
 
-    std::string_view
+    [[nodiscard]] std::string_view
     name() const override {
         return _unique_name;
     }
 
-    virtual fg::work_return_t
+    fg::work_return_t
     work() override {
         return _scheduler.work();
     }
 
-    virtual void *
+    void *
     raw() override {
         return this;
     }
 
     void
-    set_name(std::string name) noexcept override {}
+    set_name(std::string /*name*/) noexcept override {}
 
     [[nodiscard]] fg::property_map &
     meta_information() noexcept override {
@@ -117,7 +117,7 @@ private:
     std::size_t _remaining_events_count;
 
 public:
-    fixed_source(std::size_t events_count) : _remaining_events_count(events_count) {}
+    explicit fixed_source(std::size_t events_count) : _remaining_events_count(events_count) {}
 
     T value = 1;
 
@@ -151,7 +151,7 @@ class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
     std::size_t _remaining = 0;
 
 public:
-    cout_sink() {}
+    cout_sink() = default;
 
     explicit cout_sink(std::size_t count) : _remaining(count) {}
 
