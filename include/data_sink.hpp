@@ -238,7 +238,7 @@ private:
     struct abstract_listener_t {
         virtual ~abstract_listener_t() = default;
         virtual void set_sample_rate(float) {}
-        virtual void process_bulk(std::span<const T> history, std::span<const T> data, int64_t reader_position, const std::vector<tag_t> &tags) = 0;
+        virtual void process_bulk(std::span<const T> history, std::span<const T> data, int64_t reader_position, std::span<const tag_t> tags) = 0;
         virtual void flush() = 0;
     };
 
@@ -271,7 +271,7 @@ private:
             , polling_handler{std::move(poller)}
         {}
 
-        void process_bulk(std::span<const T>, std::span<const T> data, int64_t reader_position, const std::vector<tag_t> &tags_) override {
+        void process_bulk(std::span<const T>, std::span<const T> data, int64_t reader_position, std::span<const tag_t> tags_) override {
             using namespace fair::graph::detail;
             if (!first_sample_seen) {
                 first_sample_seen = reader_position;
@@ -435,8 +435,8 @@ private:
             }
         }
 
-        void process_bulk(std::span<const T> history, std::span<const T> in_data, int64_t reader_position, const std::vector<tag_t> &tags) override {
-            auto filtered = tags; // should use views::filter once that is working everywhere
+        void process_bulk(std::span<const T> history, std::span<const T> in_data, int64_t reader_position, std::span<const tag_t> tags) override {
+            auto filtered = std::vector(tags.begin(), tags.end()); // should use views::filter once that is working everywhere
             std::erase_if(filtered, [this](const auto &tag) {
                 return !trigger_predicate(tag);
             });
@@ -543,8 +543,8 @@ private:
             }
         }
 
-        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, const std::vector<tag_t> &tags) override {
-            for (const auto &tag :tags) {
+        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, std::span<const tag_t> tags) override {
+            for (const auto &tag : tags) {
                 const auto obsr = observer(tag);
                 // TODO set proper error state instead of throwing
                 if (obsr == trigger_observer_state::Stop || obsr == trigger_observer_state::StopAndStart) {
@@ -632,8 +632,8 @@ private:
             sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * r);
         }
 
-        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, const std::vector<tag_t> &tags) override {
-            auto triggers = tags; // should use views::filter once that is working everywhere
+        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, std::span<const tag_t> tags) override {
+            auto triggers = std::vector(tags.begin(), tags.end()); // should use views::filter once that is working everywhere
             std::erase_if(triggers, [this](const auto &tag) {
                 return !trigger_predicate(tag);
             });
@@ -773,7 +773,8 @@ public:
         auto out_of_range = [end_pos = reader_position + noutput_items](const auto &tag) {
             return tag.index > static_cast<tag_t::index_type>(end_pos);
         };
-        std::erase_if(tags, out_of_range);
+        std::erase_if(tags, out_of_range); // TODO use views it works everywhere
+        auto tag_view = std::span(tags);
         tag_reader.consume(tags.size());
 
         {
