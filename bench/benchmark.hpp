@@ -531,7 +531,7 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         diff(const std::vector<time_point> &stop, time_point start) {
             std::vector<T> ret(N);
             for (auto i = 0LU; i < N; i++) {
-                ret[i] = 1e-9 * static_cast<T>((stop[i] - start).count());
+                ret[i] = 1e-9l * static_cast<T>((stop[i] - start).count());
                 start = stop[i];
             }
             return ret;
@@ -543,7 +543,7 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         diff(const std::vector<time_point> &stop, const std::vector<time_point> &start) {
             std::vector<T> ret(N);
             for (auto i = 0LU; i < N; i++) {
-                ret[i] = 1e-9 * static_cast<T>((stop[i] - start[i]).count());
+                ret[i] = 1e-9l * static_cast<T>((stop[i] - start[i]).count());
             }
             return ret;
         }

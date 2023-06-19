@@ -331,7 +331,7 @@ const boost::ut::suite SettingsTests = [] {
         wrapped1.set_name("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "node_model wrapper name";
         expect(not wrapped1.unique_name().empty()) << "unique name";
-        wrapped1.settings().set({ { "context", "a string" } });
+        std::ignore = wrapped1.settings().set({ { "context", "a string" } });
         (wrapped1.meta_information())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "node_model meta-information";
     };

@@ -659,7 +659,7 @@ public:
         } else {
             // Non-SIMD loop
             for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
                 meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
             }
         }

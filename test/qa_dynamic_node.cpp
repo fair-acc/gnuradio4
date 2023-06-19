@@ -96,7 +96,7 @@ public:
                 },
                 available_samples);
 
-        for (auto &input_port : _input_ports) {
+        for (auto &input_port [[maybe_unused]] : _input_ports) {
             assert(available_samples == input_port.streamReader().consume(available_samples));
         }
         return fg::work_return_t::OK;
