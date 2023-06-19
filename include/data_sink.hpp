@@ -234,6 +234,8 @@ namespace detail {
  */
 template<typename T>
 class data_sink : public node<data_sink<T>> {
+static constexpr std::size_t listener_buffer_size = 65536;
+
 public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 10000.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name;
@@ -241,9 +243,8 @@ public:
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min;
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max;
 
-    IN<T>        in;
+    IN<T, std::dynamic_extent, listener_buffer_size> in;
     std::size_t  n_samples_consumed = 0;
-    static constexpr std::size_t listener_buffer_size = 65536;
 
     template<typename Payload>
     struct poller_t {
@@ -807,12 +808,11 @@ public:
         auto &in_port = input_port<"in">(this);
         auto &reader = in_port.streamReader();
 
-        const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
-        if (n_readable == 0) {
+        const auto noutput_items = std::min(reader.available(), in_port.max_buffer_size());
+        if (noutput_items == 0) {
             return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        const auto noutput_items = std::min(listener_buffer_size, n_readable);
         const auto reader_position = reader.position() + 1;
         const auto in_data = reader.get(noutput_items);
         const auto history_view = std::span(history.begin(), history_available);
