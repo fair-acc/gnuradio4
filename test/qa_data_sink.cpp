@@ -232,8 +232,8 @@ const boost::ut::suite DataSinkTests = [] {
             }
         };
 
-        expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", chunk_size, callback));
-        expect(data_sink_registry::instance().register_streaming_callback<float>("test_sink", chunk_size, callback_with_tags));
+        expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::with_sink_name("test_sink"), chunk_size, callback));
+        expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::with_sink_name("test_sink"), chunk_size, callback_with_tags));
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
@@ -262,10 +262,10 @@ const boost::ut::suite DataSinkTests = [] {
 
         std::atomic<std::size_t> samples_seen = 0;
 
-        auto poller1 = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
+        auto poller1 = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller1, nullptr));
 
-        auto poller2 = data_sink_registry::instance().get_streaming_poller<float>("test_sink", blocking_mode::Blocking);
+        auto poller2 = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller2, nullptr));
 
         auto make_runner = [](auto poller) {
@@ -318,7 +318,7 @@ const boost::ut::suite DataSinkTests = [] {
             return v && std::get<std::string>(v->get()) == "TRIGGER";
         };
 
-        auto poller = data_sink_registry::instance().get_trigger_poller<float>("test_sink", is_trigger, 3, 2, blocking_mode::Blocking);
+        auto poller = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::with_sink_name("test_sink"), is_trigger, 3, 2, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
         auto polling = std::async([poller] {
@@ -363,7 +363,7 @@ const boost::ut::suite DataSinkTests = [] {
         };
 
         const auto delay = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
-        auto poller = data_sink_registry::instance().get_snapshot_poller<int32_t>("test_sink", is_trigger, delay, blocking_mode::Blocking);
+        auto poller = data_sink_registry::instance().get_snapshot_poller<int32_t>(data_sink_query::with_sink_name("test_sink"), is_trigger, delay, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
         auto poller_result = std::async([poller] {
@@ -437,7 +437,7 @@ const boost::ut::suite DataSinkTests = [] {
         std::vector<std::shared_ptr<data_sink<int32_t>::dataset_poller>> pollers;
 
         for (const auto &f : factories) {
-            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>("test_sink", f, 100000, blocking_mode::Blocking);
+            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::with_sink_name("test_sink"), f, 100000, blocking_mode::Blocking);
             expect(neq(poller, nullptr));
             pollers.push_back(poller);
         }
@@ -491,7 +491,7 @@ const boost::ut::suite DataSinkTests = [] {
             return true;
         };
 
-        auto poller = data_sink_registry::instance().get_trigger_poller<float>("test_sink", is_trigger, 3000, 2000, blocking_mode::Blocking);
+        auto poller = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::with_sink_name("test_sink"), is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
         auto polling = std::async([poller] {
@@ -552,7 +552,7 @@ const boost::ut::suite DataSinkTests = [] {
             received_data.push_back(dataset.signal_values.back());
         };
 
-        data_sink_registry::instance().register_trigger_callback<float>("test_sink", is_trigger, 3000, 2000, callback);
+        data_sink_registry::instance().register_trigger_callback<float>(data_sink_query::with_sink_name("test_sink"), is_trigger, 3000, 2000, callback);
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
@@ -574,10 +574,10 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto invalid_type_poller = data_sink_registry::instance().get_streaming_poller<double>("test_sink");
+        auto invalid_type_poller = data_sink_registry::instance().get_streaming_poller<double>(data_sink_query::with_sink_name("test_sink"));
         expect(eq(invalid_type_poller, nullptr));
 
-        auto poller = data_sink_registry::instance().get_streaming_poller<float>("test_sink");
+        auto poller = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"));
         expect(neq(poller, nullptr));
 
         auto polling = std::async([poller] {

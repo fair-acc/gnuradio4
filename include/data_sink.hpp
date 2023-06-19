@@ -44,6 +44,19 @@ concept TriggerObserverFactory = requires(T f) {
 template<typename T>
 class data_sink;
 
+struct data_sink_query {
+    std::optional<std::string> sink_name;
+    std::optional<std::string> signal_name;
+
+    static data_sink_query with_signal_name(std::string_view name) {
+        return {{}, std::string{name}};
+    }
+
+    static data_sink_query with_sink_name(std::string_view name) {
+        return {std::string{name}, {}};
+    }
+};
+
 class data_sink_registry {
     std::mutex mutex;
     std::vector<std::any> sinks;
@@ -74,37 +87,37 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<typename data_sink<T>::poller> get_streaming_poller(std::string_view name, blocking_mode block = blocking_mode::NonBlocking) {
+    std::shared_ptr<typename data_sink<T>::poller> get_streaming_poller(const data_sink_query &query, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         return sink ? sink->get_streaming_poller(block) : nullptr;
     }
 
     template<typename T, TriggerPredicate P>
-    std::shared_ptr<typename data_sink<T>::dataset_poller> get_trigger_poller(std::string_view name, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
+    std::shared_ptr<typename data_sink<T>::dataset_poller> get_trigger_poller(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         return sink ? sink->get_trigger_poller(std::forward<P>(p), pre_samples, post_samples, block) : nullptr;
     }
 
     template<typename T, TriggerObserverFactory F>
-    std::shared_ptr<typename data_sink<T>::dataset_poller> get_multiplexed_poller(std::string_view name, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::NonBlocking) {
+    std::shared_ptr<typename data_sink<T>::dataset_poller> get_multiplexed_poller(const data_sink_query &query, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         return sink ? sink->get_multiplexed_poller(std::forward<F>(triggerObserverFactory), maximum_window_size, block) : nullptr;
     }
 
     template<typename T, TriggerPredicate P>
-    std::shared_ptr<typename data_sink<T>::dataset_poller> get_snapshot_poller(std::string_view name, P p, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::NonBlocking) {
+    std::shared_ptr<typename data_sink<T>::dataset_poller> get_snapshot_poller(const data_sink_query &query, P p, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::NonBlocking) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         return sink ? sink->get_snapshot_poller(std::forward<P>(p), delay, block) : nullptr;
     }
 
     template<typename T, typename Callback>
-    bool register_streaming_callback(std::string_view name, std::size_t max_chunk_size, Callback callback) {
+    bool register_streaming_callback(const data_sink_query &query, std::size_t max_chunk_size, Callback callback) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         if (!sink) {
             return false;
         }
@@ -114,9 +127,9 @@ public:
     }
 
     template<typename T, TriggerPredicate P, typename Callback>
-    bool register_trigger_callback(std::string_view name, P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+    bool register_trigger_callback(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         if (!sink) {
             return false;
         }
@@ -126,9 +139,9 @@ public:
     }
 
     template<typename T, TriggerObserver O, typename Callback>
-    bool register_multiplexed_callback(std::string_view name, std::size_t maximum_window_size, Callback callback) {
+    bool register_multiplexed_callback(const data_sink_query &query, std::size_t maximum_window_size, Callback callback) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         if (!sink) {
             return false;
         }
@@ -138,9 +151,9 @@ public:
     }
 
     template<typename T, TriggerPredicate P, typename Callback>
-    bool register_snapshot_callback(std::string_view name, P p, std::chrono::nanoseconds delay, Callback callback) {
+    bool register_snapshot_callback(const data_sink_query &query, P p, std::chrono::nanoseconds delay, Callback callback) {
         std::lock_guard lg{mutex};
-        auto sink = find_sink<T>(name);
+        auto sink = find_sink<T>(query);
         if (!sink) {
             return false;
         }
@@ -151,24 +164,25 @@ public:
 
 private:
     template<typename T>
-    data_sink<T>* find_sink(std::string_view name) {
-        const auto it = std::find_if(sinks.begin(), sinks.end(), matcher<T>(name));
+    data_sink<T>* find_sink(const data_sink_query &query) {
+
+        auto matches = [&query](const std::any &v) {
+            try {
+                auto sink = std::any_cast<data_sink<T>*>(v);
+                const auto sink_name_matches = !query.sink_name || *query.sink_name == sink->name();
+                const auto signal_name_matches = !query.signal_name || *query.signal_name == sink->signal_name;
+                return sink_name_matches && signal_name_matches;
+            } catch (...) {
+                return false;
+            }
+        };
+
+        const auto it = std::find_if(sinks.begin(), sinks.end(), matches);
         if (it == sinks.end()) {
             return nullptr;
         }
 
         return std::any_cast<data_sink<T>*>(*it);
-    }
-
-    template<typename T>
-    static auto matcher(std::string_view name) {
-        return [name](const std::any &v) {
-            try {
-                return std::any_cast<data_sink<T>*>(v)->name() == name;
-            } catch (...) {
-                return false;
-            }
-        };
     }
 };
 
@@ -196,9 +210,9 @@ namespace detail {
  *         ╔═══════════════╗
  *    in0 ━╢   data sink   ║                      ┌──── caller ────┐
  * (err0) ━╢ (opt. error)  ║                      │                │
- *    ┄    ║               ║  retrieve poller or  │ (custom non-GR │
- *    inN ━╢ :signal_names ║←--------------------→│  user code...) │
- * (errN) ━╢ :signal_units ║  register            │                │
+ *         ║               ║  retrieve poller or  │ (custom non-GR │
+ *        ━╢ :signal_name  ║←--------------------→│  user code...) │
+ *        ━╢ :signal_unit  ║  register            │                │
  *         ║ :...          ║  callback function   └───┬────────────┘
  *         ╚═ GR block ═╤══╝                          │
  *                      │                             │
@@ -221,10 +235,14 @@ namespace detail {
 template<typename T>
 class data_sink : public node<data_sink<T>> {
 public:
+    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 10000.f;
+    Annotated<std::string, "signal name", Visible>                                   signal_name;
+    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit;
+    Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min;
+    Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max;
+
     IN<T>        in;
     std::size_t  n_samples_consumed = 0;
-    float        sample_rate        = 10000;
-
     static constexpr std::size_t listener_buffer_size = 65536;
 
     template<typename Payload>
