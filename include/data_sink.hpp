@@ -3,6 +3,7 @@
 
 #include "circular_buffer.hpp"
 #include "dataset.hpp"
+#include "history_buffer.hpp"
 #include "node.hpp"
 #include "tag.hpp"
 
@@ -195,6 +196,16 @@ namespace detail {
         }
         return s.first(std::distance(s.begin(), nm));
     }
+
+    template<typename T>
+    bool copy_span(std::span<const T> src, std::span<T> dst) {
+        assert(src.size() <= dst.size());
+        if (src.size() > dst.size()) {
+            return false;
+        }
+        std::copy(src.begin(), src.end(), dst.begin());
+        return true;
+    }
 }
 
 /**
@@ -244,7 +255,6 @@ public:
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max;
 
     IN<T, std::dynamic_extent, listener_buffer_size> in;
-    std::size_t  n_samples_consumed = 0;
 
     template<typename Payload>
     struct poller_t {
@@ -262,7 +272,7 @@ public:
 
             const auto read_data = reader.get(available);
             fnc(read_data);
-            reader.consume(available);
+            std::ignore = reader.consume(available);
             return true;
         }
 
@@ -274,7 +284,7 @@ public:
 
             const auto read_data = reader.get(1);
             fnc(read_data[0]);
-            reader.consume(1);
+            std::ignore = reader.consume(1);
             return true;
         }
     };
@@ -283,16 +293,10 @@ public:
     using dataset_poller = poller_t<DataSet<T>>;
 
 private:
-    struct pending_window_t {
-        tag_t trigger;
-        DataSet<T> dataset;
-        std::size_t pending_post_samples = 0;
-    };
-
     struct abstract_listener_t {
         virtual ~abstract_listener_t() = default;
         virtual void set_sample_rate(float) {}
-        virtual void process_bulk(std::span<const T> history, std::span<const T> data, int64_t reader_position, std::span<const tag_t> tags) = 0;
+        virtual void process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tag_data0) = 0;
         virtual void flush() = 0;
     };
 
@@ -301,7 +305,6 @@ private:
         static constexpr auto has_callback = !std::is_same_v<Callback, null_type>;
         static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>;
 
-        std::optional<int64_t> first_sample_seen;
         bool block = false;
         std::size_t samples_written = 0;
 
@@ -325,35 +328,19 @@ private:
             , polling_handler{std::move(poller)}
         {}
 
-        void process_bulk(std::span<const T>, std::span<const T> data, int64_t reader_position, std::span<const tag_t> tags_) override {
+        void process(std::span<const T>, std::span<const T> data, std::optional<property_map> tag_data0) override {
             using namespace fair::graph::detail;
-            if (!first_sample_seen) {
-                first_sample_seen = reader_position;
-            }
-
-            auto tags = std::vector(tags_.begin(), tags_.end());
-            // send indices relative to first sample the user received
-            for (tag_t &tag : tags) {
-                tag.index -= *first_sample_seen;
-            }
-
-            auto tag_view = std::span(tags);
-
-            auto match_before = [](int64_t last_index) {
-                return [&last_index](const tag_t &tag) {
-                    return tag.index < last_index;
-                };
-            };
 
             if constexpr (has_callback) {
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
-                    const auto n = std::min(data.size(), buffer.size() - buffer_fill);
-                    std::copy(data.begin(), data.begin() + n, buffer.begin() + buffer_fill);
+                    const auto n = buffer.size() - buffer_fill;
+                    detail::copy_span(data.first(n), std::span(buffer).last(n));
                     if constexpr (callback_takes_tags) {
-                        const auto ts = find_matching_prefix(tag_view, match_before(samples_written + n));
-                        tag_buffer.insert(tag_buffer.end(), ts.begin(), ts.end());
-                        tag_view = tag_view.last(tag_view.size() - ts.size());
+                        if (tag_data0) {
+                            tag_buffer.push_back({static_cast<tag_t::index_type>(buffer_fill), *tag_data0});
+                            tag_data0.reset();
+                        }
                     }
                     buffer_fill += n;
                     if (buffer_fill == buffer.size()) {
@@ -373,9 +360,12 @@ private:
                 // send out complete chunks directly
                 while (data.size() > buffer.size()) {
                     if constexpr (callback_takes_tags) {
-                        const auto ts = find_matching_prefix(tag_view, match_before(samples_written + buffer.size()));
-                        tag_view = tag_view.last(tag_view.size() - ts.size());
-                        callback(data.first(buffer.size()), ts);
+                        std::vector<tag_t> tags;
+                        if (tag_data0) {
+                            tags.push_back({0, std::move(*tag_data0)});
+                            tag_data0.reset();
+                        }
+                        callback(data.first(buffer.size()), std::span(tags));
                     } else {
                         callback(data.first(buffer.size()));
                     }
@@ -385,10 +375,12 @@ private:
 
                 // write remaining data to the buffer
                 if (!data.empty()) {
-                    std::copy(data.begin(), data.end(), buffer.begin());
+                    detail::copy_span(data, std::span(buffer).first(data.size()));
                     buffer_fill = data.size();
                     if constexpr (callback_takes_tags) {
-                        tag_buffer.insert(tag_buffer.end(), tag_view.begin(), tag_view.end());
+                        if (tag_data0) {
+                            tag_buffer.push_back({0, std::move(*tag_data0)});
+                        }
                     }
                 }
             } else {
@@ -400,7 +392,7 @@ private:
 
                 if (block) {
                     auto write_data = poller->writer.reserve_output_range(data.size());
-                    std::copy(data.begin(), data.end(), write_data.begin());
+                    detail::copy_span(data, std::span(write_data));
                     write_data.publish(write_data.size());
                 } else {
                     const auto can_write = poller->writer.available();
@@ -408,8 +400,7 @@ private:
                     poller->drop_count += data.size() - can_write;
                     if (to_write > 0) {
                         auto write_data = poller->writer.reserve_output_range(to_write);
-                        const auto sub = data.first(to_write);
-                        std::copy(sub.begin(), sub.end(), write_data.begin());
+                        detail::copy_span(data.first(to_write), std::span(write_data));
                         write_data.publish(write_data.size());
                     }
                 }
@@ -433,6 +424,11 @@ private:
                 }
             }
         }
+    };
+
+    struct pending_window_t {
+        DataSet<T> dataset;
+        std::size_t pending_post_samples = 0;
     };
 
     template<typename Callback, TriggerPredicate P>
@@ -489,48 +485,27 @@ private:
             }
         }
 
-        void process_bulk(std::span<const T> history, std::span<const T> in_data, int64_t reader_position, std::span<const tag_t> tags) override {
-            auto filtered = std::vector(tags.begin(), tags.end()); // should use views::filter once that is working everywhere
-            std::erase_if(filtered, [this](const auto &tag) {
-                return !trigger_predicate(tag);
-            });
-            for (const auto &trigger : filtered) {
+        void process(std::span<const T> history, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
+            if (tag_data0 && trigger_predicate(tag_t{0, *tag_data0})) {
                 // TODO fill dataset with metadata etc.
                 DataSet<T> dataset;
-                dataset.timing_events = {{trigger}};
                 dataset.signal_values.reserve(pre_samples + post_samples); // TODO maybe make the circ. buffer smaller but preallocate these
-                pending_trigger_windows.push_back({.trigger = trigger, .dataset = std::move(dataset), .pending_post_samples = post_samples});
+
+                const auto pre_sample_view = history.last(std::min(pre_samples, history.size()));
+                dataset.signal_values.insert(dataset.signal_values.end(), pre_sample_view.begin(), pre_sample_view.end());
+
+                dataset.timing_events = {{{static_cast<int64_t>(pre_sample_view.size()), *tag_data0}}};
+                pending_trigger_windows.push_back({.dataset = std::move(dataset), .pending_post_samples = post_samples});
             }
 
             auto window = pending_trigger_windows.begin();
             while (window != pending_trigger_windows.end()) {
-                auto &dataset = window->dataset;
-                const auto window_offset = window->trigger.index - reader_position;
-
-                if (window_offset >= 0 && dataset.signal_values.empty()) { // new trigger, write history
-                    // old history: pre-trigger data from previous in_data (if available)
-                    const auto old_history_size = std::max(static_cast<std::int64_t>(pre_samples) - window_offset, std::int64_t{0});
-                    const auto available = std::min(static_cast<std::size_t>(old_history_size), history.size());
-                    const auto old_history_view = history.last(available);
-                    dataset.signal_values.insert(dataset.signal_values.end(), old_history_view.begin(), old_history_view.end());
-
-                    // new history: pre-trigger samples from the current in_data
-                    const auto new_history_size = pre_samples - old_history_size;
-                    const auto new_history_view = in_data.subspan(window_offset - new_history_size, new_history_size);
-                    dataset.signal_values.insert(dataset.signal_values.end(), new_history_view.begin(), new_history_view.end());
-                }
-
-                // write missing post-samples
-                const auto previous_post_samples = post_samples - window->pending_post_samples;
-                const auto first_requested = window_offset + previous_post_samples;
-                const auto last_requested = window_offset + post_samples - 1;
-                const auto last_available = std::min(last_requested, in_data.size() - 1);
-                const auto post_sample_view = in_data.subspan(first_requested, last_available - first_requested + 1);
-                dataset.signal_values.insert(dataset.signal_values.end(), post_sample_view.begin(), post_sample_view.end());
+                const auto post_sample_view = in_data.first(std::min(window->pending_post_samples, in_data.size()));
+                window->dataset.signal_values.insert(window->dataset.signal_values.end(), post_sample_view.begin(), post_sample_view.end());
                 window->pending_post_samples -= post_sample_view.size();
 
                 if (window->pending_post_samples == 0) {
-                    publish_dataset(std::move(dataset));
+                    publish_dataset(std::move(window->dataset));
                     window = pending_trigger_windows.erase(window);
                 } else {
                     ++window;
@@ -562,7 +537,7 @@ private:
         Callback callback;
 
         explicit multiplexed_listener_t(F factory, std::size_t max_window_size, Callback cb) : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), callback(cb) {}
-        explicit multiplexed_listener_t(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block) : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), polling_handler{std::move(handler)}, block(do_block) {}
+        explicit multiplexed_listener_t(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block) : block(do_block), observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), polling_handler{std::move(handler)} {}
 
         inline void publish_dataset(DataSet<T> &&data) {
             if constexpr (!std::is_same_v<Callback, null_type>) {
@@ -588,28 +563,22 @@ private:
             }
         }
 
-        inline void fill_pending_dataset(std::span<const T> in_data, int64_t reader_position, int64_t last_sample) {
-            const auto max_samples = static_cast<int64_t>(maximum_window_size - pending_dataset->signal_values.size());
-            const auto first_sample = std::max(pending_dataset->timing_events[0][0].index - reader_position, int64_t{0});
-            const auto actual_last_sample = std::min(first_sample + max_samples - 1, last_sample);
-            if (actual_last_sample >= first_sample) {
-                pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), in_data.begin() + first_sample, in_data.begin() + actual_last_sample + 1);
-            }
-        }
-
-        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, std::span<const tag_t> tags) override {
-            for (const auto &tag : tags) {
-                const auto obsr = observer(tag);
+        void process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
+            if (tag_data0) {
+                const auto obsr = observer(tag_t{0, *tag_data0});
                 // TODO set proper error state instead of throwing
                 if (obsr == trigger_observer_state::Stop || obsr == trigger_observer_state::StopAndStart) {
                     if (obsr == trigger_observer_state::Stop && !pending_dataset) {
                         throw std::runtime_error("multiplexed: Stop without start");
                     }
 
-                    pending_dataset->timing_events[0].push_back(tag);
-                    fill_pending_dataset(in_data, reader_position, tag.index - reader_position - 1);
-                    publish_dataset(std::move(*pending_dataset));
-                    pending_dataset.reset();
+                    if (pending_dataset) {
+                        if (obsr == trigger_observer_state::Stop) {
+                            pending_dataset->timing_events[0].push_back({static_cast<tag_t::index_type>(pending_dataset->signal_values.size()), *tag_data0});
+                        }
+                        publish_dataset(std::move(*pending_dataset));
+                        pending_dataset.reset();
+                    }
                 }
                 if (obsr == trigger_observer_state::Start || obsr == trigger_observer_state::StopAndStart) {
                     if (obsr == trigger_observer_state::Start && pending_dataset) {
@@ -617,11 +586,14 @@ private:
                     }
                     pending_dataset = DataSet<T>();
                     pending_dataset->signal_values.reserve(maximum_window_size); // TODO might be too much?
-                    pending_dataset->timing_events = {{tag}};
+                    pending_dataset->timing_events = {{{0, *tag_data0}}};
                 }
             }
             if (pending_dataset) {
-                fill_pending_dataset(in_data, reader_position, in_data.size() - 1);
+                const auto to_write = std::min(in_data.size(), maximum_window_size - pending_dataset->signal_values.size());
+                const auto view = in_data.first(to_write);
+                pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), view.begin(), view.end());
+
                 if (pending_dataset->signal_values.size() == maximum_window_size) {
                     publish_dataset(std::move(*pending_dataset));
                     pending_dataset.reset();
@@ -641,15 +613,16 @@ private:
     };
 
     struct pending_snapshot {
-        tag_t tag;
-        tag_t::index_type requested_sample;
+        property_map tag_data;
+        std::size_t delay = 0;
+        std::size_t pending_samples = 0;
     };
 
     template<typename Callback, TriggerPredicate P>
     struct snapshot_listener_t : public abstract_listener_t {
         bool block = false;
         std::chrono::nanoseconds time_delay;
-        tag_t::index_type sample_delay = 0;
+        std::size_t sample_delay = 0;
         P trigger_predicate = {};
         std::deque<pending_snapshot> pending;
         std::weak_ptr<dataset_poller> polling_handler = {};
@@ -684,33 +657,27 @@ private:
 
         void set_sample_rate(float r) override {
             sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * r);
+            // TODO do we need to update the requested_samples of pending here? (considering both old and new time_delay)
         }
 
-        void process_bulk(std::span<const T>, std::span<const T> in_data, int64_t reader_position, std::span<const tag_t> tags) override {
-            auto triggers = std::vector(tags.begin(), tags.end()); // should use views::filter once that is working everywhere
-            std::erase_if(triggers, [this](const auto &tag) {
-                return !trigger_predicate(tag);
-            });
-
-            if (!triggers.empty()) {
-                for (const auto &trigger : triggers) {
-                    pending.push_back({trigger, trigger.index + sample_delay});
-                }
-                // can be unsorted if sample_delay changed. Alternative: iterate the whole list below
-                std::stable_sort(pending.begin(), pending.end(), [](const auto &lhs, const auto &rhs) { return lhs.requested_sample < rhs.requested_sample; });
+        void process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
+            if (tag_data0 && trigger_predicate({0, *tag_data0})) {
+                auto new_pending = pending_snapshot{*tag_data0, sample_delay, sample_delay};
+                // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased; TODO unless we adapt them in set_sample_rate, see there)
+                auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });
+                pending.insert(rit.base(), std::move(new_pending));
             }
 
             auto it = pending.begin();
             while (it != pending.end()) {
-                const auto rel_pos = it->requested_sample - reader_position;
-                assert(rel_pos >= 0);
-                if (rel_pos >= in_data.size()) {
+                if (it->pending_samples > in_data.size()) {
+                    it->pending_samples -= in_data.size();
                     break;
                 }
 
                 DataSet<T> dataset;
-                dataset.timing_events = {{it->tag}};
-                dataset.signal_values = {in_data[rel_pos]};
+                dataset.timing_events = {{{-static_cast<tag_t::index_type>(it->delay), std::move(it->tag_data)}}};
+                dataset.signal_values = {in_data[it->pending_samples]};
                 publish_dataset(std::move(dataset));
 
                 it = pending.erase(it);
@@ -751,7 +718,7 @@ public:
         auto handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(listener_mutex);
         add_listener(std::make_unique<trigger_listener_t<null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
-        history.resize(std::max(pre_samples, history.size()));
+        ensure_history_size(pre_samples);
         return handler;
     }
 
@@ -781,7 +748,7 @@ public:
     template<TriggerPredicate P, typename Callback>
     void register_trigger_callback(P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
         add_listener(std::make_unique<trigger_listener_t<Callback, P>>(std::forward<P>(p), pre_samples, post_samples, std::forward<Callback>(callback)), false);
-        history.resize(std::max(pre_samples, history.size()));
+        ensure_history_size(pre_samples);
     }
 
     template<TriggerObserverFactory F, typename Callback>
@@ -797,64 +764,44 @@ public:
     }
 
     // TODO this code should be called at the end of graph processing
-    void stop() {
+    void stop() noexcept {
         std::lock_guard lg(listener_mutex);
         for (auto &listener : listeners) {
             listener->flush();
         }
     }
 
-    [[nodiscard]] work_return_t work() {
-        auto &in_port = input_port<"in">(this);
-        auto &reader = in_port.streamReader();
-
-        const auto noutput_items = std::min(reader.available(), in_port.max_buffer_size());
-        if (noutput_items == 0) {
-            return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+    [[nodiscard]] work_return_t process_bulk(std::span<const T> in_data) noexcept {
+        std::optional<property_map> tagData;
+        if (this->input_tags_present()) {
+            tagData = this->input_tags()[0];
         }
-
-        const auto reader_position = reader.position() + 1;
-        const auto in_data = reader.get(noutput_items);
-        const auto history_view = std::span(history.begin(), history_available);
-        // TODO I'm not sure why the +1 in "reader.position() + 1". Bug or do I misunderstand?
-        assert(reader_position == n_samples_consumed);
-
-        auto &tag_reader = in_port.tagReader();
-        const auto n_tags = tag_reader.available();
-        const auto tag_data = tag_reader.get(n_tags);
-        std::vector<tag_t> tags(tag_data.begin(), tag_data.end());
-        auto out_of_range = [end_pos = reader_position + noutput_items](const auto &tag) {
-            return tag.index > static_cast<tag_t::index_type>(end_pos);
-        };
-        std::erase_if(tags, out_of_range); // TODO use views it works everywhere
-        auto tag_view = std::span(tags);
-        tag_reader.consume(tags.size());
 
         {
             std::lock_guard lg(listener_mutex);
+            const auto history_view = history.get_span(0);
             for (auto &listener : listeners) {
-                listener->process_bulk(history, in_data, reader_position, tags);
+                listener->process(history_view, in_data, tagData);
             }
 
             // store potential pre-samples for triggers at the beginning of the next chunk
-            // TODO should use built-in history functionality that doesn't copy (but is resizable as listeners are added)
-            history_available = std::min(history.size(), noutput_items);
-            const auto history_data = in_data.last(history_available);
-            history.assign(history_data.begin(), history_data.end());
-        }
-
-        n_samples_consumed += noutput_items;
-
-        if (!reader.consume(noutput_items)) {
-            return work_return_t::ERROR;
+            const auto to_write = std::min(in_data.size(), history.capacity());
+            history.push_back_bulk(in_data.last(to_write));
         }
 
         return work_return_t::OK;
     }
 
 private:
-    std::vector<T> history;
-    std::size_t history_available = 0;
+    gr::history_buffer<T> history = gr::history_buffer<T>(1);
+
+    void ensure_history_size(std::size_t new_size) {
+        // TODO transitional, do not reallocate/copy, but create a shared buffer with size N,
+        // and a per-listener history buffer where more than N samples is needed.
+        auto new_history = gr::history_buffer<T>(std::max(new_size, history.capacity()));
+        new_history.push_back_bulk(history.begin(), history.end());
+        std::swap(history, new_history);
+    }
 
     void add_listener(std::unique_ptr<abstract_listener_t>&& l, bool block) {
         l->set_sample_rate(sample_rate); // TODO also call when sample_rate changes
@@ -868,6 +815,6 @@ private:
 
 }
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, n_samples_consumed, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, sample_rate);
 
 #endif
