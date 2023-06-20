@@ -40,6 +40,7 @@ private:
 protected:
     using setting_map                        = std::map<std::string, int, std::less<>>;
     std::string                        _name = "multi_adder";
+    std::string                        _type_name = "multi_adder";
     fg::property_map                   _meta_information; /// used to store non-graph-processing information like UI block position etc.
     bool                               _input_tags_present  = false;
     bool                               _output_tags_changed = false;
@@ -79,6 +80,11 @@ public:
         return _unique_name;
     }
 
+    std::string_view
+    type_name() const override {
+        return _type_name;
+    }
+
     fg::work_return_t
     work() override {
         return _scheduler.work();
@@ -94,6 +100,11 @@ public:
 
     [[nodiscard]] fg::property_map &
     meta_information() noexcept override {
+        return _meta_information;
+    }
+
+    [[nodiscard]] const fg::property_map &
+    meta_information() const noexcept override {
         return _meta_information;
     }
 

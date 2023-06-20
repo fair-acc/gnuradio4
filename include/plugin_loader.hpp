@@ -187,6 +187,16 @@ public:
 
         return handler->create_node(std::move(name), type, params);
     }
+
+    template<typename Graph, typename... InstantiateArgs>
+    fair::graph::node_model &
+    instantiate_in_graph(Graph &graph, InstantiateArgs &&...args) {
+        auto node_load = instantiate(std::forward<InstantiateArgs>(args)...);
+        if (!node_load) {
+            throw fmt::format("Unable to create node");
+        }
+        return graph.add_node(std::move(node_load));
+    }
 };
 #endif
 

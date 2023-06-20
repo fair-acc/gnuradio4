@@ -297,6 +297,14 @@ public:
         return _meta_information;
     }
 
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] const property_map &
+    meta_information() const noexcept {
+        return _meta_information;
+    }
+
     [[nodiscard]] constexpr std::string_view
     description() const noexcept {
         return std::string_view(Description::value);
