@@ -147,17 +147,21 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
     };
 
     "Graph"_test = [] {
-        fg::graph                 flow_graph;
+        fg::graph flow_graph;
 
-        auto                      node_source_load     = context().loader.instantiate(names::fixed_source, "double");
-        auto                     &node_source          = flow_graph.add_node(std::move(node_source_load));
+        // Instantiate the node that is defined in a plugin
+        auto &node_source = context().loader.instantiate_in_graph(flow_graph, names::fixed_source, "double");
 
-        auto                     &node_multiply_1      = flow_graph.make_node<builtin_multiply<double>>(2.0);
+        // Instantiate a built-in node in a static way
+        fair::graph::property_map node_multiply_1_params;
+        node_multiply_1_params["factor"] = 2.0;
+        auto &node_multiply_1 = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
 
-        auto                      node_multiply_2_load = context().loader.instantiate(names::builtin_multiply, "double");
-        auto                     &node_multiply_2      = flow_graph.add_node(std::move(node_multiply_2_load));
+        // Instantiate a built-in node via the plugin loader
+        auto &node_multiply_2 = context().loader.instantiate_in_graph(flow_graph, names::builtin_multiply, "double");
 
-        std::size_t               repeats              = 10;
+        //
+        std::size_t               repeats = 10;
         fair::graph::property_map node_sink_params;
         node_sink_params["total_count"] = 100_UZ;
         auto  node_sink_load            = context().loader.instantiate(names::cout_sink, "double", node_sink_params);

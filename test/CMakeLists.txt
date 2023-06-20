@@ -1,3 +1,8 @@
+set(TESTS_BINARY_PATH ${CMAKE_CURRENT_BINARY_DIR})
+set(TESTS_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
+
+configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
+
 function(add_ut_test TEST_NAME)
     add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
     if ((CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"))
@@ -7,8 +12,18 @@ function(add_ut_test TEST_NAME)
         target_compile_options(${TEST_NAME} PRIVATE -fsanitize=address -Wall)
         target_link_options(${TEST_NAME} PRIVATE -fsanitize=address -Wall)
     endif ()
-    target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include)
+    target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
     target_link_libraries(${TEST_NAME} PRIVATE graph-prototype-options graph-prototype fmt refl-cpp ut)
+    add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
+endfunction()
+
+function(add_app_test TEST_NAME)
+    add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
+    target_compile_options(${TEST_NAME} PRIVATE -fsanitize=address -Wall)
+    target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
+    target_link_options(${TEST_NAME} PRIVATE -fsanitize=address -Wall)
+    target_link_libraries(${TEST_NAME} PRIVATE graph-prototype-options graph-prototype graph-prototype-plugin fmt refl-cpp)
+    add_dependencies(${TEST_NAME} good_math_plugin good_base_plugin bad_plugin)
     add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
 endfunction()
 
@@ -23,6 +38,7 @@ add_ut_test(qa_scheduler)
 add_ut_test(qa_thread_pool)
 add_ut_test(qa_thread_affinity)
 
+
 if (NOT EMSCRIPTEN)
     add_subdirectory(plugins)
 
@@ -34,11 +50,8 @@ if (NOT EMSCRIPTEN)
         add_dependencies(qa_plugins_test good_math_plugin good_base_plugin bad_plugin)
     endif()
 
-    add_executable(app_plugins_test app_plugins_test.cpp)
-    target_compile_options(app_plugins_test PRIVATE -fsanitize=address -Wall)
-    target_include_directories(app_plugins_test PRIVATE ${CMAKE_BINARY_DIR}/include)
-    target_link_options(app_plugins_test PRIVATE -fsanitize=address -Wall)
-    target_link_libraries(app_plugins_test PRIVATE graph-prototype-options graph-prototype graph-prototype-plugin fmt refl-cpp)
-    add_dependencies(app_plugins_test good_math_plugin good_base_plugin bad_plugin)
-    add_test(NAME app_plugins_test COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/app_plugins_test)
+    add_app_test(app_plugins_test app_plugins_test.cpp)
+
+    add_app_test(app_grc)
+    target_link_libraries(app_grc PRIVATE yaml-cpp::yaml-cpp)
 endif ()

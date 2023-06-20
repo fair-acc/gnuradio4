@@ -8,6 +8,8 @@
 
 #include <fmt/format.h>
 
+#include "blocklib/core/unit-test/common_nodes.hpp"
+
 using namespace std::chrono_literals;
 using namespace fair::literals;
 
@@ -19,50 +21,6 @@ struct test_context {
     fg::node_registry registry;
     fg::plugin_loader loader;
 };
-
-template<typename T>
-class builtin_multiply : public fg::node<builtin_multiply<T>> {
-    T _factor = static_cast<T>(1.0f);
-
-public:
-    fg::IN<T>  in;
-    fg::OUT<T> out;
-
-    builtin_multiply() = delete;
-
-    template<typename Arg, typename ArgV = std::remove_cvref_t<Arg>>
-        requires(not std::is_same_v<Arg, T> and not std::is_same_v<Arg, builtin_multiply<T>>)
-    explicit builtin_multiply(Arg &&) {}
-
-    explicit builtin_multiply(T factor, std::string name = fg::this_source_location()) : _factor(factor) { this->set_name(name); }
-
-    [[nodiscard]] constexpr auto
-    process_one(T a) const noexcept {
-        return a * _factor;
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
-
-template<typename T>
-class builtin_counter : public fg::node<builtin_counter<T>> {
-public:
-    static std::size_t s_event_count;
-
-    fg::IN<T>          in;
-    fg::OUT<T>         out;
-
-    [[nodiscard]] constexpr auto
-    process_one(T a) const noexcept {
-        s_event_count++;
-        return a;
-    }
-};
-
-template<typename T>
-std::size_t builtin_counter<T>::s_event_count = 0;
-
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 
 namespace names {
 const auto fixed_source     = "good::fixed_source"s;
@@ -86,8 +44,7 @@ main(int argc, char *argv[]) {
     }
 
     test_context context(std::move(paths));
-    GP_REGISTER_NODE(&context.registry, builtin_multiply, double, float);
-    GP_REGISTER_NODE(&context.registry, builtin_counter, double, float);
+    register_builtin_nodes(&context.registry);
 
     fmt::print("PluginLoaderTests\n");
     using namespace gr;
@@ -109,32 +66,31 @@ main(int argc, char *argv[]) {
 
     fg::graph flow_graph;
 
-    auto      node_source_load = context.loader.instantiate(names::fixed_source, "double");
-    assert(node_source_load);
-    auto &node_source          = flow_graph.add_node(std::move(node_source_load));
+    // Instantiate the node that is defined in a plugin
+    auto &node_source = context.loader.instantiate_in_graph(flow_graph, names::fixed_source, "double");
 
-    auto &node_multiply_1      = flow_graph.make_node<builtin_multiply<double>>(2.0);
+    // Instantiate a built-in node in a static way
+    fair::graph::property_map node_multiply_1_params;
+    node_multiply_1_params["factor"] = 2.0;
+    auto &node_multiply_1            = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
 
-    auto  node_multiply_2_load = context.loader.instantiate(names::builtin_multiply, "double");
-    assert(node_multiply_2_load);
-    auto &node_multiply_2   = flow_graph.add_node(std::move(node_multiply_2_load));
+    // Instantiate a built-in node via the plugin loader
+    auto &node_multiply_2 = context.loader.instantiate_in_graph(flow_graph, names::builtin_multiply, "double");
+    auto &node_counter    = context.loader.instantiate_in_graph(flow_graph, names::builtin_counter, "double");
 
-    auto  node_counter_load = context.loader.instantiate(names::builtin_counter, "double");
-    assert(node_counter_load);
-    auto                     &node_counter = flow_graph.add_node(std::move(node_counter_load));
-
-    const std::size_t         repeats      = 100;
+    //
+    const std::size_t         repeats = 100;
     fair::graph::property_map node_sink_params;
     node_sink_params["total_count"] = 100_UZ;
     auto node_sink_load             = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
 
     assert(node_sink_load);
-    auto &node_sink    = flow_graph.add_node(std::move(node_sink_load));
+    auto &node_sink                     = flow_graph.add_node(std::move(node_sink_load));
 
-    auto connection_1 [[maybe_unused]] = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
-    auto connection_2 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
-    auto connection_3 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_2, 0, node_counter, 0);
-    auto connection_4 [[maybe_unused]] = flow_graph.dynamic_connect(node_counter, 0, node_sink, 0);
+    auto  connection_1 [[maybe_unused]] = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
+    auto  connection_2 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
+    auto  connection_3 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_2, 0, node_counter, 0);
+    auto  connection_4 [[maybe_unused]] = flow_graph.dynamic_connect(node_counter, 0, node_sink, 0);
 
     assert(connection_1 == fg::connection_result_t::SUCCESS);
     assert(connection_2 == fg::connection_result_t::SUCCESS);
