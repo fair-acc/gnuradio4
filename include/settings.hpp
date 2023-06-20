@@ -359,6 +359,8 @@ public:
                             member(*_node) = std::get<Type>(staged_value);
                             if constexpr (requires { _node->init(/* old settings */ _active, /* new settings */ staged); }) {
                                 staged.insert_or_assign(key, staged_value);
+                            } else {
+                                std::ignore = staged; // help clang to see why staged is not unused
                             }
                             if (_auto_forward.contains(get_display_name(member))) {
                                 forward_parameters.insert_or_assign(key, staged_value);

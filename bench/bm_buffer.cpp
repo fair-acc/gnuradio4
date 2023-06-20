@@ -44,7 +44,7 @@ setCpuAffinity(const int cpuID) {}
 #endif
 #else
 void
-setCpuAffinity(const int cpuID) {}
+setCpuAffinity(const int /*cpuID*/) {}
 #endif
 
 enum class WriteApi { via_lambda, via_split_request_publish_RAII };

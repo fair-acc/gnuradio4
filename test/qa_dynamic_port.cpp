@@ -114,7 +114,7 @@ const boost::ut::suite PortApiTests = [] {
     "PortBufferApi"_test = [] {
         OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out0"> output_port;
         BufferWriter auto                                             &writer    = output_port.streamWriter();
-        BufferWriter auto                                             &tagWriter = output_port.tagWriter();
+        // BufferWriter auto                                             &tagWriter = output_port.tagWriter();
         expect(ge(writer.available(), 32_UZ));
 
         IN<float, 0, std::numeric_limits<std::size_t>::max(), "int0"> input_port;

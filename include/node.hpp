@@ -337,12 +337,12 @@ public:
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    constexpr settings_base &
+    [[nodiscard]] constexpr settings_base &
     settings() const noexcept {
         return *_settings;
     }
 
-    constexpr settings_base &
+    [[nodiscard]] constexpr settings_base &
     settings() noexcept {
         return *_settings;
     }
@@ -542,7 +542,7 @@ public:
 
         _input_tags_present      = false;
         _output_tags_changed     = false;
-        bool auto_change         = false;
+        //bool auto_change         = false;
         if (tags_to_process) {
             property_map merged_tag_map;
             _input_tags_present    = true;
@@ -565,11 +565,11 @@ public:
             if (_input_tags_present) { // apply tags as new settings if matching
                 if (!merged_tag_map.empty()) {
                     settings().auto_update(merged_tag_map);
-                    auto_change = true;
+                    //auto_change = true;
                 }
             }
 
-            if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
+            if constexpr (Derived::tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
                 std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](property_map &tag) { tag = merged_tag_map; });
                 _output_tags_changed = true;
@@ -659,7 +659,7 @@ public:
         } else {
             // Non-SIMD loop
             for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
                 meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
             }
         }
@@ -970,10 +970,12 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
 constexpr auto
 merge(A &&a, B &&b) {
-    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
-    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
-    static_assert(OutId != -1);
-    static_assert(InId != -1);
+    constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+    constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+    static_assert(OutIdUnchecked != -1);
+    static_assert(InIdUnchecked != -1);
+    constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
+    constexpr auto InId = static_cast<std::size_t>(InIdUnchecked);
     static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
                   "Port types do not match");
     return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
@@ -984,7 +986,7 @@ namespace test {
 struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
 public:
     template<meta::t_or_simd<float> V>
-    constexpr V
+    [[nodiscard]] constexpr V
     process_one(const V &a) const noexcept {
         return a;
     }
