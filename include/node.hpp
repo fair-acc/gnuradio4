@@ -123,6 +123,15 @@ concept NodeType = requires(T t, std::string str, std::size_t index) {
     // requires !std::is_move_assignable_v<T>;
 };
 
+template<typename Derived> // TODO: nail down the required method parameters and return types
+concept HasProcessOneFunction = requires { &Derived::process_one; };
+
+template<typename Derived> // TODO: nail down the required method parameters and return types
+concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
+
+template<typename Derived> // TODO: nail down the required method parameters and return types
+concept HasRequiredProcessFunction = HasProcessOneFunction<Derived> != HasProcessBulkFunction<Derived>;
+
 /**
  * @brief The 'node<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -226,12 +235,12 @@ public:
 
 protected:
     using setting_map = std::map<std::string, int, std::less<>>;
-    std::string               _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
-    property_map              _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
-    bool                      _input_tags_present  = false;
-    bool                      _output_tags_changed = false;
-    std::vector<property_map> _tags_at_input;
-    std::vector<property_map> _tags_at_output;
+    std::string        _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
+    property_map       _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
+    bool               _input_tags_present  = false;
+    bool               _output_tags_changed = false;
+    std::vector<tag_t> _tags_at_input;
+    std::vector<tag_t> _tags_at_output;
 
     // intermediate non-real-time<->real-time setting states
     std::unique_ptr<settings_base> _settings = std::make_unique<basic_settings<Derived>>(self());
@@ -329,17 +338,17 @@ public:
         return false;
     };
 
-    [[nodiscard]] constexpr std::span<const property_map>
+    [[nodiscard]] constexpr std::span<const tag_t>
     input_tags() const noexcept {
         return { _tags_at_input.data(), _tags_at_input.size() };
     }
 
-    [[nodiscard]] constexpr std::span<const property_map>
+    [[nodiscard]] constexpr std::span<const tag_t>
     output_tags() const noexcept {
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    [[nodiscard]] constexpr std::span<property_map>
+    [[nodiscard]] constexpr std::span<tag_t>
     output_tags() noexcept {
         _output_tags_changed = true;
         return { _tags_at_output.data(), _tags_at_output.size() };
@@ -377,42 +386,56 @@ public:
     [[nodiscard]] constexpr auto static inputs_status(Self &self) noexcept {
         static_assert(traits::node::input_ports<Derived>::size > 0, "A source node has no inputs, therefore no inputs status.");
         bool       at_least_one_input_has_data = false;
-        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, std::size_t> {
-            std::size_t       availableSamples = port.streamReader().available();
-            const std::size_t availableTags    = port.tagReader().available();
+        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, int64_t> {
+            std::size_t       availableSamples         = port.streamReader().available();
+            const std::size_t availableTags            = port.tagReader().available();
+            int64_t           tag_stream_head_distance = -1;
             if (availableTags > 0) {
                 // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-                auto tagData                  = port.tagReader().get();
-                auto tag_stream_head_distance = tagData[0].index - port.streamReader().position();
+                auto        tagData      = port.tagReader().get();
+                const auto &readPosition = port.streamReader().position();
+                tag_stream_head_distance = tagData[0].index - readPosition;
                 assert(tag_stream_head_distance >= 0 && "negative tag vs. stream distance");
 
-                if (tag_stream_head_distance > 0 && availableSamples > static_cast<std::size_t>(tag_stream_head_distance)) {
+                if (readPosition == -1 && tagData[0].index == 0) { // handle tag on very first sample
+                    tag_stream_head_distance = 0;
+                    if (availableTags > 1) {
+                        availableSamples = std::min(availableSamples, static_cast<std::size_t>(tagData[1].index));
+                    }
+                } else if (tag_stream_head_distance > 0 && availableSamples > static_cast<std::size_t>(tag_stream_head_distance)) {
                     // limit number of samples to read up to the next tag <-> forces processing from tag to tag|MAX_SIZE
                     // N.B. new tags are thus always on the first readable sample
-                    availableSamples = std::min(availableSamples, static_cast<std::size_t>(tag_stream_head_distance));
+                    if (availableTags > 1) {
+                        availableSamples = std::min(availableSamples,
+                                                    static_cast<std::size_t>(tagData[1].index - tagData[0].index));
+                    } else {
+                        availableSamples = std::min(availableSamples,
+                                                    static_cast<std::size_t>(tag_stream_head_distance));
+                    }
+                    tag_stream_head_distance--;
                     // TODO: handle corner case where the distance to the next tag is less than the ports MIN_SIZE
                 }
             }
             if (availableSamples > 0_UZ) at_least_one_input_has_data = true;
             if (availableSamples < port.min_buffer_size()) {
-                return { 0_UZ, availableTags };
+                return { 0_UZ, tag_stream_head_distance };
             } else {
-                return { std::min(availableSamples, port.max_buffer_size()), availableTags };
+                return { std::min(availableSamples, port.max_buffer_size()), tag_stream_head_distance };
             }
         };
 
-        const std::pair<std::size_t, std::size_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
-                                                                                              input_ports(&self));
+        const std::pair<std::size_t, std::int64_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
+                                                                                               input_ports(&self));
 
         struct result {
-            bool        at_least_one_input_has_data;
-            std::size_t available_values_count;
-            std::size_t available_tags_count;
+            bool         at_least_one_input_has_data;
+            std::size_t  available_values_count;
+            std::int64_t samples_until_next_tag;
         };
 
         return result{ .at_least_one_input_has_data = at_least_one_input_has_data,
                        .available_values_count      = available_values_and_tag_count.first,
-                       .available_tags_count        = available_values_and_tag_count.second };
+                       .samples_until_next_tag      = available_values_and_tag_count.second };
     }
 
     // This function is a template and static to provide easier
@@ -466,17 +489,45 @@ public:
         }
     }
 
+    constexpr void
+    forward_tags() noexcept {
+        if (!_output_tags_changed) {
+            return;
+        }
+        std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
+        // TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
+        // meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
+        meta::tuple_for_each(
+                [&port_id, this](auto &output_port) noexcept {
+                    if (_tags_at_output[port_id].map.empty()) {
+                        port_id++;
+                        return;
+                    }
+                    auto data           = output_port.tagWriter().reserve_output_range(1);
+                    data[port_id].index = _tags_at_output[port_id].index + std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position());
+                    data[port_id].map   = _tags_at_output[port_id].map;
+                    data.publish(1);
+                    port_id++;
+                },
+                output_ports(&self()));
+        // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
+        _input_tags_present  = false;
+        _output_tags_changed = false;
+        std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t &tag) { tag.reset(); });
+        std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t &tag) { tag.reset(); });
+    }
+
 public:
     work_return_t
     work() noexcept {
-        using input_types                 = traits::node::input_port_types<Derived>;
-        using output_types                = traits::node::output_port_types<Derived>;
+        using input_types                       = traits::node::input_port_types<Derived>;
+        using output_types                      = traits::node::output_port_types<Derived>;
 
-        constexpr bool is_source_node     = input_types::size == 0;
-        constexpr bool is_sink_node       = output_types::size == 0;
+        constexpr bool is_source_node           = input_types::size == 0;
+        constexpr bool is_sink_node             = output_types::size == 0;
 
-        std::size_t    samples_to_process = 0;
-        std::size_t    tags_to_process    = 0;
+        std::size_t    samples_to_process       = 0;
+        std::int64_t   n_samples_until_next_tag = -1; // '-1': no tags in sight
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
                               { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
@@ -529,12 +580,12 @@ public:
             }
         } else {
             // Capturing structured bindings does not work in Clang...
-            const auto [at_least_one_input_has_data, available_values_count, available_tags_count] = self().inputs_status(self());
+            const auto [at_least_one_input_has_data, available_values_count, n_samples_until_next_tag_] = self().inputs_status(self());
             if (available_values_count == 0) {
                 return at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
             }
-            samples_to_process = available_values_count;
-            tags_to_process    = available_tags_count;
+            samples_to_process       = available_values_count;
+            n_samples_until_next_tag = n_samples_until_next_tag_;
             if (not enough_samples_for_output_ports(samples_to_process)) {
                 return work_return_t::INSUFFICIENT_INPUT_ITEMS;
             }
@@ -550,22 +601,31 @@ public:
 
         _input_tags_present      = false;
         _output_tags_changed     = false;
-        //bool auto_change         = false;
-        if (tags_to_process) {
+        if (n_samples_until_next_tag == 0) {
+            if constexpr (requires(
+                    Derived &d) { &Derived::process_one; }) { // TODO: nail down the required method parameters and return types
+                samples_to_process = 1;                                      // N.B. limit to one so that only one process_on(...) invocation receives the tag
+            }
             property_map merged_tag_map;
-            _input_tags_present    = true;
+            _input_tags_present = true;
             std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
                     [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
-                        auto tags = input_port.tagReader().get(1_UZ);
-                        if (tags.size() > 0 && (tags[0].index == input_port.streamReader().position() || tags[0].index == -1)) {
-                            _tags_at_input[port_index].clear();
+                        auto &tag_at_present_input = _tags_at_input[port_index++];
+                        tag_at_present_input.reset();
+                        if (!input_port.tagReader().available()) {
+                            return;
+                        }
+                        const auto tags           = input_port.tagReader().get(1_UZ);
+                        const auto readPos = input_port.streamReader().position();
+                        const auto tag_stream_pos = tags[0].index - 1 - readPos;
+                        if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
+                            || tag_stream_pos <= 0) {
                             for (const auto &[index, map] : tags) {
-                                _tags_at_input[port_index].insert(map.begin(), map.end());
+                                tag_at_present_input.map.insert(map.begin(), map.end());
                                 merged_tag_map.insert(map.begin(), map.end());
                             }
                             std::ignore = input_port.tagReader().consume(1_UZ);
-                            port_index++;
                         }
                     },
                     input_ports(&self()));
@@ -573,48 +633,20 @@ public:
             if (_input_tags_present) { // apply tags as new settings if matching
                 if (!merged_tag_map.empty()) {
                     settings().auto_update(merged_tag_map);
-                    //auto_change = true;
                 }
             }
 
             if constexpr (Derived::tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](property_map &tag) { tag = merged_tag_map; });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t &tag) { tag.map = merged_tag_map; });
                 _output_tags_changed = true;
             }
         }
 
-        const auto forward_tags = [this]() noexcept {
-            if (!_output_tags_changed) {
-                return;
-            }
-            std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
-            // TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
-            // meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
-            meta::tuple_for_each(
-                    [&port_id, this](auto &output_port) noexcept {
-                        if (_tags_at_output[port_id].empty()) {
-                            port_id++;
-                            return;
-                        }
-                        auto data           = output_port.tagWriter().reserve_output_range(1);
-                        data[port_id].index = output_port.streamWriter().position();
-                        data[port_id].map   = _tags_at_output[port_id];
-                        data.publish(1);
-                        port_id++;
-                    },
-                    output_ports(&self()));
-            // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
-            _input_tags_present  = false;
-            _output_tags_changed = false;
-            std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](property_map &tag) { tag.clear(); });
-            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](property_map &tag) { tag.clear(); });
-        };
-
         if (settings().changed()) {
             const auto forward_parameters = settings().apply_staged_parameters();
             if (!forward_parameters.empty()) {
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](property_map &tag) { tag.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) { tag.map.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
                 _output_tags_changed = true;
             }
             settings()._changed.store(false);
@@ -631,7 +663,7 @@ public:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
-        if constexpr (requires { &Derived::process_bulk; }) {
+        if constexpr (HasProcessBulkFunction<Derived>) {
             const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
                                                  std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
 
@@ -639,51 +671,57 @@ public:
             const bool success = consume_readers(self(), samples_to_process);
             forward_tags();
             return success ? ret : work_return_t::ERROR;
-        }
-
-        using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
-        using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
-
-        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
-                                                                                         : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
-                width{};
-
-        if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
-                                                                                              { d.process_one_simd(width) };
-                                                                                          }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
-            // SIMD loop
-            std::size_t i = 0;
-            for (; i + width <= samples_to_process; i += width) {
-                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
-                meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
-            }
-            simd_epilogue(width, [&](auto w) {
-                if (i + w <= samples_to_process) {
-                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
-                    meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
-                    i += w;
-                }
-            });
         } else {
-            // Non-SIMD loop
-            for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
-                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
+            //       if constexpr (HasProcessOneFunction<Derived>) { // TODO: nail down the required method parameters and return types
+            // handle process_one(...)
+            using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
+            using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
+
+            std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
+                                                                                             : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
+                    width{};
+
+            if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
+                                                                                                  { d.process_one_simd(width) };
+                                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+                // SIMD loop
+                std::size_t i = 0;
+                for (; i + width <= samples_to_process; i += width) {
+                    const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
+                    meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
+                }
+                simd_epilogue(width, [&](auto w) {
+                    if (i + w <= samples_to_process) {
+                        const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
+                        meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
+                        i += w;
+                    }
+                });
+            } else {
+                // Non-SIMD loop
+                for (std::size_t i = 0; i < samples_to_process; ++i) {
+                    const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                    meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
+                }
             }
-        }
 
-        write_to_outputs(samples_to_process, writers_tuple);
+            write_to_outputs(samples_to_process, writers_tuple);
 
-        const bool success = consume_readers(self(), samples_to_process);
+            const bool success = consume_readers(self(), samples_to_process);
 
 #ifdef _DEBUG
-        if (!success) {
-            fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
-        }
+            if (!success) {
+                fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
+            }
 #endif
-        forward_tags();
-        return success ? work_return_t::OK : work_return_t::ERROR;
-    } // end: work_return_t work() noexcept { ..}
+            forward_tags();
+            return success ? work_return_t::OK : work_return_t::ERROR;
+        } // process_one(...) handling
+          //        else {
+          //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
+          //        }
+        return work_return_t::ERROR;
+    }     // end: work_return_t work() noexcept { ..}
 };
 
 template<typename Derived, typename... Arguments>
@@ -983,7 +1021,7 @@ merge(A &&a, B &&b) {
     static_assert(OutIdUnchecked != -1);
     static_assert(InIdUnchecked != -1);
     constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
-    constexpr auto InId = static_cast<std::size_t>(InIdUnchecked);
+    constexpr auto InId  = static_cast<std::size_t>(InIdUnchecked);
     static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
                   "Port types do not match");
     return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };

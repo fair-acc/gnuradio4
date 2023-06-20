@@ -1,10 +1,17 @@
 #include <boost/ut.hpp>
 
+#include <buffer.hpp>
+#include <graph.hpp>
+#include <node.hpp>
+#include <reflection.hpp>
+#include <scheduler.hpp>
 #include <tag.hpp>
+
+#include <fmt/format.h>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template <>
+template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
@@ -42,6 +49,207 @@ const boost::ut::suite TagTests = [] {
         static_assert(tag::TRIGGER_NAME.shortKey() == "trigger_name");
         static_assert(tag::TRIGGER_TIME.shortKey() == "trigger_time");
         static_assert(tag::TRIGGER_OFFSET.shortKey() == "trigger_offset");
+    };
+};
+
+namespace fair::graph::tag_test {
+
+void
+print_tag(const tag_t &tag, std::string_view prefix = {}) {
+    fmt::print("{} @index={}: {{", prefix, tag.index);
+    if (tag.map.empty()) {
+        fmt::print("}}\n");
+        return;
+    }
+    for (const auto &[key, value] : tag.map) {
+        fmt::print(" {:>5}: {} ", key, value);
+    }
+    fmt::print("}}\n");
+}
+
+template<typename T>
+struct TagSource : public node<TagSource<T>> {
+    OUT<T, 0, 1>       out;
+    std::vector<tag_t> tags{ //
+                             { 0, { { "key", "value@0" } } },
+                             { 100, { { "key", "value@100" } } },
+                             { 150, { { "key", "value@150" } } },
+                             { 1000, { { "key", "value@1000" } } }
+    };
+    std::size_t   next_tag{ 0 };
+    std::uint64_t n_samples_max = 1024;
+    std::uint64_t n_samples_produced{ 0 };
+
+    constexpr std::make_signed_t<std::size_t>
+    available_samples(const TagSource &) noexcept {
+        const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
+        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
+    }
+
+    T
+    process_one() noexcept {
+        if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
+            fmt::print("publish sample at {} - {}\n", n_samples_produced, tags[next_tag].index);
+            tag_t &out_tag = this->output_tags()[0];
+            out_tag        = tags[next_tag];
+            this->forward_tags();
+            next_tag++;
+            n_samples_produced++;
+            return static_cast<T>(1);
+        }
+
+        n_samples_produced++;
+        return static_cast<T>(0);
+    }
+};
+    static_assert(HasRequiredProcessFunction<TagSource<int>>);
+
+enum class ProcessFunction {
+    USE_PROCESS_ONE  = 0, ///
+    USE_PROCESS_BULK = 1  ///
+};
+
+template<typename T, ProcessFunction UseProcessOne>
+struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
+    IN<T>              in;
+    OUT<T>             out;
+    std::vector<tag_t> tags{};
+    std::uint64_t      n_samples_produced{ 0 };
+
+    constexpr T
+    process_one(const T &input) noexcept
+        requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
+    {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("monitor::process_one received tag at {}", n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
+        }
+        n_samples_produced++;
+        return input;
+    }
+
+    constexpr work_return_t
+    process_bulk(std::span<const T> input, std::span<T> output) noexcept
+        requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
+    {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("monitor::process_bulk received tag at {}", n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
+        }
+
+        n_samples_produced += input.size();
+        std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
+
+        return work_return_t::OK;
+    }
+};
+
+    static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+    static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+    static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+    static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+    static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+    static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+
+    template<typename T>
+    struct TagSink : public node<TagSink<T>> {
+        IN<T> in;
+        std::vector<tag_t> tags{};
+        std::uint64_t n_samples_produced{0};
+
+        // template<fair::meta::t_or_simd<T> V>
+        constexpr void
+        process_one(const T &) noexcept {
+            if (this->input_tags_present()) {
+                const tag_t &tag = this->input_tags()[0];
+                print_tag(tag, fmt::format("sink received tag at {}", n_samples_produced));
+                tags.emplace_back(n_samples_produced, tag.map);
+                this->forward_tags();
+            }
+            n_samples_produced++;
+        }
+    };
+
+    static_assert(HasRequiredProcessFunction<TagSink<int>>);
+
+} // namespace fair::graph::tag_test
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::tag_test::TagSource<T>), out, n_samples_max);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagMonitor<T, b>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::tag_test::TagSink<T>), in);
+
+const boost::ut::suite TagPropagation = [] {
+    using namespace boost::ut;
+    using namespace fair::graph;
+    using namespace fair::graph::tag_test;
+
+    "tag_source"_test = [] {
+        std::uint64_t n_samples = 1024;
+        graph         flow_graph;
+        auto         &src      = flow_graph.make_node<TagSource<float>>({ { "n_samples_max", n_samples } });
+        auto         &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>();
+        auto         &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>();
+        auto         &sink     = flow_graph.make_node<TagSink<float>>();
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink)));
+
+        scheduler::simple sched{std::move(flow_graph)};
+        sched.work();
+
+        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
+        expect(eq(monitor1.n_samples_produced, n_samples)) << "monitor1 did not consume enough input samples";
+        expect(eq(monitor2.n_samples_produced, n_samples)) << "monitor2 did not consume enough input samples";
+        expect(eq(sink.n_samples_produced, n_samples)) << "sink did not consume enough input samples";
+
+        auto equal_tag_lists = [](const std::vector<tag_t> &tags1, const std::vector<tag_t> &tags2) {
+            if (tags1.size() != tags2.size()) {
+                fmt::print("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
+                return false;
+            }
+
+            auto result = std::mismatch(tags1.begin(), tags1.end(), tags2.begin(),
+                                        [](const tag_t &tag1, const tag_t &tag2) {
+                                            return tag1.index == tag2.index && tag1.map == tag2.map;
+                                        });
+
+            if (result.first != tags1.end()) {
+                size_t index = std::distance(tags1.begin(), result.first);
+                const tag_t &tag1 = *result.first;
+                const tag_t &tag2 = *result.second;
+                fmt::print("mismatch at index {}\n", index);
+                if (tag1.index != tag2.index) {
+                    fmt::print("  - different index: {} vs {}\n", tag1.index, tag2.index);
+                }
+                if (tag1.map != tag2.map) {
+                    fmt::print("  - different map content:\n");
+                    for (const auto &[key, value]: tag1.map) {
+                        if (tag2.map.find(key) == tag2.map.end()) {
+                            fmt::print("    key '{}' is present in the first map but not in the second\n", key);
+                        } else if (tag2.map.at(key) != value) {
+                            fmt::print("    key '{}' has different values ('{}' vs '{}')\n", key, value,
+                                       tag2.map.at(key));
+                        }
+                    }
+                    for (const auto &[key, value]: tag2.map) {
+                        if (tag1.map.find(key) == tag1.map.end()) {
+                            fmt::print("    key '{}' is present in the second map but not in the first\n", key);
+                        }
+                    }
+                }
+                return false;
+            }
+
+            return true;
+        };
+
+        expect(equal_tag_lists(src.tags, monitor1.tags)) << "monitor1 did not receive the required tags";
+        expect(equal_tag_lists(src.tags, monitor2.tags)) << "monitor2 did not receive the required tags";
+        expect(equal_tag_lists(src.tags, sink.tags)) << "sink did not receive the required tags";
     };
 };
 

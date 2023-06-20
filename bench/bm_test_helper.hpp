@@ -98,8 +98,8 @@ struct sink : public fg::node<sink<T, N_MIN, N_MAX>> {
     process_one(V a) noexcept {
         // optional user-level tag processing
         if (this->input_tags_present()) {
-            if (this->input_tags_present() && this->input_tags()[0].contains("N_SAMPLES_MAX")) {
-                const auto value = this->input_tags()[0].at("N_SAMPLES_MAX");
+            if (this->input_tags_present() && this->input_tags()[0].map.contains("N_SAMPLES_MAX")) {
+                const auto value = this->input_tags()[0].map.at("N_SAMPLES_MAX");
                 if (std::holds_alternative<uint64_t>(value)) { // should be std::size_t but emscripten/pmtv seem to have issues with it
                     should_receive_n_samples = std::get<uint64_t>(value);
                     _last_tag_position       = in.streamReader().position();

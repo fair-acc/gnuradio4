@@ -60,6 +60,12 @@ struct alignas(hardware_constructive_interference_size) tag_t {
     property_map                    map;
 
     // TODO: do we need the convenience methods below?
+    void
+    reset() noexcept {
+        index = 0;
+        map.clear();
+    }
+
     [[nodiscard]] pmtv::pmt &
     at(const std::string &key) {
         return map.at(key);
