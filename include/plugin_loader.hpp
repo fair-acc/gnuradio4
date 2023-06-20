@@ -48,23 +48,23 @@ private:
     }
 
 public:
-    plugin_handler() {}
+    plugin_handler() = default;
 
-    plugin_handler(std::string plugin_file) {
+    explicit plugin_handler(const std::string& plugin_file) {
         _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY);
         if (!_dl_handle) {
             _status = "Failed to load the plugin file";
             return;
         }
 
-        _create_fn = (plugin_create_function_t) (dlsym(_dl_handle, "gp_plugin_make"));
+        _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gp_plugin_make"));
         if (!_create_fn) {
             _status = "Failed to load symbol gp_plugin_make";
             release();
             return;
         }
 
-        _destroy_fn = (plugin_destroy_function_t) (dlsym(_dl_handle, "gp_plugin_free"));
+        _destroy_fn = reinterpret_cast<plugin_destroy_function_t>(dlsym(_dl_handle, "gp_plugin_free"));
         if (!_destroy_fn) {
             _status = "Failed to load symbol gp_plugin_free";
             release();
@@ -110,7 +110,7 @@ public:
 
     explicit operator bool() const { return _instance; }
 
-    const std::string &
+    [[nodiscard]] const std::string &
     status() const {
         return _status;
     }

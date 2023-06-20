@@ -64,6 +64,7 @@ function(set_project_warnings project_name)
       -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
       -Wuseless-cast # warn if you perform a cast to the same type
       -Wno-interference-size # suppress ABI compatibility warnings for hardware inferred size
+      -Wno-maybe-uninitialized # false positives if asan is enabled: https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
   )
 
   if(MSVC)

@@ -825,7 +825,7 @@ namespace vir::stdx
 
   template <typename T>
     constexpr bool
-    some_of(simd_mask<T, simd_abi::scalar> k) noexcept
+    some_of(simd_mask<T, simd_abi::scalar> /*k*/) noexcept
     { return false; }
 
   template <typename T>

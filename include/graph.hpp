@@ -99,7 +99,7 @@ class dynamic_port {
             if constexpr (T::IS_INPUT) {
                 return _value.update_reader_internal(buffer_other);
             } else {
-                assert(!"This works only on input ports");
+                assert(false && "This works only on input ports");
                 return false;
             }
         }
@@ -175,7 +175,7 @@ class dynamic_port {
                 auto src_buffer = _value.writer_handler_internal();
                 return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
             } else {
-                assert(!"This works only on input ports");
+                assert(false && "This works only on input ports");
                 return connection_result_t::FAILED;
             }
         }
@@ -350,7 +350,7 @@ protected:
     dynamic_ports _dynamic_input_ports;
     dynamic_ports _dynamic_output_ports;
 
-    node_model(){};
+    node_model()= default;
 
 public:
     node_model(const node_model &) = delete;
@@ -374,13 +374,13 @@ public:
         return _dynamic_output_ports[index];
     }
 
-    auto
+    [[nodiscard]] auto
     dynamic_input_ports_size() const {
         assert(_dynamic_ports_loaded);
         return _dynamic_input_ports.size();
     }
 
-    auto
+    [[nodiscard]] auto
     dynamic_output_ports_size() const {
         assert(_dynamic_ports_loaded);
         return _dynamic_output_ports.size();
@@ -487,13 +487,13 @@ public:
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
-    node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
+    explicit node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
         init_dynamic_ports();
     }
 
     template<typename... Args>
         requires(sizeof...(Args) > 1)
-    node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
+    explicit node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
         init_dynamic_ports();
     }
 
@@ -544,7 +544,7 @@ public: // TODO: consider making this private and to use accessors (that can be 
     std::size_t _min_buffer_size;
     int32_t     _weight;
     std::string _name; // custom edge name
-    bool        _connected;
+    bool        _connected{};
 
 public:
     edge()             = delete;
@@ -622,7 +622,7 @@ private:
             }
         }();
 
-        if (it == _nodes.end()) throw fmt::format("No such node in this graph");
+        if (it == _nodes.end()) throw std::runtime_error(fmt::format("No such node in this graph"));
         return *it;
     }
 

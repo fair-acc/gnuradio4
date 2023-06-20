@@ -253,7 +253,7 @@ const boost::ut::suite CircularBufferTests = [] {
             [](const Allocator &allocator) {
                 using namespace gr;
                 Buffer auto buffer = circular_buffer<int32_t>(1024, allocator);
-                expect(ge(buffer.size(), 1024));
+                expect(ge(buffer.size(), 1024u));
 
                 BufferWriter auto writer = buffer.new_writer();
                 expect(nothrow([&writer] { expect(eq(writer.buffer().n_readers(), std::size_t{ 0 })); })); // no reader, just writer
@@ -353,7 +353,7 @@ const boost::ut::suite CircularBufferTests = [] {
             }
             | std::vector{
 #ifndef __EMSCRIPTEN__
-                  Allocator(gr::double_mapped_memory_resource::allocator<int32_t>()),
+                  gr::double_mapped_memory_resource::allocator<int32_t>(),
 #endif
                   Allocator()
               };
@@ -364,7 +364,7 @@ const boost::ut::suite CircularBufferExceptionTests = [] {
     "CircularBufferExceptions"_test = [] {
         using namespace gr;
         Buffer auto buffer = circular_buffer<int32_t>(1024);
-        expect(ge(buffer.size(), 1024));
+        expect(ge(buffer.size(), 1024u));
 
         BufferWriter auto writer = buffer.new_writer();
         BufferReader auto reader = buffer.new_reader();
@@ -385,7 +385,7 @@ const boost::ut::suite UserDefinedTypeCasting = [] {
     "UserDefinedTypeCasting"_test = [] {
         using namespace gr;
         Buffer auto buffer = circular_buffer<std::complex<float>>(1024);
-        expect(ge(buffer.size(), 1024));
+        expect(ge(buffer.size(), 1024u));
 
         BufferWriter auto writer = buffer.new_writer();
         BufferReader auto reader = buffer.new_reader();
@@ -433,8 +433,8 @@ const boost::ut::suite StreamTagConcept = [] {
         expect(eq(sizeof(buffer_tag), std::size_t{ 64 })) << "tag size";
         Buffer auto buffer    = circular_buffer<int32_t>(1024);
         Buffer auto tagBuffer = circular_buffer<buffer_tag>(32);
-        expect(ge(buffer.size(), 1024));
-        expect(ge(tagBuffer.size(), 32));
+        expect(ge(buffer.size(), 1024u));
+        expect(ge(tagBuffer.size(), 32u));
 
         BufferWriter auto writer    = buffer.new_writer();
         BufferReader auto reader    = buffer.new_reader();
@@ -479,10 +479,10 @@ const boost::ut::suite NonPowerTwoTests = [] {
         constexpr std::size_t typeSize = sizeof(std::vector<int>);
         expect(not std::has_single_bit(typeSize)) << "type is non-power-of-two";
         Buffer auto buffer = circular_buffer<Type>(1024);
-        expect(ge(buffer.size(), 1024));
+        expect(ge(buffer.size(), 1024u));
         if (gr::has_posix_mmap_interface) {
-            expect(buffer.size() % typeSize == 0) << "divisible by the type size";
-            expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0) << "divisible by the memory page size";
+            expect(buffer.size() % typeSize == 0u) << "divisible by the type size";
+            expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0u) << "divisible by the memory page size";
         }
 
         BufferWriter auto writer     = buffer.new_writer();
@@ -506,7 +506,7 @@ const boost::ut::suite NonPowerTwoTests = [] {
                 const auto vectorData = reader.get();
                 for (auto &vector : vectorData) {
                     static int offset = -1;
-                    expect(eq(vector.size(), 1)) << "vector size == 1";
+                    expect(eq(vector.size(), 1u)) << "vector size == 1";
                     expect(eq(vector[0] - offset, 1)) << "vector offset == 1";
                     offset = vector[0];
                 }
@@ -529,7 +529,7 @@ const boost::ut::suite HistoryBufferTest = [] {
     "history_buffer<double>"_test = [](const std::size_t &capacity) {
         history_buffer<int> hb(capacity);
         expect(eq(hb.capacity(), capacity));
-        expect(eq(hb.size(), 0));
+        expect(eq(hb.size(), 0u));
 
         for (std::size_t i = 1; i <= capacity + 1; ++i) {
             hb.push_back(static_cast<int>(i));
@@ -537,19 +537,19 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb.capacity(), capacity));
         expect(eq(hb.size(), capacity));
 
-        expect(eq(hb[0], capacity + 1)) << "access the last/actual sample";
-        expect(eq(hb[-1], capacity)) << "access the previous sample";
+        expect(eq(hb[0], static_cast<int>(capacity + 1))) << "access the last/actual sample";
+        expect(eq(hb[-1], static_cast<int>(capacity))) << "access the previous sample";
 
-        expect(eq(hb.at(0), capacity + 1)) << "checked access the last/actual sample";
-        expect(eq(hb.at(-1), capacity)) << "checked access the previous sample";
+        expect(eq(hb.at(0), static_cast<int>(capacity + 1))) << "checked access the last/actual sample";
+        expect(eq(hb.at(-1), static_cast<int>(capacity))) << "checked access the previous sample";
     } | std::vector<std::size_t>{ 5, 3, 10 };
 
     "history_buffer - range tests"_test = [] {
         history_buffer<int> hb(5);
         hb.push_back_bulk(std::array{ 1, 2, 3 });
         hb.push_back_bulk(std::vector{ 4, 5, 6 });
-        expect(eq(hb.capacity(), 5));
-        expect(eq(hb.size(), 5));
+        expect(eq(hb.capacity(), 5u));
+        expect(eq(hb.size(), 5u));
 
         auto equal = [](const auto &range1, const auto &range2) { // N.B. TODO replacement until libc++ fully supports ranges
             return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end());
@@ -583,12 +583,12 @@ const boost::ut::suite HistoryBufferTest = [] {
 
         // Create a history buffer of size 1
         history_buffer<int> hb_one(1);
-        expect(eq(hb_one.capacity(), 1));
-        expect(eq(hb_one.size(), 0));
+        expect(eq(hb_one.capacity(), 1u));
+        expect(eq(hb_one.size(), 0u));
         hb_one.push_back(41);
         hb_one.push_back(42);
-        expect(eq(hb_one.capacity(), 1));
-        expect(eq(hb_one.size(), 1));
+        expect(eq(hb_one.capacity(), 1u));
+        expect(eq(hb_one.size(), 1u));
         expect(eq(hb_one[0], 42));
 
         expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(1); })) << "throws for index > 0";
@@ -609,8 +609,8 @@ const boost::ut::suite HistoryBufferTest = [] {
         for (int i = 0; i < 10; ++i) {
             hb_double.push_back(i * 0.1);
         }
-        expect(eq(hb_double.capacity(), 5));
-        expect(eq(hb_double.size(), 5));
+        expect(eq(hb_double.capacity(), 5u));
+        expect(eq(hb_double.size(), 5u));
     };
 };
 

@@ -7,7 +7,6 @@
 #include <iostream>
 
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 
 using namespace std::chrono_literals;
 using namespace fair::literals;
@@ -15,7 +14,7 @@ using namespace fair::literals;
 namespace fg = fair::graph;
 
 struct test_context {
-    test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
+    explicit test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
     fg::node_registry registry;
     fg::plugin_loader loader;
@@ -78,11 +77,11 @@ int
 main(int argc, char *argv[]) {
     std::vector<std::filesystem::path> paths;
     if (argc < 2) {
-        paths.push_back("test/plugins");
-        paths.push_back("plugins");
+        paths.emplace_back("test/plugins");
+        paths.emplace_back("plugins");
     } else {
         for (int i = 1; i < argc; ++i) {
-            paths.push_back(argv[i]);
+            paths.emplace_back(argv[i]);
         }
     }
 
@@ -93,18 +92,18 @@ main(int argc, char *argv[]) {
     fmt::print("PluginLoaderTests\n");
     using namespace gr;
 
-    for (const auto &plugin : context.loader.plugins()) {
+    for (const auto &plugin [[maybe_unused]] : context.loader.plugins()) {
         assert(plugin->metadata->plugin_name.starts_with("Good"));
     }
 
-    for (const auto &plugin : context.loader.failed_plugins()) {
+    for (const auto &plugin [[maybe_unused]] : context.loader.failed_plugins()) {
         assert(plugin.first.ends_with("bad_plugin.so"));
     }
 
     auto        known = context.loader.known_nodes();
     std::vector requireds{ names::cout_sink, names::fixed_source, names::divide, names::multiply };
 
-    for (const auto &required : requireds) {
+    for (const auto &required [[maybe_unused]] : requireds) {
         assert(std::ranges::find(known, required) != known.end());
     }
 
@@ -132,10 +131,10 @@ main(int argc, char *argv[]) {
     assert(node_sink_load);
     auto &node_sink    = flow_graph.add_node(std::move(node_sink_load));
 
-    auto  connection_1 = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
-    auto  connection_2 = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
-    auto  connection_3 = flow_graph.dynamic_connect(node_multiply_2, 0, node_counter, 0);
-    auto  connection_4 = flow_graph.dynamic_connect(node_counter, 0, node_sink, 0);
+    auto connection_1 [[maybe_unused]] = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
+    auto connection_2 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
+    auto connection_3 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_2, 0, node_counter, 0);
+    auto connection_4 [[maybe_unused]] = flow_graph.dynamic_connect(node_counter, 0, node_sink, 0);
 
     assert(connection_1 == fg::connection_result_t::SUCCESS);
     assert(connection_2 == fg::connection_result_t::SUCCESS);
@@ -143,11 +142,11 @@ main(int argc, char *argv[]) {
     assert(connection_4 == fg::connection_result_t::SUCCESS);
 
     for (std::size_t i = 0; i < repeats; ++i) {
-        node_source.work();
-        node_multiply_1.work();
-        node_multiply_2.work();
-        node_counter.work();
-        node_sink.work();
+        std::ignore = node_source.work();
+        std::ignore = node_multiply_1.work();
+        std::ignore = node_multiply_2.work();
+        std::ignore = node_counter.work();
+        std::ignore = node_sink.work();
     }
 
     fmt::print("repeats {} event_count {}\n", repeats, builtin_counter<double>::s_event_count);

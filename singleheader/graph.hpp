@@ -1578,7 +1578,7 @@ namespace vir::stdx
 
   template <typename T>
     constexpr bool
-    some_of(simd_mask<T, simd_abi::scalar> k) noexcept
+    some_of(simd_mask<T, simd_abi::scalar> /*k*/) noexcept
     { return false; }
 
   template <typename T>
@@ -3917,7 +3917,7 @@ struct NO_SPIN_WAIT {};
 
 template<typename SPIN_WAIT = NO_SPIN_WAIT>
 class AtomicMutex {
-    std::atomic_flag _lock = ATOMIC_FLAG_INIT;
+    std::atomic_flag _lock{};
     SPIN_WAIT        _spin_wait;
 
 public:
@@ -11082,6 +11082,8 @@ public:
                             member(*_node) = std::get<Type>(staged_value);
                             if constexpr (requires { _node->init(/* old settings */ _active, /* new settings */ staged); }) {
                                 staged.insert_or_assign(key, staged_value);
+                            } else {
+                                std::ignore = staged; // help clang to see why staged is not unused
                             }
                             if (_auto_forward.contains(get_display_name(member))) {
                                 forward_parameters.insert_or_assign(key, staged_value);
@@ -11450,12 +11452,12 @@ public:
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    constexpr settings_base &
+    [[nodiscard]] constexpr settings_base &
     settings() const noexcept {
         return *_settings;
     }
 
-    constexpr settings_base &
+    [[nodiscard]] constexpr settings_base &
     settings() noexcept {
         return *_settings;
     }
@@ -11655,7 +11657,7 @@ public:
 
         _input_tags_present      = false;
         _output_tags_changed     = false;
-        bool auto_change         = false;
+        //bool auto_change         = false;
         if (tags_to_process) {
             property_map merged_tag_map;
             _input_tags_present    = true;
@@ -11678,11 +11680,11 @@ public:
             if (_input_tags_present) { // apply tags as new settings if matching
                 if (!merged_tag_map.empty()) {
                     settings().auto_update(merged_tag_map);
-                    auto_change = true;
+                    //auto_change = true;
                 }
             }
 
-            if constexpr (tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
+            if constexpr (Derived::tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
                 std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](property_map &tag) { tag = merged_tag_map; });
                 _output_tags_changed = true;
@@ -11772,7 +11774,7 @@ public:
         } else {
             // Non-SIMD loop
             for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
                 meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
             }
         }
@@ -12083,10 +12085,12 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
 template<fixed_string OutName, fixed_string InName, source_node A, sink_node B>
 constexpr auto
 merge(A &&a, B &&b) {
-    constexpr std::size_t OutId = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
-    constexpr std::size_t InId  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
-    static_assert(OutId != -1);
-    static_assert(InId != -1);
+    constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::node::output_ports<A>>();
+    constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::node::input_ports<B>>();
+    static_assert(OutIdUnchecked != -1);
+    static_assert(InIdUnchecked != -1);
+    constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
+    constexpr auto InId = static_cast<std::size_t>(InIdUnchecked);
     static_assert(std::same_as<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
                   "Port types do not match");
     return merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
@@ -12097,7 +12101,7 @@ namespace test {
 struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
 public:
     template<meta::t_or_simd<float> V>
-    constexpr V
+    [[nodiscard]] constexpr V
     process_one(const V &a) const noexcept {
         return a;
     }
@@ -12221,7 +12225,7 @@ class dynamic_port {
             if constexpr (T::IS_INPUT) {
                 return _value.update_reader_internal(buffer_other);
             } else {
-                assert(!"This works only on input ports");
+                assert(false && "This works only on input ports");
                 return false;
             }
         }
@@ -12297,7 +12301,7 @@ class dynamic_port {
                 auto src_buffer = _value.writer_handler_internal();
                 return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
             } else {
-                assert(!"This works only on input ports");
+                assert(false && "This works only on input ports");
                 return connection_result_t::FAILED;
             }
         }
@@ -12472,7 +12476,7 @@ protected:
     dynamic_ports _dynamic_input_ports;
     dynamic_ports _dynamic_output_ports;
 
-    node_model(){};
+    node_model()= default;
 
 public:
     node_model(const node_model &) = delete;
@@ -12496,13 +12500,13 @@ public:
         return _dynamic_output_ports[index];
     }
 
-    auto
+    [[nodiscard]] auto
     dynamic_input_ports_size() const {
         assert(_dynamic_ports_loaded);
         return _dynamic_input_ports.size();
     }
 
-    auto
+    [[nodiscard]] auto
     dynamic_output_ports_size() const {
         assert(_dynamic_ports_loaded);
         return _dynamic_output_ports.size();
@@ -12609,13 +12613,13 @@ public:
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
-    node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
+    explicit node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
         init_dynamic_ports();
     }
 
     template<typename... Args>
         requires(sizeof...(Args) > 1)
-    node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
+    explicit node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
         init_dynamic_ports();
     }
 
@@ -12666,7 +12670,7 @@ public: // TODO: consider making this private and to use accessors (that can be 
     std::size_t _min_buffer_size;
     int32_t     _weight;
     std::string _name; // custom edge name
-    bool        _connected;
+    bool        _connected{};
 
 public:
     edge()             = delete;
@@ -12744,7 +12748,7 @@ private:
             }
         }();
 
-        if (it == _nodes.end()) throw fmt::format("No such node in this graph");
+        if (it == _nodes.end()) throw std::runtime_error(fmt::format("No such node in this graph"));
         return *it;
     }
 
