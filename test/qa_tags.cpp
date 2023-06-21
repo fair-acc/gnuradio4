@@ -102,7 +102,8 @@ struct TagSource : public node<TagSource<T>> {
         return static_cast<T>(0);
     }
 };
-    static_assert(HasRequiredProcessFunction<TagSource<int>>);
+
+static_assert(HasRequiredProcessFunction<TagSource<int>>);
 
 enum class ProcessFunction {
     USE_PROCESS_ONE  = 0, ///
@@ -148,33 +149,33 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
     }
 };
 
-    static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-    static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-    static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-    static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-    static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-    static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
 
-    template<typename T>
-    struct TagSink : public node<TagSink<T>> {
-        IN<T> in;
-        std::vector<tag_t> tags{};
-        std::uint64_t n_samples_produced{0};
+template<typename T>
+struct TagSink : public node<TagSink<T>> {
+    IN<T>              in;
+    std::vector<tag_t> tags{};
+    std::uint64_t      n_samples_produced{ 0 };
 
-        // template<fair::meta::t_or_simd<T> V>
-        constexpr void
-        process_one(const T &) noexcept {
-            if (this->input_tags_present()) {
-                const tag_t &tag = this->input_tags()[0];
-                print_tag(tag, fmt::format("sink received tag at {}", n_samples_produced));
-                tags.emplace_back(n_samples_produced, tag.map);
-                this->forward_tags();
-            }
-            n_samples_produced++;
+    // template<fair::meta::t_or_simd<T> V>
+    constexpr void
+    process_one(const T &) noexcept {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("sink received tag at {}", n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
         }
-    };
+        n_samples_produced++;
+    }
+};
 
-    static_assert(HasRequiredProcessFunction<TagSink<int>>);
+static_assert(HasRequiredProcessFunction<TagSink<int>>);
 
 } // namespace fair::graph::tag_test
 
@@ -190,15 +191,19 @@ const boost::ut::suite TagPropagation = [] {
     "tag_source"_test = [] {
         std::uint64_t n_samples = 1024;
         graph         flow_graph;
-        auto         &src      = flow_graph.make_node<TagSource<float>>({ { "n_samples_max", n_samples } });
-        auto         &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>();
-        auto         &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>();
-        auto         &sink     = flow_graph.make_node<TagSink<float>>();
+        auto         &src = flow_graph.make_node<TagSource<float>>({ { "n_samples_max", n_samples } });
+        src.set_name("src");
+        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>();
+        monitor1.set_name("monitor1");
+        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>();
+        monitor2.set_name("monitor2");
+        auto &sink = flow_graph.make_node<TagSink<float>>();
+        sink.set_name("sink");
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink)));
 
-        scheduler::simple sched{std::move(flow_graph)};
+        scheduler::simple sched{ std::move(flow_graph) };
         sched.work();
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
@@ -212,30 +217,26 @@ const boost::ut::suite TagPropagation = [] {
                 return false;
             }
 
-            auto result = std::mismatch(tags1.begin(), tags1.end(), tags2.begin(),
-                                        [](const tag_t &tag1, const tag_t &tag2) {
-                                            return tag1.index == tag2.index && tag1.map == tag2.map;
-                                        });
+            auto result = std::mismatch(tags1.begin(), tags1.end(), tags2.begin(), [](const tag_t &tag1, const tag_t &tag2) { return tag1.index == tag2.index && tag1.map == tag2.map; });
 
             if (result.first != tags1.end()) {
-                size_t index = std::distance(tags1.begin(), result.first);
-                const tag_t &tag1 = *result.first;
-                const tag_t &tag2 = *result.second;
+                size_t       index = std::distance(tags1.begin(), result.first);
+                const tag_t &tag1  = *result.first;
+                const tag_t &tag2  = *result.second;
                 fmt::print("mismatch at index {}\n", index);
                 if (tag1.index != tag2.index) {
                     fmt::print("  - different index: {} vs {}\n", tag1.index, tag2.index);
                 }
                 if (tag1.map != tag2.map) {
                     fmt::print("  - different map content:\n");
-                    for (const auto &[key, value]: tag1.map) {
+                    for (const auto &[key, value] : tag1.map) {
                         if (tag2.map.find(key) == tag2.map.end()) {
                             fmt::print("    key '{}' is present in the first map but not in the second\n", key);
                         } else if (tag2.map.at(key) != value) {
-                            fmt::print("    key '{}' has different values ('{}' vs '{}')\n", key, value,
-                                       tag2.map.at(key));
+                            fmt::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, tag2.map.at(key));
                         }
                     }
-                    for (const auto &[key, value]: tag2.map) {
+                    for (const auto &[key, value] : tag2.map) {
                         if (tag1.map.find(key) == tag1.map.end()) {
                             fmt::print("    key '{}' is present in the second map but not in the first\n", key);
                         }

@@ -386,51 +386,48 @@ public:
     [[nodiscard]] constexpr auto static inputs_status(Self &self) noexcept {
         static_assert(traits::node::input_ports<Derived>::size > 0, "A source node has no inputs, therefore no inputs status.");
         bool       at_least_one_input_has_data = false;
-        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, int64_t> {
-            std::size_t       availableSamples         = port.streamReader().available();
-            const std::size_t availableTags            = port.tagReader().available();
-            int64_t           tag_stream_head_distance = -1;
-            if (availableTags > 0) {
-                // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-                auto        tagData      = port.tagReader().get();
-                const auto &readPosition = port.streamReader().position();
-                tag_stream_head_distance = tagData[0].index - readPosition;
-                assert(tag_stream_head_distance >= 0 && "negative tag vs. stream distance");
+        const auto availableForPort            = [&at_least_one_input_has_data, &self]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, size_t> {
+            std::size_t availableSamples               = port.streamReader().available();
+            at_least_one_input_has_data                = at_least_one_input_has_data || (availableSamples > 0);
 
-                if (readPosition == -1 && tagData[0].index == 0) { // handle tag on very first sample
-                    tag_stream_head_distance = 0;
-                    if (availableTags > 1) {
-                        availableSamples = std::min(availableSamples, static_cast<std::size_t>(tagData[1].index));
-                    }
-                } else if (tag_stream_head_distance > 0 && availableSamples > static_cast<std::size_t>(tag_stream_head_distance)) {
-                    // limit number of samples to read up to the next tag <-> forces processing from tag to tag|MAX_SIZE
-                    // N.B. new tags are thus always on the first readable sample
-                    if (availableTags > 1) {
-                        availableSamples = std::min(availableSamples,
-                                                    static_cast<std::size_t>(tagData[1].index - tagData[0].index));
-                    } else {
-                        availableSamples = std::min(availableSamples,
-                                                    static_cast<std::size_t>(tag_stream_head_distance));
-                    }
-                    tag_stream_head_distance--;
-                    // TODO: handle corner case where the distance to the next tag is less than the ports MIN_SIZE
-                }
+            const std::size_t availableTags            = port.tagReader().available();
+            size_t            tag_stream_head_distance = -1_UZ;
+
+            if (availableSamples < port.min_buffer_size()) availableSamples = 0;
+            if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
+
+            if (availableTags == 0) {
+                return { availableSamples, -1 };
             }
-            if (availableSamples > 0_UZ) at_least_one_input_has_data = true;
-            if (availableSamples < port.min_buffer_size()) {
-                return { 0_UZ, tag_stream_head_distance };
+
+            // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+            const auto &tagData      = port.tagReader().get();
+            const auto &readPosition = port.streamReader().position();
+
+            tag_stream_head_distance = readPosition == -1 ? tagData[0].index : (tagData[0].index - readPosition - 1);
+
+            auto future_tags_begin   = std::find_if(tagData.begin(), tagData.end(), [position = std::max(0L, readPosition)](const auto &tag) { return tag.index > position + 1; });
+
+            if (future_tags_begin == tagData.begin()) {
+                std::size_t first_future_tag_index   = future_tags_begin->index;
+                std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - readPosition - 1);
+                assert(n_samples_until_next_tag > 0);
+                return { std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag };
+
             } else {
-                return { std::min(availableSamples, port.max_buffer_size()), tag_stream_head_distance };
+                std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? -1_UZ : future_tags_begin->index;
+                std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - readPosition - 1);
+                return { std::min(availableSamples, n_samples_until_next_tag), 0 };
             }
         };
 
-        const std::pair<std::size_t, std::int64_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_min(availableForPort(input_port)...); },
-                                                                                               input_ports(&self));
+        const std::pair<std::size_t, std::size_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_pair_min(availableForPort(input_port)...); },
+                                                                                              input_ports(&self));
 
         struct result {
-            bool         at_least_one_input_has_data;
-            std::size_t  available_values_count;
-            std::int64_t samples_until_next_tag;
+            bool        at_least_one_input_has_data;
+            std::size_t available_values_count;
+            std::size_t samples_until_next_tag;
         };
 
         return result{ .at_least_one_input_has_data = at_least_one_input_has_data,
@@ -504,7 +501,8 @@ public:
                         return;
                     }
                     auto data           = output_port.tagWriter().reserve_output_range(1);
-                    data[port_id].index = _tags_at_output[port_id].index + std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position());
+                    auto offset         = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
+                    data[port_id].index = _tags_at_output[port_id].index + offset;
                     data[port_id].map   = _tags_at_output[port_id].map;
                     data.publish(1);
                     port_id++;
@@ -527,7 +525,7 @@ public:
         constexpr bool is_sink_node             = output_types::size == 0;
 
         std::size_t    samples_to_process       = 0;
-        std::int64_t   n_samples_until_next_tag = -1; // '-1': no tags in sight
+        std::size_t    n_samples_until_next_tag = -1_UZ; // '-1': no tags in sight
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
                               { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
@@ -602,12 +600,11 @@ public:
         _input_tags_present      = false;
         _output_tags_changed     = false;
         if (n_samples_until_next_tag == 0) {
-            if constexpr (requires(
-                    Derived &d) { &Derived::process_one; }) { // TODO: nail down the required method parameters and return types
-                samples_to_process = 1;                                      // N.B. limit to one so that only one process_on(...) invocation receives the tag
+            if constexpr (requires(Derived &d) { &Derived::process_one; }) { // TODO: nail down the required method parameters and return types
+                if (samples_to_process > 1) samples_to_process = 1;          // N.B. limit to one so that only one process_on(...) invocation receives the tag
             }
             property_map merged_tag_map;
-            _input_tags_present = true;
+            _input_tags_present    = true;
             std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
                     [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
@@ -617,7 +614,7 @@ public:
                             return;
                         }
                         const auto tags           = input_port.tagReader().get(1_UZ);
-                        const auto readPos = input_port.streamReader().position();
+                        const auto readPos        = input_port.streamReader().position();
                         const auto tag_stream_pos = tags[0].index - 1 - readPos;
                         if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
                             || tag_stream_pos <= 0) {
@@ -721,7 +718,7 @@ public:
           //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
           //        }
         return work_return_t::ERROR;
-    }     // end: work_return_t work() noexcept { ..}
+    } // end: work_return_t work() noexcept { ..}
 };
 
 template<typename Derived, typename... Arguments>

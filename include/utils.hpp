@@ -361,6 +361,18 @@ safe_min(Arg &&arg, Args &&...args) {
     }
 }
 
+template<typename Arg, typename... Args>
+auto
+safe_pair_min(Arg &&arg, Args &&...args) {
+    if constexpr (sizeof...(Args) == 0) {
+        return arg;
+    } else {
+        return std::make_pair(
+                std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first ...),
+                std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second ...));
+    }
+}
+
 template<typename Function, typename Tuple, typename... Tuples>
 auto
 tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
