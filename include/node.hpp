@@ -631,50 +631,50 @@ public:
             const bool success = consume_readers(self(), samples_to_process);
             forward_tags();
             return success ? ret : work_return_t::ERROR;
-        }
-
-        using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
-        using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
-
-        std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
-                                                                                         : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
-                width{};
-
-        if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
-                                                                                              { d.process_one_simd(width) };
-                                                                                          }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
-            // SIMD loop
-            std::size_t i = 0;
-            for (; i + width <= samples_to_process; i += width) {
-                const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
-                meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
-            }
-            simd_epilogue(width, [&](auto w) {
-                if (i + w <= samples_to_process) {
-                    const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
-                    meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
-                    i += w;
-                }
-            });
         } else {
-            // Non-SIMD loop
-            for (std::size_t i = 0; i < samples_to_process; ++i) {
-                const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
-                meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
+            using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
+            using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
+
+            std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
+                                                                                            : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
+                    width{};
+
+            if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
+                                                                                                { d.process_one_simd(width) };
+                                                                                            }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+                // SIMD loop
+                std::size_t i = 0;
+                for (; i + width <= samples_to_process; i += width) {
+                    const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
+                    meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
+                }
+                simd_epilogue(width, [&](auto w) {
+                    if (i + w <= samples_to_process) {
+                        const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
+                        meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
+                        i += w;
+                    }
+                });
+            } else {
+                // Non-SIMD loop
+                for (std::size_t i = 0; i < samples_to_process; ++i) {
+                    const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
+                    meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
+                }
             }
+
+            write_to_outputs(samples_to_process, writers_tuple);
+
+            const bool success = consume_readers(self(), samples_to_process);
+
+    #ifdef _DEBUG
+            if (!success) {
+                fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
+            }
+    #endif
+            forward_tags();
+            return success ? work_return_t::OK : work_return_t::ERROR;
         }
-
-        write_to_outputs(samples_to_process, writers_tuple);
-
-        const bool success = consume_readers(self(), samples_to_process);
-
-#ifdef _DEBUG
-        if (!success) {
-            fmt::print("Node {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
-        }
-#endif
-        forward_tags();
-        return success ? work_return_t::OK : work_return_t::ERROR;
     } // end: work_return_t work() noexcept { ..}
 };
 
