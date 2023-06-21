@@ -52,7 +52,13 @@ FetchContent_Declare(
         GIT_TAG 696c047c368d3324e8e6fedb46d8eed4c9eeba7c# head as of 2023-05-25
 )
 
-FetchContent_MakeAvailable(fmt refl-cpp pmt ut)
+FetchContent_Declare(
+        yaml-cpp
+        GIT_REPOSITORY  https://github.com/jbeder/yaml-cpp.git
+        GIT_TAG         yaml-cpp-0.7.0
+)
+
+FetchContent_MakeAvailable(fmt refl-cpp pmt ut yaml-cpp)
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)

@@ -322,6 +322,17 @@ struct typelist {
     template<template<typename> typename Pred, typename DefaultType>
     using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
 
+    template<typename Needle>
+    static constexpr std::size_t index_of() {
+        std::size_t result = static_cast<std::size_t>(-1);
+        fair::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
+            if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
+                result = index;
+            }
+        });
+        return result;
+    }
+
     template<typename T>
     inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
 

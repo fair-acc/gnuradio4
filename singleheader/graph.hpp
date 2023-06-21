@@ -722,6 +722,17 @@ struct typelist {
     template<template<typename> typename Pred, typename DefaultType>
     using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
 
+    template<typename Needle>
+    static constexpr std::size_t index_of() {
+        std::size_t result = static_cast<std::size_t>(-1);
+        fair::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
+            if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
+                result = index;
+            }
+        });
+        return result;
+    }
+
     template<typename T>
     inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
 
@@ -11412,6 +11423,14 @@ public:
         return _meta_information;
     }
 
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] const property_map &
+    meta_information() const noexcept {
+        return _meta_information;
+    }
+
     [[nodiscard]] constexpr std::string_view
     description() const noexcept {
         return std::string_view(Description::value);
@@ -12476,7 +12495,7 @@ protected:
     dynamic_ports _dynamic_input_ports;
     dynamic_ports _dynamic_output_ports;
 
-    node_model()= default;
+    node_model() = default;
 
 public:
     node_model(const node_model &) = delete;
@@ -12522,6 +12541,13 @@ public:
             = 0;
 
     /**
+     * @brief the type of the node as a string
+     */
+    [[nodiscard]] virtual std::string_view
+    type_name() const
+            = 0;
+
+    /**
      * @brief user-defined name
      * N.B. may not be unique -> ::unique_name
      */
@@ -12534,6 +12560,10 @@ public:
      */
     [[nodiscard]] virtual property_map &
     meta_information() noexcept
+            = 0;
+
+    [[nodiscard]] virtual const property_map &
+    meta_information() const
             = 0;
 
     /**
@@ -12559,7 +12589,8 @@ template<NodeType T>
 class node_wrapper : public node_model {
 private:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
-    T _node;
+    T           _node;
+    std::string _type_name = fair::meta::type_name<T>();
 
     [[nodiscard]] constexpr const auto &
     node_ref() const noexcept {
@@ -12638,8 +12669,18 @@ public:
         return node_ref().set_name(std::move(name));
     }
 
+    [[nodiscard]] std::string_view
+    type_name() const override {
+        return _type_name;
+    }
+
     [[nodiscard]] property_map &
     meta_information() noexcept override {
+        return node_ref().meta_information();
+    }
+
+    [[nodiscard]] const property_map &
+    meta_information() const noexcept override {
         return node_ref().meta_information();
     }
 
@@ -12663,14 +12704,14 @@ class edge {
 public: // TODO: consider making this private and to use accessors (that can be safely used by users)
     using port_direction_t::INPUT;
     using port_direction_t::OUTPUT;
-    node_model *_src_node;
-    node_model *_dst_node;
-    std::size_t _src_port_index;
-    std::size_t _dst_port_index;
-    std::size_t _min_buffer_size;
-    int32_t     _weight;
-    std::string _name; // custom edge name
-    bool        _connected{};
+    node_model  *_src_node;
+    node_model  *_dst_node;
+    std::size_t  _src_port_index;
+    std::size_t  _dst_port_index;
+    std::size_t  _min_buffer_size;
+    std::int32_t _weight;
+    std::string  _name; // custom edge name
+    bool         _connected;
 
 public:
     edge()             = delete;
@@ -12687,7 +12728,7 @@ public:
     operator=(edge &&) noexcept
             = default;
 
-    edge(node_model *src_node, std::size_t src_port_index, node_model *dst_node, std::size_t dst_port_index, std::size_t min_buffer_size, int32_t weight, std::string_view name)
+    edge(node_model *src_node, std::size_t src_port_index, node_model *dst_node, std::size_t dst_port_index, std::size_t min_buffer_size, std::int32_t weight, std::string_view name)
         : _src_node(src_node), _dst_node(dst_node), _src_port_index(src_port_index), _dst_port_index(dst_port_index), _min_buffer_size(min_buffer_size), _weight(weight), _name(name) {}
 
     [[nodiscard]] constexpr const node_model &
@@ -12720,7 +12761,7 @@ public:
         return _min_buffer_size;
     }
 
-    [[nodiscard]] constexpr int32_t
+    [[nodiscard]] constexpr std::int32_t
     weight() const noexcept {
         return _weight;
     }
@@ -12740,6 +12781,7 @@ private:
     template<typename Node>
     std::unique_ptr<node_model> &
     find_node(Node &what) {
+        static_assert(!std::is_pointer_v<std::remove_cvref_t<Node>>);
         auto it = [&, this] {
             if constexpr (std::is_same_v<Node, node_model>) {
                 return std::find_if(_nodes.begin(), _nodes.end(), [&](const auto &node) { return node.get() == &what; });
@@ -12766,7 +12808,7 @@ private:
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] connection_result_t
-    connect_impl(Source &src_node_raw, SourcePort &source_port, Destination &dst_node_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, int32_t weight = 0,
+    connect_impl(Source &src_node_raw, SourcePort &source_port, Destination &dst_node_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
                  std::string_view name = "unnamed edge") {
         static_assert(std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>, "The source port type needs to match the sink port type");
 
@@ -12777,15 +12819,8 @@ private:
 
         auto result = source_port.connect(destination_port);
         if (result == connection_result_t::SUCCESS) {
-            auto find_wrapper = [this](auto *node) {
-                auto it = std::find_if(_nodes.begin(), _nodes.end(), [node](auto &wrapper) { return wrapper->raw() == node; });
-                if (it == _nodes.end()) {
-                    throw fmt::format("This node {} does not belong to this graph\n", node->name());
-                }
-                return it->get();
-            };
-            auto *src_node = find_wrapper(&src_node_raw);
-            auto *dst_node = find_wrapper(&dst_node_raw);
+            auto *src_node = find_node(src_node_raw).get();
+            auto *dst_node = find_node(dst_node_raw).get();
             _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, min_buffer_size, weight, name);
         }
 
@@ -12942,10 +12977,18 @@ public:
         return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
-    template<typename Source, typename Sink>
+    template<typename Source, typename Destination>
+        requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     connection_result_t
-    dynamic_connect(Source &source, std::size_t source_index, Sink &sink, std::size_t sink_index) {
-        return dynamic_output_port(source, source_index).connect(dynamic_input_port(sink, sink_index));
+    dynamic_connect(Source &src_node_raw, std::size_t src_port_index, Destination &dst_node_raw, std::size_t dst_port_index, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
+                    std::string_view name = "unnamed edge") {
+        auto result = dynamic_output_port(src_node_raw, src_port_index).connect(dynamic_input_port(dst_node_raw, dst_port_index));
+        if (result == connection_result_t::SUCCESS) {
+            auto *src_node = find_node(src_node_raw).get();
+            auto *dst_node = find_node(dst_node_raw).get();
+            _edges.emplace_back(src_node, src_port_index, dst_node, src_port_index, min_buffer_size, weight, name);
+        }
+        return result;
     }
 
     const std::vector<std::function<connection_result_t()>> &
@@ -12956,6 +12999,18 @@ public:
     void
     clear_connection_definitions() {
         _connection_definitions.clear();
+    }
+
+    template<typename F>
+    void
+    for_each_node(F &&f) const {
+        std::for_each(_nodes.cbegin(), _nodes.cend(), [f](const auto &node_ptr) { f(*node_ptr.get()); });
+    }
+
+    template<typename F>
+    void
+    for_each_edge(F &&f) const {
+        std::for_each(_edges.cbegin(), _edges.cend(), [f](const auto &edge) { f(edge); });
     }
 };
 
