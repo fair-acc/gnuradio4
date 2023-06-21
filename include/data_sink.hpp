@@ -395,14 +395,13 @@ private:
                     detail::copy_span(data, std::span(write_data));
                     write_data.publish(write_data.size());
                 } else {
-                    const auto can_write = poller->writer.available();
-                    auto to_write = std::min(data.size(), can_write);
-                    poller->drop_count += data.size() - can_write;
+                    auto to_write = std::max(data.size(), poller->writer.available());
                     if (to_write > 0) {
                         auto write_data = poller->writer.reserve_output_range(to_write);
                         detail::copy_span(data.first(to_write), std::span(write_data));
                         write_data.publish(write_data.size());
                     }
+                    poller->drop_count += data.size() - to_write;
                 }
             }
         }
