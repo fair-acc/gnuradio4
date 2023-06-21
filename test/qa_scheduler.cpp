@@ -207,7 +207,7 @@ void check_node_names(std::vector<node_type> joblist, std::set<std::string> set)
 const boost::ut::suite SchedulerTests = [] {
     using namespace boost::ut;
     using namespace fair::graph;
-    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool<fair::thread_pool::CPU_BOUND>>("custom pool", 2,2);
+    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
 
     "SimpleScheduler_linear"_test = [&thread_pool] {
         using scheduler = fair::graph::scheduler::simple<>;

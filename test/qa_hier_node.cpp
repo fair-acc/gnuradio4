@@ -194,7 +194,7 @@ make_graph(std::size_t events_count) {
 
 int
 main() {
-    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool<fair::thread_pool::CPU_BOUND>>("custom pool", 2,2);
+    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2,2);
 
     fg::scheduler::simple scheduler(make_graph(10), thread_pool);
 

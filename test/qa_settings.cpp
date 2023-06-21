@@ -238,7 +238,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
 
-        auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool<fair::thread_pool::CPU_BOUND>>("custom pool", 2,2);
+        auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
         fair::graph::scheduler::simple sched{ std::move(flow_graph), thread_pool };
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
         std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });

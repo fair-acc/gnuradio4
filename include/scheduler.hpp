@@ -90,16 +90,17 @@ void run_on_pool(std::span<node_model*> job, std::size_t n_batches, std::atomic_
 /**
  * Trivial loop based scheduler, which iterates over all nodes in definition order in the graph until no node did any processing
  */
-template<execution_policy executionPolicy = single_threaded, typename thread_pool_type = thread_pool::BasicThreadPool<thread_pool::CPU_BOUND>>
-class simple : public node<simple<executionPolicy, thread_pool_type>>{
+template<execution_policy executionPolicy = single_threaded>
+class simple : public node<simple<executionPolicy>>{
     using node_t = node_model*;
+    using thread_pool_type = thread_pool::BasicThreadPool;
     init_proof                        _init;
     fair::graph::graph                _graph;
     std::shared_ptr<thread_pool_type> _pool;
     std::vector<std::vector<node_t>>  _job_lists{};
 public:
-    explicit simple(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool<thread_pool::CPU_BOUND>>("simple-scheduler-pool"))
-            : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)), _pool(thread_pool) {
+    explicit simple(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND))
+            : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)), _pool(std::move(thread_pool)) {
         // generate job list
         const auto n_batches = std::min(static_cast<std::size_t>(_pool->maxThreads()), _graph.blocks().size());
         _job_lists.reserve(n_batches);
@@ -150,17 +151,18 @@ public:
  * Breadth first traversal scheduler which traverses the graph starting from the source nodes in a breath first fashion
  * detecting cycles and nodes which can be reached from several source nodes.
  */
-template<execution_policy executionPolicy = single_threaded, typename thread_pool_type = thread_pool::BasicThreadPool<thread_pool::CPU_BOUND>>
-class breadth_first : public node<breadth_first<executionPolicy, thread_pool_type>> {
+template<execution_policy executionPolicy = single_threaded>
+class breadth_first : public node<breadth_first<executionPolicy>> {
     using node_t = node_model*;
+    using thread_pool_type = thread_pool::BasicThreadPool;
     init_proof _init;
     fair::graph::graph _graph;
     std::vector<node_t> _nodelist;
     std::vector<std::vector<node_t>> _job_lists;
     std::shared_ptr<thread_pool_type> _pool;
 public:
-    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool<thread_pool::CPU_BOUND>>("breadth-first-pool"))
-            : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)), _pool(thread_pool) {
+    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<thread_pool_type>("breadth-first-pool", thread_pool::CPU_BOUND))
+            : _init{fair::graph::scheduler::init(graph)}, _graph(std::move(graph)), _pool(std::move(thread_pool)) {
         std::map<node_t, std::vector<node_t>> _adjacency_list{};
         std::vector<node_t>                   _source_nodes{};
         // compute the adjacency list

@@ -107,10 +107,10 @@ void exec_bm(auto& scheduler, const std::string& test_case) {
 [[maybe_unused]] inline const boost::ut::suite scheduler_tests = [] {
     using namespace boost::ut;
     using namespace benchmark;
-    using thread_pool = fair::thread_pool::BasicThreadPool<fair::thread_pool::CPU_BOUND>;
+    using thread_pool = fair::thread_pool::BasicThreadPool;
     using fg::scheduler::execution_policy::multi_threaded;
 
-    auto pool = std::make_shared<thread_pool>("custom-pool", 2, 2);
+    auto pool = std::make_shared<thread_pool>("custom-pool", fair::thread_pool::CPU_BOUND, 2, 2);
 
     fg::scheduler::simple sched1(test_graph_linear<float>(2 * N_NODES), pool);
     "linear graph - simple scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1]() {
