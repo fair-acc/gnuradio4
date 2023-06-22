@@ -56,10 +56,26 @@ using property_map = std::map<std::string, pmtv::pmt, detail::transparent_less>;
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
-    std::make_signed_t<std::size_t> index = 0;
-    property_map                    map;
+    using signed_index_type = std::make_signed_t<std::size_t>;
+    signed_index_type index{0};
+    property_map map{};
+
+    tag_t() = default; // TODO: remove -- needed only for Clang <=15
+
+    tag_t(signed_index_type index_, property_map map_) noexcept: index(index_), map(std::move(
+            map_)) {} // TODO: remove -- needed only for Clang <=15
+
+    bool
+    operator==(const tag_t &other) const
+    = default;
 
     // TODO: do we need the convenience methods below?
+    void
+    reset() noexcept {
+        index = 0;
+        map.clear();
+    }
+
     [[nodiscard]] pmtv::pmt &
     at(const std::string &key) {
         return map.at(key);
