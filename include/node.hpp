@@ -391,27 +391,37 @@ public:
             at_least_one_input_has_data  = at_least_one_input_has_data || (availableSamples > 0);
 
             if (availableSamples < port.min_buffer_size()) availableSamples = 0;
-            if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
+                if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
 
-            if (port.tagReader().available() == 0) {
-                return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
-            }
+                if (port.tagReader().available() == 0) {
+                    return {availableSamples, std::numeric_limits<std::size_t>::max()}; // default: no tags in sight
+                }
 
-            // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-            const auto &tagData           = port.tagReader().get();
-            const auto &readPosition      = port.streamReader().position();
+                // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+                const auto &tagData           = port.tagReader().get();
+                const auto &readPosition      = port.streamReader().position();
 
-            const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [position = std::max(0L, readPosition)](const auto &tag) noexcept { return tag.index > position + 1; });
+                const auto future_tags_begin = std::find_if(tagData.begin(), tagData.end(),[&readPosition](const auto &tag) noexcept {
+                    return tag.index > readPosition + 1;
+                });
 
-            if (future_tags_begin == tagData.begin()) {
-                const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
-                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
-                assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
-                return { std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag };
-            } else {
-                const std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(future_tags_begin->index);
-                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
-                return { std::min(availableSamples, n_samples_until_next_tag), 0 };
+                if (future_tags_begin == tagData.begin()) {
+                    const auto first_future_tag_index = static_cast<std::size_t>(future_tags_begin->index);
+                    const std::size_t n_samples_until_next_tag =
+                            readPosition == -1 ? first_future_tag_index : (first_future_tag_index -
+                                                                           static_cast<std::size_t>(readPosition) -
+                                                                           1_UZ);
+                    assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
+                    return {std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag};
+                } else {
+                    const std::size_t first_future_tag_index =
+                            future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max()
+                                                               : static_cast<std::size_t>(future_tags_begin->index);
+                    const std::size_t n_samples_until_next_tag =
+                            readPosition == -1 ? first_future_tag_index : (first_future_tag_index -
+                                                                           static_cast<std::size_t>(readPosition) -
+                                                                           1_UZ);
+                    return {std::min(availableSamples, n_samples_until_next_tag), 0};
             }
         };
 
@@ -688,7 +698,8 @@ public:
             } else {
                 // Non-SIMD loop
                 for (std::size_t i = 0; i < samples_to_process; ++i) {
-                    const auto results = std::apply([this, i](auto &...inputs) { return invoke_process_one(inputs[i]...); }, input_spans);
+                    const auto results = std::apply(
+                            [this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
                     meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
                 }
             }

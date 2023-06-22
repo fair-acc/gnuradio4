@@ -25,7 +25,7 @@ print_tag(const tag_t &tag, std::string_view prefix = {}) {
 
 template<typename T>
 struct TagSource : public node<TagSource<T>> {
-    OUT<T, 0, 1>       out;
+    OUT<T> out;
     std::vector<tag_t> tags{};
     std::size_t        next_tag{ 0 };
     std::uint64_t      n_samples_max = 1024;

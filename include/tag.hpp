@@ -57,28 +57,17 @@ using property_map = std::map<std::string, pmtv::pmt, detail::transparent_less>;
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
     using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{ 0 };
-    property_map      map{};
+    signed_index_type index{0};
+    property_map map{};
 
-    tag_t() = default;
+    tag_t() = default; // TODO: remove -- needed only for Clang <=15
 
-    tag_t(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {}
-
-    tag_t(const tag_t &other) = default;
-
-    tag_t &
-    operator=(const tag_t &other)
-            = default;
-
-    tag_t(tag_t &&other) noexcept = default;
-
-    tag_t &
-    operator=(tag_t &&other) noexcept
-            = default;
+    tag_t(signed_index_type index_, property_map map_) noexcept: index(index_), map(std::move(
+            map_)) {} // TODO: remove -- needed only for Clang <=15
 
     bool
     operator==(const tag_t &other) const
-            = default;
+    = default;
 
     // TODO: do we need the convenience methods below?
     void

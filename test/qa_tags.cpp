@@ -11,7 +11,7 @@
 
 #include "blocklib/core/unit-test/tag_monitors.hpp"
 
-#if defined(__clang__) && __clang_major__ >= 16
+#if defined(__clang__) && __clang_major__ >= 15
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
 template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
@@ -64,10 +64,14 @@ const boost::ut::suite TagPropagation = [] {
         graph         flow_graph;
         auto         &src = flow_graph.make_node<TagSource<float>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
         src.tags          = { // TODO: allow parameter settings to include maps?!?
-            { 0, { { "key", "value@0" } } },
-            { 100, { { "key", "value@100" } } },
-            { 150, { { "key", "value@150" } } },
-            { 1000, { { "key", "value@1000" } } }
+                {0,    {{"key", "value@0"}}},
+                {1,    {{"key", "value@1"}}},
+                {100,  {{"key", "value@100"}}},
+                {150,  {{"key", "value@150"}}},
+                {1000, {{"key", "value@1000"}}},
+                {1001, {{"key", "value@1001"}}},
+                {1002, {{"key", "value@1002"}}},
+                {1023, {{"key", "value@1023"}}}
         };
         src.set_name("TagSource"); // TODO: enable property_map to base-class parameter propagation
         auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
