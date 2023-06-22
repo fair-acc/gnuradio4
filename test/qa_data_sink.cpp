@@ -298,7 +298,9 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples = 200000;
 
         graph flow_graph;
+        const auto tags = make_test_tags(0, 1000);
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        src.tags = std::deque(tags.begin(), tags.end());
         auto &sink = flow_graph.make_node<data_sink<float>>();
         sink.set_name("test_sink");
 
@@ -306,30 +308,45 @@ const boost::ut::suite DataSinkTests = [] {
 
         std::atomic<std::size_t> samples_seen = 0;
 
-        auto poller1 = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"), blocking_mode::Blocking);
-        expect(neq(poller1, nullptr));
+        auto poller_data_only = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"), blocking_mode::Blocking);
+        expect(neq(poller_data_only, nullptr));
 
-        auto poller2 = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"), blocking_mode::Blocking);
-        expect(neq(poller2, nullptr));
+        auto poller_with_tags = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::with_sink_name("test_sink"), blocking_mode::Blocking);
+        expect(neq(poller_with_tags, nullptr));
 
-        auto make_runner = [](auto poller) {
-            return std::async([poller] {
-                std::vector<float> received;
-                bool seen_finished = false;
-                while (!seen_finished) {
-                    // TODO make finished vs. pending data handling actually thread-safe
-                    seen_finished = poller->finished.load();
-                    while (poller->process_bulk([&received](const auto &data) {
-                        received.insert(received.end(), data.begin(), data.end());
-                    })) {}
-                }
+        auto runner1 = std::async([poller = poller_data_only] {
+            std::vector<float> received;
+            bool seen_finished = false;
+            while (!seen_finished) {
+                // TODO make finished vs. pending data handling actually thread-safe
+                seen_finished = poller->finished;
+                while (poller->process([&received](const auto &data) {
+                    received.insert(received.end(), data.begin(), data.end());
+                })) {}
+            }
 
-                return received;
-            });
-        };
+            return received;
+        });
 
-        auto runner1 = make_runner(poller1);
-        auto runner2 = make_runner(poller2);
+        auto runner2 = std::async([poller = poller_with_tags] {
+            std::vector<float> received;
+            std::vector<tag_t> received_tags;
+            bool seen_finished = false;
+            while (!seen_finished) {
+                // TODO make finished vs. pending data handling actually thread-safe
+                seen_finished = poller->finished;
+                while (poller->process([&received, &received_tags](const auto &data, const auto &tags_) {
+                   auto tags = std::vector<tag_t>(tags_.begin(), tags_.end());
+                    for (auto &t : tags) {
+                        t.index += static_cast<int64_t>(received.size());
+                    }
+                    received_tags.insert(received_tags.end(), tags.begin(), tags.end());
+                    received.insert(received.end(), data.begin(), data.end());
+                })) {}
+            }
+
+            return std::make_tuple(received, received_tags);
+        });
 
         fair::graph::scheduler::simple sched{std::move(flow_graph)};
         sched.work();
@@ -340,13 +357,15 @@ const boost::ut::suite DataSinkTests = [] {
         std::iota(expected.begin(), expected.end(), 0.0);
 
         const auto received1 = runner1.get();
-        const auto received2 = runner2.get();
+        const auto &[received2, received_tags] = runner2.get();
         expect(eq(received1.size(), expected.size()));
         expect(eq(received1, expected));
-        expect(eq(poller1->drop_count.load(), 0));
+        expect(eq(poller_data_only->drop_count.load(), 0));
         expect(eq(received2.size(), expected.size()));
         expect(eq(received2, expected));
-        expect(eq(poller2->drop_count.load(), 0));
+        expect(eq(received_tags.size(), tags.size()));
+        expect(eq(indexes_match(received_tags, tags), true)) << fmt::format("{} != {}", format_list(received_tags), format_list(tags));
+        expect(eq(poller_with_tags->drop_count.load(), 0));
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
@@ -650,7 +669,7 @@ const boost::ut::suite DataSinkTests = [] {
                 std::this_thread::sleep_for(20ms);
 
                 seen_finished = poller->finished.load();
-                while (poller->process_bulk([&samples_seen](const auto &data) {
+                while (poller->process([&samples_seen](const auto &data) {
                     samples_seen += data.size();
                 })) {}
             }

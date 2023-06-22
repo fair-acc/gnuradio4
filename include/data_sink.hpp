@@ -256,15 +256,55 @@ public:
 
     IN<T, std::dynamic_extent, listener_buffer_size> in;
 
-    template<typename Payload>
-    struct poller_t {
+
+    struct poller {
+        gr::circular_buffer<T> buffer = gr::circular_buffer<T>(listener_buffer_size);
+        decltype(buffer.new_reader()) reader = buffer.new_reader();
+        decltype(buffer.new_writer()) writer = buffer.new_writer();
+        gr::circular_buffer<tag_t> tag_buffer = gr::circular_buffer<tag_t>(1024);
+        decltype(tag_buffer.new_reader()) tag_reader = tag_buffer.new_reader();
+        decltype(tag_buffer.new_writer()) tag_writer = tag_buffer.new_writer();
+        std::size_t samples_read = 0; // reader thread
         std::atomic<bool> finished = false;
         std::atomic<std::size_t> drop_count = 0;
-        gr::circular_buffer<Payload> buffer = gr::circular_buffer<Payload>(listener_buffer_size);
+
+        template<typename Handler>
+        [[nodiscard]] bool process(Handler fnc) {
+            const auto available = reader.available();
+            if (available == 0) {
+                return false;
+            }
+
+            const auto read_data = reader.get(available);
+            if constexpr (requires { fnc(std::span<const T>(), std::span<const tag_t>()); }) {
+                const auto tags = tag_reader.get();
+                const auto it = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + available)](const auto &tag) { return tag.index < until; });
+                auto relevant_tags = std::vector<tag_t>(tags.begin(), it);
+                for (auto &t : relevant_tags) {
+                    t.index -= static_cast<int64_t>(samples_read);
+                }
+                fnc(read_data, std::span<const tag_t>(relevant_tags));
+                std::ignore = tag_reader.consume(relevant_tags.size());
+            } else {
+                std::ignore = tag_reader.consume(tag_reader.available());
+                fnc(read_data);
+            }
+
+            std::ignore = reader.consume(available);
+            samples_read += available;
+            return true;
+        }
+    };
+
+    struct dataset_poller {
+        gr::circular_buffer<DataSet<T>> buffer = gr::circular_buffer<DataSet<T>>(listener_buffer_size);
         decltype(buffer.new_reader()) reader = buffer.new_reader();
         decltype(buffer.new_writer()) writer = buffer.new_writer();
 
-        [[nodiscard]] bool process_bulk(std::invocable<std::span<Payload>> auto fnc) {
+        std::atomic<bool> finished = false;
+        std::atomic<std::size_t> drop_count = 0;
+
+        [[nodiscard]] bool process_bulk(std::invocable<std::span<DataSet<T>>> auto fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -276,7 +316,7 @@ public:
             return true;
         }
 
-        [[nodiscard]] bool process_one(std::invocable<Payload> auto fnc) {
+        [[nodiscard]] bool process_one(std::invocable<DataSet<T>> auto fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -288,9 +328,6 @@ public:
             return true;
         }
     };
-
-    using poller = poller_t<T>;
-    using dataset_poller = poller_t<DataSet<T>>;
 
 private:
     struct abstract_listener_t {
@@ -390,19 +427,20 @@ private:
                     return;
                 }
 
-                if (block) {
-                    auto write_data = poller->writer.reserve_output_range(data.size());
-                    detail::copy_span(data, std::span(write_data));
+                const auto to_write = block ? data.size() : std::min(data.size(), poller->writer.available());
+
+                if (to_write > 0) {
+                    auto write_data = poller->writer.reserve_output_range(to_write);
+                    detail::copy_span(data.first(to_write), std::span(write_data));
                     write_data.publish(write_data.size());
-                } else {
-                    auto to_write = std::max(data.size(), poller->writer.available());
-                    if (to_write > 0) {
-                        auto write_data = poller->writer.reserve_output_range(to_write);
-                        detail::copy_span(data.first(to_write), std::span(write_data));
-                        write_data.publish(write_data.size());
+                    if (tag_data0) {
+                        auto tw = poller->tag_writer.reserve_output_range(1);
+                        tw[0] = {static_cast<tag_t::index_type>(samples_written), std::move(*tag_data0)};
+                        tw.publish(1);
                     }
-                    poller->drop_count += data.size() - to_write;
                 }
+                poller->drop_count += data.size() - to_write;
+                samples_written += to_write;
             }
         }
 
