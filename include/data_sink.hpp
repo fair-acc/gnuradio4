@@ -371,8 +371,8 @@ private:
             if constexpr (has_callback) {
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
-                    const auto n = buffer.size() - buffer_fill;
-                    detail::copy_span(data.first(n), std::span(buffer).last(n));
+                    const auto n = std::min(data.size(), buffer.size() - buffer_fill);
+                    detail::copy_span(data.first(n), std::span(buffer).subspan(buffer_fill, n));
                     if constexpr (callback_takes_tags) {
                         if (tag_data0) {
                             tag_buffer.push_back({static_cast<tag_t::signed_index_type>(buffer_fill), *tag_data0});
@@ -707,7 +707,7 @@ private:
 
             auto it = pending.begin();
             while (it != pending.end()) {
-                if (it->pending_samples > in_data.size()) {
+                if (it->pending_samples >= in_data.size()) {
                     it->pending_samples -= in_data.size();
                     break;
                 }
