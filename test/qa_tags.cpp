@@ -61,8 +61,10 @@ const boost::ut::suite TagPropagation = [] {
 
     "tag_source"_test = [] {
         std::uint64_t n_samples = 1024;
-        graph         flow_graph;
-        auto         &src = flow_graph.make_node<TagSource<float>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
+        graph flow_graph;
+        auto &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(
+                {{"n_samples_max", n_samples},
+                 {"name",          "TagSource"}});
         src.tags          = { // TODO: allow parameter settings to include maps?!?
                 {0,    {{"key", "value@0"}}},
                 {1,    {{"key", "value@1"}}},
