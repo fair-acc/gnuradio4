@@ -159,12 +159,12 @@ struct Sink : public node<Sink<T>> {
         // alt: optional user-level tag processing
         /*
         if (this->input_tags_present()) {
-            if (this->input_tags_present() && this->input_tags()[0].contains("n_samples_max")) {
-                const auto value = this->input_tags()[0].at("n_samples_max");
+            if (this->input_tags_present() && this->input_tags()[0].map.contains("n_samples_max")) {
+                const auto value = this->input_tags()[0].map.at("n_samples_max");
                 assert(std::holds_alternative<std::int32_t>(value));
                 n_samples_max = std::get<std::int32_t>(value);
                 last_tag_position        = in.streamReader().position();
-                this->acknowledge_input_tags(); // clears further tag notifications
+                this->forward_tags(); // clears further notifications and forward tags to output ports
             }
         }
         */
