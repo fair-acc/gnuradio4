@@ -30,7 +30,7 @@ const boost::ut::suite TagTests = [] {
     };
 
     "DefaultTags"_test = [] {
-        tag_t testTag;
+        tag_t testTag{};
 
         testTag.insert_or_assign(tag::SAMPLE_RATE, pmtv::pmt(3.0f));
         testTag.insert_or_assign(tag::SAMPLE_RATE(4.0f));

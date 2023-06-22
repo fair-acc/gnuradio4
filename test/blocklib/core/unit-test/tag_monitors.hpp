@@ -5,6 +5,9 @@
 #include <reflection.hpp>
 #include <tag.hpp>
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 namespace fair::graph::tag_test {
 
 void

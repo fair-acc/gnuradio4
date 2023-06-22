@@ -729,9 +729,12 @@ node_description() noexcept {
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
-                                                fair::meta::type_name<DerivedNode>(), Description::value,
+                                                fair::meta::type_name<DerivedNode>(), Description::value._data,
                                                 is_blocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
-    fair::meta::typelist<SupportedTypes>::template apply_func([&](auto index, auto &&t) { ret += fmt::format("{}:{} ", index, fair::meta::type_name<decltype(t)>()); });
+    fair::meta::typelist<SupportedTypes>::template apply_func([&](std::size_t index, auto &&t) {
+        std::string type_name = fair::meta::type_name<decltype(t)>();
+        ret += fmt::format("{}:{} ", index, type_name);
+    });
     ret += fmt::format("\n**Parameters:**\n");
     if constexpr (refl::is_reflectable<DerivedNode>()) {
         for_each(refl::reflect<DerivedNode>().members, [&](auto member) {
@@ -740,13 +743,16 @@ node_description() noexcept {
 
             if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
                 if constexpr (is_annotated<RawType>()) {
+                    const std::string type_name   = refl::detail::get_type_name<Type>().str();
+                    const std::string member_name = get_display_name_const(member).str();
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n", RawType::visible() ? "" : "_", //
-                                       refl::detail::get_type_name<Type>(), get_display_name_const(member).str(),                             //
+                                       type_name, member_name,                                                                                //
                                        RawType::description(), RawType::unit(), RawType::documentation(),                                     //
                                        RawType::visible() ? "" : "_");
                 } else {
-                    ret += fmt::format("_{:10} {}_\n", //
-                                       refl::detail::get_type_name<Type>(), get_display_name_const(member).str());
+                    const std::string type_name   = refl::detail::get_type_name<Type>().str();
+                    const std::string member_name = get_display_name_const(member).str();
+                    ret += fmt::format("_{:10} {}_\n", type_name, member_name);
                 }
             }
         });
