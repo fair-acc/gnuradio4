@@ -448,14 +448,14 @@ private:
                 const auto to_write = block ? data.size() : std::min(data.size(), poller->writer.available());
 
                 if (to_write > 0) {
-                    auto write_data = poller->writer.reserve_output_range(to_write);
-                    detail::copy_span(data.first(to_write), std::span(write_data));
-                    write_data.publish(write_data.size());
                     if (tag_data0) {
                         auto tw = poller->tag_writer.reserve_output_range(1);
                         tw[0]   = { static_cast<tag_t::signed_index_type>(samples_written), std::move(*tag_data0) };
                         tw.publish(1);
                     }
+                    auto write_data = poller->writer.reserve_output_range(to_write);
+                    detail::copy_span(data.first(to_write), std::span(write_data));
+                    write_data.publish(write_data.size());
                 }
                 poller->drop_count += data.size() - to_write;
                 samples_written += to_write;
