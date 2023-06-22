@@ -52,20 +52,19 @@ struct Source : public node<Source<T>> {
     constexpr std::int64_t
     available_samples(const Source &) noexcept {
         const auto ret = static_cast<std::int64_t>(n_samples_max - n_samples_produced);
-        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
+        // forcing one sample, at a time, see below
+        return ret > 0 ? 1 : -1; // '-1' -> DONE, produced enough samples
     }
 
     T process_one() noexcept {
         if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
-#if 0
             tag_t &out_tag = this->output_tags()[0];
-            out_tag        = tags[next_tag];
+            // TODO when not enforcing single samples in available_samples, one would have to do:
+            // const auto base = std::max(out.streamWriter().position() + 1, tag_t::signed_index_type{0});
+            // out_tag        = tag_t{ tags[next_tag].index - base, tags[next_tag].map };
+            // Still think there could be nicer API to set a tag from process_one()
+            out_tag        = tag_t{ 0 , tags[next_tag].map };
             this->forward_tags();
-#else
-            auto range = out.tagWriter().reserve_output_range(1);
-            range[0] = tags[next_tag];
-            range.publish(1);
-#endif
             next_tag++;
         }
 
