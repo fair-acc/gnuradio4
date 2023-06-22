@@ -375,7 +375,7 @@ private:
                     detail::copy_span(data.first(n), std::span(buffer).last(n));
                     if constexpr (callback_takes_tags) {
                         if (tag_data0) {
-                            tag_buffer.push_back({static_cast<tag_t::index_type>(buffer_fill), *tag_data0});
+                            tag_buffer.push_back({static_cast<tag_t::signed_index_type>(buffer_fill), *tag_data0});
                             tag_data0.reset();
                         }
                     }
@@ -435,7 +435,7 @@ private:
                     write_data.publish(write_data.size());
                     if (tag_data0) {
                         auto tw = poller->tag_writer.reserve_output_range(1);
-                        tw[0] = {static_cast<tag_t::index_type>(samples_written), std::move(*tag_data0)};
+                        tw[0] = {static_cast<tag_t::signed_index_type>(samples_written), std::move(*tag_data0)};
                         tw.publish(1);
                     }
                 }
@@ -611,7 +611,7 @@ private:
 
                     if (pending_dataset) {
                         if (obsr == trigger_observer_state::Stop) {
-                            pending_dataset->timing_events[0].push_back({static_cast<tag_t::index_type>(pending_dataset->signal_values.size()), *tag_data0});
+                            pending_dataset->timing_events[0].push_back({static_cast<tag_t::signed_index_type>(pending_dataset->signal_values.size()), *tag_data0});
                         }
                         publish_dataset(std::move(*pending_dataset));
                         pending_dataset.reset();
@@ -713,7 +713,7 @@ private:
                 }
 
                 DataSet<T> dataset;
-                dataset.timing_events = {{{-static_cast<tag_t::index_type>(it->delay), std::move(it->tag_data)}}};
+                dataset.timing_events = {{{-static_cast<tag_t::signed_index_type>(it->delay), std::move(it->tag_data)}}};
                 dataset.signal_values = {in_data[it->pending_samples]};
                 publish_dataset(std::move(dataset));
 
@@ -811,7 +811,8 @@ public:
     [[nodiscard]] work_return_t process_bulk(std::span<const T> in_data) noexcept {
         std::optional<property_map> tagData;
         if (this->input_tags_present()) {
-            tagData = this->input_tags()[0];
+            assert(this->input_tags()[0].index == 0);
+            tagData = this->input_tags()[0].map;
         }
 
         {

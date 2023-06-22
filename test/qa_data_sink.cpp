@@ -10,7 +10,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <deque>
 #include <future>
 
 #if defined(__clang__) && __clang_major__ >= 16
@@ -41,7 +40,8 @@ struct Source : public node<Source<T>> {
     std::size_t  n_tag_offset       = 0;
     float        sample_rate        = 1000.0f;
     T            next_value         = {};
-    std::deque<tag_t> tags; // must be sorted by index, only one tag per sample
+    std::size_t next_tag            = 0;
+    std::vector<tag_t> tags; // must be sorted by index, only one tag per sample
 
     void
     init(const property_map &, const property_map &) {
@@ -55,20 +55,18 @@ struct Source : public node<Source<T>> {
         return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }
 
-    [[nodiscard]] constexpr T
-    process_one() noexcept {
-        if (!tags.empty() && tags[0].index == n_samples_produced) {
+    T process_one() noexcept {
+        if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
 #if 0
-            // TODO this is supposed to be the way, but the outputs tags are not processed after every process_one call,
-            // and with process_bulk we could only write one tag
-            this->output_tags()[0] = tags[0].map;
+            tag_t &out_tag = this->output_tags()[0];
+            out_tag        = tags[next_tag];
+            this->forward_tags();
 #else
             auto range = out.tagWriter().reserve_output_range(1);
-            range[0].index = n_samples_produced;
-            range[0].map = std::move(tags[0].map);
+            range[0] = tags[next_tag];
             range.publish(1);
 #endif
-            tags.pop_front();
+            next_tag++;
         }
 
         n_samples_produced++;
@@ -143,11 +141,11 @@ struct Observer {
     }
 };
 
-static tag_t make_tag(tag_t::index_type index, int year, int month, int day) {
+static tag_t make_tag(tag_t::signed_index_type index, int year, int month, int day) {
     return tag_t{index, {{"Y", year}, {"M", month}, {"D", day}}};
 }
 
-static std::vector<tag_t> make_test_tags(tag_t::index_type first_index, tag_t::index_type interval) {
+static std::vector<tag_t> make_test_tags(tag_t::signed_index_type first_index, tag_t::signed_index_type interval) {
     std::vector<tag_t> tags;
     for (int y = 1; y <= 3; ++y) {
         for (int m = 1; m <= 2; ++m) {
@@ -229,7 +227,7 @@ const boost::ut::suite DataSinkTests = [] {
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto &sink = flow_graph.make_node<data_sink<float>>();
-        src.tags = std::deque(src_tags.begin(), src_tags.end());
+        src.tags = src_tags;
         sink.set_name("test_sink");
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
@@ -260,13 +258,13 @@ const boost::ut::suite DataSinkTests = [] {
             }
 
             for (const auto &tag : tags) {
-                ge(tag.index, static_cast<tag_t::index_type>(samples_seen2));
+                ge(tag.index, static_cast<tag_t::signed_index_type>(samples_seen2));
                 lt(tag.index, samples_seen2 + buffer.size());
             }
 
             auto lg = std::lock_guard{m2};
             std::vector<tag_t> adjusted;
-            std::transform(tags.begin(), tags.end(), std::back_inserter(adjusted), [samples_seen2](const auto &tag) { return tag_t{static_cast<tag_t::index_type>(samples_seen2) + tag.index, tag.map}; });
+            std::transform(tags.begin(), tags.end(), std::back_inserter(adjusted), [samples_seen2](const auto &tag) { return tag_t{static_cast<tag_t::signed_index_type>(samples_seen2) + tag.index, tag.map}; });
             received_tags.insert(received_tags.end(), adjusted.begin(), adjusted.end());
             samples_seen2 += buffer.size();
             chunks_seen2++;
@@ -300,7 +298,7 @@ const boost::ut::suite DataSinkTests = [] {
         graph flow_graph;
         const auto tags = make_test_tags(0, 1000);
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        src.tags = std::deque(tags.begin(), tags.end());
+        src.tags = tags;
         auto &sink = flow_graph.make_node<data_sink<float>>();
         sink.set_name("test_sink");
 
@@ -374,7 +372,7 @@ const boost::ut::suite DataSinkTests = [] {
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
         const auto tags = std::vector<tag_t>{{3000, {{"TYPE", "TRIGGER"}}}, tag_t{8000, {{"TYPE", "NO_TRIGGER"}}}, {180000, {{"TYPE", "TRIGGER"}}}};
-        src.tags = std::deque(tags.begin(), tags.end());
+        src.tags = tags;
         auto &sink = flow_graph.make_node<data_sink<int32_t>>();
         sink.set_name("test_sink");
 
@@ -474,7 +472,7 @@ const boost::ut::suite DataSinkTests = [] {
         const std::int32_t n_samples = tags.size() * 10000 + 100000;
         graph flow_graph;
         auto &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
-        src.tags = std::deque(tags.begin(), tags.end());
+        src.tags = tags;
         auto &sink = flow_graph.make_node<data_sink<int32_t>>();
         sink.set_name("test_sink");
 
@@ -554,7 +552,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
-            src.tags.push_back(tag_t{static_cast<tag_t::index_type>(60000 + i), {{"TYPE", "TRIGGER"}}});
+            src.tags.push_back(tag_t{static_cast<tag_t::signed_index_type>(60000 + i), {{"TYPE", "TRIGGER"}}});
         }
 
         auto &sink = flow_graph.make_node<data_sink<float>>();
@@ -610,7 +608,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
-            src.tags.push_back(tag_t{static_cast<tag_t::index_type>(60000 + i), {{"TYPE", "TRIGGER"}}});
+            src.tags.push_back(tag_t{static_cast<tag_t::signed_index_type>(60000 + i), {{"TYPE", "TRIGGER"}}});
         }
 
         auto &sink = flow_graph.make_node<data_sink<float>>();
