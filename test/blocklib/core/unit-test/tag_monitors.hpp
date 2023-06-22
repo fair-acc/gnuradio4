@@ -1,0 +1,154 @@
+#ifndef GRAPH_PROTOTYPE_TAG_MONITORS_HPP
+#define GRAPH_PROTOTYPE_TAG_MONITORS_HPP
+
+#include <node.hpp>
+#include <reflection.hpp>
+#include <tag.hpp>
+
+namespace fair::graph::tag_test {
+
+void
+print_tag(const tag_t &tag, std::string_view prefix = {}) {
+    fmt::print("{} @index= {}: {{", prefix, tag.index);
+    if (tag.map.empty()) {
+        fmt::print("}}\n");
+        return;
+    }
+    for (const auto &[key, value] : tag.map) {
+        fmt::print(" {:>5}: {} ", key, value);
+    }
+    fmt::print("}}\n");
+}
+
+template<typename T>
+struct TagSource : public node<TagSource<T>> {
+    OUT<T, 0, 1>       out;
+    std::vector<tag_t> tags{};
+    std::size_t        next_tag{ 0 };
+    std::uint64_t      n_samples_max = 1024;
+    std::uint64_t      n_samples_produced{ 0 };
+
+    constexpr std::make_signed_t<std::size_t>
+    available_samples(const TagSource &) noexcept {
+        const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
+        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
+    }
+
+    T
+    process_one() noexcept {
+        if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
+            print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name(), n_samples_produced));
+            tag_t &out_tag = this->output_tags()[0];
+            out_tag        = tags[next_tag];
+            this->forward_tags();
+            next_tag++;
+            n_samples_produced++;
+            return static_cast<T>(1);
+        }
+
+        n_samples_produced++;
+        return static_cast<T>(0);
+    }
+};
+
+static_assert(HasRequiredProcessFunction<TagSource<int>>);
+
+enum class ProcessFunction {
+    USE_PROCESS_ONE  = 0, ///
+    USE_PROCESS_BULK = 1  ///
+};
+
+template<typename T, ProcessFunction UseProcessOne>
+struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
+    IN<T>              in;
+    OUT<T>             out;
+    std::vector<tag_t> tags{};
+    std::uint64_t      n_samples_produced{ 0 };
+
+    constexpr T
+    process_one(const T &input) noexcept
+        requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
+    {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
+        }
+        n_samples_produced++;
+        return input;
+    }
+
+    constexpr work_return_t
+    process_bulk(std::span<const T> input, std::span<T> output) noexcept
+        requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
+    {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("{}::process_bulk(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
+        }
+
+        n_samples_produced += input.size();
+        std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
+
+        return work_return_t::OK;
+    }
+};
+
+static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+
+template<typename T, ProcessFunction UseProcessOne>
+struct TagSink : public node<TagSink<T, UseProcessOne>> {
+    IN<T>              in;
+    std::vector<tag_t> tags{};
+    std::uint64_t      n_samples_produced{ 0 };
+
+    // template<fair::meta::t_or_simd<T> V>
+    constexpr void
+    process_one(const T &) noexcept
+        requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
+    {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
+        }
+        n_samples_produced++;
+    }
+
+    // template<fair::meta::t_or_simd<T> V>
+    constexpr work_return_t
+    process_bulk(std::span<const T> input) noexcept
+        requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
+    {
+        if (this->input_tags_present()) {
+            const tag_t &tag = this->input_tags()[0];
+            print_tag(tag, fmt::format("{}::process_bulk(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            tags.emplace_back(n_samples_produced, tag.map);
+            this->forward_tags();
+        }
+
+        n_samples_produced += input.size();
+
+        return work_return_t::OK;
+    }
+};
+
+static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
+
+} // namespace fair::graph::tag_test
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::tag_test::TagSource<T>), out, n_samples_max);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagMonitor<T, b>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagSink<T, b>), in);
+
+#endif // GRAPH_PROTOTYPE_TAG_MONITORS_HPP

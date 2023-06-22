@@ -59,6 +59,10 @@ struct alignas(hardware_constructive_interference_size) tag_t {
     std::make_signed_t<std::size_t> index = 0;
     property_map                    map;
 
+    bool
+    operator==(const tag_t &other) const
+            = default;
+
     // TODO: do we need the convenience methods below?
     void
     reset() noexcept {

@@ -386,37 +386,31 @@ public:
     [[nodiscard]] constexpr auto static inputs_status(Self &self) noexcept {
         static_assert(traits::node::input_ports<Derived>::size > 0, "A source node has no inputs, therefore no inputs status.");
         bool       at_least_one_input_has_data = false;
-        const auto availableForPort            = [&at_least_one_input_has_data, &self]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, size_t> {
-            std::size_t availableSamples               = port.streamReader().available();
-            at_least_one_input_has_data                = at_least_one_input_has_data || (availableSamples > 0);
-
-            const std::size_t availableTags            = port.tagReader().available();
-            size_t            tag_stream_head_distance = -1_UZ;
+        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, size_t> {
+            std::size_t availableSamples = port.streamReader().available();
+            at_least_one_input_has_data  = at_least_one_input_has_data || (availableSamples > 0);
 
             if (availableSamples < port.min_buffer_size()) availableSamples = 0;
             if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
 
-            if (availableTags == 0) {
-                return { availableSamples, -1 };
+            if (port.tagReader().available() == 0) {
+                return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
             }
 
             // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-            const auto &tagData      = port.tagReader().get();
-            const auto &readPosition = port.streamReader().position();
+            const auto &tagData           = port.tagReader().get();
+            const auto &readPosition      = port.streamReader().position();
 
-            tag_stream_head_distance = readPosition == -1 ? tagData[0].index : (tagData[0].index - readPosition - 1);
-
-            auto future_tags_begin   = std::find_if(tagData.begin(), tagData.end(), [position = std::max(0L, readPosition)](const auto &tag) { return tag.index > position + 1; });
+            const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [position = std::max(0L, readPosition)](const auto &tag) noexcept { return tag.index > position + 1; });
 
             if (future_tags_begin == tagData.begin()) {
-                std::size_t first_future_tag_index   = future_tags_begin->index;
-                std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - readPosition - 1);
-                assert(n_samples_until_next_tag > 0);
+                const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
+                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+                assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
                 return { std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag };
-
             } else {
-                std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? -1_UZ : future_tags_begin->index;
-                std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - readPosition - 1);
+                const std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(future_tags_begin->index);
+                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
                 return { std::min(availableSamples, n_samples_until_next_tag), 0 };
             }
         };
@@ -525,7 +519,7 @@ public:
         constexpr bool is_sink_node             = output_types::size == 0;
 
         std::size_t    samples_to_process       = 0;
-        std::size_t    n_samples_until_next_tag = -1_UZ; // '-1': no tags in sight
+        std::size_t    n_samples_until_next_tag = std::numeric_limits<std::size_t>::max(); // default: no tags in sight
         if constexpr (is_source_node) {
             if constexpr (requires(const Derived &d) {
                               { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
@@ -600,8 +594,8 @@ public:
         _input_tags_present      = false;
         _output_tags_changed     = false;
         if (n_samples_until_next_tag == 0) {
-            if constexpr (requires(Derived &d) { &Derived::process_one; }) { // TODO: nail down the required method parameters and return types
-                if (samples_to_process > 1) samples_to_process = 1;          // N.B. limit to one so that only one process_on(...) invocation receives the tag
+            if constexpr (HasProcessOneFunction<Derived>) {
+                samples_to_process = 1; // N.B. limit to one so that only one process_on(...) invocation receives the tag
             }
             property_map merged_tag_map;
             _input_tags_present    = true;
@@ -627,10 +621,8 @@ public:
                     },
                     input_ports(&self()));
 
-            if (_input_tags_present) { // apply tags as new settings if matching
-                if (!merged_tag_map.empty()) {
-                    settings().auto_update(merged_tag_map);
-                }
+            if (_input_tags_present && !merged_tag_map.empty()) { // apply tags as new settings if matching
+                settings().auto_update(merged_tag_map);
             }
 
             if constexpr (Derived::tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
@@ -641,8 +633,7 @@ public:
         }
 
         if (settings().changed()) {
-            const auto forward_parameters = settings().apply_staged_parameters();
-            if (!forward_parameters.empty()) {
+            if (const auto forward_parameters = settings().apply_staged_parameters(); !forward_parameters.empty()) {
                 std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) { tag.map.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
                 _output_tags_changed = true;
             }
@@ -718,7 +709,7 @@ public:
           //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
           //        }
         return work_return_t::ERROR;
-    } // end: work_return_t work() noexcept { ..}
+    }     // end: work_return_t work() noexcept { ..}
 };
 
 template<typename Derived, typename... Arguments>
@@ -1026,7 +1017,7 @@ merge(A &&a, B &&b) {
 
 #if !DISABLE_SIMD
 namespace test {
-struct copy : public node<copy, IN<float, 0, -1_UZ, "in">, OUT<float, 0, -1_UZ, "out">> {
+struct copy : public node<copy, IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">, OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out">> {
 public:
     template<meta::t_or_simd<float> V>
     [[nodiscard]] constexpr V
