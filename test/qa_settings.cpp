@@ -1,3 +1,4 @@
+#include "timingctx.hpp"
 #include <boost/ut.hpp>
 
 #include <buffer.hpp>
@@ -5,9 +6,14 @@
 #include <node.hpp>
 #include <reflection.hpp>
 #include <scheduler.hpp>
+#include <stdexcept>
+#include <string>
+#include <transactions.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+
+using namespace std::string_literals;
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -521,6 +527,126 @@ const boost::ut::suite AnnotationTests = [] {
         std::ignore = block.settings().apply_staged_parameters(); // should print out a warning -> TODO: replace with pmt error message on msgOut port
 
         // fmt::print("description:\n {}", fair::graph::node_description<TestBlock<float>>());
+    };
+};
+
+const boost::ut::suite TransactionTests = [] {
+    using namespace boost::ut;
+    using namespace fair::graph;
+    using namespace fair::graph::setting_test;
+
+    "Settingsbase"_test = [] {
+        SettingBase<int, int> a;
+        expect(eq(a.nHistory(), 1U));
+        auto [r1, t1] = a.commit(42);
+        expect(r1);
+        expect(eq(a.nHistory(), 2U));
+        auto commitResult2 = a.commit(43);
+        expect(commitResult2);
+        expect(eq(a.nHistory(), 3U));
+
+        expect(eq(a.get(), 43));
+        expect(eq(a.get(commitResult2.timeStamp), 43));
+        expect(eq(a.get(-1), 42));
+        expect(eq(a.get(t1), 42));
+
+        expect(eq(a.getPendingTransactions().size(), 0U));
+        auto [r3, t3] = a.stage(53, "transactionToken#1");
+        expect(!r3);
+        expect(eq(a.getPendingTransactions().size(), 1U));
+        expect(eq(a.nHistory(), 3U));
+        auto [r4, t4] = a.commit(40);
+        expect(r4);
+        expect(eq(a.nHistory(), 4U));
+        expect(eq(a.get(t4), 40));
+        expect(eq(a.get(t3), 43)); // transaction not yet committed
+        expect(eq(a.get(), 40));   // transaction not yet committed
+
+        auto [r5, t5] = a.commit("transactionToken#1"); // commit transaction
+        expect(r5);
+        expect(eq(a.nHistory(), 5U));
+        expect(eq(a.get(), 53));
+        expect(eq(a.get(t5), 53));
+        expect(eq(a.getPendingTransactions().size(), 0U));
+
+        auto [r6, t] = a.stage(80, "transactionToken#2");
+        expect(!r6);
+        expect(eq(a.nHistory(), 5U));
+        expect(eq(a.getPendingTransactions().size(), 1U));
+        expect(eq(a.getPendingTransactions().front(), "transactionToken#2"s));
+        expect(!a.retireStaged("unknownToken"));
+        expect(eq(a.nHistory(), 5U));
+        expect(eq(a.getPendingTransactions().size(), 1U));
+        expect(a.retireStaged("transactionToken#2"));
+        expect(eq(a.nHistory(), 5U));
+        expect(eq(a.getPendingTransactions().size(), 0U));
+
+        // test staging duplicate transaction token -- last should survive
+        expect(eq(a.getPendingTransactions().size(), 0U));
+        expect(!a.stage(80, "transactionToken#2").isCommitted);
+        expect(eq(a.getPendingTransactions().size(), 1U));
+        expect(!a.stage(81, "transactionToken#2")); // short-hand notation w/o 'isCommitted'
+        expect(eq(a.getPendingTransactions().size(), 1U));
+        expect(a.commit("transactionToken#2"));
+        expect(eq(a.get(), 81));
+    };
+
+    "SettingBase time-out and expiry"_test = [] {
+        const auto timeStart = std::chrono::system_clock::now();
+        using namespace std::chrono_literals;
+        SettingBase<int, int, std::string, 16, std::chrono::milliseconds, 100> a;
+        expect(eq(a.nHistory(), 1U));
+        expect(throws<std::out_of_range>([&] { std::ignore = a.get(timeStart); }));
+        expect(throws<std::out_of_range>([&] { std::ignore = a.get(1); }));
+        expect(throws<std::out_of_range>([&] { std::ignore = a.get(static_cast<int64_t>(-a.nHistory())); }));
+        expect(nothrow([&] { std::ignore = a.get(static_cast<int64_t>(-a.nHistory() + 1)); }));
+
+        for (int i = 0; i < 8; ++i) {
+            auto [r1, t1] = a.commit(std::forward<int>(i));
+            expect(r1);
+            expect(eq(a.nHistory(), static_cast<std::size_t>(i + 2)));
+        }
+
+        for (int i = 0; i < 8; ++i) {
+            auto [r1, t1] = a.commit(std::forward<int>(i));
+            expect(r1);
+        }
+        expect(eq(a.nHistory(), 16U - 8 + 1));
+
+        SettingBase<int, int, std::string, 16, std::chrono::milliseconds, -1, 100> b;
+        expect(eq(b.getPendingTransactions().size(), 0U));
+        for (int i = 0; i < 5; ++i) {
+            auto [r1, t1] = b.stage(std::forward<int>(i), fmt::format("token#{}", i));
+            expect(!r1);
+        }
+        expect(eq(b.getPendingTransactions().size(), 5U));
+
+        std::this_thread::sleep_for(200ms); // wait for timeout to expire for both 'a' and 'b'
+        expect(eq(a.nHistory(), static_cast<std::size_t>(16 - 8 + 1)));
+        a.retireExpired();
+        expect(eq(a.nHistory(), 1U));
+
+        expect(eq(b.getPendingTransactions().size(), 5U));
+        b.retireExpired();
+        expect(eq(b.getPendingTransactions().size(), 0U));
+
+        expect(eq(a.nHistory(), 1U));
+        a.commit(0);
+        a.retireExpired();
+        expect(eq(a.nHistory(), 1U));
+        expect(a.modifySetting([](const int &oldValue) -> int { return oldValue; }));
+        expect(eq(a.nHistory(), 2U));
+    };
+
+    "SettingBase constructors"_test = [] {
+        Setting<int, 128> a;
+        expect(eq(a.nHistory(), 1U));
+        Setting<int, 128, std::chrono::milliseconds, 100> b;
+        expect(eq(b.nHistory(), 1U));
+        TransactionSetting<int, std::string, 128> c;
+        expect(eq(c.nHistory(), 1U));
+        TransactionSetting<int, std::string, 128, std::chrono::milliseconds, 100> d;
+        expect(eq(d.nHistory(), 1));
     };
 };
 

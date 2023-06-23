@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <new>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -446,6 +447,12 @@ tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
 static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
+
+#ifdef __cpp_lib_hardware_interference_size
+static constexpr const std::size_t kCacheLine = std::hardware_destructive_interference_size;
+#else
+static constexpr const std::size_t kCacheLine = 64;
+#endif
 
 } // namespace fair::meta
 

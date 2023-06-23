@@ -32,7 +32,9 @@ const_hash(char const *input) noexcept {
 constexpr std::string_view TIMING_DESCRIPTION = "Dummy timing selector";
 } // namespace detail
 
-template<typename ParsePredicate, typename MatchPredicate>
+static auto nullParsePred = [](auto) {};
+static auto nullMatchPred = [](auto, auto) { return true; };
+
 class TimingCtx {
     using timestamp                  = std::chrono::system_clock::time_point;
     using ParsePredicate             = std::function<void(const TimingCtx *)>;
@@ -129,7 +131,8 @@ private:
     }
 };
 
-template<typename ParsePredicate, typename MatchPredicate>
+inline static const auto NullTimingCtx = TimingCtx(nullParsePred, nullMatchPred);
+
 [[nodiscard]] inline bool
 operator==(const TimingCtx &lhs, const std::string_view &rhs) {
     return (lhs.bpcts == 0) && (lhs.selector.value == rhs);
