@@ -102,6 +102,7 @@ void exec_bm(auto& scheduler, const std::string& test_case) {
     scheduler.work();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << fmt::format("did not produce enough output samples for {}", test_case);
     expect(ge(test::n_samples_consumed, N_SAMPLES)) << fmt::format("did not consume enough input samples for {}", test_case);
+    scheduler.reset();
 }
 
 [[maybe_unused]] inline const boost::ut::suite scheduler_tests = [] {
