@@ -866,6 +866,9 @@ private:
 
     void
     ensure_history_size(std::size_t new_size) {
+        if (new_size <= history.capacity()) {
+            return;
+        }
         // TODO transitional, do not reallocate/copy, but create a shared buffer with size N,
         // and a per-listener history buffer where more than N samples is needed.
         auto new_history = gr::history_buffer<T>(std::max(new_size, history.capacity()));
