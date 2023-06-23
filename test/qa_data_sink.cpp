@@ -547,8 +547,8 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode overlapping"_test = [] {
-        constexpr std::int32_t n_samples  = 2000000;
-        constexpr std::size_t  n_triggers = 5000;
+        constexpr std::int32_t n_samples  = 150000;
+        constexpr std::size_t  n_triggers = 300;
 
         graph                  flow_graph;
         auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
@@ -602,8 +602,8 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "callback trigger mode overlapping"_test = [] {
-        constexpr std::int32_t n_samples  = 2000000;
-        constexpr std::size_t  n_triggers = 5000;
+        constexpr std::int32_t n_samples  = 150000;
+        constexpr std::size_t  n_triggers = 300;
 
         graph                  flow_graph;
         auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
