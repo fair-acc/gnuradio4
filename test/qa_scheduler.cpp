@@ -197,7 +197,7 @@ get_graph_scaled_sum(tracer &trace) {
 }
 
 template<typename node_type>
-void check_node_names(std::vector<node_type> joblist, std::set<std::string> set) {
+void check_node_names(const std::vector<node_type> &joblist, std::set<std::string> set) {
     boost::ut::expect(boost::ut::that % joblist.size() == set.size());
     for (auto &node: joblist) {
         boost::ut::expect(boost::ut::that % set.contains(std::string(node->name()))) << fmt::format("{} not in {}\n", node->name(), set);
@@ -283,6 +283,8 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::breadth_first<fg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto sched = scheduler{get_graph_linear(trace), thread_pool};
+        sched.init();
+        expect(sched.getJobLists().size() == 2u);
         check_node_names(sched.getJobLists()[0], {"s1", "mult2"});
         check_node_names(sched.getJobLists()[1], {"mult1", "out"});
         sched.work();
@@ -303,6 +305,8 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::breadth_first<fg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto sched = scheduler{get_graph_parallel(trace), thread_pool};
+        sched.init();
+        expect(sched.getJobLists().size() == 2u);
         check_node_names(sched.getJobLists()[0], {"s1", "mult1b", "mult2b",  "outb"});
         check_node_names(sched.getJobLists()[1], {"mult1a", "mult2a",  "outa"});
         sched.work();
@@ -324,6 +328,8 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::breadth_first<fg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto sched = scheduler{get_graph_scaled_sum(trace), thread_pool};
+        sched.init();
+        expect(sched.getJobLists().size() == 2u);
         check_node_names(sched.getJobLists()[0], {"s1", "mult",  "out"});
         check_node_names(sched.getJobLists()[1], {"s2", "add"});
         sched.work();

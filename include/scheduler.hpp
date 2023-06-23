@@ -10,7 +10,7 @@
 namespace fair::graph::scheduler {
 
 enum execution_policy { single_threaded, multi_threaded };
-enum SchedulerState { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSE, SHUTTING_DOWN };
+enum SchedulerState { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, SHUTTING_DOWN };
 
 template<typename scheduler_type, execution_policy = single_threaded>
 class scheduler_base : public node<scheduler_type> {
@@ -20,7 +20,7 @@ protected:
     SchedulerState                    _state = IDLE;
     fair::graph::graph                _graph;
     std::shared_ptr<thread_pool_type> _pool;
-    std::vector<std::vector<node_t>>  _job_lists{};
+    std::vector<std::vector<node_t>>  _job_lists{}; // move to impl
 
 public:
     explicit scheduler_base(fair::graph::graph              &&graph,
@@ -28,13 +28,19 @@ public:
         : _graph(std::move(graph)), _pool(std::move(thread_pool)){};
 
     void
-    init(fair::graph::graph &graph) {
-        auto result = init_proof(std::all_of(graph.connection_definitions().begin(), graph.connection_definitions().end(),
-                                             [](auto &connection_definition) { return connection_definition() == connection_result_t::SUCCESS; }));
-        graph.clear_connection_definitions();
-        return result;
+    init() {
+        if (_state != IDLE) {
+            return;
+        }
+        auto result = std::all_of(_graph.connection_definitions().begin(), _graph.connection_definitions().end(),
+                                             [this](auto &connection_definition) { return connection_definition(_graph) == connection_result_t::SUCCESS; });
+        _graph.clear_connection_definitions();
+        if (result) {
+            _state = INITIALISED;
+        }
     }
 
+    // todo: move to impl
     template<typename node_t>
     work_return_t
     traverse_nodes(std::span<node_t> nodes) {
@@ -98,12 +104,16 @@ public:
  */
 template<execution_policy executionPolicy = single_threaded>
 class simple : public scheduler_base<simple<executionPolicy>>{
-    using S = scheduler_base<simple<executionPolicy>>;
-    using node_t = S::node_t; //node_model*;
-    using thread_pool_type = S::thread_pool_type; //thread_pool::BasicThreadPool;
+    using Base = scheduler_base<simple<executionPolicy>>;
+    using thread_pool_type = Base::thread_pool_type; //thread_pool::BasicThreadPool;
 public:
     explicit simple(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<thread_pool_type>("simple-scheduler-pool", thread_pool::CPU_BOUND))
-            : S(std::move(graph), thread_pool) {
+            : Base(std::forward<fair::graph::graph>(graph), thread_pool) {
+    }
+
+    void
+    init() {
+        Base::init();
         // generate job list
         if constexpr (executionPolicy == multi_threaded) {
             const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), this->_graph.blocks().size());
@@ -119,11 +129,16 @@ public:
         }
     }
 
+
     work_return_t
     work() {
-        // if (!_init) {
-        //     return work_return_t::ERROR;
-        // }
+        if (this->_state == IDLE) {
+            this->init();
+        }
+        if (this->_state != INITIALISED) {
+            fmt::print("simple scheduler work(): graph not initialised");
+            return work_return_t::ERROR;
+        }
         if constexpr (executionPolicy == single_threaded) {
             bool run = true;
             while (run) {
@@ -157,13 +172,19 @@ public:
  */
 template<execution_policy executionPolicy = single_threaded>
 class breadth_first : public scheduler_base<breadth_first<executionPolicy>> {
-    using S = scheduler_base<breadth_first<executionPolicy>>;
+    using Base = scheduler_base<breadth_first<executionPolicy>>;
     using node_t = node_model*;
     using thread_pool_type = thread_pool::BasicThreadPool;
     std::vector<node_t> _nodelist;
 public:
     explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<thread_pool_type>("breadth-first-pool", thread_pool::CPU_BOUND))
-                : S(std::move(graph), thread_pool) {
+                : Base(std::move(graph), thread_pool) {
+    }
+
+    void
+    init() {
+        Base::init();
+        // calculate adjacency list
         std::map<node_t, std::vector<node_t>> _adjacency_list{};
         std::vector<node_t>                   _source_nodes{};
         // compute the adjacency list
@@ -213,9 +234,13 @@ public:
 
     work_return_t
     work() {
-        // if (!_init) {
-        //     return work_return_t::ERROR;
-        // }
+        if (this->_state == IDLE) {
+            this->init();
+        }
+        if (this->_state != INITIALISED) {
+            fmt::print("simple scheduler work(): graph not initialised");
+            return work_return_t::ERROR;
+        }
         if constexpr (executionPolicy == single_threaded) {
             bool run = true;
             while (run) {
