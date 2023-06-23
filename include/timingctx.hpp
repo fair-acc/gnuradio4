@@ -129,7 +129,10 @@ private:
     }
 };
 
-template<typename ParsePredicate, typename MatchPredicate>
+static auto              nullParsePred = [](auto) {};
+static auto              nullMatchPred = [](auto, auto) { return true; };
+inline static const auto NullTimingCtx = TimingCtx{ nullParsePred, nullMatchPred };
+
 [[nodiscard]] inline bool
 operator==(const TimingCtx &lhs, const std::string_view &rhs) {
     return (lhs.bpcts == 0) && (lhs.selector.value == rhs);
