@@ -673,7 +673,7 @@ private:
                 const auto pre_sample_view = history.last(std::min(pre_samples, history.size()));
                 dataset.signal_values.insert(dataset.signal_values.end(), pre_sample_view.begin(), pre_sample_view.end());
 
-                dataset.timing_events = { { { static_cast<int64_t>(pre_sample_view.size()), *tag_data0 } } };
+                dataset.timing_events = { { { static_cast<tag_t::signed_index_type>(pre_sample_view.size()), *tag_data0 } } };
                 pending_trigger_windows.push_back({ .dataset = std::move(dataset), .pending_post_samples = post_samples });
             }
 
