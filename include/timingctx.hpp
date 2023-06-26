@@ -53,8 +53,8 @@ public:
         parse();
     }
 
-    explicit TimingCtx(ParsePredicate &parsePred, MatchPredicate &matchPred, pmtv::map_t identifier = {}, std::chrono::microseconds bpcTimeStamp = {})
-        : _parse_pred(parsePred), _match_pred(matchPred), _identifier(identifier), selector(), bpcts(bpcTimeStamp.count()) {
+    explicit TimingCtx(ParsePredicate parsePred = nullParsePred, MatchPredicate matchPred = nullMatchPred, pmtv::map_t identifier = {}, std::chrono::microseconds bpcTimeStamp = {})
+        : _parse_pred(parsePred), _match_pred(matchPred), selector(), bpcts(bpcTimeStamp.count()), _identifier(identifier) {
         parse();
     }
 
@@ -131,7 +131,7 @@ private:
     }
 };
 
-inline static const auto NullTimingCtx = TimingCtx(nullParsePred, nullMatchPred);
+inline static const auto NullTimingCtx = TimingCtx{ nullParsePred, nullMatchPred };
 
 [[nodiscard]] inline bool
 operator==(const TimingCtx &lhs, const std::string_view &rhs) {

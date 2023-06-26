@@ -1,4 +1,3 @@
-#include "timingctx.hpp"
 #include <boost/ut.hpp>
 
 #include <buffer.hpp>
@@ -8,6 +7,7 @@
 #include <scheduler.hpp>
 #include <stdexcept>
 #include <string>
+#include <timingctx.hpp>
 #include <transactions.hpp>
 
 #include <fmt/format.h>
@@ -646,7 +646,70 @@ const boost::ut::suite TransactionTests = [] {
         TransactionSetting<int, std::string, 128> c;
         expect(eq(c.nHistory(), 1U));
         TransactionSetting<int, std::string, 128, std::chrono::milliseconds, 100> d;
-        expect(eq(d.nHistory(), 1));
+        expect(eq(d.nHistory(), 1U));
+        CtxSetting<int, std::string, 128> e;
+        expect(eq(e.nHistory(), 1U));
+    };
+
+    // a simple parse function that just stores every ordered number from a selector string "val0:val1:val2:..."
+    auto parsePred = [](auto t) {
+        auto sel     = t->selector.value;
+        auto strView = std::string_view{ sel.data(), sel.data() + sel.length() };
+        for (char c = 'a';; ++c) {
+            const auto posColon               = strView.find(':');
+            const auto tag                    = posColon != std::string_view::npos ? strView.substr(0, posColon) : strView;
+            int32_t    value                  = -1;
+            std::ignore                       = std::from_chars(tag.begin(), tag.end(), value);
+            t->_identifier[std::string(1, c)] = value;
+
+            if (posColon == std::string_view::npos) {
+                return;
+            }
+
+            // advance to after the ":"
+            strView.remove_prefix(posColon + 1);
+        }
+    };
+    auto matchPred    = [](const auto lhs, const auto rhs) { return std::all_of(lhs._identifier.begin(), lhs._identifier.end(), [&](auto v) { return rhs._identifier.contains(v.first) && rhs._identifier[v.first] == v.second; }); };
+
+    "CtxSetting"_test = [&] {
+        CtxSetting<int, std::string, 16> a;
+        expect(eq(a.nHistory(), 1U));
+
+        auto [r1, t1] = a.commit(NullTimingCtx, 42);
+        expect(r1);
+        expect(eq(a.nHistory(), 2U));
+        auto [r2, t2] = a.commit(NullTimingCtx, 43);
+        expect(r2);
+        expect(eq(a.nHistory(), 3U));
+
+        expect(eq(a.get().settingValue, 43));
+        expect(eq(a.get(), 43)); // short-hand notation
+        expect(eq(a.get(NullTimingCtx, t2), 43));
+        expect(eq(a.get(NullTimingCtx, -1), 42));
+        expect(eq(a.get(NullTimingCtx, t1), 42));
+
+        auto [r3, t3] = a.commit(TimingCtx(parsePred, matchPred, "1"), 55);
+        expect(r3);
+        expect(eq(a.nHistory(), 4U));
+        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1")), 55));
+        auto e = a.get(TimingCtx(parsePred, matchPred, "2"));
+        expect(neq(a.get(TimingCtx(parsePred, matchPred, "2")).timingCtx, TimingCtx(parsePred, matchPred, "2"))); // non-matching context
+        expect(neq(a.get(TimingCtx(parsePred, matchPred, "2")), TimingCtx(parsePred, matchPred, "2")));           // non-matching context, short-hand notation
+
+        auto [r4, t4] = a.commit(TimingCtx(parsePred, matchPred, "2"), 56);
+        expect(r4);
+        expect(eq(a.nHistory(), 5U));
+        expect(eq(a.get(NullTimingCtx), 43));
+        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1")), 55));
+        expect(eq(a.get(TimingCtx(parsePred, matchPred, "2")), 56));
+
+        expect(a.commit(TimingCtx(parsePred, matchPred, "1:1:1:1"), 101));
+        expect(a.commit(TimingCtx(parsePred, matchPred, "1:1:1"), 102));
+        expect(a.commit(TimingCtx(parsePred, matchPred, "1:1"), 103));
+        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1")), 55));
+        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1:1:1:1")), 101));
+        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1:1:1:1")).timingCtx, TimingCtx(parsePred, matchPred, "1:1:1:1")));
     };
 };
 
