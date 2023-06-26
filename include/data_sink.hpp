@@ -61,8 +61,8 @@ struct data_sink_query {
 };
 
 class data_sink_registry {
-    std::mutex            mutex;
-    std::vector<std::any> sinks;
+    std::mutex            _mutex;
+    std::vector<std::any> _sinks;
 
 public:
     // TODO this shouldn't be a singleton but associated with the flow graph (?)
@@ -75,15 +75,15 @@ public:
     template<typename T>
     void
     register_sink(data_sink<T> *sink) {
-        std::lock_guard lg{ mutex };
-        sinks.push_back(sink);
+        std::lock_guard lg{ _mutex };
+        _sinks.push_back(sink);
     }
 
     template<typename T>
     void
     unregister_sink(data_sink<T> *sink) {
-        std::lock_guard lg{ mutex };
-        std::erase_if(sinks, [sink](const std::any &v) {
+        std::lock_guard lg{ _mutex };
+        std::erase_if(_sinks, [sink](const std::any &v) {
             try {
                 return std::any_cast<data_sink<T> *>(v) == sink;
             } catch (...) {
@@ -95,7 +95,7 @@ public:
     template<typename T>
     std::shared_ptr<typename data_sink<T>::poller>
     get_streaming_poller(const data_sink_query &query, blocking_mode block = blocking_mode::NonBlocking) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_streaming_poller(block) : nullptr;
     }
@@ -103,7 +103,7 @@ public:
     template<typename T, TriggerPredicate P>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
     get_trigger_poller(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_trigger_poller(std::forward<P>(p), pre_samples, post_samples, block) : nullptr;
     }
@@ -111,7 +111,7 @@ public:
     template<typename T, TriggerObserverFactory F>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
     get_multiplexed_poller(const data_sink_query &query, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::NonBlocking) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_multiplexed_poller(std::forward<F>(triggerObserverFactory), maximum_window_size, block) : nullptr;
     }
@@ -119,7 +119,7 @@ public:
     template<typename T, TriggerPredicate P>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
     get_snapshot_poller(const data_sink_query &query, P p, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::NonBlocking) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_snapshot_poller(std::forward<P>(p), delay, block) : nullptr;
     }
@@ -127,7 +127,7 @@ public:
     template<typename T, typename Callback>
     bool
     register_streaming_callback(const data_sink_query &query, std::size_t max_chunk_size, Callback callback) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
             return false;
@@ -140,7 +140,7 @@ public:
     template<typename T, TriggerPredicate P, typename Callback>
     bool
     register_trigger_callback(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
             return false;
@@ -153,7 +153,7 @@ public:
     template<typename T, TriggerObserver O, typename Callback>
     bool
     register_multiplexed_callback(const data_sink_query &query, std::size_t maximum_window_size, Callback callback) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
             return false;
@@ -166,7 +166,7 @@ public:
     template<typename T, TriggerPredicate P, typename Callback>
     bool
     register_snapshot_callback(const data_sink_query &query, P p, std::chrono::nanoseconds delay, Callback callback) {
-        std::lock_guard lg{ mutex };
+        std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
             return false;
@@ -191,8 +191,8 @@ private:
             }
         };
 
-        const auto it = std::find_if(sinks.begin(), sinks.end(), matches);
-        if (it == sinks.end()) {
+        const auto it = std::find_if(_sinks.begin(), _sinks.end(), matches);
+        if (it == _sinks.end()) {
             return nullptr;
         }
 
@@ -260,7 +260,12 @@ copy_span(std::span<const T> src, std::span<T> dst) {
  */
 template<typename T>
 class data_sink : public node<data_sink<T>> {
-    static constexpr std::size_t listener_buffer_size = 65536;
+    struct abstract_listener;
+
+    static constexpr std::size_t                   _listener_buffer_size = 65536;
+    std::deque<std::unique_ptr<abstract_listener>> _listeners;
+    std::mutex                                     _listener_mutex;
+    gr::history_buffer<T>                          _history = gr::history_buffer<T>(1);
 
 public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 10000.f;
@@ -269,10 +274,10 @@ public:
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min;
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max;
 
-    IN<T, std::dynamic_extent, listener_buffer_size>                                 in;
+    IN<T, std::dynamic_extent, _listener_buffer_size>                                in;
 
     struct poller {
-        gr::circular_buffer<T>            buffer       = gr::circular_buffer<T>(listener_buffer_size);
+        gr::circular_buffer<T>            buffer       = gr::circular_buffer<T>(_listener_buffer_size);
         decltype(buffer.new_reader())     reader       = buffer.new_reader();
         decltype(buffer.new_writer())     writer       = buffer.new_writer();
         gr::circular_buffer<tag_t>        tag_buffer   = gr::circular_buffer<tag_t>(1024);
@@ -312,7 +317,7 @@ public:
     };
 
     struct dataset_poller {
-        gr::circular_buffer<DataSet<T>> buffer     = gr::circular_buffer<DataSet<T>>(listener_buffer_size);
+        gr::circular_buffer<DataSet<T>> buffer     = gr::circular_buffer<DataSet<T>>(_listener_buffer_size);
         decltype(buffer.new_reader())   reader     = buffer.new_reader();
         decltype(buffer.new_writer())   writer     = buffer.new_writer();
 
@@ -346,9 +351,134 @@ public:
         }
     };
 
+    data_sink() { data_sink_registry::instance().register_sink(this); }
+
+    ~data_sink() { data_sink_registry::instance().unregister_sink(this); }
+
+    std::shared_ptr<poller>
+    get_streaming_poller(blocking_mode block_mode = blocking_mode::NonBlocking) {
+        std::lock_guard lg(_listener_mutex);
+        const auto      block   = block_mode == blocking_mode::Blocking;
+        auto            handler = std::make_shared<poller>();
+        add_listener(std::make_unique<continuous_listener<null_type>>(handler, block), block);
+        return handler;
+    }
+
+    template<typename TriggerPredicate>
+    std::shared_ptr<dataset_poller>
+    get_trigger_poller(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::NonBlocking) {
+        const auto      block   = block_mode == blocking_mode::Blocking;
+        auto            handler = std::make_shared<dataset_poller>();
+        std::lock_guard lg(_listener_mutex);
+        add_listener(std::make_unique<trigger_listener<null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
+        ensure_history_size(pre_samples);
+        return handler;
+    }
+
+    template<TriggerObserverFactory F>
+    std::shared_ptr<dataset_poller>
+    get_multiplexed_poller(F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::NonBlocking) {
+        std::lock_guard lg(_listener_mutex);
+        const auto      block   = block_mode == blocking_mode::Blocking;
+        auto            handler = std::make_shared<dataset_poller>();
+        add_listener(std::make_unique<multiplexed_listener<null_type, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
+        return handler;
+    }
+
+    template<TriggerPredicate P>
+    std::shared_ptr<dataset_poller>
+    get_snapshot_poller(P p, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::NonBlocking) {
+        const auto      block   = block_mode == blocking_mode::Blocking;
+        auto            handler = std::make_shared<dataset_poller>();
+        std::lock_guard lg(_listener_mutex);
+        add_listener(std::make_unique<snapshot_listener<null_type, P>>(std::forward<P>(p), delay, handler, block), block);
+        return handler;
+    }
+
+    template<typename Callback>
+    void
+    register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
+        add_listener(std::make_unique<continuous_listener<Callback>>(max_chunk_size, std::forward<Callback>(callback)), false);
+    }
+
+    template<TriggerPredicate P, typename Callback>
+    void
+    register_trigger_callback(P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
+        add_listener(std::make_unique<trigger_listener<Callback, P>>(std::forward<P>(p), pre_samples, post_samples, std::forward<Callback>(callback)), false);
+        ensure_history_size(pre_samples);
+    }
+
+    template<TriggerObserverFactory F, typename Callback>
+    void
+    register_multiplexed_callback(F triggerObserverFactory, std::size_t maximum_window_size, Callback callback) {
+        std::lock_guard lg(_listener_mutex);
+        add_listener(std::make_unique<multiplexed_listener>(std::move(triggerObserverFactory), maximum_window_size, std::forward<Callback>(callback)), false);
+    }
+
+    template<TriggerPredicate P, typename Callback>
+    void
+    register_snapshot_callback(P p, std::chrono::nanoseconds delay, Callback callback) {
+        std::lock_guard lg(_listener_mutex);
+        add_listener(std::make_unique<snapshot_listener>(std::forward<P>(p), delay, std::forward<Callback>(callback)), false);
+    }
+
+    // TODO this code should be called at the end of graph processing
+    void
+    stop() noexcept {
+        std::lock_guard lg(_listener_mutex);
+        for (auto &listener : _listeners) {
+            listener->flush();
+        }
+    }
+
+    [[nodiscard]] work_return_t
+    process_bulk(std::span<const T> in_data) noexcept {
+        std::optional<property_map> tagData;
+        if (this->input_tags_present()) {
+            assert(this->input_tags()[0].index == 0);
+            tagData = this->input_tags()[0].map;
+        }
+
+        {
+            std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
+            const auto      history_view = _history.get_span(0);
+            for (auto &listener : _listeners) {
+                listener->process(history_view, in_data, tagData);
+            }
+
+            // store potential pre-samples for triggers at the beginning of the next chunk
+            const auto to_write = std::min(in_data.size(), _history.capacity());
+            _history.push_back_bulk(in_data.last(to_write));
+        }
+
+        return work_return_t::OK;
+    }
+
 private:
-    struct abstract_listener_t {
-        virtual ~abstract_listener_t() = default;
+    void
+    ensure_history_size(std::size_t new_size) {
+        if (new_size <= _history.capacity()) {
+            return;
+        }
+        // TODO transitional, do not reallocate/copy, but create a shared buffer with size N,
+        // and a per-listener history buffer where more than N samples is needed.
+        auto new_history = gr::history_buffer<T>(std::max(new_size, _history.capacity()));
+        new_history.push_back_bulk(_history.begin(), _history.end());
+        std::swap(_history, new_history);
+    }
+
+    void
+    add_listener(std::unique_ptr<abstract_listener> &&l, bool block) {
+        l->set_sample_rate(sample_rate); // TODO also call when sample_rate changes
+        if (block) {
+            _listeners.push_back(std::move(l));
+        } else {
+            _listeners.push_front(std::move(l));
+        }
+    }
+
+    struct abstract_listener {
+        virtual ~abstract_listener() = default;
 
         virtual void
         set_sample_rate(float) {}
@@ -361,7 +491,7 @@ private:
     };
 
     template<typename Callback>
-    struct continuous_listener_t : public abstract_listener_t {
+    struct continuous_listener : public abstract_listener {
         static constexpr auto has_callback        = !std::is_same_v<Callback, null_type>;
         static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>;
 
@@ -378,9 +508,9 @@ private:
 
         Callback              callback;
 
-        explicit continuous_listener_t(std::size_t max_chunk_size, Callback c) : buffer(max_chunk_size), callback{ std::forward<Callback>(c) } {}
+        explicit continuous_listener(std::size_t max_chunk_size, Callback c) : buffer(max_chunk_size), callback{ std::forward<Callback>(c) } {}
 
-        explicit continuous_listener_t(std::shared_ptr<poller> poller, bool do_block) : block(do_block), polling_handler{ std::move(poller) } {}
+        explicit continuous_listener(std::shared_ptr<poller> poller, bool do_block) : block(do_block), polling_handler{ std::move(poller) } {}
 
         void
         process(std::span<const T>, std::span<const T> data, std::optional<property_map> tag_data0) override {
@@ -482,27 +612,27 @@ private:
         }
     };
 
-    struct pending_window_t {
+    struct pending_window {
         DataSet<T>  dataset;
         std::size_t pending_post_samples = 0;
     };
 
     template<typename Callback, TriggerPredicate P>
-    struct trigger_listener_t : public abstract_listener_t {
+    struct trigger_listener : public abstract_listener {
         bool                          block             = false;
         std::size_t                   pre_samples       = 0;
         std::size_t                   post_samples      = 0;
 
         P                             trigger_predicate = {};
-        std::deque<pending_window_t>  pending_trigger_windows; // triggers that still didn't receive all their data
+        std::deque<pending_window>    pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<dataset_poller> polling_handler = {};
 
         Callback                      callback;
 
-        explicit trigger_listener_t(P predicate, std::shared_ptr<dataset_poller> handler, std::size_t pre, std::size_t post, bool do_block)
+        explicit trigger_listener(P predicate, std::shared_ptr<dataset_poller> handler, std::size_t pre, std::size_t post, bool do_block)
             : block(do_block), pre_samples(pre), post_samples(post), trigger_predicate(std::forward<P>(predicate)), polling_handler{ std::move(handler) } {}
 
-        explicit trigger_listener_t(P predicate, std::size_t pre, std::size_t post, Callback cb)
+        explicit trigger_listener(P predicate, std::size_t pre, std::size_t post, Callback cb)
             : pre_samples(pre), post_samples(post), trigger_predicate(std::forward<P>(predicate)), callback{ std::forward<Callback>(cb) } {}
 
         // TODO all the dataset-based listeners could share publish_dataset and parts of flush (closing pollers),
@@ -577,7 +707,7 @@ private:
     };
 
     template<typename Callback, TriggerObserverFactory F>
-    struct multiplexed_listener_t : public abstract_listener_t {
+    struct multiplexed_listener : public abstract_listener {
         bool                          block = false;
         F                             observerFactory;
         decltype(observerFactory())   observer;
@@ -586,10 +716,10 @@ private:
         std::weak_ptr<dataset_poller> polling_handler = {};
         Callback                      callback;
 
-        explicit multiplexed_listener_t(F factory, std::size_t max_window_size, Callback cb)
+        explicit multiplexed_listener(F factory, std::size_t max_window_size, Callback cb)
             : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), callback(cb) {}
 
-        explicit multiplexed_listener_t(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
+        explicit multiplexed_listener(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
             : block(do_block), observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), polling_handler{ std::move(handler) } {}
 
         inline void
@@ -675,7 +805,7 @@ private:
     };
 
     template<typename Callback, TriggerPredicate P>
-    struct snapshot_listener_t : public abstract_listener_t {
+    struct snapshot_listener : public abstract_listener {
         bool                          block = false;
         std::chrono::nanoseconds      time_delay;
         std::size_t                   sample_delay      = 0;
@@ -684,10 +814,10 @@ private:
         std::weak_ptr<dataset_poller> polling_handler = {};
         Callback                      callback;
 
-        explicit snapshot_listener_t(P p, std::chrono::nanoseconds delay, std::shared_ptr<dataset_poller> poller, bool do_block)
+        explicit snapshot_listener(P p, std::chrono::nanoseconds delay, std::shared_ptr<dataset_poller> poller, bool do_block)
             : block(do_block), time_delay(delay), trigger_predicate(std::forward<P>(p)), polling_handler{ std::move(poller) } {}
 
-        explicit snapshot_listener_t(P p, std::chrono::nanoseconds delay, Callback cb) : trigger_predicate(std::forward<P>(p)), time_delay(std::forward<Callback>(cb)) {}
+        explicit snapshot_listener(P p, std::chrono::nanoseconds delay, Callback cb) : trigger_predicate(std::forward<P>(p)), time_delay(std::forward<Callback>(cb)) {}
 
         inline void
         publish_dataset(DataSet<T> &&data) {
@@ -753,138 +883,6 @@ private:
             }
         }
     };
-
-    std::deque<std::unique_ptr<abstract_listener_t>> listeners;
-    std::mutex                                       listener_mutex;
-
-public:
-    data_sink() { data_sink_registry::instance().register_sink(this); }
-
-    ~data_sink() { data_sink_registry::instance().unregister_sink(this); }
-
-    std::shared_ptr<poller>
-    get_streaming_poller(blocking_mode block_mode = blocking_mode::NonBlocking) {
-        std::lock_guard lg(listener_mutex);
-        const auto      block   = block_mode == blocking_mode::Blocking;
-        auto            handler = std::make_shared<poller>();
-        add_listener(std::make_unique<continuous_listener_t<null_type>>(handler, block), block);
-        return handler;
-    }
-
-    template<typename TriggerPredicate>
-    std::shared_ptr<dataset_poller>
-    get_trigger_poller(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::NonBlocking) {
-        const auto      block   = block_mode == blocking_mode::Blocking;
-        auto            handler = std::make_shared<dataset_poller>();
-        std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<trigger_listener_t<null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
-        ensure_history_size(pre_samples);
-        return handler;
-    }
-
-    template<TriggerObserverFactory F>
-    std::shared_ptr<dataset_poller>
-    get_multiplexed_poller(F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::NonBlocking) {
-        std::lock_guard lg(listener_mutex);
-        const auto      block   = block_mode == blocking_mode::Blocking;
-        auto            handler = std::make_shared<dataset_poller>();
-        add_listener(std::make_unique<multiplexed_listener_t<null_type, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
-        return handler;
-    }
-
-    template<TriggerPredicate P>
-    std::shared_ptr<dataset_poller>
-    get_snapshot_poller(P p, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::NonBlocking) {
-        const auto      block   = block_mode == blocking_mode::Blocking;
-        auto            handler = std::make_shared<dataset_poller>();
-        std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<snapshot_listener_t<null_type, P>>(std::forward<P>(p), delay, handler, block), block);
-        return handler;
-    }
-
-    template<typename Callback>
-    void
-    register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
-        add_listener(std::make_unique<continuous_listener_t<Callback>>(max_chunk_size, std::forward<Callback>(callback)), false);
-    }
-
-    template<TriggerPredicate P, typename Callback>
-    void
-    register_trigger_callback(P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
-        add_listener(std::make_unique<trigger_listener_t<Callback, P>>(std::forward<P>(p), pre_samples, post_samples, std::forward<Callback>(callback)), false);
-        ensure_history_size(pre_samples);
-    }
-
-    template<TriggerObserverFactory F, typename Callback>
-    void
-    register_multiplexed_callback(F triggerObserverFactory, std::size_t maximum_window_size, Callback callback) {
-        std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<multiplexed_listener_t>(std::move(triggerObserverFactory), maximum_window_size, std::forward<Callback>(callback)), false);
-    }
-
-    template<TriggerPredicate P, typename Callback>
-    void
-    register_snapshot_callback(P p, std::chrono::nanoseconds delay, Callback callback) {
-        std::lock_guard lg(listener_mutex);
-        add_listener(std::make_unique<snapshot_listener_t>(std::forward<P>(p), delay, std::forward<Callback>(callback)), false);
-    }
-
-    // TODO this code should be called at the end of graph processing
-    void
-    stop() noexcept {
-        std::lock_guard lg(listener_mutex);
-        for (auto &listener : listeners) {
-            listener->flush();
-        }
-    }
-
-    [[nodiscard]] work_return_t
-    process_bulk(std::span<const T> in_data) noexcept {
-        std::optional<property_map> tagData;
-        if (this->input_tags_present()) {
-            assert(this->input_tags()[0].index == 0);
-            tagData = this->input_tags()[0].map;
-        }
-
-        {
-            std::lock_guard lg(listener_mutex);
-            const auto      history_view = history.get_span(0);
-            for (auto &listener : listeners) {
-                listener->process(history_view, in_data, tagData);
-            }
-
-            // store potential pre-samples for triggers at the beginning of the next chunk
-            const auto to_write = std::min(in_data.size(), history.capacity());
-            history.push_back_bulk(in_data.last(to_write));
-        }
-
-        return work_return_t::OK;
-    }
-
-private:
-    gr::history_buffer<T> history = gr::history_buffer<T>(1);
-
-    void
-    ensure_history_size(std::size_t new_size) {
-        if (new_size <= history.capacity()) {
-            return;
-        }
-        // TODO transitional, do not reallocate/copy, but create a shared buffer with size N,
-        // and a per-listener history buffer where more than N samples is needed.
-        auto new_history = gr::history_buffer<T>(std::max(new_size, history.capacity()));
-        new_history.push_back_bulk(history.begin(), history.end());
-        std::swap(history, new_history);
-    }
-
-    void
-    add_listener(std::unique_ptr<abstract_listener_t> &&l, bool block) {
-        l->set_sample_rate(sample_rate); // TODO also call when sample_rate changes
-        if (block) {
-            listeners.push_back(std::move(l));
-        } else {
-            listeners.push_front(std::move(l));
-        }
-    }
 };
 
 } // namespace fair::graph
