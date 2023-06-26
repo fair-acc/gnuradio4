@@ -40,6 +40,25 @@ concept TriggerPredicate = requires(const T p, tag_t tag) {
  *
  * The observer can rely on being called with each incoming tag exactly once, in the order they arrive.
  *
+ * Example:
+ *
+ * @code
+ * // Observer observing three possible tag values, "green", "yellow", "red".
+ * // starting a dataset when seeing "green", stopping on "red", starting a new dataset on "yellow"
+ * struct color_observer {
+ *     trigger_observer_state operator()(const tag_t &tag) {
+ *         if (tag == green || tag == yellow) {
+ *             return trigger_observer_state::StopAndStart;
+ *         }
+ *         if (tag == red) {
+ *             return trigger_observer_state::Stop;
+ *         }
+ *
+ *         return trigger_observer_state::Ignore;
+ *     }
+ * };
+ * @endcode
+ *
  * @see trigger_observer_state
  */
 template<typename T>
@@ -105,7 +124,7 @@ public:
 
     template<typename T>
     std::shared_ptr<typename data_sink<T>::poller>
-    get_streaming_poller(const data_sink_query &query, blocking_mode block = blocking_mode::NonBlocking) {
+    get_streaming_poller(const data_sink_query &query, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_streaming_poller(block) : nullptr;
@@ -113,7 +132,7 @@ public:
 
     template<typename T, TriggerPredicate P>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_trigger_poller(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::NonBlocking) {
+    get_trigger_poller(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_trigger_poller(std::forward<P>(p), pre_samples, post_samples, block) : nullptr;
@@ -121,7 +140,7 @@ public:
 
     template<typename T, TriggerObserverFactory F>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_multiplexed_poller(const data_sink_query &query, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::NonBlocking) {
+    get_multiplexed_poller(const data_sink_query &query, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_multiplexed_poller(std::forward<F>(triggerObserverFactory), maximum_window_size, block) : nullptr;
@@ -129,7 +148,7 @@ public:
 
     template<typename T, TriggerPredicate P>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_snapshot_poller(const data_sink_query &query, P p, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::NonBlocking) {
+    get_snapshot_poller(const data_sink_query &query, P p, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_snapshot_poller(std::forward<P>(p), delay, block) : nullptr;
@@ -367,7 +386,7 @@ public:
     ~data_sink() { data_sink_registry::instance().unregister_sink(this); }
 
     std::shared_ptr<poller>
-    get_streaming_poller(blocking_mode block_mode = blocking_mode::NonBlocking) {
+    get_streaming_poller(blocking_mode block_mode = blocking_mode::Blocking) {
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<poller>();
@@ -377,7 +396,7 @@ public:
 
     template<typename TriggerPredicate>
     std::shared_ptr<dataset_poller>
-    get_trigger_poller(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::NonBlocking) {
+    get_trigger_poller(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::Blocking) {
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
@@ -388,7 +407,7 @@ public:
 
     template<TriggerObserverFactory F>
     std::shared_ptr<dataset_poller>
-    get_multiplexed_poller(F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::NonBlocking) {
+    get_multiplexed_poller(F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::Blocking) {
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
@@ -398,7 +417,7 @@ public:
 
     template<TriggerPredicate P>
     std::shared_ptr<dataset_poller>
-    get_snapshot_poller(P p, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::NonBlocking) {
+    get_snapshot_poller(P p, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::Blocking) {
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
