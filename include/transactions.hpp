@@ -366,6 +366,130 @@ template<std::movable T, std::equality_comparable TransactionToken, std::size_t 
     requires(std::has_single_bit(N_HISTORY) && N_HISTORY > 8)
 class TransactionSetting : public SettingBase<T, T, TransactionToken, N_HISTORY, TimeDiff, timeOut, timeOutTransactions> {};
 
+template<std::movable T, std::equality_comparable TransactionToken, std::size_t N_HISTORY = 1024, typename TimeDiff = std::chrono::seconds, int timeOut = -1, int timeOutTransactions = -1>
+    requires(std::has_single_bit(N_HISTORY) && N_HISTORY > 8)
+class CtxSetting {
+    using TimeStamp = std::chrono::system_clock::time_point;
+    using Setting   = std::pair<TimingCtx, T>;
+    //
+    SettingBase<std::pair<TimingCtx, T>, std::unordered_map<TimingCtx, settings::node<T>>, TransactionToken, N_HISTORY, TimeDiff, timeOut, timeOutTransactions> _setting{
+        [](const std::unordered_map<TimingCtx, settings::node<T>> &oldMap, std::pair<TimingCtx, T> &&newValue) -> std::unordered_map<TimingCtx, settings::node<T>> {
+            auto newMap = oldMap;
+            if (auto it = newMap.find(newValue.first); it != newMap.end()) {
+                it->second = settings::node(FWD(newValue.second));
+            } else {
+                newMap.emplace(newValue.first, settings::node(FWD(std::move(newValue.second))));
+            }
+            return newMap;
+        }
+    };
+
+public:
+    using Node                     = settings::node<T>;
+    using TransactionResult        = settings::TransactionResult;
+    using CtxResult                = settings::CtxResult<T>;
+    CtxSetting()                   = default;
+    CtxSetting(const CtxSetting &) = delete;
+    CtxSetting &
+    operator=(const CtxSetting &)
+            = delete;
+
+    TransactionResult
+    stage(const TimingCtx &timingCtx, T &&newValue, const TransactionToken &transactionToken = NullToken<TransactionToken>, const TimeStamp &now = std::chrono::system_clock::now()) {
+        return _setting.stage({ timingCtx, FWD(newValue) }, transactionToken, now);
+    }
+
+    [[maybe_unused]] bool
+    retireStaged(const TransactionToken &transactionToken = NullToken<TransactionToken>) {
+        return _setting.retireStaged(transactionToken);
+    }
+
+    TransactionResult
+    commit(const TimingCtx &timingCtx, T &&newValue, const TimeStamp &now = std::chrono::system_clock::now()) {
+        return stage(timingCtx, FWD(newValue), NullToken<TransactionToken>, now);
+    }
+
+    TransactionResult
+    commit(const TransactionToken &transactionToken = NullToken<TransactionToken>, const TimeStamp &now = std::chrono::system_clock::now()) {
+        return _setting.commit(transactionToken, now);
+    }
+
+    [[nodiscard]] CtxResult
+    get(const TimingCtx &timingCtx = TimingCtx(), const std::int64_t idx = 0) const {
+        return get(*_setting.get(idx).value, timingCtx);
+    }
+
+    [[nodiscard]] CtxResult
+    get(const TimingCtx &timingCtx, const TimeStamp &timeStamp) const {
+        return get(*_setting.get(timeStamp).value, timingCtx);
+    }
+
+    [[nodiscard]] std::size_t
+    nHistory() const {
+        return _setting.nHistory();
+    }
+
+    [[nodiscard]] std::size_t
+    nCtxHistory(const std::int64_t idx = 0) const {
+        return _setting.get(idx).value->size();
+    }
+
+    [[nodiscard]] std::vector<TransactionToken>
+    getPendingTransactions() const {
+        return _setting.getPendingTransactions();
+    }
+
+    void
+    retireExpired(const TimeStamp &now = std::chrono::system_clock::now()) {
+        _setting.historyLock().template scopedGuard<ReaderWriterLockType::WRITE>();
+        _setting.retireExpired(now);
+        retireOldSettings(*_setting.get().value, now);
+    }
+
+    template<bool exactMatch = false>
+    [[maybe_unused]] bool
+    retire(const TimingCtx &ctx, const TimeStamp &now = std::chrono::system_clock::now()) {
+        bool modifiedSettings = false;
+        _setting.modifySetting(
+                [&ctx, &modifiedSettings](const std::unordered_map<TimingCtx, settings::node<T>> &oldSetting) {
+                    auto newSetting = oldSetting;
+                    if constexpr (exactMatch) {
+                        modifiedSettings = std::erase_if(newSetting, [&ctx](const std::pair<TimingCtx, settings::node<T>> &pair) { return pair.first == ctx; });
+                    } else {
+                        modifiedSettings = std::erase_if(newSetting, [&ctx](const auto &pair) { return pair.first.matches(ctx); });
+                    }
+                    return newSetting;
+                },
+                now);
+        return modifiedSettings;
+    }
+
+private:
+    [[nodiscard]] CtxResult
+    get(const auto &settingsMap, const TimingCtx &timingCtx) const noexcept {
+        for (const auto &[key, value] : settingsMap) {
+            if (key == timingCtx) {
+                value.touch();
+                return { timingCtx, value };
+            }
+        }
+
+        // did not find an exact match the setting for the specific timing context
+        return { {}, settings::node<T>(T()) };
+    }
+
+    void
+    retireOldSettings(auto &settingsMap, const TimeStamp &now = std::chrono::system_clock::now()) const noexcept {
+        for (auto it = settingsMap.begin(); it != settingsMap.end();) {
+            if (it->second.lastAccess - now + TimeDiff{ timeOut } < TimeDiff{ 0 }) {
+                it = settingsMap.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+};
+
 } // namespace fair::graph
 
 #endif // GRAPH_PROTOTYPE_TRANSACTIONS_HPP
