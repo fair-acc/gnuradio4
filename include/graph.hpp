@@ -389,6 +389,12 @@ public:
     virtual ~node_model() = default;
 
     /**
+     * @brief to be called by scheduler->graph to initialise block
+     */
+    virtual void
+    init() = 0;
+
+    /**
      * @brief user defined name
      */
     [[nodiscard]] virtual std::string_view
@@ -509,6 +515,16 @@ public:
         init_dynamic_ports();
     }
 
+    explicit node_wrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _node{ std::move(init_parameter) } {
+        init_dynamic_ports();
+        _node.settings().update_active_parameters();
+    }
+
+    void
+    init() override {
+        return node_ref().init();
+    }
+
     [[nodiscard]] constexpr work_return_t
     work() override {
         return node_ref().work();
@@ -516,12 +532,12 @@ public:
 
     [[nodiscard]] std::string_view
     name() const override {
-        return node_ref().name();
+        return node_ref().name;
     }
 
     void
     set_name(std::string name) noexcept override {
-        return node_ref().set_name(std::move(name));
+        node_ref().name = std::move(name);
     }
 
     [[nodiscard]] std::string_view
@@ -531,17 +547,17 @@ public:
 
     [[nodiscard]] property_map &
     meta_information() noexcept override {
-        return node_ref().meta_information();
+        return node_ref().meta_information;
     }
 
     [[nodiscard]] const property_map &
     meta_information() const noexcept override {
-        return node_ref().meta_information();
+        return node_ref().meta_information;
     }
 
     [[nodiscard]] std::string_view
     unique_name() const override {
-        return node_ref().name();
+        return node_ref().unique_name;
     }
 
     [[nodiscard]] settings_base &
@@ -669,7 +685,7 @@ private:
 
         if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(src_node_raw); })
             || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(dst_node_raw); })) {
-            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name(), src_port_index, dst_node_raw.name(), dst_port_index));
+            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name, src_port_index, dst_node_raw.name, dst_port_index));
         }
 
         auto result = source_port.connect(destination_port);
@@ -703,7 +719,7 @@ private:
                 return std::any_of(self._nodes.cbegin(), self._nodes.cend(), [&query_node](const auto &known_node) { return known_node->raw() == std::addressof(query_node); });
             };
             if (!is_node_known(source) || !is_node_known(destination)) {
-                throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name(), destination.name());
+                throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
             }
             self._connection_definitions.push_back([source = &source, source_port = &port, destination = &destination, destination_port = &destination_port](graph &graph) {
                 return graph.connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
@@ -786,7 +802,8 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
-        std::ignore        = new_node_ref->settings().apply_staged_parameters();
+        new_node_ref->init();
+        ;
         return *new_node_ref.get();
     }
 
@@ -796,7 +813,8 @@ public:
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
-        std::ignore        = raw_ref->settings().apply_staged_parameters();
+        raw_ref->init();
+        ;
         return *raw_ref;
     }
 
@@ -807,7 +825,7 @@ public:
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
         std::ignore        = raw_ref->settings().set(initial_settings);
-        std::ignore        = raw_ref->settings().apply_staged_parameters();
+        raw_ref->init();
         return *raw_ref;
     }
 

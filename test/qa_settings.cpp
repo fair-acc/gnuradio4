@@ -83,9 +83,9 @@ struct Source : public node<Source<T>> {
     float        sample_rate        = 1000.0f;
 
     void
-    init(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
+    settings_changed(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
         // optional init function that is called after construction and whenever settings change
-        fair::graph::publish_tag(out, {{"n_samples_max", n_samples_max}}, static_cast<std::size_t>(n_tag_offset));
+        fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t>(n_tag_offset));
     }
 
     constexpr std::make_signed_t<std::size_t>
@@ -112,25 +112,25 @@ some test doc documentation
 
 template<typename T>
 struct TestBlock : public node<TestBlock<T>, BlockingIO, TestBlockDoc, SupportedTypes<float, double>> {
-    IN<T> in{};
+    IN<T>  in{};
     OUT<T> out{};
     // parameters
     A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">> scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
-    A<std::string, "context information", Visible> context{};
-    std::int32_t n_samples_max = -1;
-    float sample_rate = 1000.0f;
-    std::vector<T> vector_setting{T(3), T(2), T(1)};
-    int update_count = 0;
-    bool debug = false;
+    A<std::string, "context information", Visible>                context{};
+    std::int32_t                                                  n_samples_max = -1;
+    float                                                         sample_rate   = 1000.0f;
+    std::vector<T>                                                vector_setting{ T(3), T(2), T(1) };
+    int                                                           update_count = 0;
+    bool                                                          debug        = false;
 
     void
-    init(const property_map &old_setting, const property_map &new_setting) noexcept {
+    settings_changed(const property_map &old_settings, const property_map &new_settings) noexcept {
         // optional function that is called whenever settings change
         update_count++;
 
         if (debug) {
             fmt::print("settings changed - update_count: {}\n", update_count);
-            utils::printChanges(old_setting, new_setting);
+            utils::printChanges(old_settings, new_settings);
         }
     }
 
@@ -194,17 +194,17 @@ const boost::ut::suite SettingsTests = [] {
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
-        expect(eq(src.settings().auto_update_parameters().size(), 3UL));
+        expect(eq(src.settings().auto_update_parameters().size(), 4UL));
         expect(eq(src.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
         auto &block1 = flow_graph.make_node<TestBlock<float>>();
         auto &block2 = flow_graph.make_node<TestBlock<float>>();
         auto &sink   = flow_graph.make_node<Sink<float>>();
-        expect(eq(sink.settings().auto_update_parameters().size(), 4UL));
+        expect(eq(sink.settings().auto_update_parameters().size(), 5UL));
         expect(eq(sink.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
 
         block1.context = "Test Context";
         block1.settings().update_active_parameters();
-        expect(eq(block1.settings().auto_update_parameters().size(), 5UL));
+        expect(eq(block1.settings().auto_update_parameters().size(), 6UL));
         expect(eq(block1.settings().auto_forward_parameters().size(), 2UL));
 
         expect(block1.settings().get("context").has_value());
@@ -217,12 +217,13 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().get(keys1).empty());
         expect(block1.settings().get(keys2).empty());
         expect(block1.settings().get(keys3).empty());
-        expect(eq(block1.settings().get().size(), 5UL));
+        expect(eq(block1.settings().get().size(), 7UL));
 
         // set non-existent setting
         expect(not block1.settings().changed()) << "settings not changed";
         auto ret1 = block1.settings().set({ { "unknown", "random value" } });
         expect(eq(ret1.size(), 1U)) << "setting one unknown parameter";
+        expect(eq(std::get<std::string>(static_cast<property_map>(block1.meta_information).at("unknown")), "random value"sv)) << "setting one unknown parameter";
 
         expect(not block1.settings().changed());
         auto ret2 = block1.settings().set({ { "context", "alt context" } });
@@ -264,9 +265,9 @@ const boost::ut::suite SettingsTests = [] {
 
     "constructor"_test = [] {
         "empty"_test = [] {
-            auto block  = TestBlock<float>();
-            std::ignore = block.settings().apply_staged_parameters();
-            expect(eq(block.settings().get().size(), 5UL));
+            auto block = TestBlock<float>();
+            block.init();
+            expect(eq(block.settings().get().size(), 7UL));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
@@ -274,10 +275,10 @@ const boost::ut::suite SettingsTests = [] {
         "with init parameter"_test = [] {
             auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
             expect(eq(block.settings().staged_parameters().size(), 1u));
-            std::ignore = block.settings().apply_staged_parameters();
+            block.init();
             expect(eq(block.settings().staged_parameters().size(), 0u));
             block.settings().update_active_parameters();
-            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(block.settings().get().size(), 7UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -286,7 +287,7 @@ const boost::ut::suite SettingsTests = [] {
         "empty via graph"_test = [] {
             graph flow_graph;
             auto &block = flow_graph.make_node<TestBlock<float>>();
-            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(block.settings().get().size(), 7UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
@@ -294,7 +295,7 @@ const boost::ut::suite SettingsTests = [] {
         "with init parameter via graph"_test = [] {
             graph flow_graph;
             auto &block = flow_graph.make_node<TestBlock<float>>({ { "scaling_factor", 2.f } });
-            expect(eq(block.settings().get().size(), 5UL));
+            expect(eq(block.settings().get().size(), 7UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -304,12 +305,12 @@ const boost::ut::suite SettingsTests = [] {
         graph flow_graph;
         auto &block = flow_graph.make_node<TestBlock<float>>();
         block.settings().update_active_parameters();
-        expect(eq(block.settings().get().size(), 5UL));
+        expect(eq(block.settings().get().size(), 7UL));
 
         block.debug    = true;
         const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } } });
         expect(val.empty()) << "unable to stage settings";
-        std::ignore = block.settings().apply_staged_parameters();
+        block.init();
         expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
     };
@@ -329,12 +330,23 @@ const boost::ut::suite SettingsTests = [] {
 
     "run-time type-erased node setter/getter"_test = [] {
         auto wrapped1 = node_wrapper<TestBlock<float>>();
+        wrapped1.init();
         wrapped1.set_name("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "node_model wrapper name";
         expect(not wrapped1.unique_name().empty()) << "unique name";
-        std::ignore = wrapped1.settings().set({{"context", "a string"}});
+        std::ignore                          = wrapped1.settings().set({ { "context", "a string" } });
         (wrapped1.meta_information())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "node_model meta-information";
+
+        // via constructor
+        auto wrapped2 = node_wrapper<TestBlock<float>>({ { "name", "test_name" } });
+        std::ignore   = wrapped2.settings().set({ { "context", "a string" } });
+        wrapped2.init();
+        expect(eq(wrapped2.name(), "test_name"sv)) << "node_model wrapper name";
+        expect(not wrapped2.unique_name().empty()) << "unique name";
+        std::ignore                          = wrapped2.settings().set({ { "context", "a string" } });
+        (wrapped2.meta_information())["key"] = "value";
+        expect(eq(std::get<std::string>(wrapped2.meta_information().at("key")), "value"sv)) << "node_model meta-information";
     };
 };
 
@@ -342,11 +354,17 @@ const boost::ut::suite AnnotationTests = [] {
     using namespace boost::ut;
     using namespace fair::graph;
     using namespace fair::graph::setting_test;
+    using namespace std::literals;
 
     "basic node annotations"_test = [] {
         graph             flow_graph;
         TestBlock<float> &block = flow_graph.make_node<TestBlock<float>>();
         expect(fair::graph::node_description<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
+        expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlockDoc::value))) << "type-erased block description";
+        expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
+        expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::documentation")), "y = a * x"sv));
+        expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::unit")), "As"sv));
+        expect(std::get<bool>(block.meta_information.value.at("scaling_factor::visible"))) << "visible being true";
         expect(block.scaling_factor.visible());
         expect(eq(block.scaling_factor.description(), std::string_view{ "scaling factor" }));
         expect(eq(block.scaling_factor.unit(), std::string_view{ "As" }));

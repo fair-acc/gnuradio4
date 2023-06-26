@@ -131,10 +131,21 @@ struct Annotated {
         }
     }
 
+    template<typename U>
+    Annotated &
+    operator=(const U &sv) noexcept requires std::is_same_v<T, std::string> && std::is_same_v<U, std::string_view> {
+        value = std::string(sv); // Convert from std::string_view to std::string and assign
+        return *this;
+    }
+
+    operator std::string_view() const noexcept requires std::is_same_v<T, std::string> {
+        return std::string_view(value); // Convert from std::string to std::string_view
+    }
+
     // meta-information
     static constexpr std::string_view
     description() noexcept {
-        return std::string_view{ description_ };
+        return std::string_view{description_};
     }
 
     static constexpr std::string_view
@@ -178,12 +189,47 @@ struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
  * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
  * If the given type is not an `Annotated`, it returns the type itself.
  */
-template<typename T>
-using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
+    template<typename T>
+    using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
 
 } // namespace fair::graph
 
 template<typename... Ts>
-struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
+struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {
+};
+
+#ifdef FMT_FORMAT_H_
+
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+
+template<typename T, fair::meta::fixed_string description, typename... Arguments>
+struct fmt::formatter<fair::graph::Annotated<T, description, Arguments...>> {
+    fmt::formatter<T> value_formatter;
+
+    template<typename FormatContext>
+    auto
+    parse(FormatContext &ctx) {
+        return value_formatter.parse(ctx);
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return value_formatter.format(annotated.value, ctx);
+    }
+};
+
+namespace gr {
+    template<typename T, fair::meta::fixed_string description, typename... Arguments>
+    inline std::ostream &
+    operator<<(std::ostream &os, const fair::graph::Annotated<T, description, Arguments...> &v) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return os << fmt::format("{}", v.value);
+    }
+} // namespace gr
+
+#endif // FMT_FORMAT_H_
 
 #endif // GRAPH_PROTOTYPE_ANNOTATED_HPP

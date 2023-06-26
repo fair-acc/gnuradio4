@@ -63,8 +63,8 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
     YAML::Node                          tree   = YAML::Load(yaml_source);
     auto                                blocks = tree["blocks"];
     for (const auto &grc_block : blocks) {
-        auto  name         = grc_block["name"].as<std::string>();
-        auto  id           = grc_block["id"].as<std::string>();
+        auto name = grc_block["name"].as<std::string>();
+        auto id   = grc_block["id"].as<std::string>();
 
         // TODO: Discuss how GRC should store the node types, how we should
         // in general handle nodes that are parametrised by more than one type
@@ -117,14 +117,14 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
                     // clang-format on
 
                 } else {
-                    const auto &value = kv.second.as<std::string>();
+                    const auto &value                    = kv.second.as<std::string>();
                     current_node.meta_information()[key] = value;
                 }
             }
         }
 
         std::ignore = current_node.settings().set(new_properties);
-        std::ignore = current_node.settings().apply_staged_parameters();
+        current_node.init();
     }
 
     for (const auto &connection : tree["connections"]) {
@@ -175,7 +175,7 @@ save_grc(const fair::graph::graph &flow_graph) {
                 detail::YamlMap map(out);
                 map.write("name", std::string(node.name()));
 
-                const auto& full_type_name = node.type_name();
+                const auto &full_type_name = node.type_name();
                 std::string type_name(full_type_name.cbegin(), std::find(full_type_name.cbegin(), full_type_name.cend(), '<'));
                 map.write("id", std::move(type_name));
 

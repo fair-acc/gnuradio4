@@ -36,14 +36,7 @@ enum class tag_propagation_policy_t {
                        application-specific forwarding behaviour. */
 };
 
-namespace detail {
-struct transparent_less : public std::less<void> {
-    using is_transparent = void;
-};
-
-} // namespace detail
-
-using property_map = std::map<std::string, pmtv::pmt, detail::transparent_less>;
+using property_map = pmtv::map_t;
 
 /**
  * @brief 'tag_t' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
@@ -120,6 +113,32 @@ ENABLE_REFLECTION(fair::graph::tag_t, index, map);
 
 namespace fair::graph {
 using meta::fixed_string;
+
+void
+update_maps(const property_map &src, property_map &dest) {
+    for (const auto &[key, value] : src) {
+        if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
+            // If it's a nested map
+            if (auto it = dest.find(key); it != dest.end()) {
+                // If the key exists in the destination map
+                auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
+                if (dest_nested_map) {
+                    // Merge the nested maps recursively
+                    update_maps(*nested_map, *dest_nested_map);
+                } else {
+                    // Key exists but not a map, replace it
+                    dest[key] = value;
+                }
+            } else {
+                // If the key doesn't exist, just insert
+                dest.insert({ key, value });
+            }
+        } else {
+            // If it's not a nested map, insert/replace the value
+            dest[key] = value;
+        }
+    }
+}
 
 constexpr fixed_string GR_TAG_PREFIX = "gr:";
 

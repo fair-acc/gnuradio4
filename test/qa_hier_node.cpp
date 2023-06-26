@@ -6,10 +6,7 @@
 namespace fg = fair::graph;
 
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
-public:
-    explicit scale(std::string_view name = "") { this->_name = name; }
-
+struct scale : public fg::node<scale<T, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -18,11 +15,8 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">,
-                              fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
-public:
-    explicit adder(std::string_view name = "") { this->_name = name; }
-
+struct adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">,
+                               fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -38,8 +32,8 @@ private:
     const std::string         _unique_name = fmt::format("multi_adder#{}", _unique_id);
 
 protected:
-    using setting_map                        = std::map<std::string, int, std::less<>>;
-    std::string                        _name = "multi_adder";
+    using setting_map                             = std::map<std::string, int, std::less<>>;
+    std::string                        _name      = "multi_adder";
     std::string                        _type_name = "multi_adder";
     fg::property_map                   _meta_information; /// used to store non-graph-processing information like UI block position etc.
     bool                               _input_tags_present  = false;
@@ -55,12 +49,12 @@ protected:
     fg::graph
     make_graph() {
         fg::graph graph;
-        auto     &adder_block       = graph.make_node<adder<double>>("adder");
+        auto     &adder_block       = graph.make_node<adder<double>>({ { "name", "adder" } });
         auto     &left_scale_block  = graph.make_node<scale<double>>();
         auto     &right_scale_block = graph.make_node<scale<double>>();
 
-        std::ignore = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
-        std::ignore = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
+        std::ignore                 = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
+        std::ignore                 = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
 
         _dynamic_input_ports.emplace_back(fg::input_port<0>(&left_scale_block));
         _dynamic_input_ports.emplace_back(fg::input_port<0>(&right_scale_block));
@@ -74,6 +68,9 @@ public:
     hier_node() : _scheduler(make_graph()){};
 
     ~hier_node() override = default;
+
+    void
+    init() override {}
 
     [[nodiscard]] std::string_view
     name() const override {
@@ -124,18 +121,14 @@ template<typename T>
 std::atomic_size_t hier_node<T>::_unique_id_counter = 0;
 
 template<typename T>
-class fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {
-private:
-    std::size_t _remaining_events_count;
+struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {
+    std::size_t remaining_events_count;
 
-public:
-    explicit fixed_source(std::size_t events_count) : _remaining_events_count(events_count) {}
-
-    T value = 1;
+    T           value = 1;
 
     fg::work_return_t
     work() {
-        if (_remaining_events_count != 0) {
+        if (remaining_events_count != 0) {
             using namespace fair::literals;
             auto &port   = fg::output_port<0>(this);
             auto &writer = port.streamWriter();
@@ -143,8 +136,8 @@ public:
             data[0]      = value;
             data.publish(1_UZ);
 
-            _remaining_events_count--;
-            if (_remaining_events_count == 0) {
+            remaining_events_count--;
+            if (remaining_events_count == 0) {
                 fmt::print("Last value sent was {}\n", value);
             }
 
@@ -158,31 +151,30 @@ public:
     }
 };
 
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fixed_source<T>), remaining_events_count);
+
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
-    std::size_t _remaining = 0;
-
-public:
-    cout_sink() = default;
-
-    explicit cout_sink(std::size_t count) : _remaining(count) {}
+struct cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
+    std::size_t remaining = 0;
 
     void
     process_one(T value) {
-        _remaining--;
-        if (_remaining == 0) {
+        remaining--;
+        if (remaining == 0) {
             std::cerr << "last value was: " << value << "\n";
         }
     }
 };
 
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), remaining);
+
 fg::graph
 make_graph(std::size_t events_count) {
     fg::graph graph;
 
-    auto     &source_left_node  = graph.make_node<fixed_source<double>>(events_count);
-    auto     &source_right_node = graph.make_node<fixed_source<double>>(events_count);
-    auto     &sink              = graph.make_node<cout_sink<double>>(events_count);
+    auto     &source_left_node  = graph.make_node<fixed_source<double>>({ { "remaining_events_count", events_count } });
+    auto     &source_right_node = graph.make_node<fixed_source<double>>({ { "remaining_events_count", events_count } });
+    auto     &sink              = graph.make_node<cout_sink<double>>({ { "remaining", events_count } });
 
     auto     &hier              = graph.add_node(std::make_unique<hier_node<double>>());
 
