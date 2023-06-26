@@ -127,9 +127,7 @@
  * };
  * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
  */
-#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
-    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
-
+#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
 
 #define GP_CONCAT_IMPL(x, y) x##y
 #define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)

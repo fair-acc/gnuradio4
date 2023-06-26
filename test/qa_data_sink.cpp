@@ -49,7 +49,7 @@ struct Source : public node<Source<T>> {
     std::vector<tag_t> tags; // must be sorted by index, only one tag per sample
 
     void
-    init(const property_map &, const property_map &) {
+    settings_changed(const property_map &, const property_map &) {
         // optional init function that is called after construction and whenever settings change
         fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
     }
@@ -64,7 +64,7 @@ struct Source : public node<Source<T>> {
                 ret = tags[next_tag].index - n_samples_produced;
             } else if (next_tag + 1 < tags.size()) {
                 // tag at first sample? then read up until before next tag
-                ret = tags[next_tag+1].index - n_samples_produced;
+                ret = tags[next_tag + 1].index - n_samples_produced;
             }
         }
 
@@ -228,6 +228,7 @@ indexes_match(const T &lhs, const U &rhs) {
 
 const boost::ut::suite DataSinkTests = [] {
     using namespace boost::ut;
+    using namespace gr;
     using namespace fair::graph;
     using namespace fair::graph::data_sink_test;
     using namespace std::string_literals;
@@ -240,9 +241,8 @@ const boost::ut::suite DataSinkTests = [] {
 
         graph                         flow_graph;
         auto                         &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto                         &sink = flow_graph.make_node<data_sink<float>>();
+        auto                         &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
         src.tags                           = src_tags;
-        sink.set_name("test_sink");
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -258,7 +258,7 @@ const boost::ut::suite DataSinkTests = [] {
             if (chunks_seen1 < 201) {
                 expect(eq(buffer.size(), chunk_size));
             } else {
-                expect(eq(buffer.size(), 5));
+                expect(eq(buffer.size(), 5_UZ));
             }
         };
 
@@ -273,7 +273,7 @@ const boost::ut::suite DataSinkTests = [] {
 
             for (const auto &tag : tags) {
                 expect(ge(tag.index, 0));
-                expect(lt(tag.index, buffer.size()));
+                expect(lt(tag.index, static_cast<decltype(tag.index)>(buffer.size())));
             }
 
             auto               lg = std::lock_guard{ m2 };
@@ -287,12 +287,12 @@ const boost::ut::suite DataSinkTests = [] {
             if (chunks_seen2 < 201) {
                 expect(eq(buffer.size(), chunk_size));
             } else {
-                expect(eq(buffer.size(), 5));
+                expect(eq(buffer.size(), 5_UZ));
             }
         };
 
         auto callback_with_tags_and_sink = [&sink](std::span<const float>, std::span<const tag_t>, const data_sink<float> &passed_sink) {
-            expect(eq(passed_sink.name(), "test_sink"s));
+            expect(eq(passed_sink.name.value, "test_sink"s));
             expect(eq(sink.unique_name, passed_sink.unique_name));
         };
 
@@ -306,10 +306,10 @@ const boost::ut::suite DataSinkTests = [] {
         sink.stop(); // TODO the scheduler should call this
 
         auto lg = std::lock_guard{ m2 };
-        expect(eq(chunks_seen1.load(), 201));
-        expect(eq(chunks_seen2, 201));
-        expect(eq(samples_seen1.load(), n_samples));
-        expect(eq(samples_seen2, n_samples));
+        expect(eq(chunks_seen1.load(), 201_UZ));
+        expect(eq(chunks_seen2, 201_UZ));
+        expect(eq(samples_seen1.load(), static_cast<std::size_t>(n_samples)));
+        expect(eq(samples_seen2, static_cast<std::size_t>(n_samples)));
         expect(eq(indexes_match(received_tags, src_tags), true)) << fmt::format("{} != {}", format_list(received_tags), format_list(src_tags));
     };
 
@@ -320,8 +320,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto             tags = make_test_tags(0, 1000);
         auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         src.tags                    = tags;
-        auto &sink                  = flow_graph.make_node<data_sink<float>>();
-        sink.set_name("test_sink");
+        auto &sink                  = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -377,12 +376,12 @@ const boost::ut::suite DataSinkTests = [] {
         const auto &[received2, received_tags] = runner2.get();
         expect(eq(received1.size(), expected.size()));
         expect(eq(received1, expected));
-        expect(eq(poller_data_only->drop_count.load(), 0));
+        expect(eq(poller_data_only->drop_count.load(), 0_UZ));
         expect(eq(received2.size(), expected.size()));
         expect(eq(received2, expected));
         expect(eq(received_tags.size(), tags.size()));
         expect(eq(indexes_match(received_tags, tags), true)) << fmt::format("{} != {}", format_list(received_tags), format_list(tags));
-        expect(eq(poller_with_tags->drop_count.load(), 0));
+        expect(eq(poller_with_tags->drop_count.load(), 0_UZ));
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
@@ -393,8 +392,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
         auto &sink                  = flow_graph.make_node<data_sink<int32_t>>(
-                { { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
-        sink.set_name("test_sink");
+                { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -441,11 +439,11 @@ const boost::ut::suite DataSinkTests = [] {
         const auto &[received_data, received_tags] = polling.get();
         const auto expected_tags                   = { tags[0], tags[2] }; // triggers-only
 
-        expect(eq(received_data.size(), 10));
+        expect(eq(received_data.size(), 10_UZ));
         expect(eq(received_data, std::vector<int32_t>{ 2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001 }));
         expect(eq(received_tags.size(), expected_tags.size()));
 
-        expect(eq(poller->drop_count.load(), 0));
+        expect(eq(poller->drop_count.load(), 0_UZ));
     };
 
     "blocking snapshot mode"_test = [] {
@@ -461,8 +459,7 @@ const boost::ut::suite DataSinkTests = [] {
                                        { 3000, { { "TYPE", "TRIGGER" } } },
                                        { 8000, { { "TYPE", "NO_TRIGGER" } } },
                                        { 180000, { { "TYPE", "TRIGGER" } } } };
-        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ { "sample_rate", 10000.f } });
-        sink.set_name("test_sink");
+        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" }, { "sample_rate", 10000.f } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -515,18 +512,17 @@ const boost::ut::suite DataSinkTests = [] {
         const auto received_data = poller_result.get();
         expect(eq(received_data_cb, received_data));
         expect(eq(received_data, std::vector<int32_t>{ 8000, 185000 }));
-        expect(eq(poller->drop_count.load(), 0));
+        expect(eq(poller->drop_count.load(), 0_UZ));
     };
 
     "blocking multiplexed mode"_test = [] {
         const auto         tags      = make_test_tags(0, 10000);
 
-        const std::int32_t n_samples = tags.size() * 10000 + 100000;
+        const std::int32_t n_samples = static_cast<std::int32_t>(tags.size() * 10000 + 100000);
         graph              flow_graph;
         auto              &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags               = tags;
-        auto &sink             = flow_graph.make_node<data_sink<int32_t>>();
-        sink.set_name("test_sink");
+        auto &sink             = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -612,12 +608,11 @@ const boost::ut::suite DataSinkTests = [] {
             src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
-        auto &sink = flow_graph.make_node<data_sink<float>>();
-        sink.set_name("test_sink");
+        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto is_trigger = [](const tag_t &tag) { return trigger_match_result::Matching; };
+        auto is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
 
         auto poller     = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
@@ -633,7 +628,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.signal_values.size(), 5000u) >> fatal);
                         received_data.push_back(dataset.signal_values.front());
                         received_data.push_back(dataset.signal_values.back());
-                        expect(eq(dataset.timing_events.size(), 1u)) >> fatal;
+                        expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].index, 3000));
                         received_tags.insert(received_tags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
@@ -668,8 +663,7 @@ const boost::ut::suite DataSinkTests = [] {
             src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
-        auto &sink = flow_graph.make_node<data_sink<float>>();
-        sink.set_name("test_sink");
+        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -701,8 +695,7 @@ const boost::ut::suite DataSinkTests = [] {
     "non-blocking polling continuous mode"_test = [] {
         graph flow_graph;
         auto &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto &sink = flow_graph.make_node<data_sink<float>>();
-        sink.set_name("test_sink");
+        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -734,7 +727,7 @@ const boost::ut::suite DataSinkTests = [] {
         sink.stop(); // TODO the scheduler should call this
 
         const auto samples_seen = polling.get();
-        expect(eq(samples_seen + poller->drop_count, n_samples));
+        expect(eq(samples_seen + poller->drop_count, static_cast<std::size_t>(n_samples)));
     };
 };
 

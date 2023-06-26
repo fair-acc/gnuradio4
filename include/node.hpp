@@ -103,18 +103,16 @@ output_ports(Self *self) noexcept {
 }
 
 template<typename T>
-concept NodeType = requires(T t, std::string str, std::size_t index) {
-    { t.name() } -> std::same_as<std::string_view>;
-    { t.set_name(std::move(str)) } noexcept -> std::same_as<void>;
-    { t.settings() } -> std::same_as<settings_base &>;
-
-    { t.description() } noexcept -> std::same_as<std::string_view>;
-    { t.is_blocking() } noexcept -> std::same_as<bool>;
+concept NodeType = requires(T t) {
     { t.unique_name } -> std::same_as<const std::string &>;
+    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
+    { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
+    { t.description } noexcept -> std::same_as<const std::string_view &>;
 
+    { t.is_blocking() } noexcept -> std::same_as<bool>;
+
+    { t.settings() } -> std::same_as<settings_base &>;
     { t.work() } -> std::same_as<work_return_t>;
-
-    { t.meta_information() } -> std::same_as<property_map &>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
@@ -224,19 +222,22 @@ concept HasRequiredProcessFunction = HasProcessOneFunction<Derived> != HasProces
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
+    template<typename T, fair::meta::fixed_string description = "", typename... Args>
+    using A = Annotated<T, description, Args...>;
 
 public:
-    using derived_t                                       = Derived;
-    using node_template_parameters                        = meta::typelist<Arguments...>;
-    using Description                                     = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
-    constexpr static tag_propagation_policy_t tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
-    const std::size_t                         unique_id   = _unique_id_counter++;
-    const std::string                         unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
+    using base_t                   = node<Derived, Arguments...>;
+    using derived_t                = Derived;
+    using node_template_parameters = meta::typelist<Arguments...>;
+    using Description              = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    constexpr static tag_propagation_policy_t                                                                      tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
+    const std::size_t                                                                                              unique_id   = _unique_id_counter++;
+    const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(fair::meta::type_name<Derived>()) };
+    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
+    constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
 
 protected:
-    using setting_map = std::map<std::string, int, std::less<>>;
-    std::string        _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
-    property_map       _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
     bool               _input_tags_present  = false;
     bool               _output_tags_changed = false;
     std::vector<tag_t> _tags_at_input;
@@ -280,43 +281,13 @@ public:
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
-    /**
-     * @brief user-defined name
-     * N.B. may not be unique -> ::unique_name
-     */
-    [[nodiscard]] std::string_view
-    name() const noexcept {
-        return _name;
-    }
-
-    /**
-     * @brief user-defined name
-     * N.B. may not be unique -> ::unique_name
-     */
     void
-    set_name(std::string name) noexcept {
-        _name = std::move(name);
-    }
-
-    /**
-     * @brief used to store non-graph-processing information like UI block position etc.
-     */
-    [[nodiscard]] property_map &
-    meta_information() noexcept {
-        return _meta_information;
-    }
-
-    /**
-     * @brief used to store non-graph-processing information like UI block position etc.
-     */
-    [[nodiscard]] const property_map &
-    meta_information() const noexcept {
-        return _meta_information;
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    description() const noexcept {
-        return std::string_view(Description::value);
+    init() {
+        std::ignore = settings().apply_staged_parameters();
+        // TODO: expand on this init function:
+        //  * store initial setting -> needed for `reset()` call
+        //  * push settings that cannot be applied to block parameters to meta-information
+        //  * ...
     }
 
     [[nodiscard]] constexpr bool
@@ -391,37 +362,27 @@ public:
             at_least_one_input_has_data  = at_least_one_input_has_data || (availableSamples > 0);
 
             if (availableSamples < port.min_buffer_size()) availableSamples = 0;
-                if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
+            if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
 
-                if (port.tagReader().available() == 0) {
-                    return {availableSamples, std::numeric_limits<std::size_t>::max()}; // default: no tags in sight
-                }
+            if (port.tagReader().available() == 0) {
+                return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
+            }
 
-                // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-                const auto &tagData           = port.tagReader().get();
-                const auto &readPosition      = port.streamReader().position();
+            // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+            const auto &tagData           = port.tagReader().get();
+            const auto &readPosition      = port.streamReader().position();
 
-                const auto future_tags_begin = std::find_if(tagData.begin(), tagData.end(),[&readPosition](const auto &tag) noexcept {
-                    return tag.index > readPosition + 1;
-                });
+            const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
 
-                if (future_tags_begin == tagData.begin()) {
-                    const auto first_future_tag_index = static_cast<std::size_t>(future_tags_begin->index);
-                    const std::size_t n_samples_until_next_tag =
-                            readPosition == -1 ? first_future_tag_index : (first_future_tag_index -
-                                                                           static_cast<std::size_t>(readPosition) -
-                                                                           1_UZ);
-                    assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
-                    return {std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag};
-                } else {
-                    const std::size_t first_future_tag_index =
-                            future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max()
-                                                               : static_cast<std::size_t>(future_tags_begin->index);
-                    const std::size_t n_samples_until_next_tag =
-                            readPosition == -1 ? first_future_tag_index : (first_future_tag_index -
-                                                                           static_cast<std::size_t>(readPosition) -
-                                                                           1_UZ);
-                    return {std::min(availableSamples, n_samples_until_next_tag), 0};
+            if (future_tags_begin == tagData.begin()) {
+                const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
+                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+                assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
+                return { std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag };
+            } else {
+                const std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(future_tags_begin->index);
+                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+                return { std::min(availableSamples, n_samples_until_next_tag), 0 };
             }
         };
 
@@ -698,8 +659,7 @@ public:
             } else {
                 // Non-SIMD loop
                 for (std::size_t i = 0; i < samples_to_process; ++i) {
-                    const auto results = std::apply(
-                            [this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
+                    const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
                     meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
                 }
             }
@@ -716,15 +676,20 @@ public:
             forward_tags();
             return success ? work_return_t::OK : work_return_t::ERROR;
         } // process_one(...) handling
-          //        else {
-          //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
-          //        }
+        //        else {
+        //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
+        //        }
         return work_return_t::ERROR;
-    }     // end: work_return_t work() noexcept { ..}
+    } // end: work_return_t work() noexcept { ..}
 };
 
 template<typename Derived, typename... Arguments>
 inline std::atomic_size_t node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
+} // namespace fair::graph
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (fair::graph::node<T, Arguments...>), unique_name, name, meta_information);
+
+namespace fair::graph {
 
 /**
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
@@ -756,9 +721,12 @@ node_description() noexcept {
                 if constexpr (is_annotated<RawType>()) {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
                     const std::string member_name = get_display_name_const(member).str();
-                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n", RawType::visible() ? "" : "_", //
-                                       type_name, member_name,                                                                                //
-                                       RawType::description(), RawType::unit(), RawType::documentation(),                                     //
+                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
+                                       RawType::visible() ? "" : "_", //
+                                       type_name,
+                                       member_name,                   //
+                                       RawType::description(), RawType::unit(),
+                                       RawType::documentation(),      //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
@@ -823,6 +791,7 @@ private:
 
     // merged_work_chunk_size, that's what friends are for
     friend base;
+
     template<source_node, sink_node, std::size_t, std::size_t>
     friend class merged_node;
 

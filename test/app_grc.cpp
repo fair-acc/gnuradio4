@@ -51,7 +51,8 @@ main(int argc, char *argv[]) {
         auto graph_saved_source    = fg::save_grc(graph);
 
         auto graph_expected_source = read_file(TESTS_SOURCE_PATH "/grc/test.grc.expected");
-        assert(graph_saved_source + "\n" == graph_expected_source);
+        assert(graph_saved_source + "\n"
+               == graph_expected_source); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
 
         fair::graph::scheduler::simple scheduler(std::move(graph));
         scheduler.run_and_wait();

@@ -3,15 +3,61 @@ blocks:
     id: good::fixed_source
     parameters:
       event_count: 100
+      name: main_source
+      unique_name: good::fixed_source<double>#0
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: 0
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: 0
       unknown_property: 42
   - name: multiplier
     id: good::multiply
+    parameters:
+      name: multiplier
+      unique_name: good::multiply<double>#0
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: 0
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: 0
   - name: counter
     id: builtin_counter
+    parameters:
+      name: counter
+      unique_name: builtin_counter<double>#0
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: 0
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: 0
   - name: sink
     id: good::cout_sink
     parameters:
+      name: sink
       total_count: 100
+      unique_name: good::cout_sink<double>#0
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: 0
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: 0
       unknown_property: 42
 connections:
   - [main_source, 0, multiplier, 0]
