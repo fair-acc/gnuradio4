@@ -442,6 +442,7 @@ public:
         {
             std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
             const auto      history_view = _history.get_span(0);
+            std::erase_if(_listeners, [](const auto &l) { return l->expired; });
             for (auto &listener : _listeners) {
                 listener->process(history_view, in_data, tagData);
             }
@@ -478,7 +479,11 @@ private:
     }
 
     struct abstract_listener {
+        bool expired = false;
+
         virtual ~abstract_listener() = default;
+
+        void set_expired() { expired = true; }
 
         virtual void
         set_sample_rate(float) {}
@@ -571,7 +576,7 @@ private:
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
-                    // TODO someone remove this listener from the list
+                    this->set_expired();
                     return;
                 }
 
@@ -645,6 +650,7 @@ private:
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
+                    this->set_expired();
                     return;
                 }
 
@@ -729,6 +735,7 @@ private:
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
+                    this->set_expired();
                     return;
                 }
 
@@ -826,6 +833,7 @@ private:
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
+                    this->set_expired();
                     return;
                 }
 
