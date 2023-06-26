@@ -112,9 +112,9 @@ struct Observer {
 
     trigger_observer_state
     operator()(const tag_t &tag) {
-        const auto ty = tag.get("Y");
-        const auto tm = tag.get("M");
-        const auto td = tag.get("D");
+        const auto ty = tag.get("YEAR");
+        const auto tm = tag.get("MONTH");
+        const auto td = tag.get("DAY");
         if (!ty || !tm || !td) {
             return trigger_observer_state::Ignore;
         }
@@ -152,7 +152,7 @@ struct Observer {
 
 static tag_t
 make_tag(tag_t::signed_index_type index, int year, int month, int day) {
-    return tag_t{ index, { { "Y", year }, { "M", month }, { "D", day } } };
+    return tag_t{ index, { { "YEAR", year }, { "MONTH", month }, { "DAY", day } } };
 }
 
 static std::vector<tag_t>

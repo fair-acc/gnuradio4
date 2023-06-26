@@ -31,6 +31,17 @@ concept TriggerPredicate = requires(const T p, tag_t tag) {
     { p(tag) } -> std::convertible_to<bool>;
 };
 
+/**
+ * For the 'Multiplexed' acquisition mode: Stateful object checking all incoming tags to control which data should be sent
+ * to the listener.
+ *
+ * A new dataset is started when the observer returns @c Start or @c StopAndStart.
+ * A dataset is closed and sent when @c Stop or @StopAndStart is returned.
+ *
+ * The observer can rely on being called with each incoming tag exactly once, in the order they arrive.
+ *
+ * @see trigger_observer_state
+ */
 template<typename T>
 concept TriggerObserver = requires(T o, tag_t tag) {
     { o(tag) } -> std::convertible_to<trigger_observer_state>;
@@ -470,7 +481,7 @@ private:
 
     void
     add_listener(std::unique_ptr<abstract_listener> &&l, bool block) {
-        l->set_sample_rate(sample_rate); // TODO also call when sample_rate changes
+        l->apply_sample_rate(sample_rate); // TODO also call when sample_rate changes
         if (block) {
             _listeners.push_back(std::move(l));
         } else {
@@ -486,7 +497,7 @@ private:
         void set_expired() { expired = true; }
 
         virtual void
-        set_sample_rate(float) {}
+        apply_sample_rate(float) {}
 
         virtual void
         process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tag_data0)
@@ -853,8 +864,8 @@ private:
         }
 
         void
-        set_sample_rate(float r) override {
-            sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * r);
+        apply_sample_rate(float rateHz) override {
+            sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * rateHz);
             // TODO do we need to update the requested_samples of pending here? (considering both old and new time_delay)
         }
 
@@ -895,6 +906,6 @@ private:
 
 } // namespace fair::graph
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
 #endif
