@@ -21,9 +21,6 @@ enum class trigger_observer_state {
     Ignore        ///< Ignore tag
 };
 
-// TODO is the scope where want these?
-struct null_type {};
-
 // Until clang-format can handle concepts
 // clang-format off
 template<typename T>
@@ -76,16 +73,16 @@ template<typename T>
 class data_sink;
 
 struct data_sink_query {
-    std::optional<std::string> sink_name;
-    std::optional<std::string> signal_name;
+    std::optional<std::string> _sink_name;
+    std::optional<std::string> _signal_name;
 
     static data_sink_query
-    with_signal_name(std::string_view name) {
+    signal_name(std::string_view name) {
         return { {}, std::string{ name } };
     }
 
     static data_sink_query
-    with_sink_name(std::string_view name) {
+    sink_name(std::string_view name) {
         return { std::string{ name }, {} };
     }
 };
@@ -96,6 +93,7 @@ class data_sink_registry {
 
 public:
     // TODO this shouldn't be a singleton but associated with the flow graph (?)
+    // TODO reconsider mutex usage when moving to the graph
     static data_sink_registry &
     instance() {
         static data_sink_registry s_instance;
@@ -213,8 +211,8 @@ private:
         auto matches = [&query](const std::any &v) {
             try {
                 auto       sink                = std::any_cast<data_sink<T> *>(v);
-                const auto sink_name_matches   = !query.sink_name || *query.sink_name == sink->name();
-                const auto signal_name_matches = !query.signal_name || *query.signal_name == sink->signal_name;
+                const auto sink_name_matches   = !query._sink_name || *query._sink_name == sink->name();
+                const auto signal_name_matches = !query._signal_name || *query._signal_name == sink->signal_name;
                 return sink_name_matches && signal_name_matches;
             } catch (...) {
                 return false;
@@ -390,7 +388,7 @@ public:
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<poller>();
-        add_listener(std::make_unique<continuous_listener<null_type>>(handler, block), block);
+        add_listener(std::make_unique<continuous_listener<fair::meta::null_type>>(handler, block), block);
         return handler;
     }
 
@@ -400,7 +398,7 @@ public:
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
-        add_listener(std::make_unique<trigger_listener<null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
+        add_listener(std::make_unique<trigger_listener<fair::meta::null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
         ensure_history_size(pre_samples);
         return handler;
     }
@@ -411,7 +409,7 @@ public:
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
-        add_listener(std::make_unique<multiplexed_listener<null_type, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
+        add_listener(std::make_unique<multiplexed_listener<fair::meta::null_type, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
         return handler;
     }
 
@@ -421,7 +419,7 @@ public:
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
-        add_listener(std::make_unique<snapshot_listener<null_type, P>>(std::forward<P>(p), delay, handler, block), block);
+        add_listener(std::make_unique<snapshot_listener<fair::meta::null_type, P>>(std::forward<P>(p), delay, handler, block), block);
         return handler;
     }
 
@@ -527,7 +525,7 @@ private:
 
     template<typename Callback>
     struct continuous_listener : public abstract_listener {
-        static constexpr auto has_callback        = !std::is_same_v<Callback, null_type>;
+        static constexpr auto has_callback        = !std::is_same_v<Callback, fair::meta::null_type>;
         static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>;
 
         bool                  block               = false;
@@ -675,7 +673,7 @@ private:
         // I leave it as is for now.
         inline void
         publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, null_type>) {
+            if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -760,7 +758,7 @@ private:
 
         inline void
         publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, null_type>) {
+            if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -858,7 +856,7 @@ private:
 
         inline void
         publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, null_type>) {
+            if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -892,7 +890,7 @@ private:
         process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
             if (tag_data0 && trigger_predicate({ 0, *tag_data0 })) {
                 auto new_pending = pending_snapshot{ *tag_data0, sample_delay, sample_delay };
-                // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased; TODO unless we adapt them in set_sample_rate, see there)
+                // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased; TODO unless we adapt them in apply_sample_rate, see there)
                 auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });
                 pending.insert(rit.base(), std::move(new_pending));
             }
