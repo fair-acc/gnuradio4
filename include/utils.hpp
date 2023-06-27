@@ -416,8 +416,6 @@ static constexpr const std::size_t kCacheLine = std::hardware_destructive_interf
 static constexpr const std::size_t kCacheLine = 64;
 #endif
 
-#define FWD(x) std::forward<decltype(x)>(x)
-
 } // namespace fair::meta
 
 #endif // include guard

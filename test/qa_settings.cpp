@@ -471,13 +471,13 @@ const boost::ut::suite TransactionTests = [] {
         expect(nothrow([&] { std::ignore = a.get(static_cast<int64_t>(-a.nHistory() + 1)); }));
 
         for (int i = 0; i < 8; ++i) {
-            auto [r1, t1] = a.commit(FWD(i));
+            auto [r1, t1] = a.commit(std::forward<int>(i));
             expect(r1);
             expect(eq(a.nHistory(), static_cast<std::size_t>(i + 2)));
         }
 
         for (int i = 0; i < 8; ++i) {
-            auto [r1, t1] = a.commit(FWD(i));
+            auto [r1, t1] = a.commit(std::forward<int>(i));
             expect(r1);
         }
         expect(eq(a.nHistory(), 16 - 8 + 1));
@@ -485,7 +485,7 @@ const boost::ut::suite TransactionTests = [] {
         SettingBase<int, int, std::string, 16, std::chrono::milliseconds, -1, 100> b;
         expect(eq(b.getPendingTransactions().size(), 0));
         for (int i = 0; i < 5; ++i) {
-            auto [r1, t1] = b.stage(FWD(i), fmt::format("token#{}", i));
+            auto [r1, t1] = b.stage(std::forward<int>(i), fmt::format("token#{}", i));
             expect(!r1);
         }
         expect(eq(b.getPendingTransactions().size(), 5));
@@ -500,7 +500,7 @@ const boost::ut::suite TransactionTests = [] {
         expect(eq(b.getPendingTransactions().size(), 0));
 
         expect(eq(a.nHistory(), 1U));
-        a.commit(FWD(0));
+        a.commit(0);
         a.retireExpired();
         expect(eq(a.nHistory(), 1U));
         expect(a.modifySetting([](const int &oldValue) -> int { return oldValue; }));

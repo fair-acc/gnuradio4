@@ -35,7 +35,7 @@ struct alignas(fair::meta::kCacheLine) node {
     TimeStamp          validSince = std::chrono::system_clock::now();
     mutable TimeStamp  lastAccess = std::chrono::system_clock::now();
     node()                        = default;
-    explicit node(T &&in) : value(std::make_shared<T>(FWD(in))){};
+    explicit node(T &&in) : value(std::make_shared<T>(std::forward<T>(in))){};
 
     constexpr void
     touch() const noexcept {
@@ -135,7 +135,7 @@ public:
 
     template<class Fn>
         requires std::is_invocable_r_v<U, Fn &&, const U &, T &&>
-    explicit SettingBase(Fn &&onCommit) : _onCommit(FWD(onCommit)) {
+    explicit SettingBase(Fn &&onCommit) : _onCommit(std::forward<decltype(onCommit)>(onCommit)) {
         auto data     = _writer->reserve_output_range(1);
         data[0].value = std::make_shared<U>(U());
         data.publish(1);
@@ -159,7 +159,7 @@ public:
             // auto data = writer.reserve_output_range(1);
             const auto oldValue   = get();
             const auto isCommited = _writer->try_publish([&](auto &w) {
-                w[0].value      = std::make_shared<U>(_onCommit(*oldValue.value, FWD(t)));
+                w[0].value      = std::make_shared<U>(_onCommit(*oldValue.value, std::forward<T>(t)));
                 w[0].validSince = now;
                 w[0].lastAccess = now;
                 std::ignore     = _sequenceHead->incrementAndGet();
@@ -177,9 +177,9 @@ public:
 #else
         if (auto it = std::find_if(_transactionList.begin(), _transactionList.end(), [&transactionToken](const auto &pair) { return pair.first == transactionToken; }); it != _transactionList.end()) {
 #endif
-            it->second = settings::node<T>(FWD(t)); // update value of existing transaction
+            it->second = settings::node<T>(std::forward<T>(t)); // update value of existing transaction
         } else {
-            _transactionList.push_back(std::make_pair(transactionToken, settings::node<T>(FWD(t))));
+            _transactionList.push_back(std::make_pair(transactionToken, settings::node<T>(std::forward<T>(t))));
         }
         std::atomic_store_explicit(&_transactionListLock, false, std::memory_order_release);
 
@@ -376,9 +376,9 @@ class CtxSetting {
         [](const std::unordered_map<TimingCtx, settings::node<T>> &oldMap, std::pair<TimingCtx, T> &&newValue) -> std::unordered_map<TimingCtx, settings::node<T>> {
             auto newMap = oldMap;
             if (auto it = newMap.find(newValue.first); it != newMap.end()) {
-                it->second = settings::node(FWD(newValue.second));
+                it->second = settings::node(std::forward<decltype(newValue.second)>(newValue.second));
             } else {
-                newMap.emplace(newValue.first, settings::node(FWD(std::move(newValue.second))));
+                newMap.emplace(newValue.first, settings::node(std::move(newValue.second)));
             }
             return newMap;
         }
@@ -396,7 +396,7 @@ public:
 
     TransactionResult
     stage(const TimingCtx &timingCtx, T &&newValue, const TransactionToken &transactionToken = NullToken<TransactionToken>, const TimeStamp &now = std::chrono::system_clock::now()) {
-        return _setting.stage({ timingCtx, FWD(newValue) }, transactionToken, now);
+        return _setting.stage({ timingCtx, std::forward<T>(newValue) }, transactionToken, now);
     }
 
     [[maybe_unused]] bool
@@ -406,7 +406,7 @@ public:
 
     TransactionResult
     commit(const TimingCtx &timingCtx, T &&newValue, const TimeStamp &now = std::chrono::system_clock::now()) {
-        return stage(timingCtx, FWD(newValue), NullToken<TransactionToken>, now);
+        return stage(timingCtx, std::forward<T>(newValue), NullToken<TransactionToken>, now);
     }
 
     TransactionResult
