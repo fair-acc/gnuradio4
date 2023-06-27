@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <type_traits>
+#include <array>
 
 namespace gr {
 namespace util {
