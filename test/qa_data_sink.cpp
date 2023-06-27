@@ -110,38 +110,36 @@ struct Observer {
         return !same(x, other);
     }
 
-    trigger_observer_state
+    trigger_test_result
     operator()(const tag_t &tag) {
         const auto ty = tag.get("YEAR");
         const auto tm = tag.get("MONTH");
         const auto td = tag.get("DAY");
         if (!ty || !tm || !td) {
-            return trigger_observer_state::Ignore;
+            return trigger_test_result::Ignore;
         }
 
-        const auto tup                       = std::make_tuple(std::get<int>(ty->get()), std::get<int>(tm->get()), std::get<int>(td->get()));
-        const auto &[y, m, d]                = tup;
-        const auto             ly            = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
-        const auto             lm            = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
-        const auto             ld            = last_seen ? std::optional<int>(std::get<2>(*last_seen)) : std::nullopt;
+        const auto tup                    = std::make_tuple(std::get<int>(ty->get()), std::get<int>(tm->get()), std::get<int>(td->get()));
+        const auto &[y, m, d]             = tup;
+        const auto          ly            = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
+        const auto          lm            = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
+        const auto          ld            = last_seen ? std::optional<int>(std::get<2>(*last_seen)) : std::nullopt;
 
-        const auto             year_restart  = year && *year == -1 && changed(y, ly);
-        const auto             year_matches  = !year || *year == -1 || same(y, year);
-        const auto             month_restart = month && *month == -1 && changed(m, lm);
-        const auto             month_matches = !month || *month == -1 || same(m, month);
-        const auto             day_restart   = day && *day == -1 && changed(d, ld);
-        const auto             day_matches   = !day || *day == -1 || same(d, day);
-        const auto             matches       = year_matches && month_matches && day_matches;
-        const auto             restart       = year_restart || month_restart || day_restart;
+        const auto          year_restart  = year && *year == -1 && changed(y, ly);
+        const auto          year_matches  = !year || *year == -1 || same(y, year);
+        const auto          month_restart = month && *month == -1 && changed(m, lm);
+        const auto          month_matches = !month || *month == -1 || same(m, month);
+        const auto          day_restart   = day && *day == -1 && changed(d, ld);
+        const auto          day_matches   = !day || *day == -1 || same(d, day);
+        const auto          matches       = year_matches && month_matches && day_matches;
+        const auto          restart       = year_restart || month_restart || day_restart;
 
-        trigger_observer_state r             = trigger_observer_state::Ignore;
+        trigger_test_result r             = trigger_test_result::Ignore;
 
-        if (last_matched && !matches) {
-            r = trigger_observer_state::Stop;
-        } else if (!last_matched && matches) {
-            r = trigger_observer_state::Start;
-        } else if ((!last_seen || last_matched) && matches && restart) {
-            r = trigger_observer_state::StopAndStart;
+        if (!matches) {
+            r = trigger_test_result::NotMatching;
+        } else if (!last_matched || restart) {
+            r = trigger_test_result::Matching;
         }
 
         last_seen    = tup;
@@ -170,24 +168,20 @@ make_test_tags(tag_t::signed_index_type first_index, tag_t::signed_index_type in
 }
 
 static std::string
-to_ascii_art(std::span<trigger_observer_state> states) {
+to_ascii_art(std::span<trigger_test_result> states) {
     bool        started = false;
     std::string r;
     for (auto s : states) {
         switch (s) {
-        case trigger_observer_state::Start:
-            r += started ? "E" : "|#";
-            started = true;
-            break;
-        case trigger_observer_state::Stop:
-            r += started ? "|_" : "E";
-            started = false;
-            break;
-        case trigger_observer_state::StopAndStart:
+        case trigger_test_result::Matching:
             r += started ? "||#" : "|#";
             started = true;
             break;
-        case trigger_observer_state::Ignore: r += started ? "#" : "_"; break;
+        case trigger_test_result::NotMatching:
+            r += started ? "|_" : "_";
+            started = false;
+            break;
+        case trigger_test_result::Ignore: r += started ? "#" : "_"; break;
         }
     };
     return r;
@@ -196,7 +190,7 @@ to_ascii_art(std::span<trigger_observer_state> states) {
 template<TriggerObserver O>
 std::string
 run_observer_test(std::span<const tag_t> tags, O o) {
-    std::vector<trigger_observer_state> r;
+    std::vector<trigger_test_result> r;
     r.reserve(tags.size());
     for (const auto &tag : tags) {
         r.push_back(o(tag));
@@ -391,7 +385,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
-            return v && std::get<std::string>(v->get()) == "TRIGGER";
+            return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger_test_result::Matching : trigger_test_result::Ignore;
         };
 
         auto poller = data_sink_registry::instance().get_trigger_poller<int32_t>(data_sink_query::sink_name("test_sink"), is_trigger, 3, 2, blocking_mode::Blocking);
@@ -442,7 +436,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
-            return v && std::get<std::string>(v->get()) == "TRIGGER";
+            return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger_test_result::Matching : trigger_test_result::Ignore;
         };
 
         const auto delay  = std::chrono::milliseconds{ 500 }; // sample rate 10000 -> 5000 samples
@@ -561,7 +555,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto is_trigger = [](const tag_t &tag) { return true; };
+        auto is_trigger = [](const tag_t &tag) { return trigger_test_result::Matching; };
 
         auto poller     = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
@@ -616,7 +610,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto               is_trigger = [](const tag_t &) { return true; };
+        auto               is_trigger = [](const tag_t &) { return trigger_test_result::Matching; };
 
         std::mutex         m;
         std::vector<float> received_data;

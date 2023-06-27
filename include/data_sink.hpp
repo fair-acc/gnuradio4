@@ -14,11 +14,10 @@ namespace fair::graph {
 
 enum class blocking_mode { NonBlocking, Blocking };
 
-enum class trigger_observer_state {
-    Start,        ///< Start a new dataset
-    Stop,         ///< Finish dataset
-    StopAndStart, ///< Finish pending dataset, start a new one
-    Ignore        ///< Ignore tag
+enum class trigger_test_result {
+    Matching,    ///< Start a new dataset
+    NotMatching, ///< Finish dataset
+    Ignore       ///< Ignore tag
 };
 
 // Until clang-format can handle concepts
@@ -33,13 +32,17 @@ concept DataSetCallback = std::invocable<T, DataSet<V>>;
 template<typename T, typename V>
 concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const tag_t>>;
 
+/**
+ * For the 'Triggered' and 'Snapshot' acquisition modes.
+ * Stateless predicate to check whether a tag matches the trigger criteria.
+ */
 template<typename T>
 concept TriggerPredicate = requires(const T p, tag_t tag) {
-    { p(tag) } -> std::convertible_to<bool>;
+    { p(tag) } -> std::convertible_to<trigger_test_result>;
 };
 
 /**
- * For the 'Multiplexed' acquisition mode: Stateful object checking all incoming tags to control which data should be sent
+ * For the 'Multiplexed' acquisition mode: Possibly stateful object checking all incoming tags to control which data should be sent
  * to the listener.
  *
  * A new dataset is started when the observer returns @c Start or @c StopAndStart.
@@ -55,10 +58,10 @@ concept TriggerPredicate = requires(const T p, tag_t tag) {
  * struct color_observer {
  *     trigger_observer_state operator()(const tag_t &tag) {
  *         if (tag == green || tag == yellow) {
- *             return trigger_observer_state::StopAndStart;
+ *             return trigger_observer_state::Matching;
  *         }
  *         if (tag == red) {
- *             return trigger_observer_state::Stop;
+ *             return trigger_observer_state::NotMatching;
  *         }
  *
  *         return trigger_observer_state::Ignore;
@@ -70,7 +73,7 @@ concept TriggerPredicate = requires(const T p, tag_t tag) {
  */
 template<typename T>
 concept TriggerObserver = requires(T o, tag_t tag) {
-    { o(tag) } -> std::convertible_to<trigger_observer_state>;
+    { o(tag) } -> std::convertible_to<trigger_test_result>;
 };
 
 // clang-format on
@@ -708,7 +711,7 @@ private:
 
         void
         process(std::span<const T> history, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
-            if (tag_data0 && trigger_predicate(tag_t{ 0, *tag_data0 })) {
+            if (tag_data0 && trigger_predicate(tag_t{ 0, *tag_data0 }) == trigger_test_result::Matching) {
                 // TODO fill dataset with metadata etc.
                 DataSet<T> dataset;
                 dataset.signal_values.reserve(pre_samples + post_samples); // TODO maybe make the circ. buffer smaller but preallocate these
@@ -793,24 +796,16 @@ private:
         process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
             if (tag_data0) {
                 const auto obsr = observer(tag_t{ 0, *tag_data0 });
-                // TODO set proper error state instead of throwing
-                if (obsr == trigger_observer_state::Stop || obsr == trigger_observer_state::StopAndStart) {
-                    if (obsr == trigger_observer_state::Stop && !pending_dataset) {
-                        throw std::runtime_error("multiplexed: Stop without start");
-                    }
-
+                if (obsr == trigger_test_result::NotMatching || obsr == trigger_test_result::Matching) {
                     if (pending_dataset) {
-                        if (obsr == trigger_observer_state::Stop) {
+                        if (obsr == trigger_test_result::NotMatching) {
                             pending_dataset->timing_events[0].push_back({ static_cast<tag_t::signed_index_type>(pending_dataset->signal_values.size()), *tag_data0 });
                         }
                         publish_dataset(std::move(*pending_dataset));
                         pending_dataset.reset();
                     }
                 }
-                if (obsr == trigger_observer_state::Start || obsr == trigger_observer_state::StopAndStart) {
-                    if (obsr == trigger_observer_state::Start && pending_dataset) {
-                        throw std::runtime_error("multiplexed: Two starts without stop");
-                    }
+                if (obsr == trigger_test_result::Matching) {
                     pending_dataset = DataSet<T>();
                     pending_dataset->signal_values.reserve(maximum_window_size); // TODO might be too much?
                     pending_dataset->timing_events = { { { 0, *tag_data0 } } };
@@ -895,7 +890,7 @@ private:
 
         void
         process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
-            if (tag_data0 && trigger_predicate({ 0, *tag_data0 })) {
+            if (tag_data0 && trigger_predicate({ 0, *tag_data0 }) == trigger_test_result::Matching) {
                 auto new_pending = pending_snapshot{ *tag_data0, sample_delay, sample_delay };
                 // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased; TODO unless we adapt them in apply_sample_rate, see there)
                 auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });
