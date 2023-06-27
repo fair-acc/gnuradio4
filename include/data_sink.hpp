@@ -265,8 +265,8 @@ copy_span(std::span<const T> src, std::span<T> dst) {
  *    in0 ━╢   data sink   ║                      ┌──── caller ────┐
  * (err0) ━╢ (opt. error)  ║                      │                │
  *         ║               ║  retrieve poller or  │ (custom non-GR │
- *        ━╢ :signal_name  ║←--------------------→│  user code...) │
- *        ━╢ :signal_unit  ║  register            │                │
+ *         ║ :signal_name  ║←--------------------→│  user code...) │
+ *         ║ :signal_unit  ║  register            │                │
  *         ║ :...          ║  callback function   └───┬────────────┘
  *         ╚═ GR block ═╤══╝                          │
  *                      │                             │
