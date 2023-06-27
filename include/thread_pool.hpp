@@ -321,7 +321,6 @@ concept ThreadPool = requires(T t, std::function<void()> &&func) {
  * }
  * @endcode
  */
-template<TaskType taskType>
 class BasicThreadPool {
     using Task      = thread_pool::detail::Task;
     using TaskQueue = thread_pool::detail::TaskQueue;
@@ -351,6 +350,7 @@ class BasicThreadPool {
     int                          _schedulingPriority = 0;
 
     const std::string            _poolName;
+    const TaskType               _taskType;
     const uint32_t               _minThreads;
     const uint32_t               _maxThreads;
 
@@ -358,8 +358,8 @@ public:
     std::chrono::microseconds    sleepDuration       = std::chrono::milliseconds(1);
     std::chrono::milliseconds    keepAliveDuration = std::chrono::seconds(10);
 
-    BasicThreadPool(const std::string_view &name = generateName(), uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency())
-        : _poolName(name), _minThreads(min), _maxThreads(max) {
+    BasicThreadPool(const std::string_view &name = generateName(), const TaskType taskType = TaskType::CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency())
+        : _poolName(name), _taskType(taskType), _minThreads(min), _maxThreads(max) {
         assert(min > 0 && "minimum number of threads must be > 0");
         assert(min <= max && "minimum number of threads must be <= maximum number of threads");
         for (uint32_t i = 0; i < _minThreads; ++i) {
@@ -435,7 +435,7 @@ public:
 
         _taskQueue.push(createTask<taskName, priority, cpuID>(std::forward<decltype(func)>(func), std::forward<decltype(func)>(args)...));
         _condition.notify_one();
-        if constexpr (taskType == TaskType::IO_BOUND) {
+        if (_taskType == TaskType::IO_BOUND) {
             spinWait.spinOnce();
             spinWait.spinOnce();
             while (_taskQueue.size() > 0) {
@@ -493,7 +493,7 @@ private:
         thread::setThreadName(fmt::format("{}#{}", _poolName, threadID), thread);
         thread::setThreadSchedulingParameter(_schedulingPolicy, _schedulingPriority, thread);
         if (!_affinityMask.empty()) {
-            if (taskType == TaskType::IO_BOUND) {
+            if (_taskType == TaskType::IO_BOUND) {
                 thread::setThreadAffinity(_affinityMask);
                 return;
             }
@@ -636,12 +636,9 @@ private:
         } while (running);
     }
 };
-template<TaskType T>
-inline std::atomic<uint64_t> BasicThreadPool<T>::_globalPoolId = 0U;
-template<TaskType T>
-inline std::atomic<uint64_t> BasicThreadPool<T>::_taskID = 0U;
-static_assert(ThreadPool<BasicThreadPool<IO_BOUND>>);
-static_assert(ThreadPool<BasicThreadPool<CPU_BOUND>>);
+inline std::atomic<uint64_t> BasicThreadPool::_globalPoolId = 0U;
+inline std::atomic<uint64_t> BasicThreadPool::_taskID = 0U;
+static_assert(ThreadPool<BasicThreadPool>);
 
 }
 

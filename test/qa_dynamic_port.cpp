@@ -169,7 +169,7 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
         fair::graph::scheduler::simple sched{ std::move(flow) };
-        sched.work();
+        sched.run_and_wait();
     };
 
 #ifdef ENABLE_DYNAMIC_PORTS

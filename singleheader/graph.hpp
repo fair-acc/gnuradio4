@@ -12845,9 +12845,9 @@ public:
 
 class graph {
 private:
-    std::vector<std::function<connection_result_t()>> _connection_definitions;
-    std::vector<std::unique_ptr<node_model>>          _nodes;
-    std::vector<edge>                                 _edges;
+    std::vector<std::function<connection_result_t(graph&)>> _connection_definitions;
+    std::vector<std::unique_ptr<node_model>>                _nodes;
+    std::vector<edge>                                       _edges;
 
     template<typename Node>
     std::unique_ptr<node_model> &
@@ -12921,8 +12921,8 @@ private:
             if (!is_node_known(source) || !is_node_known(destination)) {
                 throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name(), destination.name());
             }
-            self._connection_definitions.push_back([self = &self, source = &source, source_port = &port, destination = &destination, destination_port = &destination_port]() {
-                return self->connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
+            self._connection_definitions.push_back([source = &source, source_port = &port, destination = &destination, destination_port = &destination_port](graph &graph) {
+                return graph.connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
             });
             return connection_result_t::SUCCESS;
         }
@@ -12977,6 +12977,11 @@ private:
     connect(Source &source, Port Source::*member_ptr);
 
 public:
+    graph(graph&) = delete;
+    graph(graph&&) = default;
+    graph() = default;
+    graph &operator=(graph&) = delete;
+    graph &operator=(graph&&) = default;
     /**
      * @return a list of all blocks contained in this graph
      * N.B. some 'blocks' may be (sub-)graphs themselves
@@ -13062,7 +13067,7 @@ public:
         return result;
     }
 
-    const std::vector<std::function<connection_result_t()>> &
+    const std::vector<std::function<connection_result_t(graph&)>> &
     connection_definitions() {
         return _connection_definitions;
     }

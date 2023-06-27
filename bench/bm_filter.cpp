@@ -36,7 +36,7 @@ invoke_work(auto &sched) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    sched.work();
+    sched.run_and_wait();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
 }

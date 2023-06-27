@@ -54,7 +54,7 @@ main(int argc, char *argv[]) {
         assert(graph_saved_source + "\n" == graph_expected_source);
 
         fair::graph::scheduler::simple scheduler(std::move(graph));
-        scheduler.work();
+        scheduler.run_and_wait();
     }
 
     // Test if we get the same graph when saving it and loading the saved
