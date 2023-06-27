@@ -50,7 +50,7 @@ protected:
 
     using in_port_t                              = fg::IN<T>;
 
-    fg::scheduler::simple _scheduler;
+    fg::scheduler::simple<> _scheduler;
 
     fg::graph
     make_graph() {
@@ -87,7 +87,8 @@ public:
 
     fg::work_return_t
     work() override {
-        return _scheduler.work();
+        _scheduler.run_and_wait();
+        return fair::graph::work_return_t::DONE;
     }
 
     void *
@@ -194,7 +195,9 @@ make_graph(std::size_t events_count) {
 
 int
 main() {
-    fg::scheduler::simple scheduler(make_graph(10));
+    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2,2); // use custom pool to limit number of threads for emscripten
 
-    scheduler.work();
+    fg::scheduler::simple scheduler(make_graph(10), thread_pool);
+
+    scheduler.run_and_wait();
 }
