@@ -267,12 +267,12 @@ public:
     void
     setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
         if constexpr (IS_INPUT) {
-            _ioHandler    = std::move(streamBuffer.new_reader());
-            _tagIoHandler = std::move(tagBuffer.new_reader());
-            _connected    = true;
+            _ioHandler = streamBuffer.new_reader();
+            _tagIoHandler = tagBuffer.new_reader();
+            _connected = true;
         } else {
-            _ioHandler    = std::move(streamBuffer.new_writer());
-            _tagIoHandler = std::move(tagBuffer.new_reader());
+            _ioHandler = streamBuffer.new_writer();
+            _tagIoHandler = tagBuffer.new_reader();
         }
     }
 

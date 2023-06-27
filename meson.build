@@ -2,8 +2,10 @@ project('graph-prototype', 'cpp',
   version : '0.1',
   default_options : ['warning_level=0', 'cpp_std=gnu++20'])
 
-clang_warnings = ['-Wall', '-Wextra', '-Wshadow','-Wnon-virtual-dtor','-Wold-style-cast','-Wcast-align','-Wunused','-Woverloaded-virtual','-Wpedantic','-Wconversion','-Wsign-conversion','-Wnull-dereference','-Wdouble-promotion','-Wformat=2','-Wno-unknown-pragmas','-Wimplicit-fallthrough']
-gcc_warnings = clang_warnings + ['-Wmisleading-indentation','-Wduplicated-cond','-Wduplicated-branches','-Wlogical-op','-Wuseless-cast','-Wno-interference-size']
+clang_warnings = [ # '-Werror', # TODO: enable once the flags are set for the graph-prototype only and not also it's depenencies
+'-Wall', '-Wextra', '-Wshadow','-Wnon-virtual-dtor','-Wold-style-cast','-Wcast-align','-Wunused','-Woverloaded-virtual','-Wpedantic','-Wconversion','-Wsign-conversion','-Wnull-dereference','-Wdouble-promotion','-Wformat=2','-Wno-unknown-pragmas','-Wimplicit-fallthrough']
+gcc_warnings = clang_warnings + [ '-Wno-dangling-reference', # TODO: remove this once the fmt dangling reference bug is fixed
+'-Wmisleading-indentation','-Wduplicated-cond','-Wduplicated-branches','-Wlogical-op','-Wuseless-cast','-Wno-interference-size']
 
 compiler = meson.get_compiler('cpp')
 if compiler.get_id() == 'gcc'

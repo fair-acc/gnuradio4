@@ -83,13 +83,13 @@ struct Source : public node<Source<T>> {
     float        sample_rate        = 1000.0f;
 
     void
-    init(const property_map &/*old_settings*/, const property_map &/*new_settings*/) {
+    init(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
         // optional init function that is called after construction and whenever settings change
-        fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t >(n_tag_offset));
+        fair::graph::publish_tag(out, {{"n_samples_max", n_samples_max}}, static_cast<std::size_t>(n_tag_offset));
     }
 
     constexpr std::make_signed_t<std::size_t>
-    available_samples(const Source &/*self*/) noexcept {
+    available_samples(const Source & /*self*/) noexcept {
         const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
         return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }
@@ -112,16 +112,16 @@ some test doc documentation
 
 template<typename T>
 struct TestBlock : public node<TestBlock<T>, BlockingIO, TestBlockDoc, SupportedTypes<float, double>> {
-    IN<T>  in;
-    OUT<T> out;
+    IN<T> in{};
+    OUT<T> out{};
     // parameters
     A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">> scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
-    A<std::string, "context information", Visible>                context;
-    std::int32_t                                                  n_samples_max = -1;
-    float                                                         sample_rate   = 1000.0f;
-    std::vector<T>                                                vector_setting{ T(3), T(2), T(1) };
-    int                                                           update_count = 0;
-    bool                                                          debug        = false;
+    A<std::string, "context information", Visible> context{};
+    std::int32_t n_samples_max = -1;
+    float sample_rate = 1000.0f;
+    std::vector<T> vector_setting{T(3), T(2), T(1)};
+    int update_count = 0;
+    bool debug = false;
 
     void
     init(const property_map &old_setting, const property_map &new_setting) noexcept {
@@ -332,7 +332,7 @@ const boost::ut::suite SettingsTests = [] {
         wrapped1.set_name("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "node_model wrapper name";
         expect(not wrapped1.unique_name().empty()) << "unique name";
-        std::ignore = wrapped1.settings().set({ { "context", "a string" } });
+        std::ignore = wrapped1.settings().set({{"context", "a string"}});
         (wrapped1.meta_information())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "node_model meta-information";
     };
