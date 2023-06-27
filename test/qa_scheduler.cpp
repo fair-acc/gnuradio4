@@ -213,7 +213,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::simple<>;
         tracer trace{};
         auto sched = scheduler{get_graph_linear(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
@@ -223,7 +223,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::breadth_first<>;
         tracer trace{};
         auto sched = scheduler{get_graph_linear(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out"});
@@ -233,7 +233,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::simple<>;
         tracer trace{};
         auto sched = scheduler{get_graph_parallel(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 14u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb", "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb"});
@@ -243,7 +243,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::breadth_first<>;
         tracer trace{};
         auto sched = scheduler{get_graph_parallel(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 14u);
         expect(boost::ut::that % t == trace_vector_type{"s1", "mult1a", "mult1b", "mult2a", "mult2b", "outa", "outb", "s1", "mult1a", "mult1b", "mult2a", "mult2b", "outa", "outb", });
@@ -254,7 +254,7 @@ const boost::ut::suite SchedulerTests = [] {
         // construct an example graph and get an adjacency list for it
         tracer trace{};
         auto sched = scheduler{get_graph_scaled_sum(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out"});
@@ -264,7 +264,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::breadth_first<>;
         tracer trace{};
         auto sched = scheduler{get_graph_scaled_sum(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out"});
@@ -274,7 +274,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::simple<fg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto sched = scheduler{get_graph_linear(trace), thread_pool};
-        expect(sched.work() == work_return_t::DONE);
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(that % t.size() >= 8u);
     };
@@ -287,7 +287,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(sched.getJobLists().size() == 2u);
         check_node_names(sched.getJobLists()[0], {"s1", "mult2"});
         check_node_names(sched.getJobLists()[1], {"mult1", "out"});
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 8u);
     };
@@ -296,7 +296,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler = fair::graph::scheduler::simple<fg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto sched = scheduler{get_graph_parallel(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 14u);
     };
@@ -309,7 +309,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(sched.getJobLists().size() == 2u);
         check_node_names(sched.getJobLists()[0], {"s1", "mult1b", "mult2b",  "outb"});
         check_node_names(sched.getJobLists()[1], {"mult1a", "mult2a",  "outa"});
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 14u);
     };
@@ -319,7 +319,7 @@ const boost::ut::suite SchedulerTests = [] {
         // construct an example graph and get an adjacency list for it
         tracer trace{};
         auto sched = scheduler{get_graph_scaled_sum(trace), thread_pool};
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 10u);
     };
@@ -332,7 +332,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(sched.getJobLists().size() == 2u);
         check_node_names(sched.getJobLists()[0], {"s1", "mult",  "out"});
         check_node_names(sched.getJobLists()[1], {"s2", "add"});
-        sched.work();
+        sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 10u);
     };

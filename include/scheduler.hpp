@@ -8,26 +8,23 @@
 #include <utility>
 
 namespace fair::graph::scheduler {
+using fair::thread_pool::BasicThreadPool;
 
 enum execution_policy { single_threaded, multi_threaded };
 enum SchedulerState { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, SHUTTING_DOWN, ERROR};
 
-template<typename scheduler_type, execution_policy = single_threaded>
-class scheduler_base : public node<scheduler_type> {
+class scheduler_base {
 protected:
-    using node_t                             = node_model *;
-    using thread_pool_type                   = thread_pool::BasicThreadPool;
     SchedulerState                    _state = IDLE;
     fair::graph::graph                _graph;
-    std::shared_ptr<thread_pool_type> _pool;
+    std::shared_ptr<BasicThreadPool>  _pool;
     std::atomic_uint64_t              _progress;
     std::atomic_size_t                _running_threads;
     std::atomic_bool                  _stop_requested;
-    std::vector<std::vector<node_t>>  _job_lists{}; // move to impl
 
 public:
     explicit scheduler_base(fair::graph::graph              &&graph,
-                            std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND))
+                            std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND))
         : _graph(std::move(graph)), _pool(std::move(thread_pool)){};
 
     ~scheduler_base() {
@@ -117,7 +114,7 @@ public:
     }
 
     void
-    run_on_pool(const std::vector<std::vector<node_t>> &jobs, const std::function<work_return_t(const std::span<const node_t>&)> work_function) {
+    run_on_pool(const std::vector<std::vector<node_model *>> &jobs, const std::function<work_return_t(const std::span<node_model * const>&)> work_function) {
         _progress = 0;
         _running_threads = jobs.size();
         for (auto &jobset : jobs) {
@@ -166,26 +163,21 @@ public:
         _running_threads.notify_all();
     }
 
-    [[nodiscard]] const std::vector<std::vector<node_t>> &getJobLists() const {
-        return _job_lists;
-    }
 };
 
 /**
  * Trivial loop based scheduler, which iterates over all nodes in definition order in the graph until no node did any processing
  */
 template<execution_policy executionPolicy = single_threaded>
-class simple : public scheduler_base<simple<executionPolicy>>{
-    using Base = scheduler_base<simple<executionPolicy>>;
-    using node_t = node_model*;
-    using thread_pool_type = typename Base::thread_pool_type; //thread_pool::BasicThreadPool;
+class simple : public scheduler_base {
+    std::vector<std::vector<node_model *>>  _job_lists{};
 public:
-    explicit simple(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<thread_pool_type>("simple-scheduler-pool", thread_pool::CPU_BOUND))
-            : Base(std::forward<fair::graph::graph>(graph), thread_pool) { }
+    explicit simple(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND))
+            : scheduler_base(std::forward<fair::graph::graph>(graph), thread_pool) { }
 
     void
     init() {
-        Base::init();
+        scheduler_base::init();
         // generate job list
         if constexpr (executionPolicy == multi_threaded) {
             const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), this->_graph.blocks().size());
@@ -218,11 +210,12 @@ public:
         return something_happened ? work_return_t::OK : work_return_t::DONE;
     }
 
-    work_return_t
-    work() {
+    // todo: could be moved to base class, but would make `start()` virtual or require CRTP
+    // todo: iterate api for continuous flowgraphs vs ones that become "DONE" at some point
+    void
+    run_and_wait() {
         start();
         this->wait_done();
-        return work_return_t::DONE;
     }
 
     void
@@ -258,19 +251,18 @@ public:
  * detecting cycles and nodes which can be reached from several source nodes.
  */
 template<execution_policy executionPolicy = single_threaded>
-class breadth_first : public scheduler_base<breadth_first<executionPolicy>> {
-    using Base = scheduler_base<breadth_first<executionPolicy>>;
-    using node_t = node_model*;
-    using thread_pool_type = thread_pool::BasicThreadPool;
-    std::vector<node_t> _nodelist;
+class breadth_first : public scheduler_base {
+    std::vector<node_model *> _nodelist;
+    std::vector<std::vector<node_model *>>  _job_lists{};
 public:
-    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<thread_pool_type> thread_pool = std::make_shared<thread_pool_type>("breadth-first-pool", thread_pool::CPU_BOUND))
-                : Base(std::move(graph), thread_pool) {
+    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND))
+                : scheduler_base(std::move(graph), thread_pool) {
     }
 
     void
     init() {
-        Base::init();
+        using node_t = node_model *;
+        scheduler_base::init();
         // calculate adjacency list
         std::map<node_t, std::vector<node_t>> _adjacency_list{};
         std::vector<node_t>                   _source_nodes{};
@@ -307,14 +299,16 @@ public:
             }
         }
         // generate job list
-        const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _nodelist.size());
-        this->_job_lists.reserve(n_batches);
-        for (std::size_t i = 0; i < n_batches; i++) {
-            // create job-set for thread
-            auto &job = this->_job_lists.emplace_back();
-            job.reserve(_nodelist.size() / n_batches + 1);
-            for (std::size_t j = i; j < _nodelist.size(); j += n_batches) {
-                job.push_back(_nodelist[j]);
+        if constexpr (executionPolicy == multi_threaded) {
+            const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _nodelist.size());
+            this->_job_lists.reserve(n_batches);
+            for (std::size_t i = 0; i < n_batches; i++) {
+                // create job-set for thread
+                auto &job = this->_job_lists.emplace_back();
+                job.reserve(_nodelist.size() / n_batches + 1);
+                for (std::size_t j = i; j < _nodelist.size(); j += n_batches) {
+                    job.push_back(_nodelist[j]);
+                }
             }
         }
     }
@@ -336,11 +330,10 @@ public:
         return something_happened ? work_return_t::OK : work_return_t::DONE;
     }
 
-    work_return_t
-    work() {
+    void
+    run_and_wait() {
         start();
         this->wait_done();
-        return work_return_t::DONE;
     }
 
     void
@@ -368,6 +361,10 @@ public:
         } else {
             throw std::invalid_argument("Unknown execution Policy");
         }
+    }
+
+    [[nodiscard]] const std::vector<std::vector<node_model *>> &getJobLists() const {
+        return _job_lists;
     }
 };
 } // namespace fair::graph::scheduler

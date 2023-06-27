@@ -90,7 +90,7 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink2)));
 
         scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
         expect(eq(monitor1.n_samples_produced, n_samples)) << "monitor1 did not consume enough input samples";

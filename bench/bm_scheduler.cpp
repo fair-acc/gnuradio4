@@ -99,7 +99,7 @@ void exec_bm(auto& scheduler, const std::string& test_case) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    scheduler.work();
+    scheduler.run_and_wait();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << fmt::format("did not produce enough output samples for {}", test_case);
     expect(ge(test::n_samples_consumed, N_SAMPLES)) << fmt::format("did not consume enough input samples for {}", test_case);
     scheduler.reset();
@@ -152,29 +152,6 @@ void exec_bm(auto& scheduler, const std::string& test_case) {
     "bifurcated graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt]() {
         exec_bm(sched4_mt, "bifurcated-graph BFS-sched (multi-threaded)");
     };
-
-    //auto pinned_pool = std::make_shared<thread_pool>("pinned-pool", 2, 2);
-    //pinned_pool->setAffinityMask({true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false});
-
-    //fg::scheduler::simple<multi_threaded> sched1_mt2(test_graph_linear<float>(2 * NODES), pinned_pool);
-    //"linear graph - simple scheduler (multi-threaded(pinned))"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1_mt2]() {
-    //    exec_bm(sched1_mt2, "linear-graph simple-sched (multi-threaded(pinned))");
-    //};
-
-    //fg::scheduler::breadth_first<multi_threaded> sched2_mt2(test_graph_linear<float>(2 * NODES), pinned_pool);
-    //"linear graph - BFS scheduler (multi-threaded(pinned))"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched2_mt2]() {
-    //    exec_bm(sched2_mt2, "linear-graph BFS-sched (multi-threaded(pinned))");
-    //};
-
-    //fg::scheduler::simple<multi_threaded> sched3_mt2(test_graph_bifurcated<float>(NODES), pinned_pool);
-    //"bifurcated graph - simple scheduler (multi-threaded(pinned))"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched3_mt2]() {
-    //    exec_bm(sched3_mt2, "bifurcated-graph simple-sched (multi-threaded(pinned))");
-    //};
-
-    //fg::scheduler::breadth_first<multi_threaded> sched4_mt2(test_graph_bifurcated<float>(NODES), pinned_pool);
-    //"bifurcated graph - BFS scheduler (multi-threaded(pinned))"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt2]() {
-    //    exec_bm(sched4_mt2, "bifurcated-graph BFS-sched (multi-threaded(pinned))");
-    //};
 };
 
 int
