@@ -32,6 +32,7 @@ function(set_project_warnings project_name)
   )
 
   set(CLANG_WARNINGS
+      # -Werror # avoid warnings since they are often indicative of immature API and/or potential sources of bugs # TODO: enable
       -Wall
       -Wextra # reasonable and standard
       -Wshadow # warn the user if a variable declaration shadows one from a parent context
@@ -57,15 +58,16 @@ function(set_project_warnings project_name)
   endif()
 
   set(GCC_WARNINGS
-      ${CLANG_WARNINGS}
-      -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
-      -Wduplicated-cond # warn if if / else chain has duplicated conditions
-      -Wduplicated-branches # warn if if / else branches have duplicated code
-      -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
-      -Wuseless-cast # warn if you perform a cast to the same type
-      -Wno-interference-size # suppress ABI compatibility warnings for hardware inferred size
-      -Wno-maybe-uninitialized # false positives if asan is enabled: https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
-  )
+          ${CLANG_WARNINGS}
+          -Wno-dangling-reference # TODO: remove this once the fmt dangling reference bug is fixed
+          -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
+          -Wduplicated-cond # warn if if / else chain has duplicated conditions
+          -Wduplicated-branches # warn if if / else branches have duplicated code
+          -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
+          -Wuseless-cast # warn if you perform a cast to the same type
+          -Wno-interference-size # suppress ABI compatibility warnings for hardware inferred size
+          -Wno-maybe-uninitialized # false positives if asan is enabled: https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
+          )
 
   if(MSVC)
     set(PROJECT_WARNINGS ${MSVC_WARNINGS})

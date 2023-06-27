@@ -201,7 +201,7 @@ struct fmt::formatter<gr::Sequence> {
 namespace gr {
 inline std::ostream &
 operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v);
+    return os << fmt::format("{}", v.value());
 }
 } // namespace gr
 

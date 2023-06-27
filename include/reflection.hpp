@@ -1,6 +1,9 @@
 #ifndef GRAPH_PROTOTYPE_REFLECTION_HPP
 #define GRAPH_PROTOTYPE_REFLECTION_HPP
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wshadow"
 #include <refl.hpp>
 
 /**
@@ -133,6 +136,5 @@
 
 #define GP_REGISTER_NODE(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
 
-
-
+#pragma GCC diagnostic pop
 #endif //GRAPH_PROTOTYPE_REFLECTION_HPP

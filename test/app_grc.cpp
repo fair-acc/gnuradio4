@@ -6,7 +6,7 @@
 #include <scheduler.hpp>
 
 #include <fstream>
-#include <strstream>
+#include <sstream>
 
 #include "build_configure.hpp"
 #include "blocklib/core/unit-test/common_nodes.hpp"
@@ -70,7 +70,7 @@ main(int argc, char *argv[]) {
 
         auto graph_2            = fg::load_grc(context.loader, graph_saved_source);
 
-        auto collect_nodes      = [](fg::graph &graph) {
+        [[maybe_unused]] auto collect_nodes      = [](fg::graph &graph) {
             std::set<std::string> result;
             graph.for_each_node([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.type_name())); });
             return result;
@@ -78,7 +78,7 @@ main(int argc, char *argv[]) {
 
         assert(collect_nodes(graph_1) == collect_nodes(graph_2));
 
-        auto collect_edges = [](fg::graph &graph) {
+        [[maybe_unused]] auto collect_edges = [](fg::graph &graph) {
             std::set<std::string> result;
             graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_node().name(), edge.src_port_index(), edge.dst_node().name(), edge.dst_port_index())); });
             return result;

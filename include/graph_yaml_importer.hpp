@@ -3,7 +3,11 @@
 
 #include <charconv>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#pragma GCC diagnostic ignored "-Wshadow"
 #include <yaml-cpp/yaml.h>
+#pragma GCC diagnostic pop
 
 #include <graph.hpp>
 #include <plugin_loader.hpp>
@@ -12,7 +16,9 @@ namespace fair::graph {
 
 namespace detail {
 struct YamlMap {
-    YamlMap(YAML::Emitter &out) : out(out) { out << YAML::BeginMap; }
+    YAML::Emitter &out;
+
+    YamlMap(YAML::Emitter &out_) : out(out_) { out << YAML::BeginMap; }
 
     ~YamlMap() { out << YAML::EndMap; }
 
@@ -30,23 +36,21 @@ struct YamlMap {
         out << YAML::Value;
         fun();
     }
-
-    YAML::Emitter &out;
 };
 
 struct YamlSeq {
-    YamlSeq(YAML::Emitter &out) : out(out) { out << YAML::BeginSeq; }
+    YAML::Emitter &out;
+
+    YamlSeq(YAML::Emitter &out_) : out(out_) { out << YAML::BeginSeq; }
 
     ~YamlSeq() { out << YAML::EndSeq; }
 
     template<typename F>
         requires std::is_invocable_v<F>
     void
-    write_fn(const char *key, F &&fun) {
+    write_fn(const char */*key*/, F &&fun) {
         fun();
     }
-
-    YAML::Emitter &out;
 };
 } // namespace detail
 
@@ -179,8 +183,8 @@ save_grc(const fair::graph::graph &flow_graph) {
                 if (!node.meta_information().empty() || !settings_map.empty()) {
                     map.write_fn("parameters", [&]() {
                         detail::YamlMap parameters(out);
-                        auto            write_map = [&](const auto &map) {
-                            for (const auto &settings_pair : map) {
+                        auto            write_map = [&](const auto &local_map) {
+                            for (const auto &settings_pair : local_map) {
                                 std::visit(
                                         [&]<typename T>(const T &value) {
                                             if constexpr (std::is_same_v<std::string, std::remove_cvref_t<T>>) {
