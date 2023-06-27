@@ -131,7 +131,7 @@ private:
     }
 };
 
-inline static const auto NullTimingCtx = TimingCtx{ nullParsePred, nullMatchPred };
+inline static const auto NullTimingCtx = TimingCtx(nullParsePred, nullMatchPred);
 
 [[nodiscard]] inline bool
 operator==(const TimingCtx &lhs, const std::string_view &rhs) {

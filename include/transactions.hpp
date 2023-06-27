@@ -475,7 +475,7 @@ private:
         }
 
         // did not find an exact match the setting for the specific timing context
-        return { {}, settings::node<T>(T()) };
+        return { TimingCtx(), settings::node<T>({}) };
     }
 
     void
