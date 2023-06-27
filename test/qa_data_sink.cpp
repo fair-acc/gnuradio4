@@ -398,19 +398,21 @@ const boost::ut::suite DataSinkTests = [] {
             bool                 seen_finished = false;
             while (!seen_finished) {
                 seen_finished           = poller->finished;
-                [[maybe_unused]] auto r = poller->process_one([&received_data, &received_tags](const auto &dataset) {
-                    received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
-                    // signal info from sink settings
-                    expect(eq(dataset.signal_names.size(), 1u));
-                    expect(eq(dataset.signal_units.size(), 1u));
-                    expect(eq(dataset.signal_ranges.size(), 1u));
-                    expect(eq(dataset.timing_events.size(), 1u));
-                    expect(eq(dataset.signal_names[0], "test signal"s));
-                    expect(eq(dataset.signal_units[0], "none"s));
-                    expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, n_samples - 1 }));
-                    expect(eq(dataset.timing_events[0].size(), 1u));
-                    expect(eq(dataset.timing_events[0][0].index, 3));
-                    received_tags.insert(received_tags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                [[maybe_unused]] auto r = poller->process([&received_data, &received_tags](const auto &datasets) {
+                    for (const auto &dataset : datasets) {
+                        received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                        // signal info from sink settings
+                        expect(eq(dataset.signal_names.size(), 1u));
+                        expect(eq(dataset.signal_units.size(), 1u));
+                        expect(eq(dataset.signal_ranges.size(), 1u));
+                        expect(eq(dataset.timing_events.size(), 1u));
+                        expect(eq(dataset.signal_names[0], "test signal"s));
+                        expect(eq(dataset.signal_units[0], "none"s));
+                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, n_samples - 1 }));
+                        expect(eq(dataset.timing_events[0].size(), 1u));
+                        expect(eq(dataset.timing_events[0][0].index, 3));
+                        received_tags.insert(received_tags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                    }
                 });
             }
             return std::make_tuple(received_data, received_tags);
@@ -464,18 +466,20 @@ const boost::ut::suite DataSinkTests = [] {
             bool                 seen_finished = false;
             while (!seen_finished) {
                 seen_finished           = poller->finished;
-                [[maybe_unused]] auto r = poller->process_one([&received_data](const auto &dataset) {
-                    // signal info from tags
-                    expect(eq(dataset.signal_names.size(), 1u));
-                    expect(eq(dataset.signal_units.size(), 1u));
-                    expect(eq(dataset.signal_ranges.size(), 1u));
-                    expect(eq(dataset.timing_events.size(), 1u));
-                    expect(eq(dataset.signal_names[0], "test signal"s));
-                    expect(eq(dataset.signal_units[0], "none"s));
-                    expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, n_samples - 1 }));
-                    expect(eq(dataset.timing_events[0].size(), 1u));
-                    expect(eq(dataset.timing_events[0][0].index, -5000));
-                    received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                [[maybe_unused]] auto r = poller->process([&received_data](const auto &datasets) {
+                    for (const auto &dataset : datasets) {
+                        // signal info from tags
+                        expect(eq(dataset.signal_names.size(), 1u));
+                        expect(eq(dataset.signal_units.size(), 1u));
+                        expect(eq(dataset.signal_ranges.size(), 1u));
+                        expect(eq(dataset.timing_events.size(), 1u));
+                        expect(eq(dataset.signal_names[0], "test signal"s));
+                        expect(eq(dataset.signal_units[0], "none"s));
+                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, n_samples - 1 }));
+                        expect(eq(dataset.timing_events[0].size(), 1u));
+                        expect(eq(dataset.timing_events[0][0].index, -5000));
+                        received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                    }
                 });
             }
 
@@ -540,15 +544,17 @@ const boost::ut::suite DataSinkTests = [] {
                 bool                 seen_finished = false;
                 while (!seen_finished) {
                     seen_finished = poller->finished.load();
-                    while (poller->process_one([&ranges](const auto &dataset) {
-                        // default signal info, we didn't set anything
-                        expect(eq(dataset.signal_names.size(), 1u));
-                        expect(eq(dataset.signal_units.size(), 1u));
-                        expect(eq(dataset.timing_events.size(), 1u));
-                        expect(eq(dataset.signal_names[0], "unknown signal"s));
-                        expect(eq(dataset.signal_units[0], "a.u."s));
-                        ranges.push_back(dataset.signal_values.front());
-                        ranges.push_back(dataset.signal_values.back());
+                    while (poller->process([&ranges](const auto &datasets) {
+                        for (const auto &dataset : datasets) {
+                            // default signal info, we didn't set anything
+                            expect(eq(dataset.signal_names.size(), 1u));
+                            expect(eq(dataset.signal_units.size(), 1u));
+                            expect(eq(dataset.timing_events.size(), 1u));
+                            expect(eq(dataset.signal_names[0], "unknown signal"s));
+                            expect(eq(dataset.signal_units[0], "a.u."s));
+                            ranges.push_back(dataset.signal_values.front());
+                            ranges.push_back(dataset.signal_values.back());
+                        }
                     })) {
                     }
                 }
@@ -595,14 +601,16 @@ const boost::ut::suite DataSinkTests = [] {
             while (!seen_finished) {
                 // TODO make finished vs. pending data handling actually thread-safe
                 seen_finished = poller->finished.load();
-                while (poller->process_one([&received_data, &received_tags](const auto &dataset) {
-                    expect(eq(dataset.signal_values.size(), 5000u) >> fatal);
-                    received_data.push_back(dataset.signal_values.front());
-                    received_data.push_back(dataset.signal_values.back());
-                    expect(eq(dataset.timing_events.size(), 1u)) >> fatal;
-                    expect(eq(dataset.timing_events[0].size(), 1u));
-                    expect(eq(dataset.timing_events[0][0].index, 3000));
-                    received_tags.insert(received_tags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                while (poller->process([&received_data, &received_tags](const auto &datasets) {
+                    for (const auto &dataset : datasets) {
+                        expect(eq(dataset.signal_values.size(), 5000u) >> fatal);
+                        received_data.push_back(dataset.signal_values.front());
+                        received_data.push_back(dataset.signal_values.back());
+                        expect(eq(dataset.timing_events.size(), 1u)) >> fatal;
+                        expect(eq(dataset.timing_events[0].size(), 1u));
+                        expect(eq(dataset.timing_events[0][0].index, 3000));
+                        received_tags.insert(received_tags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                    }
                 })) {
                 }
             }

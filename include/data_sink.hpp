@@ -376,7 +376,7 @@ public:
         std::atomic<std::size_t>        drop_count = 0;
 
         [[nodiscard]] bool
-        process_bulk(std::invocable<std::span<DataSet<T>>> auto fnc) {
+        process(std::invocable<std::span<DataSet<T>>> auto fnc) {
             const auto available = reader.available();
             if (available == 0) {
                 return false;
@@ -385,19 +385,6 @@ public:
             const auto read_data = reader.get(available);
             fnc(read_data);
             std::ignore = reader.consume(available);
-            return true;
-        }
-
-        [[nodiscard]] bool
-        process_one(std::invocable<DataSet<T>> auto fnc) {
-            const auto available = reader.available();
-            if (available == 0) {
-                return false;
-            }
-
-            const auto read_data = reader.get(1);
-            fnc(read_data[0]);
-            std::ignore = reader.consume(1);
             return true;
         }
     };
