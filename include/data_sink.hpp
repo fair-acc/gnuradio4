@@ -23,6 +23,16 @@ enum class trigger_observer_state {
 
 // Until clang-format can handle concepts
 // clang-format off
+
+template<typename T, typename V>
+concept DataSetCallback = std::invocable<T, DataSet<V>>;
+
+/**
+ * Stream callback functions receive the span of data, and optionally the tags associated with it.
+ */
+template<typename T, typename V>
+concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const tag_t>>;
+
 template<typename T>
 concept TriggerPredicate = requires(const T p, tag_t tag) {
     { p(tag) } -> std::convertible_to<bool>;
@@ -148,7 +158,7 @@ public:
         return sink ? sink->get_snapshot_poller(std::forward<P>(p), delay, block) : nullptr;
     }
 
-    template<typename T, typename Callback>
+    template<typename T, StreamCallback<T> Callback>
     bool
     register_streaming_callback(const data_sink_query &query, std::size_t max_chunk_size, Callback callback) {
         std::lock_guard lg{ _mutex };
@@ -161,7 +171,7 @@ public:
         return true;
     }
 
-    template<typename T, TriggerPredicate P, typename Callback>
+    template<typename T, TriggerPredicate P, DataSetCallback<T> Callback>
     bool
     register_trigger_callback(const data_sink_query &query, P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
         std::lock_guard lg{ _mutex };
@@ -174,7 +184,7 @@ public:
         return true;
     }
 
-    template<typename T, TriggerObserver O, typename Callback>
+    template<typename T, TriggerObserver O, DataSetCallback<T> Callback>
     bool
     register_multiplexed_callback(const data_sink_query &query, std::size_t maximum_window_size, Callback callback) {
         std::lock_guard lg{ _mutex };
@@ -187,7 +197,7 @@ public:
         return true;
     }
 
-    template<typename T, TriggerPredicate P, typename Callback>
+    template<typename T, TriggerPredicate P, DataSetCallback<T> Callback>
     bool
     register_snapshot_callback(const data_sink_query &query, P p, std::chrono::nanoseconds delay, Callback callback) {
         std::lock_guard lg{ _mutex };
@@ -388,13 +398,13 @@ public:
         return handler;
     }
 
-    template<typename TriggerPredicate>
+    template<TriggerPredicate P>
     std::shared_ptr<dataset_poller>
-    get_trigger_poller(TriggerPredicate p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::Blocking) {
+    get_trigger_poller(P p, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::Blocking) {
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
-        add_listener(std::make_unique<trigger_listener<fair::meta::null_type, TriggerPredicate>>(std::forward<TriggerPredicate>(p), handler, pre_samples, post_samples, block), block);
+        add_listener(std::make_unique<trigger_listener<fair::meta::null_type, P>>(std::move(p), handler, pre_samples, post_samples, block), block);
         ensure_history_size(pre_samples);
         return handler;
     }
@@ -419,27 +429,27 @@ public:
         return handler;
     }
 
-    template<typename Callback>
+    template<StreamCallback<T> Callback>
     void
     register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
         add_listener(std::make_unique<continuous_listener<Callback>>(max_chunk_size, std::forward<Callback>(callback)), false);
     }
 
-    template<TriggerPredicate P, typename Callback>
+    template<TriggerPredicate P, DataSetCallback<T> Callback>
     void
     register_trigger_callback(P p, std::size_t pre_samples, std::size_t post_samples, Callback callback) {
         add_listener(std::make_unique<trigger_listener<Callback, P>>(std::forward<P>(p), pre_samples, post_samples, std::forward<Callback>(callback)), false);
         ensure_history_size(pre_samples);
     }
 
-    template<TriggerObserver O, typename Callback>
+    template<TriggerObserver O, DataSetCallback<T> Callback>
     void
     register_multiplexed_callback(O triggerObserver, std::size_t maximum_window_size, Callback callback) {
         std::lock_guard lg(_listener_mutex);
         add_listener(std::make_unique<multiplexed_listener>(std::move(triggerObserver), maximum_window_size, std::forward<Callback>(callback)), false);
     }
 
-    template<TriggerPredicate P, typename Callback>
+    template<TriggerPredicate P, DataSetCallback<T> Callback>
     void
     register_snapshot_callback(P p, std::chrono::nanoseconds delay, Callback callback) {
         std::lock_guard lg(_listener_mutex);
