@@ -507,11 +507,14 @@ private:
     }
 
     struct abstract_listener {
-        bool expired = false;
+        bool expired                 = false;
 
         virtual ~abstract_listener() = default;
 
-        void set_expired() { expired = true; }
+        void
+        set_expired() {
+            expired = true;
+        }
 
         virtual void
         apply_sample_rate(float) {}
