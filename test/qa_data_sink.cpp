@@ -500,19 +500,18 @@ const boost::ut::suite DataSinkTests = [] {
             expect(eq(run_observer_test(t, Observer({}, {}, 1)), "|#|__|#|__|#|__|#|__|#|__|#|__"s));
         }
 
-        auto       observer_factory = [](std::optional<int> y, std::optional<int> m, std::optional<int> d) { return [y, m, d]() { return Observer(y, m, d); }; };
-        const auto factories        = std::array{ observer_factory({}, -1, {}), observer_factory(-1, {}, {}), observer_factory(1, {}, {}), observer_factory(1, {}, 2), observer_factory({}, {}, 1) };
+        const auto observers = std::array{ Observer({}, -1, {}), Observer(-1, {}, {}), Observer(1, {}, {}), Observer(1, {}, 2), Observer({}, {}, 1) };
 
         // Following the patterns above, where each #/_ is 10000 samples
-        const auto expected = std::array<std::vector<int32_t>, factories.size()>{ { { 0, 29999, 30000, 59999, 60000, 89999, 90000, 119999, 120000, 149999, 150000, 249999 },
+        const auto expected = std::array<std::vector<int32_t>, observers.size()>{ { { 0, 29999, 30000, 59999, 60000, 89999, 90000, 119999, 120000, 149999, 150000, 249999 },
                                                                                     { 0, 59999, 60000, 119999, 120000, 219999 },
                                                                                     { 0, 59999 },
                                                                                     { 10000, 19999, 40000, 49999 },
                                                                                     { 0, 9999, 30000, 39999, 60000, 69999, 90000, 99999, 120000, 129999, 150000, 159999 } } };
         std::vector<std::shared_ptr<data_sink<int32_t>::dataset_poller>> pollers;
 
-        for (const auto &f : factories) {
-            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), f, 100000, blocking_mode::Blocking);
+        for (const auto &o : observers) {
+            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), o, 100000, blocking_mode::Blocking);
             expect(neq(poller, nullptr));
             pollers.push_back(poller);
         }

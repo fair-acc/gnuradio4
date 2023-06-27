@@ -63,10 +63,6 @@ concept TriggerObserver = requires(T o, tag_t tag) {
     { o(tag) } -> std::convertible_to<trigger_observer_state>;
 };
 
-template<typename T>
-concept TriggerObserverFactory = requires(T f) {
-    { f() } -> TriggerObserver;
-};
 // clang-format on
 
 template<typename T>
@@ -136,12 +132,12 @@ public:
         return sink ? sink->get_trigger_poller(std::forward<P>(p), pre_samples, post_samples, block) : nullptr;
     }
 
-    template<typename T, TriggerObserverFactory F>
+    template<typename T, TriggerObserver O>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_multiplexed_poller(const data_sink_query &query, F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block = blocking_mode::Blocking) {
+    get_multiplexed_poller(const data_sink_query &query, O triggerObserver, std::size_t maximum_window_size, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
-        return sink ? sink->get_multiplexed_poller(std::forward<F>(triggerObserverFactory), maximum_window_size, block) : nullptr;
+        return sink ? sink->get_multiplexed_poller(std::forward<O>(triggerObserver), maximum_window_size, block) : nullptr;
     }
 
     template<typename T, TriggerPredicate P>
@@ -403,13 +399,13 @@ public:
         return handler;
     }
 
-    template<TriggerObserverFactory F>
+    template<TriggerObserver O>
     std::shared_ptr<dataset_poller>
-    get_multiplexed_poller(F triggerObserverFactory, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::Blocking) {
+    get_multiplexed_poller(O triggerObserver, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::Blocking) {
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
-        add_listener(std::make_unique<multiplexed_listener<fair::meta::null_type, F>>(std::move(triggerObserverFactory), maximum_window_size, handler, block), block);
+        add_listener(std::make_unique<multiplexed_listener<fair::meta::null_type, O>>(std::move(triggerObserver), maximum_window_size, handler, block), block);
         return handler;
     }
 
@@ -436,11 +432,11 @@ public:
         ensure_history_size(pre_samples);
     }
 
-    template<TriggerObserverFactory F, typename Callback>
+    template<TriggerObserver O, typename Callback>
     void
-    register_multiplexed_callback(F triggerObserverFactory, std::size_t maximum_window_size, Callback callback) {
+    register_multiplexed_callback(O triggerObserver, std::size_t maximum_window_size, Callback callback) {
         std::lock_guard lg(_listener_mutex);
-        add_listener(std::make_unique<multiplexed_listener>(std::move(triggerObserverFactory), maximum_window_size, std::forward<Callback>(callback)), false);
+        add_listener(std::make_unique<multiplexed_listener>(std::move(triggerObserver), maximum_window_size, std::forward<Callback>(callback)), false);
     }
 
     template<TriggerPredicate P, typename Callback>
@@ -743,21 +739,19 @@ private:
         }
     };
 
-    template<typename Callback, TriggerObserverFactory F>
+    template<typename Callback, TriggerObserver O>
     struct multiplexed_listener : public abstract_listener {
         bool                          block = false;
-        F                             observerFactory;
-        decltype(observerFactory())   observer;
+        O                             observer;
         std::optional<DataSet<T>>     pending_dataset;
         std::size_t                   maximum_window_size;
         std::weak_ptr<dataset_poller> polling_handler = {};
         Callback                      callback;
 
-        explicit multiplexed_listener(F factory, std::size_t max_window_size, Callback cb)
-            : observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), callback(cb) {}
+        explicit multiplexed_listener(O observer_, std::size_t max_window_size, Callback cb) : observer(std::move(observer_)), maximum_window_size(max_window_size), callback(cb) {}
 
-        explicit multiplexed_listener(F factory, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
-            : block(do_block), observerFactory(factory), observer(observerFactory()), maximum_window_size(max_window_size), polling_handler{ std::move(handler) } {}
+        explicit multiplexed_listener(O observer_, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
+            : block(do_block), observer(std::move(observer_)), maximum_window_size(max_window_size), polling_handler{ std::move(handler) } {}
 
         inline void
         publish_dataset(DataSet<T> &&data) {
