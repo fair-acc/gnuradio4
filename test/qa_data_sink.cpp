@@ -376,9 +376,10 @@ const boost::ut::suite DataSinkTests = [] {
 
         graph                  flow_graph;
         auto                  &src  = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
-        const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, tag_t{ 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
+        const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
-        auto &sink                  = flow_graph.make_node<data_sink<int32_t>>();
+        auto &sink                  = flow_graph.make_node<data_sink<int32_t>>(
+                { { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
         sink.set_name("test_sink");
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
@@ -399,7 +400,14 @@ const boost::ut::suite DataSinkTests = [] {
                 seen_finished           = poller->finished;
                 [[maybe_unused]] auto r = poller->process_one([&received_data, &received_tags](const auto &dataset) {
                     received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
-                    expect(eq(dataset.timing_events.size(), 1u)) >> fatal;
+                    // signal info from sink settings
+                    expect(eq(dataset.signal_names.size(), 1u));
+                    expect(eq(dataset.signal_units.size(), 1u));
+                    expect(eq(dataset.signal_ranges.size(), 1u));
+                    expect(eq(dataset.timing_events.size(), 1u));
+                    expect(eq(dataset.signal_names[0], "test signal"s));
+                    expect(eq(dataset.signal_units[0], "none"s));
+                    expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, n_samples - 1 }));
                     expect(eq(dataset.timing_events[0].size(), 1u));
                     expect(eq(dataset.timing_events[0][0].index, 3));
                     received_tags.insert(received_tags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
@@ -428,8 +436,15 @@ const boost::ut::suite DataSinkTests = [] {
 
         graph                  flow_graph;
         auto                  &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
-        src.tags                   = { { 3000, { { "TYPE", "TRIGGER" } } }, tag_t{ 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
-        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ {"sample_rate", 10000.f } } );
+        src.tags                   = { { 0,
+                                         { { std::string(tag::SIGNAL_NAME.key()), "test signal" },
+                                           { std::string(tag::SIGNAL_UNIT.key()), "none" },
+                                           { std::string(tag::SIGNAL_MIN.key()), int32_t{ 0 } },
+                                           { std::string(tag::SIGNAL_MAX.key()), n_samples - 1 } } },
+                                       { 3000, { { "TYPE", "TRIGGER" } } },
+                                       { 8000, { { "TYPE", "NO_TRIGGER" } } },
+                                       { 180000, { { "TYPE", "TRIGGER" } } } };
+        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ { "sample_rate", 10000.f } });
         sink.set_name("test_sink");
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
@@ -450,7 +465,14 @@ const boost::ut::suite DataSinkTests = [] {
             while (!seen_finished) {
                 seen_finished           = poller->finished;
                 [[maybe_unused]] auto r = poller->process_one([&received_data](const auto &dataset) {
-                    expect(eq(dataset.timing_events.size(), 1u)) >> fatal;
+                    // signal info from tags
+                    expect(eq(dataset.signal_names.size(), 1u));
+                    expect(eq(dataset.signal_units.size(), 1u));
+                    expect(eq(dataset.signal_ranges.size(), 1u));
+                    expect(eq(dataset.timing_events.size(), 1u));
+                    expect(eq(dataset.signal_names[0], "test signal"s));
+                    expect(eq(dataset.signal_units[0], "none"s));
+                    expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, n_samples - 1 }));
                     expect(eq(dataset.timing_events[0].size(), 1u));
                     expect(eq(dataset.timing_events[0][0].index, -5000));
                     received_data.insert(received_data.end(), dataset.signal_values.begin(), dataset.signal_values.end());
@@ -519,6 +541,12 @@ const boost::ut::suite DataSinkTests = [] {
                 while (!seen_finished) {
                     seen_finished = poller->finished.load();
                     while (poller->process_one([&ranges](const auto &dataset) {
+                        // default signal info, we didn't set anything
+                        expect(eq(dataset.signal_names.size(), 1u));
+                        expect(eq(dataset.signal_units.size(), 1u));
+                        expect(eq(dataset.timing_events.size(), 1u));
+                        expect(eq(dataset.signal_names[0], "unknown signal"s));
+                        expect(eq(dataset.signal_units[0], "a.u."s));
                         ranges.push_back(dataset.signal_values.front());
                         ranges.push_back(dataset.signal_values.back());
                     })) {

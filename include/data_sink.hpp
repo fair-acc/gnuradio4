@@ -9,6 +9,7 @@
 
 #include <any>
 #include <chrono>
+#include <limits>
 
 namespace fair::graph {
 
@@ -258,6 +259,18 @@ copy_span(std::span<const T> src, std::span<T> dst) {
     std::copy(src.begin(), src.end(), dst.begin());
     return true;
 }
+
+template<typename T>
+std::optional<T>
+get(const property_map &m, const std::string_view &key) {
+    const auto it = m.find(key);
+    if (it == m.end()) {
+        return {};
+    }
+
+    return std::get<T>(it->second);
+}
+
 } // namespace detail
 
 /**
@@ -302,14 +315,15 @@ class data_sink : public node<data_sink<T>> {
     static constexpr std::size_t                   _listener_buffer_size = 65536;
     std::deque<std::unique_ptr<abstract_listener>> _listeners;
     std::mutex                                     _listener_mutex;
-    gr::history_buffer<T>                          _history = gr::history_buffer<T>(1);
+    gr::history_buffer<T>                          _history                       = gr::history_buffer<T>(1);
+    bool                                           _has_signal_info_from_settings = false;
 
 public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name;
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit;
-    Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min;
-    Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max;
+    Annotated<std::string, "signal name", Visible>                                   signal_name = std::string("unknown signal");
+    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = std::string("a.u.");
+    Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
+    Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
 
     IN<T, std::dynamic_extent, _listener_buffer_size>                                in;
 
@@ -394,14 +408,8 @@ public:
 
     void
     init(const property_map & /*old_settings*/, const property_map &new_settings) {
-        const auto it = new_settings.find("sample_rate");
-        if (it == new_settings.end()) {
-            return;
-        }
-        sample_rate = std::get<float>(it->second);
-        std::lock_guard lg(_listener_mutex);
-        for (auto &l : _listeners) {
-            l->apply_sample_rate(sample_rate);
+        if (apply_signal_info(new_settings)) {
+            _has_signal_info_from_settings = true;
         }
     }
 
@@ -477,7 +485,7 @@ public:
     stop() noexcept {
         std::lock_guard lg(_listener_mutex);
         for (auto &listener : _listeners) {
-            listener->flush();
+            listener->stop();
         }
     }
 
@@ -487,6 +495,10 @@ public:
         if (this->input_tags_present()) {
             assert(this->input_tags()[0].index == 0);
             tagData = this->input_tags()[0].map;
+            // signal info from settings overrides info from tags
+            if (!_has_signal_info_from_settings) {
+                apply_signal_info(this->input_tags()[0].map);
+            }
         }
 
         {
@@ -506,6 +518,62 @@ public:
     }
 
 private:
+    bool
+    apply_signal_info(const property_map &properties) {
+        try {
+            const auto srate = detail::get<float>(properties, tag::SAMPLE_RATE.key());
+            const auto name  = detail::get<std::string>(properties, tag::SIGNAL_NAME.key());
+            const auto unit  = detail::get<std::string>(properties, tag::SIGNAL_UNIT.key());
+            const auto min   = detail::get<T>(properties, tag::SIGNAL_MIN.key());
+            const auto max   = detail::get<T>(properties, tag::SIGNAL_MAX.key());
+
+            // commit
+            if (srate) {
+                sample_rate = *srate;
+            }
+            if (name) {
+                signal_name = *name;
+            }
+            if (unit) {
+                signal_unit = *unit;
+            }
+            if (min) {
+                signal_min = *min;
+            }
+            if (max) {
+                signal_max = *max;
+            }
+
+            // forward to listeners
+            if (srate || name || unit || min || max) {
+                const auto      dstempl = make_dataset_template();
+
+                std::lock_guard lg{ _listener_mutex };
+                for (auto &l : _listeners) {
+                    if (srate) {
+                        l->apply_sample_rate(sample_rate);
+                    }
+                    if (name || unit || min || max) {
+                        l->set_dataset_template(dstempl);
+                    }
+                }
+            }
+            return name || unit || min || max;
+        } catch (const std::bad_variant_access &) {
+            // TODO log?
+            return false;
+        }
+    }
+
+    DataSet<T>
+    make_dataset_template() const {
+        DataSet<T> dstempl;
+        dstempl.signal_names  = { signal_name };
+        dstempl.signal_units  = { signal_unit };
+        dstempl.signal_ranges = { { signal_min, signal_max } };
+        return dstempl;
+    }
+
     void
     ensure_history_size(std::size_t new_size) {
         if (new_size <= _history.capacity()) {
@@ -520,6 +588,7 @@ private:
 
     void
     add_listener(std::unique_ptr<abstract_listener> &&l, bool block) {
+        l->set_dataset_template(make_dataset_template());
         l->apply_sample_rate(sample_rate);
         if (block) {
             _listeners.push_back(std::move(l));
@@ -539,13 +608,16 @@ private:
         }
 
         virtual void
-        apply_sample_rate(float) {}
+        apply_sample_rate(float /*sample_rate*/) {}
+
+        virtual void
+        set_dataset_template(DataSet<T>) {}
 
         virtual void
         process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tag_data0)
                 = 0;
         virtual void
-        flush() = 0;
+        stop() = 0;
     };
 
     template<typename Callback>
@@ -651,7 +723,7 @@ private:
         }
 
         void
-        flush() override {
+        stop() override {
             if constexpr (has_callback) {
                 if (buffer_fill > 0) {
                     if constexpr (callback_takes_tags) {
@@ -677,10 +749,11 @@ private:
 
     template<typename Callback, TriggerPredicate P>
     struct trigger_listener : public abstract_listener {
-        bool                          block             = false;
-        std::size_t                   pre_samples       = 0;
-        std::size_t                   post_samples      = 0;
+        bool                          block        = false;
+        std::size_t                   pre_samples  = 0;
+        std::size_t                   post_samples = 0;
 
+        DataSet<T>                    dataset_template;
         P                             trigger_predicate = {};
         std::deque<pending_window>    pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<dataset_poller> polling_handler = {};
@@ -693,9 +766,11 @@ private:
         explicit trigger_listener(P predicate, std::size_t pre, std::size_t post, Callback cb)
             : pre_samples(pre), post_samples(post), trigger_predicate(std::forward<P>(predicate)), callback{ std::forward<Callback>(cb) } {}
 
-        // TODO all the dataset-based listeners could share publish_dataset and parts of flush (closing pollers),
-        // but if we want to use different datastructures/pass additional info, this might become moot again, so
-        // I leave it as is for now.
+        void
+        set_dataset_template(DataSet<T> dst) override {
+            dataset_template = std::move(dst);
+        }
+
         inline void
         publish_dataset(DataSet<T> &&data) {
             if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
@@ -725,8 +800,7 @@ private:
         void
         process(std::span<const T> history, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
             if (tag_data0 && trigger_predicate(tag_t{ 0, *tag_data0 }) == trigger_test_result::Matching) {
-                // TODO fill dataset with metadata etc.
-                DataSet<T> dataset;
+                DataSet<T> dataset = dataset_template;
                 dataset.signal_values.reserve(pre_samples + post_samples); // TODO maybe make the circ. buffer smaller but preallocate these
 
                 const auto pre_sample_view = history.last(std::min(pre_samples, history.size()));
@@ -743,7 +817,7 @@ private:
                 window->pending_post_samples -= post_sample_view.size();
 
                 if (window->pending_post_samples == 0) {
-                    publish_dataset(std::move(window->dataset));
+                    this->publish_dataset(std::move(window->dataset));
                     window = pending_trigger_windows.erase(window);
                 } else {
                     ++window;
@@ -752,10 +826,10 @@ private:
         }
 
         void
-        flush() override {
+        stop() override {
             for (auto &window : pending_trigger_windows) {
                 if (!window.dataset.signal_values.empty()) {
-                    publish_dataset(std::move(window.dataset));
+                    this->publish_dataset(std::move(window.dataset));
                 }
             }
             pending_trigger_windows.clear();
@@ -769,6 +843,7 @@ private:
     struct multiplexed_listener : public abstract_listener {
         bool                          block = false;
         O                             observer;
+        DataSet<T>                    dataset_template;
         std::optional<DataSet<T>>     pending_dataset;
         std::size_t                   maximum_window_size;
         std::weak_ptr<dataset_poller> polling_handler = {};
@@ -778,6 +853,11 @@ private:
 
         explicit multiplexed_listener(O observer_, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
             : block(do_block), observer(std::move(observer_)), maximum_window_size(max_window_size), polling_handler{ std::move(handler) } {}
+
+        void
+        set_dataset_template(DataSet<T> dst) override {
+            dataset_template = std::move(dst);
+        }
 
         inline void
         publish_dataset(DataSet<T> &&data) {
@@ -814,12 +894,12 @@ private:
                         if (obsr == trigger_test_result::NotMatching) {
                             pending_dataset->timing_events[0].push_back({ static_cast<tag_t::signed_index_type>(pending_dataset->signal_values.size()), *tag_data0 });
                         }
-                        publish_dataset(std::move(*pending_dataset));
+                        this->publish_dataset(std::move(*pending_dataset));
                         pending_dataset.reset();
                     }
                 }
                 if (obsr == trigger_test_result::Matching) {
-                    pending_dataset = DataSet<T>();
+                    pending_dataset = dataset_template;
                     pending_dataset->signal_values.reserve(maximum_window_size); // TODO might be too much?
                     pending_dataset->timing_events = { { { 0, *tag_data0 } } };
                 }
@@ -830,16 +910,16 @@ private:
                 pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), view.begin(), view.end());
 
                 if (pending_dataset->signal_values.size() == maximum_window_size) {
-                    publish_dataset(std::move(*pending_dataset));
+                    this->publish_dataset(std::move(*pending_dataset));
                     pending_dataset.reset();
                 }
             }
         }
 
         void
-        flush() override {
+        stop() override {
             if (pending_dataset) {
-                publish_dataset(std::move(*pending_dataset));
+                this->publish_dataset(std::move(*pending_dataset));
                 pending_dataset.reset();
             }
             if (auto p = polling_handler.lock()) {
@@ -858,7 +938,8 @@ private:
     struct snapshot_listener : public abstract_listener {
         bool                          block = false;
         std::chrono::nanoseconds      time_delay;
-        std::size_t                   sample_delay      = 0;
+        std::size_t                   sample_delay = 0;
+        DataSet<T>                    dataset_template;
         P                             trigger_predicate = {};
         std::deque<pending_snapshot>  pending;
         std::weak_ptr<dataset_poller> polling_handler = {};
@@ -868,6 +949,17 @@ private:
             : block(do_block), time_delay(delay), trigger_predicate(std::forward<P>(p)), polling_handler{ std::move(poller) } {}
 
         explicit snapshot_listener(P p, std::chrono::nanoseconds delay, Callback cb) : trigger_predicate(std::forward<P>(p)), time_delay(std::forward<Callback>(cb)) {}
+
+        void
+        set_dataset_template(DataSet<T> dst) override {
+            dataset_template = std::move(dst);
+        }
+
+        void
+        apply_sample_rate(float rateHz) override {
+            sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * rateHz);
+            // TODO do we need to update the requested_samples of pending here? (considering both old and new time_delay)
+        }
 
         inline void
         publish_dataset(DataSet<T> &&data) {
@@ -896,12 +988,6 @@ private:
         }
 
         void
-        apply_sample_rate(float rateHz) override {
-            sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * rateHz);
-            // TODO do we need to update the requested_samples of pending here? (considering both old and new time_delay)
-        }
-
-        void
         process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
             if (tag_data0 && trigger_predicate({ 0, *tag_data0 }) == trigger_test_result::Matching) {
                 auto new_pending = pending_snapshot{ *tag_data0, sample_delay, sample_delay };
@@ -917,17 +1003,17 @@ private:
                     break;
                 }
 
-                DataSet<T> dataset;
+                DataSet<T> dataset    = dataset_template;
                 dataset.timing_events = { { { -static_cast<tag_t::signed_index_type>(it->delay), std::move(it->tag_data) } } };
                 dataset.signal_values = { in_data[it->pending_samples] };
-                publish_dataset(std::move(dataset));
+                this->publish_dataset(std::move(dataset));
 
                 it = pending.erase(it);
             }
         }
 
         void
-        flush() override {
+        stop() override {
             pending.clear();
             if (auto p = polling_handler.lock()) {
                 p->finished = true;
