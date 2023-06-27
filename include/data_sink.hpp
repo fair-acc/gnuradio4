@@ -305,7 +305,7 @@ class data_sink : public node<data_sink<T>> {
     gr::history_buffer<T>                          _history = gr::history_buffer<T>(1);
 
 public:
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 10000.f;
+    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name;
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit;
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min;
@@ -391,6 +391,19 @@ public:
     data_sink() { data_sink_registry::instance().register_sink(this); }
 
     ~data_sink() { data_sink_registry::instance().unregister_sink(this); }
+
+    void
+    init(const property_map & /*old_settings*/, const property_map &new_settings) {
+        const auto it = new_settings.find("sample_rate");
+        if (it == new_settings.end()) {
+            return;
+        }
+        sample_rate = std::get<float>(it->second);
+        std::lock_guard lg(_listener_mutex);
+        for (auto &l : _listeners) {
+            l->apply_sample_rate(sample_rate);
+        }
+    }
 
     std::shared_ptr<poller>
     get_streaming_poller(blocking_mode block_mode = blocking_mode::Blocking) {
@@ -507,7 +520,7 @@ private:
 
     void
     add_listener(std::unique_ptr<abstract_listener> &&l, bool block) {
-        l->apply_sample_rate(sample_rate); // TODO also call when sample_rate changes
+        l->apply_sample_rate(sample_rate);
         if (block) {
             _listeners.push_back(std::move(l));
         } else {

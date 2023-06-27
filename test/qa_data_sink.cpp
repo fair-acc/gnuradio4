@@ -429,7 +429,7 @@ const boost::ut::suite DataSinkTests = [] {
         graph                  flow_graph;
         auto                  &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags                   = { { 3000, { { "TYPE", "TRIGGER" } } }, tag_t{ 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
-        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>();
+        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ {"sample_rate", 10000.f } } );
         sink.set_name("test_sink");
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
