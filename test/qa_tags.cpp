@@ -65,24 +65,27 @@ const boost::ut::suite TagPropagation = [] {
         auto &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(
                 {{"n_samples_max", n_samples},
                  {"name",          "TagSource"}});
-        src.tags          = { // TODO: allow parameter settings to include maps?!?
-                {0,    {{"key", "value@0"}}},
-                {1,    {{"key", "value@1"}}},
-                {100,  {{"key", "value@100"}}},
-                {150,  {{"key", "value@150"}}},
-                {1000, {{"key", "value@1000"}}},
-                {1001, {{"key", "value@1001"}}},
-                {1002, {{"key", "value@1002"}}},
-                {1023, {{"key", "value@1023"}}}
+        src.tags = {
+                // TODO: allow parameter settings to include maps?!?
+                {0,    {{"key", "value@0"}}},       //
+                {1,    {{"key", "value@1"}}},       //
+                {100,  {{"key", "value@100"}}},   //
+                {150,  {{"key", "value@150"}}},   //
+                {1000, {{"key", "value@1000"}}}, //
+                {1001, {{"key", "value@1001"}}}, //
+                {1002, {{"key", "value@1002"}}}, //
+                {1023, {{"key", "value@1023"}}}  //
         };
         src.set_name("TagSource"); // TODO: enable property_map to base-class parameter propagation
-        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
+        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>(
+                {{"name", "TagMonitor1"}});
         monitor1.set_name("TagMonitor1");
-        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
+        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>(
+                {{"name", "TagMonitor2"}});
         monitor2.set_name("TagMonitor2");
-        auto &sink1 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
+        auto &sink1 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink1"}});
         sink1.set_name("TagSink1");
-        auto &sink2 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
+        auto &sink2 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink2"}});
         sink2.set_name("TagSink2");
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));

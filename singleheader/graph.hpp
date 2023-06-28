@@ -376,7 +376,7 @@ struct fmt::formatter<gr::Sequence> {
 namespace gr {
 inline std::ostream &
 operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v);
+    return os << fmt::format("{}", v.value());
 }
 } // namespace gr
 
@@ -4086,14 +4086,18 @@ struct MultiThreadedStrategySizeMembers
 };
 
 template <>
-struct MultiThreadedStrategySizeMembers<std::dynamic_extent>
-{
-    explicit MultiThreadedStrategySizeMembers(std::size_t size)
-    : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size)))
-    {}
-
+struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
     const std::int32_t _size;
     const std::int32_t _indexShift;
+
+    #ifdef __clang__
+    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
+    #else
+    #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
+    #pragma GCC diagnostic ignored "-Wuseless-cast"
+    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
+    #pragma GCC diagnostic pop
+    #endif
 };
 
 /**
@@ -4972,6 +4976,9 @@ struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::ty
 #ifndef GRAPH_PROTOTYPE_REFLECTION_HPP
 #define GRAPH_PROTOTYPE_REFLECTION_HPP
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wshadow"
 // #include <refl.hpp>
 // The MIT License (MIT)
 //
@@ -9893,8 +9900,7 @@ REFL_END
 
 #define GP_REGISTER_NODE(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
 
-
-
+#pragma GCC diagnostic pop
 #endif //GRAPH_PROTOTYPE_REFLECTION_HPP
 
 
@@ -10353,12 +10359,12 @@ public:
     void
     setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
         if constexpr (IS_INPUT) {
-            _ioHandler    = std::move(streamBuffer.new_reader());
-            _tagIoHandler = std::move(tagBuffer.new_reader());
-            _connected    = true;
+            _ioHandler = streamBuffer.new_reader();
+            _tagIoHandler = tagBuffer.new_reader();
+            _connected = true;
         } else {
-            _ioHandler    = std::move(streamBuffer.new_writer());
-            _tagIoHandler = std::move(tagBuffer.new_reader());
+            _ioHandler = streamBuffer.new_writer();
+            _tagIoHandler = tagBuffer.new_reader();
         }
     }
 
