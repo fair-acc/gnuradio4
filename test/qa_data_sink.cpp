@@ -80,7 +80,7 @@ struct Source : public node<Source<T>> {
 };
 
 /**
- * Example tag observer (TriggerObserver implementation) for the multiplexed listener case (interleaved data). As a toy example, we use
+ * Example tag matcher (TriggerMatcher implementation) for the multiplexed listener case (interleaved data). As a toy example, we use
  * data tagged as Year/Month/Day.
  *
  * For each of year, month, day, the user can specify whether:
@@ -89,16 +89,16 @@ struct Source : public node<Source<T>> {
  *  - -1: Whenever a change between the previous and the current tag is observed, start a new data set (StopAndStart)
  *  - other values >= 0: A new dataset is started when the tag matches, and stopped, when a tag doesn't match
  *
- * (Note that the TriggerObserver is stateful and remembers the last tag seen, other than a stateless TriggerPredicate)
+ * (Note that this Matcher is stateful and remembers the last tag seen)
  */
-struct Observer {
+struct Matcher {
     std::optional<int>                       year;
     std::optional<int>                       month;
     std::optional<int>                       day;
     std::optional<std::tuple<int, int, int>> last_seen;
     bool                                     last_matched = false;
 
-    explicit Observer(std::optional<int> year_, std::optional<int> month_, std::optional<int> day_) : year(year_), month(month_), day(day_) {}
+    explicit Matcher(std::optional<int> year_, std::optional<int> month_, std::optional<int> day_) : year(year_), month(month_), day(day_) {}
 
     static inline bool
     same(int x, std::optional<int> other) {
@@ -110,36 +110,36 @@ struct Observer {
         return !same(x, other);
     }
 
-    trigger_test_result
+    trigger_match_result
     operator()(const tag_t &tag) {
         const auto ty = tag.get("YEAR");
         const auto tm = tag.get("MONTH");
         const auto td = tag.get("DAY");
         if (!ty || !tm || !td) {
-            return trigger_test_result::Ignore;
+            return trigger_match_result::Ignore;
         }
 
-        const auto tup                    = std::make_tuple(std::get<int>(ty->get()), std::get<int>(tm->get()), std::get<int>(td->get()));
-        const auto &[y, m, d]             = tup;
-        const auto          ly            = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
-        const auto          lm            = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
-        const auto          ld            = last_seen ? std::optional<int>(std::get<2>(*last_seen)) : std::nullopt;
+        const auto tup                     = std::make_tuple(std::get<int>(ty->get()), std::get<int>(tm->get()), std::get<int>(td->get()));
+        const auto &[y, m, d]              = tup;
+        const auto           ly            = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
+        const auto           lm            = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
+        const auto           ld            = last_seen ? std::optional<int>(std::get<2>(*last_seen)) : std::nullopt;
 
-        const auto          year_restart  = year && *year == -1 && changed(y, ly);
-        const auto          year_matches  = !year || *year == -1 || same(y, year);
-        const auto          month_restart = month && *month == -1 && changed(m, lm);
-        const auto          month_matches = !month || *month == -1 || same(m, month);
-        const auto          day_restart   = day && *day == -1 && changed(d, ld);
-        const auto          day_matches   = !day || *day == -1 || same(d, day);
-        const auto          matches       = year_matches && month_matches && day_matches;
-        const auto          restart       = year_restart || month_restart || day_restart;
+        const auto           year_restart  = year && *year == -1 && changed(y, ly);
+        const auto           year_matches  = !year || *year == -1 || same(y, year);
+        const auto           month_restart = month && *month == -1 && changed(m, lm);
+        const auto           month_matches = !month || *month == -1 || same(m, month);
+        const auto           day_restart   = day && *day == -1 && changed(d, ld);
+        const auto           day_matches   = !day || *day == -1 || same(d, day);
+        const auto           matches       = year_matches && month_matches && day_matches;
+        const auto           restart       = year_restart || month_restart || day_restart;
 
-        trigger_test_result r             = trigger_test_result::Ignore;
+        trigger_match_result r             = trigger_match_result::Ignore;
 
         if (!matches) {
-            r = trigger_test_result::NotMatching;
+            r = trigger_match_result::NotMatching;
         } else if (!last_matched || restart) {
-            r = trigger_test_result::Matching;
+            r = trigger_match_result::Matching;
         }
 
         last_seen    = tup;
@@ -168,29 +168,29 @@ make_test_tags(tag_t::signed_index_type first_index, tag_t::signed_index_type in
 }
 
 static std::string
-to_ascii_art(std::span<trigger_test_result> states) {
+to_ascii_art(std::span<trigger_match_result> states) {
     bool        started = false;
     std::string r;
     for (auto s : states) {
         switch (s) {
-        case trigger_test_result::Matching:
+        case trigger_match_result::Matching:
             r += started ? "||#" : "|#";
             started = true;
             break;
-        case trigger_test_result::NotMatching:
+        case trigger_match_result::NotMatching:
             r += started ? "|_" : "_";
             started = false;
             break;
-        case trigger_test_result::Ignore: r += started ? "#" : "_"; break;
+        case trigger_match_result::Ignore: r += started ? "#" : "_"; break;
         }
     };
     return r;
 }
 
-template<TriggerObserver O>
+template<TriggerMatcher M>
 std::string
-run_observer_test(std::span<const tag_t> tags, O o) {
-    std::vector<trigger_test_result> r;
+run_matcher_test(std::span<const tag_t> tags, M o) {
+    std::vector<trigger_match_result> r;
     r.reserve(tags.size());
     for (const auto &tag : tags) {
         r.push_back(o(tag));
@@ -384,7 +384,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
-            return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger_test_result::Matching : trigger_test_result::Ignore;
+            return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger_match_result::Matching : trigger_match_result::Ignore;
         };
 
         // lookup by signal name
@@ -452,7 +452,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
-            return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger_test_result::Matching : trigger_test_result::Ignore;
+            return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger_match_result::Matching : trigger_match_result::Ignore;
         };
 
         const auto delay  = std::chrono::milliseconds{ 500 }; // sample rate 10000 -> 5000 samples
@@ -511,26 +511,26 @@ const boost::ut::suite DataSinkTests = [] {
         {
             const auto t = std::span(tags);
 
-            // Test the test observer
-            expect(eq(run_observer_test(t, Observer({}, -1, {})), "|###||###||###||###||###||###"s));
-            expect(eq(run_observer_test(t, Observer(-1, {}, {})), "|######||######||######"s));
-            expect(eq(run_observer_test(t, Observer(1, {}, {})), "|######|____________"s));
-            expect(eq(run_observer_test(t, Observer(1, {}, 2)), "_|#|__|#|_____________"s));
-            expect(eq(run_observer_test(t, Observer({}, {}, 1)), "|#|__|#|__|#|__|#|__|#|__|#|__"s));
+            // Test the test matcher
+            expect(eq(run_matcher_test(t, Matcher({}, -1, {})), "|###||###||###||###||###||###"s));
+            expect(eq(run_matcher_test(t, Matcher(-1, {}, {})), "|######||######||######"s));
+            expect(eq(run_matcher_test(t, Matcher(1, {}, {})), "|######|____________"s));
+            expect(eq(run_matcher_test(t, Matcher(1, {}, 2)), "_|#|__|#|_____________"s));
+            expect(eq(run_matcher_test(t, Matcher({}, {}, 1)), "|#|__|#|__|#|__|#|__|#|__|#|__"s));
         }
 
-        const auto observers = std::array{ Observer({}, -1, {}), Observer(-1, {}, {}), Observer(1, {}, {}), Observer(1, {}, 2), Observer({}, {}, 1) };
+        const auto matchers = std::array{ Matcher({}, -1, {}), Matcher(-1, {}, {}), Matcher(1, {}, {}), Matcher(1, {}, 2), Matcher({}, {}, 1) };
 
         // Following the patterns above, where each #/_ is 10000 samples
-        const auto expected = std::array<std::vector<int32_t>, observers.size()>{ { { 0, 29999, 30000, 59999, 60000, 89999, 90000, 119999, 120000, 149999, 150000, 249999 },
-                                                                                    { 0, 59999, 60000, 119999, 120000, 219999 },
-                                                                                    { 0, 59999 },
-                                                                                    { 10000, 19999, 40000, 49999 },
-                                                                                    { 0, 9999, 30000, 39999, 60000, 69999, 90000, 99999, 120000, 129999, 150000, 159999 } } };
+        const auto expected = std::array<std::vector<int32_t>, matchers.size()>{ { { 0, 29999, 30000, 59999, 60000, 89999, 90000, 119999, 120000, 149999, 150000, 249999 },
+                                                                                   { 0, 59999, 60000, 119999, 120000, 219999 },
+                                                                                   { 0, 59999 },
+                                                                                   { 10000, 19999, 40000, 49999 },
+                                                                                   { 0, 9999, 30000, 39999, 60000, 69999, 90000, 99999, 120000, 129999, 150000, 159999 } } };
         std::vector<std::shared_ptr<data_sink<int32_t>::dataset_poller>> pollers;
 
-        for (const auto &o : observers) {
-            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), o, 100000, blocking_mode::Blocking);
+        for (const auto &m : matchers) {
+            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), m, 100000, blocking_mode::Blocking);
             expect(neq(poller, nullptr));
             pollers.push_back(poller);
         }
@@ -588,7 +588,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto is_trigger = [](const tag_t &tag) { return trigger_test_result::Matching; };
+        auto is_trigger = [](const tag_t &tag) { return trigger_match_result::Matching; };
 
         auto poller     = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
@@ -644,7 +644,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto               is_trigger = [](const tag_t &) { return trigger_test_result::Matching; };
+        auto               is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
 
         std::mutex         m;
         std::vector<float> received_data;
