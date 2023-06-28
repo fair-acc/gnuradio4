@@ -281,8 +281,14 @@ const boost::ut::suite DataSinkTests = [] {
             }
         };
 
+        auto callback_with_tags_and_sink = [&sink](std::span<const float>, std::span<const tag_t>, const data_sink<float> &passed_sink) {
+            expect(eq(passed_sink.name(), "test_sink"s));
+            expect(eq(sink.unique_name, passed_sink.unique_name));
+        };
+
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback));
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags));
+        expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags_and_sink));
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
@@ -336,11 +342,11 @@ const boost::ut::suite DataSinkTests = [] {
             while (!seen_finished) {
                 seen_finished = poller->finished;
                 while (poller->process([&received, &received_tags](const auto &data, const auto &tags_) {
-                    auto tags = std::vector<tag_t>(tags_.begin(), tags_.end());
-                    for (auto &t : tags) {
+                    auto rtags = std::vector<tag_t>(tags_.begin(), tags_.end());
+                    for (auto &t : rtags) {
                         t.index += static_cast<int64_t>(received.size());
                     }
-                    received_tags.insert(received_tags.end(), tags.begin(), tags.end());
+                    received_tags.insert(received_tags.end(), rtags.begin(), rtags.end());
                     received.insert(received.end(), data.begin(), data.end());
                 })) {
                 }

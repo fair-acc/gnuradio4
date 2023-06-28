@@ -21,6 +21,9 @@ enum class trigger_match_result {
     Ignore       ///< Ignore tag
 };
 
+template<typename T>
+class data_sink;
+
 // Until clang-format can handle concepts
 // clang-format off
 
@@ -28,10 +31,10 @@ template<typename T, typename V>
 concept DataSetCallback = std::invocable<T, DataSet<V>>;
 
 /**
- * Stream callback functions receive the span of data, and optionally the tags associated with it.
+ * Stream callback functions receive the span of data, with optional tags and reference to the sink.
  */
 template<typename T, typename V>
-concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const tag_t>>;
+concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const tag_t>> || std::invocable<T, std::span<const V>, std::span<const tag_t>, const data_sink<V>&>;
 
 /**
  * Used for testing whether a tag should trigger data acquisition.
@@ -81,9 +84,6 @@ concept TriggerMatcher = requires(T matcher, tag_t tag) {
 };
 
 // clang-format on
-
-template<typename T>
-class data_sink;
 
 struct data_sink_query {
     std::optional<std::string> _sink_name;
@@ -402,7 +402,7 @@ public:
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<poller>();
-        add_listener(std::make_unique<continuous_listener<fair::meta::null_type>>(handler, block), block);
+        add_listener(std::make_unique<continuous_listener<fair::meta::null_type>>(handler, block, *this), block);
         return handler;
     }
 
@@ -440,7 +440,7 @@ public:
     template<StreamCallback<T> Callback>
     void
     register_streaming_callback(std::size_t max_chunk_size, Callback callback) {
-        add_listener(std::make_unique<continuous_listener<Callback>>(max_chunk_size, std::move(callback)), false);
+        add_listener(std::make_unique<continuous_listener<Callback>>(max_chunk_size, std::move(callback), *this), false);
     }
 
     template<TriggerMatcher M, DataSetCallback<T> Callback>
@@ -611,10 +611,12 @@ private:
     template<typename Callback>
     struct continuous_listener : public abstract_listener {
         static constexpr auto has_callback        = !std::is_same_v<Callback, fair::meta::null_type>;
-        static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>;
+        static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>
+                                                 || std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>, const data_sink<T> &>;
 
-        bool                  block               = false;
-        std::size_t           samples_written     = 0;
+        const data_sink<T> &parent_sink;
+        bool                block           = false;
+        std::size_t         samples_written = 0;
 
         // callback-only
         std::size_t        buffer_fill = 0;
@@ -626,9 +628,20 @@ private:
 
         Callback              callback;
 
-        explicit continuous_listener(std::size_t max_chunk_size, Callback c) : buffer(max_chunk_size), callback{ std::forward<Callback>(c) } {}
+        explicit continuous_listener(std::size_t max_chunk_size, Callback c, const data_sink<T> &parent) : parent_sink(parent), buffer(max_chunk_size), callback{ std::forward<Callback>(c) } {}
 
-        explicit continuous_listener(std::shared_ptr<poller> poller, bool do_block) : block(do_block), polling_handler{ std::move(poller) } {}
+        explicit continuous_listener(std::shared_ptr<poller> poller, bool do_block, const data_sink<T> &parent) : parent_sink(parent), block(do_block), polling_handler{ std::move(poller) } {}
+
+        inline void
+        call_callback(std::span<const T> data, std::span<const tag_t> tags) {
+            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>, const data_sink<T> &>) {
+                callback(std::move(data), std::move(tags), parent_sink);
+            } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>) {
+                callback(std::move(data), std::move(tags));
+            } else {
+                callback(std::move(data));
+            }
+        }
 
         void
         process(std::span<const T>, std::span<const T> data, std::optional<property_map> tag_data0) override {
@@ -647,11 +660,7 @@ private:
                     }
                     buffer_fill += n;
                     if (buffer_fill == buffer.size()) {
-                        if constexpr (callback_takes_tags) {
-                            callback(std::span(buffer), std::span(tag_buffer));
-                        } else {
-                            callback(std::span(buffer));
-                        }
+                        call_callback(std::span(buffer), std::span(tag_buffer));
                         samples_written += buffer.size();
                         buffer_fill = 0;
                         tag_buffer.clear();
@@ -668,7 +677,7 @@ private:
                             tags.push_back({ 0, std::move(*tag_data0) });
                             tag_data0.reset();
                         }
-                        callback(data.first(buffer.size()), std::span(tags));
+                        call_callback(data.first(buffer.size()), std::span(tags));
                     } else {
                         callback(data.first(buffer.size()));
                     }
@@ -714,12 +723,8 @@ private:
         stop() override {
             if constexpr (has_callback) {
                 if (buffer_fill > 0) {
-                    if constexpr (callback_takes_tags) {
-                        callback(std::span(buffer).first(buffer_fill), std::span(tag_buffer));
-                        tag_buffer.clear();
-                    } else {
-                        callback(std::span(buffer).first(buffer_fill));
-                    }
+                    call_callback(std::span(buffer).first(buffer_fill), std::span(tag_buffer));
+                    tag_buffer.clear();
                     buffer_fill = 0;
                 }
             } else {
