@@ -285,7 +285,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags));
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -350,7 +350,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -417,7 +417,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -485,7 +485,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -562,7 +562,7 @@ const boost::ut::suite DataSinkTests = [] {
         }
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -615,7 +615,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -658,7 +658,7 @@ const boost::ut::suite DataSinkTests = [] {
         data_sink_registry::instance().register_trigger_callback<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, callback);
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -699,7 +699,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         fair::graph::scheduler::simple sched{ std::move(flow_graph) };
-        sched.work();
+        sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
 
