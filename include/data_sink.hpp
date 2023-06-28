@@ -242,18 +242,8 @@ private:
 };
 
 namespace detail {
-template<typename T, typename P>
-std::span<T>
-find_matching_prefix(std::span<T> s, P predicate) {
-    const auto nm = std::find_if_not(s.begin(), s.end(), predicate);
-    if (nm == s.end()) {
-        return s;
-    }
-    return s.first(std::distance(s.begin(), nm));
-}
-
 template<typename T>
-bool
+inline bool
 copy_span(std::span<const T> src, std::span<T> dst) {
     assert(src.size() <= dst.size());
     if (src.size() > dst.size()) {
@@ -264,7 +254,7 @@ copy_span(std::span<const T> src, std::span<T> dst) {
 }
 
 template<typename T>
-std::optional<T>
+inline std::optional<T>
 get(const property_map &m, const std::string_view &key) {
     const auto it = m.find(key);
     if (it == m.end()) {
