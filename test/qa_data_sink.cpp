@@ -438,7 +438,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(poller->drop_count.load(), 0));
     };
 
-    "blocking polling snapshot mode"_test = [] {
+    "blocking snapshot mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
         graph                  flow_graph;
@@ -464,6 +464,12 @@ const boost::ut::suite DataSinkTests = [] {
         const auto delay  = std::chrono::milliseconds{ 500 }; // sample rate 10000 -> 5000 samples
         auto       poller = data_sink_registry::instance().get_snapshot_poller<int32_t>(data_sink_query::sink_name("test_sink"), is_trigger, delay, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
+
+        std::vector<int32_t> received_data_cb;
+
+        auto                 callback = [&received_data_cb](const auto &dataset) { received_data_cb.insert(received_data_cb.end(), dataset.signal_values.begin(), dataset.signal_values.end()); };
+
+        expect(data_sink_registry::instance().register_snapshot_callback<int32_t>(data_sink_query::sink_name("test_sink"), is_trigger, delay, callback));
 
         auto                           poller_result = std::async([poller] {
             std::vector<int32_t> received_data;
@@ -497,12 +503,12 @@ const boost::ut::suite DataSinkTests = [] {
         sink.stop(); // TODO the scheduler should call this
 
         const auto received_data = poller_result.get();
-
+        expect(eq(received_data_cb, received_data));
         expect(eq(received_data, std::vector<int32_t>{ 8000, 185000 }));
         expect(eq(poller->drop_count.load(), 0));
     };
 
-    "blocking polling multiplexed mode"_test = [] {
+    "blocking multiplexed mode"_test = [] {
         const auto         tags      = make_test_tags(0, 10000);
 
         const std::int32_t n_samples = tags.size() * 10000 + 100000;
@@ -533,15 +539,21 @@ const boost::ut::suite DataSinkTests = [] {
                                                                                    { 0, 59999 },
                                                                                    { 10000, 19999, 40000, 49999 },
                                                                                    { 0, 9999, 30000, 39999, 60000, 69999, 90000, 99999, 120000, 129999, 150000, 159999 } } };
-        std::vector<std::shared_ptr<data_sink<int32_t>::dataset_poller>> pollers;
+        std::array<std::shared_ptr<data_sink<int32_t>::dataset_poller>, matchers.size()> pollers;
 
-        for (const auto &m : matchers) {
-            auto poller = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), m, 100000, blocking_mode::Blocking);
-            expect(neq(poller, nullptr));
-            pollers.push_back(poller);
+        std::vector<std::future<std::vector<int32_t>>>                                   results;
+        std::array<std::vector<int32_t>, matchers.size()>                                results_cb;
+
+        for (std::size_t i = 0; i < results_cb.size(); ++i) {
+            auto callback = [&r = results_cb[i]](const auto &dataset) {
+                r.push_back(dataset.signal_values.front());
+                r.push_back(dataset.signal_values.back());
+            };
+            expect(eq(data_sink_registry::instance().register_multiplexed_callback<int32_t>(data_sink_query::sink_name("test_sink"), Matcher(matchers[i]), 100000, callback), true));
+
+            pollers[i] = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), Matcher(matchers[i]), 100000, blocking_mode::Blocking);
+            expect(neq(pollers[i], nullptr));
         }
-
-        std::vector<std::future<std::vector<int32_t>>> results;
 
         for (std::size_t i = 0; i < pollers.size(); ++i) {
             auto f = std::async([poller = pollers[i]] {
@@ -575,6 +587,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         for (std::size_t i = 0; i < results.size(); ++i) {
             expect(eq(results[i].get(), expected[i]));
+            expect(eq(results_cb[i], expected[i]));
         }
     };
 

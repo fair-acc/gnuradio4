@@ -940,7 +940,7 @@ private:
         explicit snapshot_listener(M matcher, std::chrono::nanoseconds delay, std::shared_ptr<dataset_poller> poller, bool do_block)
             : block(do_block), time_delay(delay), trigger_matcher(std::move(matcher)), polling_handler{ std::move(poller) } {}
 
-        explicit snapshot_listener(M matcher, std::chrono::nanoseconds delay, Callback cb) : trigger_matcher(std::move(matcher)), time_delay(std::move(cb)) {}
+        explicit snapshot_listener(M matcher, std::chrono::nanoseconds delay, Callback cb) : time_delay(delay), trigger_matcher(std::move(matcher)), callback(std::move(cb)) {}
 
         void
         set_dataset_template(DataSet<T> dst) override {
