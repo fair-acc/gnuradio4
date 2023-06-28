@@ -331,6 +331,7 @@ public:
     IN<T, std::dynamic_extent, _listener_buffer_size>                                in;
 
     struct poller {
+        // TODO consider whether reusing port<T> here makes sense
         gr::circular_buffer<T>            buffer       = gr::circular_buffer<T>(_listener_buffer_size);
         decltype(buffer.new_reader())     reader       = buffer.new_reader();
         decltype(buffer.new_writer())     writer       = buffer.new_writer();
@@ -572,7 +573,11 @@ private:
         if (new_size <= _history.capacity()) {
             return;
         }
-        // TODO transitional, do not reallocate/copy, but create a shared buffer with size N,
+        // TODO Important!
+        //  - History size must be limited to avoid users causing OOM
+        //  - History should shrink again
+
+        // transitional, do not reallocate/copy, but create a shared buffer with size N,
         // and a per-listener history buffer where more than N samples is needed.
         auto new_history = gr::history_buffer<T>(std::max(new_size, _history.capacity()));
         new_history.push_back_bulk(_history.begin(), _history.end());
