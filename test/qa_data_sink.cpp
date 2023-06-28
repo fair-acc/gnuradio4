@@ -387,7 +387,8 @@ const boost::ut::suite DataSinkTests = [] {
             return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger_test_result::Matching : trigger_test_result::Ignore;
         };
 
-        auto poller = data_sink_registry::instance().get_trigger_poller<int32_t>(data_sink_query::sink_name("test_sink"), is_trigger, 3, 2, blocking_mode::Blocking);
+        // lookup by signal name
+        auto poller = data_sink_registry::instance().get_trigger_poller<int32_t>(data_sink_query::signal_name("test signal"), is_trigger, 3, 2, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
         auto                           polling = std::async([poller] {
