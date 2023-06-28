@@ -321,7 +321,6 @@ const boost::ut::suite DataSinkTests = [] {
             std::vector<float> received;
             bool               seen_finished = false;
             while (!seen_finished) {
-                // TODO make finished vs. pending data handling actually thread-safe
                 seen_finished = poller->finished;
                 while (poller->process([&received](const auto &data) { received.insert(received.end(), data.begin(), data.end()); })) {
                 }
@@ -335,7 +334,6 @@ const boost::ut::suite DataSinkTests = [] {
             std::vector<tag_t> received_tags;
             bool               seen_finished = false;
             while (!seen_finished) {
-                // TODO make finished vs. pending data handling actually thread-safe
                 seen_finished = poller->finished;
                 while (poller->process([&received, &received_tags](const auto &data, const auto &tags_) {
                     auto tags = std::vector<tag_t>(tags_.begin(), tags_.end());
@@ -599,7 +597,6 @@ const boost::ut::suite DataSinkTests = [] {
             std::vector<tag_t> received_tags;
             bool               seen_finished = false;
             while (!seen_finished) {
-                // TODO make finished vs. pending data handling actually thread-safe
                 seen_finished = poller->finished.load();
                 while (poller->process([&received_data, &received_tags](const auto &datasets) {
                     for (const auto &dataset : datasets) {
@@ -690,7 +687,6 @@ const boost::ut::suite DataSinkTests = [] {
             std::size_t samples_seen  = 0;
             bool        seen_finished = false;
             while (!seen_finished) {
-                // TODO make finished vs. pending data handling actually thread-safe
                 using namespace std::chrono_literals;
                 std::this_thread::sleep_for(20ms);
 
