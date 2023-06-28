@@ -394,7 +394,10 @@ public:
 
     data_sink() { data_sink_registry::instance().register_sink(this); }
 
-    ~data_sink() { data_sink_registry::instance().unregister_sink(this); }
+    ~data_sink() {
+        stop();
+        data_sink_registry::instance().unregister_sink(this);
+    }
 
     void
     init(const property_map & /*old_settings*/, const property_map &new_settings) {
