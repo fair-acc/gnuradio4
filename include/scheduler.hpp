@@ -243,8 +243,7 @@ public:
                 break;
         }
         if (this->_state != INITIALISED) {
-            fmt::print("simple scheduler work(): graph not initialised");
-            return;
+            throw std::runtime_error("simple scheduler work(): graph not initialised");
         }
         if constexpr (executionPolicy == single_threaded) {
             this->_state = RUNNING;
@@ -376,8 +375,7 @@ public:
                 break;
         }
         if (this->_state != INITIALISED) {
-            fmt::print("simple scheduler work(): graph not initialised");
-            return;
+            throw std::runtime_error("simple scheduler work(): graph not initialised");
         }
         if constexpr (executionPolicy == single_threaded) {
             this->_state = RUNNING;
