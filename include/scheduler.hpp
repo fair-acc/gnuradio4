@@ -61,7 +61,11 @@ public:
         for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
             _running_threads.wait(running);
         }
-        _state = STOPPED;
+        if (_state == REQUESTED_PAUSE) {
+            _state = PAUSED;
+        } else {
+            _state = STOPPED;
+        }
     }
 
     void
@@ -93,7 +97,7 @@ public:
 
     void
     reset() {
-        // since it is not possible to setup the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
+        // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
         switch (_state) {
         case IDLE: init(); break;
         case RUNNING:
@@ -103,11 +107,12 @@ public:
             // intentional fallthrough
             FMT_FALLTHROUGH;
         case STOPPED:
-        case PAUSED:
             // clear buffers
             // std::for_each(_graph.edges().begin(), _graph.edges().end(), [](auto &edge) {
             //
             // });
+            FMT_FALLTHROUGH;
+        case PAUSED:
             _state = INITIALISED;
             break;
         case SHUTTING_DOWN:
@@ -219,8 +224,23 @@ public:
 
     void
     start() {
-        if (this->_state == IDLE) {
-            this->init();
+        switch(this->_state) {
+            case IDLE:
+                this->init();
+                break;
+            case STOPPED:
+                reset();
+                break;
+            case PAUSED:
+                this->_state = INITIALISED;
+                break;
+            case INITIALISED:
+            case RUNNING:
+            case REQUESTED_PAUSE:
+            case REQUESTED_STOP:
+            case SHUTTING_DOWN:
+            case ERROR:
+                break;
         }
         if (this->_state != INITIALISED) {
             fmt::print("simple scheduler work(): graph not initialised");
@@ -337,8 +357,23 @@ public:
 
     void
     start() {
-        if (this->_state == IDLE) {
-            this->init();
+        switch(this->_state) {
+            case IDLE:
+                this->init();
+                break;
+            case STOPPED:
+                reset();
+                break;
+            case PAUSED:
+                this->_state = INITIALISED;
+                break;
+            case INITIALISED:
+            case RUNNING:
+            case REQUESTED_PAUSE:
+            case REQUESTED_STOP:
+            case SHUTTING_DOWN:
+            case ERROR:
+                break;
         }
         if (this->_state != INITIALISED) {
             fmt::print("simple scheduler work(): graph not initialised");
