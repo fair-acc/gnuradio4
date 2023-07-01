@@ -272,8 +272,8 @@ const boost::ut::suite DataSinkTests = [] {
             }
 
             for (const auto &tag : tags) {
-                ge(tag.index, static_cast<tag_t::signed_index_type>(samples_seen2));
-                lt(tag.index, samples_seen2 + buffer.size());
+                expect(ge(tag.index, 0));
+                expect(lt(tag.index, buffer.size()));
             }
 
             auto               lg = std::lock_guard{ m2 };

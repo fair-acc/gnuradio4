@@ -670,7 +670,7 @@ private:
                 }
 
                 // send out complete chunks directly
-                while (data.size() > buffer.size()) {
+                while (data.size() >= buffer.size()) {
                     if constexpr (callback_takes_tags) {
                         std::vector<tag_t> tags;
                         if (tag_data0) {
