@@ -56,9 +56,19 @@ struct Source : public node<Source<T>> {
 
     constexpr std::int64_t
     available_samples(const Source &) noexcept {
-        const auto ret = static_cast<std::int64_t>(n_samples_max - n_samples_produced);
-        // forcing one sample, at a time, see below
-        return ret > 0 ? 1 : -1; // '-1' -> DONE, produced enough samples
+        // TODO unify with other test sources
+        // split into chunks so that we have a single tag at index 0 (or none)
+        auto ret = static_cast<std::int64_t>(n_samples_max - n_samples_produced);
+        if (next_tag < tags.size()) {
+            if (n_samples_produced < tags[next_tag].index) {
+                ret = tags[next_tag].index - n_samples_produced;
+            } else if (next_tag + 1 < tags.size()) {
+                // tag at first sample? then read up until before next tag
+                ret = tags[next_tag+1].index - n_samples_produced;
+            }
+        }
+
+        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }
 
     T
