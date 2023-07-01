@@ -308,7 +308,7 @@ class data_sink : public node<data_sink<T>> {
     static constexpr std::size_t                   _listener_buffer_size = 65536;
     std::deque<std::unique_ptr<abstract_listener>> _listeners;
     std::mutex                                     _listener_mutex;
-    gr::history_buffer<T>                          _history                       = gr::history_buffer<T>(1);
+    std::optional<gr::history_buffer<T>>           _history;
     bool                                           _has_signal_info_from_settings = false;
 
 public:
@@ -487,15 +487,16 @@ public:
 
         {
             std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
-            const auto      history_view = _history.get_span(0);
+            const auto      history_view = _history ? _history->get_span(0) : std::span<const T>();
             std::erase_if(_listeners, [](const auto &l) { return l->expired; });
             for (auto &listener : _listeners) {
                 listener->process(history_view, in_data, tagData);
             }
-
-            // store potential pre-samples for triggers at the beginning of the next chunk
-            const auto to_write = std::min(in_data.size(), _history.capacity());
-            _history.push_back_bulk(in_data.last(to_write));
+            if (_history) {
+                // store potential pre-samples for triggers at the beginning of the next chunk
+                const auto to_write = std::min(in_data.size(), _history->capacity());
+                _history->push_back_bulk(in_data.last(to_write));
+            }
         }
 
         return work_return_t::OK;
@@ -560,7 +561,8 @@ private:
 
     void
     ensure_history_size(std::size_t new_size) {
-        if (new_size <= _history.capacity()) {
+        const auto old_size = _history ? _history->capacity() : std::size_t{0};
+        if (new_size <= old_size) {
             return;
         }
         // TODO Important!
@@ -569,9 +571,11 @@ private:
 
         // transitional, do not reallocate/copy, but create a shared buffer with size N,
         // and a per-listener history buffer where more than N samples is needed.
-        auto new_history = gr::history_buffer<T>(std::max(new_size, _history.capacity()));
-        new_history.push_back_bulk(_history.begin(), _history.end());
-        std::swap(_history, new_history);
+        auto new_history = gr::history_buffer<T>(new_size);
+        if (_history) {
+            new_history.push_back_bulk(_history->begin(), _history->end());
+        }
+        _history = new_history;
     }
 
     void
