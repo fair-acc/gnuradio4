@@ -3226,6 +3226,8 @@ namespace fair::meta {
 
 using namespace fair::literals;
 
+struct null_type {};
+
 template<typename... Ts>
 struct print_types;
 
