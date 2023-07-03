@@ -54,11 +54,11 @@ struct Source : public node<Source<T>> {
         fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
     }
 
-    constexpr std::int64_t
+    constexpr std::make_signed_t<std::size_t>
     available_samples(const Source &) noexcept {
         // TODO unify with other test sources
         // split into chunks so that we have a single tag at index 0 (or none)
-        auto ret = static_cast<std::int64_t>(n_samples_max - n_samples_produced);
+        auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
         if (next_tag < tags.size()) {
             if (n_samples_produced < tags[next_tag].index) {
                 ret = tags[next_tag].index - n_samples_produced;
