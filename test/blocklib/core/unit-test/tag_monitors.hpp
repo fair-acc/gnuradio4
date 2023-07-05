@@ -22,7 +22,7 @@ print_tag(const tag_t &tag, std::string_view prefix = {}) {
         fmt::print("}}\n");
         return;
     }
-    const auto& map = tag.map;
+    const auto &map = tag.map;
     for (const auto &[key, value] : map) {
         // workaround for:
         // fmt/core.h:1674:10: warning: possibly dangling reference to a temporary [-Wdangling-reference]
@@ -62,7 +62,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
-            print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name(), n_samples_produced));
+            print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name.value, n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
             out_tag.index  = 0; // indices > 0 write tags in the future ... handle with care
@@ -81,7 +81,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
         if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
-            print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name(), n_samples_produced));
+            print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name, n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
             out_tag.index  = 0; // indices > 0 write tags in the future ... handle with care
@@ -110,7 +110,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
     {
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
@@ -124,7 +124,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
     {
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_bulk(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            print_tag(tag, fmt::format("{}::process_bulk(...)\t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
@@ -156,7 +156,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     {
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
@@ -170,7 +170,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     {
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_bulk(...)\t received tag at {:6}", this->name(), n_samples_produced));
+            print_tag(tag, fmt::format("{}::process_bulk(...)\t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }

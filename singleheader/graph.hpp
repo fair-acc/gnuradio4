@@ -4913,10 +4913,21 @@ struct Annotated {
         }
     }
 
+    template<typename U>
+    Annotated &
+    operator=(const U &sv) noexcept requires std::is_same_v<T, std::string> && std::is_same_v<U, std::string_view> {
+        value = std::string(sv); // Convert from std::string_view to std::string and assign
+        return *this;
+    }
+
+    operator std::string_view() const noexcept requires std::is_same_v<T, std::string> {
+        return std::string_view(value); // Convert from std::string to std::string_view
+    }
+
     // meta-information
     static constexpr std::string_view
     description() noexcept {
-        return std::string_view{ description_ };
+        return std::string_view{description_};
     }
 
     static constexpr std::string_view
@@ -4960,13 +4971,48 @@ struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
  * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
  * If the given type is not an `Annotated`, it returns the type itself.
  */
-template<typename T>
-using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
+    template<typename T>
+    using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
 
 } // namespace fair::graph
 
 template<typename... Ts>
-struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
+struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {
+};
+
+#ifdef FMT_FORMAT_H_
+
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+
+template<typename T, fair::meta::fixed_string description, typename... Arguments>
+struct fmt::formatter<fair::graph::Annotated<T, description, Arguments...>> {
+    fmt::formatter<T> value_formatter;
+
+    template<typename FormatContext>
+    auto
+    parse(FormatContext &ctx) {
+        return value_formatter.parse(ctx);
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return value_formatter.format(annotated.value, ctx);
+    }
+};
+
+namespace gr {
+    template<typename T, fair::meta::fixed_string description, typename... Arguments>
+    inline std::ostream &
+    operator<<(std::ostream &os, const fair::graph::Annotated<T, description, Arguments...> &v) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return os << fmt::format("{}", v.value);
+    }
+} // namespace gr
+
+#endif // FMT_FORMAT_H_
 
 #endif // GRAPH_PROTOTYPE_ANNOTATED_HPP
 
@@ -9893,9 +9939,7 @@ REFL_END
  * };
  * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
  */
-#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) \
-    ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename ...Ts), (Type<Ts...>), __VA_ARGS__)
-
+#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
 
 #define GP_CONCAT_IMPL(x, y) x##y
 #define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
@@ -9957,14 +10001,7 @@ enum class tag_propagation_policy_t {
                        application-specific forwarding behaviour. */
 };
 
-namespace detail {
-struct transparent_less : public std::less<void> {
-    using is_transparent = void;
-};
-
-} // namespace detail
-
-using property_map = std::map<std::string, pmtv::pmt, detail::transparent_less>;
+using property_map = pmtv::map_t;
 
 /**
  * @brief 'tag_t' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
@@ -10041,6 +10078,32 @@ ENABLE_REFLECTION(fair::graph::tag_t, index, map);
 
 namespace fair::graph {
 using meta::fixed_string;
+
+void
+update_maps(const property_map &src, property_map &dest) {
+    for (const auto &[key, value] : src) {
+        if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
+            // If it's a nested map
+            if (auto it = dest.find(key); it != dest.end()) {
+                // If the key exists in the destination map
+                auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
+                if (dest_nested_map) {
+                    // Merge the nested maps recursively
+                    update_maps(*nested_map, *dest_nested_map);
+                } else {
+                    // Key exists but not a map, replace it
+                    dest[key] = value;
+                }
+            } else {
+                // If the key doesn't exist, just insert
+                dest.insert({ key, value });
+            }
+        } else {
+            // If it's not a nested map, insert/replace the value
+            dest[key] = value;
+        }
+    }
+}
 
 constexpr fixed_string GR_TAG_PREFIX = "gr:";
 
@@ -10769,6 +10832,8 @@ concept can_process_simd
 #ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
 #define GRAPH_PROTOTYPE_SETTINGS_HPP
 
+// #include "annotated.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <concepts>
@@ -10930,6 +10995,11 @@ struct settings_base {
             = 0;
 };
 
+namespace detail {
+template<typename T>
+concept HasBaseType = requires { typename std::remove_cvref_t<T>::base_t; };
+};
+
 template<typename Node>
 class basic_settings : public settings_base {
     Node                              *_node = nullptr;
@@ -10947,17 +11017,54 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             meta::tuple_for_each(
                     [this](auto &&default_tag) {
-                        for_each(refl::reflect(*_node).members, [&](auto member) {
-                            using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
+                        auto iterate_over_member = [&](auto member) {
+                            using RawType = std::remove_cvref_t<decltype(member(*_node))>;
+                            using Type    = unwrap_if_wrapped_t<RawType>;
                             if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
-                                if (default_tag.shortKey().ends_with(get_display_name(member))) {
+                                auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
+                                    if (str.starts_with(prefix)) {
+                                        str.remove_prefix(prefix.size());
+                                    }
+                                    return str == target;
+                                };
+                                if (matchesIgnoringPrefix(default_tag.shortKey(), std::string_view(GR_TAG_PREFIX), get_display_name(member))) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
                                 _auto_update.emplace(get_display_name(member));
                             }
-                        });
+                        };
+                        if constexpr (detail::HasBaseType<Node>) {
+                            refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                        }
+                        refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                     },
                     fair::graph::tag::DEFAULT_TAGS);
+
+            // handle meta-information for UI and other non-processing-related purposes
+            auto iterate_over_member = [&]<typename Member>(Member member) {
+                using RawType = std::remove_cvref_t<decltype(member(*_node))>;
+                // disable clang format because v16 cannot handle in-line requires clauses with return types nicely yet
+                // clang-format off
+                if constexpr (requires(Node t) { t.meta_information; }) {
+                    static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_node->meta_information)>, property_map>);
+                    if constexpr (requires(Node t) { t.description; }) {
+                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(_node->description)>>, std::string_view>);
+                        _node->meta_information.value["description"] = std::string(_node->description);
+                    }
+
+                    if constexpr (AnnotatedType<RawType>) {
+                        _node->meta_information.value[fmt::format("{}::description", get_display_name(member))] = std::string(RawType::description());
+                        _node->meta_information.value[fmt::format("{}::documentation", get_display_name(member))] = std::string(RawType::documentation());
+                        _node->meta_information.value[fmt::format("{}::unit", get_display_name(member))] = std::string(RawType::unit());
+                        _node->meta_information.value[fmt::format("{}::visible", get_display_name(member))] = RawType::visible();
+                    }
+                }
+                // clang-format on
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
         }
     }
 
@@ -11004,10 +11111,10 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
             for (const auto &[localKey, localValue] : parameters) {
-                const auto &key    = localKey;
-                const auto &value  = localValue;
-                bool        is_set = false;
-                for_each(refl::reflect(*_node).members, [&, this](auto member) {
+                const auto &key                 = localKey;
+                const auto &value               = localValue;
+                bool        is_set              = false;
+                auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
@@ -11019,11 +11126,24 @@ public:
                             is_set = true;
                         }
                     }
-                });
+                };
+                if constexpr (detail::HasBaseType<Node>) {
+                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                }
+                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                 if (!is_set) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
             }
+        }
+
+        // copy items that could not be matched to the node's meta_information map (if available)
+        if constexpr (requires(Node t) {
+                          {
+                              unwrap_if_wrapped_t<decltype(t.meta_information)> {}
+                          } -> std::same_as<property_map>;
+                      }) {
+            update_maps(ret, _node->meta_information);
         }
 
         return ret; // N.B. returns those <key:value> parameters that could not be set
@@ -11033,9 +11153,9 @@ public:
     auto_update(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<Node>()) {
             for (const auto &[localKey, localValue] : parameters) {
-                const auto &key   = localKey;
-                const auto &value = localValue;
-                for_each(refl::reflect(*_node).members, [&](auto member) {
+                const auto &key                 = localKey;
+                const auto &value               = localValue;
+                auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
@@ -11043,7 +11163,11 @@ public:
                             settings_base::_changed.store(true);
                         }
                     }
-                });
+                };
+                if constexpr (detail::HasBaseType<Node>) {
+                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                }
+                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
             }
         }
     }
@@ -11105,29 +11229,33 @@ public:
             std::lock_guard lg(_lock);
 
             property_map    oldSettings;
-            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
+            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
-                    for_each(refl::reflect(*_node).members, [&, this](auto member) {
+                    auto iterate_over_member = [&, this](auto member) {
                         using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
                         if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                             oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                         }
-                    });
+                    };
+                    if constexpr (detail::HasBaseType<Node>) {
+                        refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                    }
+                    refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                 }
             }
 
             property_map staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
-                const auto &key          = localKey;
-                const auto &staged_value = localStaged_value;
-                for_each(refl::reflect(*_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                const auto &key                 = localKey;
+                const auto &staged_value        = localStaged_value;
+                auto        iterate_over_member = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
                     if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (requires { _node->init(/* old settings */ _active, /* new settings */ staged); }) {
+                            if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
                                 staged.insert_or_assign(key, staged_value);
                             } else {
                                 std::ignore = staged; // help clang to see why staged is not unused
@@ -11137,18 +11265,27 @@ public:
                             }
                         }
                     }
-                });
+                };
+                if constexpr (detail::HasBaseType<Node>) {
+                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                }
+                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
             }
-            for_each(refl::reflect(*_node).members, [&, this](auto member) {
+            auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
-            });
-            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
+
+            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
                 if (!staged.empty()) {
-                    _node->init(/* old settings */ oldSettings, /* new settings */ staged);
+                    _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged);
                 }
             }
             _staged.clear();
@@ -11160,13 +11297,17 @@ public:
     update_active_parameters() noexcept override {
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
-            for_each(refl::reflect(*_node).members, [&, this](auto member) {
+            auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_node));
                 }
-            });
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
         }
     }
 };
@@ -11265,18 +11406,16 @@ output_ports(Self *self) noexcept {
 }
 
 template<typename T>
-concept NodeType = requires(T t, std::string str, std::size_t index) {
-    { t.name() } -> std::same_as<std::string_view>;
-    { t.set_name(std::move(str)) } noexcept -> std::same_as<void>;
-    { t.settings() } -> std::same_as<settings_base &>;
-
-    { t.description() } noexcept -> std::same_as<std::string_view>;
-    { t.is_blocking() } noexcept -> std::same_as<bool>;
+concept NodeType = requires(T t) {
     { t.unique_name } -> std::same_as<const std::string &>;
+    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
+    { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
+    { t.description } noexcept -> std::same_as<const std::string_view &>;
 
+    { t.is_blocking() } noexcept -> std::same_as<bool>;
+
+    { t.settings() } -> std::same_as<settings_base &>;
     { t.work() } -> std::same_as<work_return_t>;
-
-    { t.meta_information() } -> std::same_as<property_map &>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
@@ -11386,19 +11525,22 @@ concept HasRequiredProcessFunction = HasProcessOneFunction<Derived> != HasProces
 template<typename Derived, typename... Arguments>
 class node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
+    template<typename T, fair::meta::fixed_string description = "", typename... Args>
+    using A = Annotated<T, description, Args...>;
 
 public:
-    using derived_t                                       = Derived;
-    using node_template_parameters                        = meta::typelist<Arguments...>;
-    using Description                                     = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
-    constexpr static tag_propagation_policy_t tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
-    const std::size_t                         unique_id   = _unique_id_counter++;
-    const std::string                         unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
+    using base_t                   = node<Derived, Arguments...>;
+    using derived_t                = Derived;
+    using node_template_parameters = meta::typelist<Arguments...>;
+    using Description              = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    constexpr static tag_propagation_policy_t                                                                      tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
+    const std::size_t                                                                                              unique_id   = _unique_id_counter++;
+    const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(fair::meta::type_name<Derived>()) };
+    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
+    constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
 
 protected:
-    using setting_map = std::map<std::string, int, std::less<>>;
-    std::string        _name{ std::string(fair::meta::type_name<Derived>()) }; /// user-defined name
-    property_map       _meta_information;                                      /// used to store non-graph-processing information like UI block position etc.
     bool               _input_tags_present  = false;
     bool               _output_tags_changed = false;
     std::vector<tag_t> _tags_at_input;
@@ -11442,43 +11584,13 @@ public:
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
-    /**
-     * @brief user-defined name
-     * N.B. may not be unique -> ::unique_name
-     */
-    [[nodiscard]] std::string_view
-    name() const noexcept {
-        return _name;
-    }
-
-    /**
-     * @brief user-defined name
-     * N.B. may not be unique -> ::unique_name
-     */
     void
-    set_name(std::string name) noexcept {
-        _name = std::move(name);
-    }
-
-    /**
-     * @brief used to store non-graph-processing information like UI block position etc.
-     */
-    [[nodiscard]] property_map &
-    meta_information() noexcept {
-        return _meta_information;
-    }
-
-    /**
-     * @brief used to store non-graph-processing information like UI block position etc.
-     */
-    [[nodiscard]] const property_map &
-    meta_information() const noexcept {
-        return _meta_information;
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    description() const noexcept {
-        return std::string_view(Description::value);
+    init() {
+        std::ignore = settings().apply_staged_parameters();
+        // TODO: expand on this init function:
+        //  * store initial setting -> needed for `reset()` call
+        //  * push settings that cannot be applied to block parameters to meta-information
+        //  * ...
     }
 
     [[nodiscard]] constexpr bool
@@ -11553,37 +11665,27 @@ public:
             at_least_one_input_has_data  = at_least_one_input_has_data || (availableSamples > 0);
 
             if (availableSamples < port.min_buffer_size()) availableSamples = 0;
-                if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
+            if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
 
-                if (port.tagReader().available() == 0) {
-                    return {availableSamples, std::numeric_limits<std::size_t>::max()}; // default: no tags in sight
-                }
+            if (port.tagReader().available() == 0) {
+                return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
+            }
 
-                // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-                const auto &tagData           = port.tagReader().get();
-                const auto &readPosition      = port.streamReader().position();
+            // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+            const auto &tagData           = port.tagReader().get();
+            const auto &readPosition      = port.streamReader().position();
 
-                const auto future_tags_begin = std::find_if(tagData.begin(), tagData.end(),[&readPosition](const auto &tag) noexcept {
-                    return tag.index > readPosition + 1;
-                });
+            const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
 
-                if (future_tags_begin == tagData.begin()) {
-                    const auto first_future_tag_index = static_cast<std::size_t>(future_tags_begin->index);
-                    const std::size_t n_samples_until_next_tag =
-                            readPosition == -1 ? first_future_tag_index : (first_future_tag_index -
-                                                                           static_cast<std::size_t>(readPosition) -
-                                                                           1_UZ);
-                    assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
-                    return {std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag};
-                } else {
-                    const std::size_t first_future_tag_index =
-                            future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max()
-                                                               : static_cast<std::size_t>(future_tags_begin->index);
-                    const std::size_t n_samples_until_next_tag =
-                            readPosition == -1 ? first_future_tag_index : (first_future_tag_index -
-                                                                           static_cast<std::size_t>(readPosition) -
-                                                                           1_UZ);
-                    return {std::min(availableSamples, n_samples_until_next_tag), 0};
+            if (future_tags_begin == tagData.begin()) {
+                const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
+                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+                assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
+                return { std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag };
+            } else {
+                const std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(future_tags_begin->index);
+                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+                return { std::min(availableSamples, n_samples_until_next_tag), 0 };
             }
         };
 
@@ -11860,8 +11962,7 @@ public:
             } else {
                 // Non-SIMD loop
                 for (std::size_t i = 0; i < samples_to_process; ++i) {
-                    const auto results = std::apply(
-                            [this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
+                    const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
                     meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
                 }
             }
@@ -11878,15 +11979,20 @@ public:
             forward_tags();
             return success ? work_return_t::OK : work_return_t::ERROR;
         } // process_one(...) handling
-          //        else {
-          //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
-          //        }
+        //        else {
+        //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
+        //        }
         return work_return_t::ERROR;
-    }     // end: work_return_t work() noexcept { ..}
+    } // end: work_return_t work() noexcept { ..}
 };
 
 template<typename Derived, typename... Arguments>
 inline std::atomic_size_t node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
+} // namespace fair::graph
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (fair::graph::node<T, Arguments...>), unique_name, name, meta_information);
+
+namespace fair::graph {
 
 /**
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
@@ -11918,9 +12024,12 @@ node_description() noexcept {
                 if constexpr (is_annotated<RawType>()) {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
                     const std::string member_name = get_display_name_const(member).str();
-                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n", RawType::visible() ? "" : "_", //
-                                       type_name, member_name,                                                                                //
-                                       RawType::description(), RawType::unit(), RawType::documentation(),                                     //
+                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
+                                       RawType::visible() ? "" : "_", //
+                                       type_name,
+                                       member_name,                   //
+                                       RawType::description(), RawType::unit(),
+                                       RawType::documentation(),      //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
@@ -11985,6 +12094,7 @@ private:
 
     // merged_work_chunk_size, that's what friends are for
     friend base;
+
     template<source_node, sink_node, std::size_t, std::size_t>
     friend class merged_node;
 
@@ -12613,6 +12723,12 @@ public:
     virtual ~node_model() = default;
 
     /**
+     * @brief to be called by scheduler->graph to initialise block
+     */
+    virtual void
+    init() = 0;
+
+    /**
      * @brief user defined name
      */
     [[nodiscard]] virtual std::string_view
@@ -12733,6 +12849,16 @@ public:
         init_dynamic_ports();
     }
 
+    explicit node_wrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _node{ std::move(init_parameter) } {
+        init_dynamic_ports();
+        _node.settings().update_active_parameters();
+    }
+
+    void
+    init() override {
+        return node_ref().init();
+    }
+
     [[nodiscard]] constexpr work_return_t
     work() override {
         return node_ref().work();
@@ -12740,12 +12866,12 @@ public:
 
     [[nodiscard]] std::string_view
     name() const override {
-        return node_ref().name();
+        return node_ref().name;
     }
 
     void
     set_name(std::string name) noexcept override {
-        return node_ref().set_name(std::move(name));
+        node_ref().name = std::move(name);
     }
 
     [[nodiscard]] std::string_view
@@ -12755,17 +12881,17 @@ public:
 
     [[nodiscard]] property_map &
     meta_information() noexcept override {
-        return node_ref().meta_information();
+        return node_ref().meta_information;
     }
 
     [[nodiscard]] const property_map &
     meta_information() const noexcept override {
-        return node_ref().meta_information();
+        return node_ref().meta_information;
     }
 
     [[nodiscard]] std::string_view
     unique_name() const override {
-        return node_ref().name();
+        return node_ref().unique_name;
     }
 
     [[nodiscard]] settings_base &
@@ -12893,7 +13019,7 @@ private:
 
         if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(src_node_raw); })
             || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(dst_node_raw); })) {
-            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name(), src_port_index, dst_node_raw.name(), dst_port_index));
+            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name, src_port_index, dst_node_raw.name, dst_port_index));
         }
 
         auto result = source_port.connect(destination_port);
@@ -12927,7 +13053,7 @@ private:
                 return std::any_of(self._nodes.cbegin(), self._nodes.cend(), [&query_node](const auto &known_node) { return known_node->raw() == std::addressof(query_node); });
             };
             if (!is_node_known(source) || !is_node_known(destination)) {
-                throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name(), destination.name());
+                throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
             }
             self._connection_definitions.push_back([source = &source, source_port = &port, destination = &destination, destination_port = &destination_port](graph &graph) {
                 return graph.connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
@@ -13010,7 +13136,8 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
-        std::ignore        = new_node_ref->settings().apply_staged_parameters();
+        new_node_ref->init();
+        ;
         return *new_node_ref.get();
     }
 
@@ -13020,7 +13147,8 @@ public:
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
-        std::ignore        = raw_ref->settings().apply_staged_parameters();
+        raw_ref->init();
+        ;
         return *raw_ref;
     }
 
@@ -13031,7 +13159,7 @@ public:
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
         std::ignore        = raw_ref->settings().set(initial_settings);
-        std::ignore        = raw_ref->settings().apply_staged_parameters();
+        raw_ref->init();
         return *raw_ref;
     }
 

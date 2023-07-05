@@ -224,7 +224,7 @@ private:
         auto matches = [&query](const std::any &v) {
             try {
                 auto       sink                = std::any_cast<data_sink<T> *>(v);
-                const auto sink_name_matches   = !query._sink_name || *query._sink_name == sink->name();
+                const auto sink_name_matches   = !query._sink_name || *query._sink_name == sink->name;
                 const auto signal_name_matches = !query._signal_name || *query._signal_name == sink->signal_name;
                 return sink_name_matches && signal_name_matches;
             } catch (...) {
@@ -256,7 +256,7 @@ copy_span(std::span<const T> src, std::span<T> dst) {
 template<typename T>
 inline std::optional<T>
 get(const property_map &m, const std::string_view &key) {
-    const auto it = m.find(key);
+    const auto it = m.find(std::string(key));
     if (it == m.end()) {
         return {};
     }
@@ -391,7 +391,7 @@ public:
     }
 
     void
-    init(const property_map & /*old_settings*/, const property_map &new_settings) {
+    settings_changed(const property_map & /*old_settings*/, const property_map &new_settings) {
         if (apply_signal_info(new_settings)) {
             _has_signal_info_from_settings = true;
         }
@@ -506,44 +506,44 @@ private:
     bool
     apply_signal_info(const property_map &properties) {
         try {
-            const auto srate = detail::get<float>(properties, tag::SAMPLE_RATE.key());
-            const auto name  = detail::get<std::string>(properties, tag::SIGNAL_NAME.key());
-            const auto unit  = detail::get<std::string>(properties, tag::SIGNAL_UNIT.key());
-            const auto min   = detail::get<T>(properties, tag::SIGNAL_MIN.key());
-            const auto max   = detail::get<T>(properties, tag::SIGNAL_MAX.key());
+            const auto rate_ = detail::get<float>(properties, tag::SAMPLE_RATE.key());
+            const auto name_ = detail::get<std::string>(properties, tag::SIGNAL_NAME.key());
+            const auto unit_ = detail::get<std::string>(properties, tag::SIGNAL_UNIT.key());
+            const auto min_  = detail::get<T>(properties, tag::SIGNAL_MIN.key());
+            const auto max_  = detail::get<T>(properties, tag::SIGNAL_MAX.key());
 
             // commit
-            if (srate) {
-                sample_rate = *srate;
+            if (rate_) {
+                sample_rate = *rate_;
             }
-            if (name) {
-                signal_name = *name;
+            if (name_) {
+                signal_name = *name_;
             }
-            if (unit) {
-                signal_unit = *unit;
+            if (unit_) {
+                signal_unit = *unit_;
             }
-            if (min) {
-                signal_min = *min;
+            if (min_) {
+                signal_min = *min_;
             }
-            if (max) {
-                signal_max = *max;
+            if (max_) {
+                signal_max = *max_;
             }
 
             // forward to listeners
-            if (srate || name || unit || min || max) {
+            if (rate_ || name_ || unit_ || min_ || max_) {
                 const auto      dstempl = make_dataset_template();
 
                 std::lock_guard lg{ _listener_mutex };
                 for (auto &l : _listeners) {
-                    if (srate) {
+                    if (rate_) {
                         l->apply_sample_rate(sample_rate);
                     }
-                    if (name || unit || min || max) {
+                    if (name_ || unit_ || min_ || max_) {
                         l->set_dataset_template(dstempl);
                     }
                 }
             }
-            return name || unit || min || max;
+            return name_ || unit_ || min_ || max_;
         } catch (const std::bad_variant_access &) {
             // TODO log?
             return false;
@@ -953,7 +953,7 @@ private:
 
         void
         apply_sample_rate(float rateHz) override {
-            sample_delay = std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * rateHz);
+            sample_delay = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * rateHz));
             // TODO do we need to update the requested_samples of pending here? (considering both old and new time_delay)
         }
 

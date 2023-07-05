@@ -109,9 +109,12 @@ public:
     ~multi_adder() override = default;
 
     void
-    init(const fair::graph::property_map & /*old_setting*/, const fair::graph::property_map & /*new_setting*/) noexcept {
+    settings_changed(const fair::graph::property_map & /*old_setting*/, const fair::graph::property_map & /*new_setting*/) noexcept {
         apply_input_count();
     }
+
+    void
+    init() override {}
 
     [[nodiscard]] std::string_view
     name() const override {

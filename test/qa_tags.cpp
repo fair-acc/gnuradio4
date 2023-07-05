@@ -76,17 +76,17 @@ const boost::ut::suite TagPropagation = [] {
                 {1002, {{"key", "value@1002"}}}, //
                 {1023, {{"key", "value@1023"}}}  //
         };
-        src.set_name("TagSource"); // TODO: enable property_map to base-class parameter propagation
+        src.name = "TagSource"; // TODO: enable property_map to base-class parameter propagation
         auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>(
                 {{"name", "TagMonitor1"}});
-        monitor1.set_name("TagMonitor1");
+        monitor1.name = "TagMonitor1";
         auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>(
                 {{"name", "TagMonitor2"}});
-        monitor2.set_name("TagMonitor2");
+        monitor2.name = "TagMonitor2";
         auto &sink1 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink1"}});
-        sink1.set_name("TagSink1");
+        sink1.name = "TagSink1";
         auto &sink2 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink2"}});
-        sink2.set_name("TagSink2");
+        sink2.name = "TagSink2";
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink1)));

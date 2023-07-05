@@ -1,6 +1,7 @@
 #ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
 #define GRAPH_PROTOTYPE_SETTINGS_HPP
 
+#include "annotated.hpp"
 #include <atomic>
 #include <chrono>
 #include <concepts>
@@ -160,6 +161,11 @@ struct settings_base {
             = 0;
 };
 
+namespace detail {
+template<typename T>
+concept HasBaseType = requires { typename std::remove_cvref_t<T>::base_t; };
+};
+
 template<typename Node>
 class basic_settings : public settings_base {
     Node                              *_node = nullptr;
@@ -177,17 +183,54 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             meta::tuple_for_each(
                     [this](auto &&default_tag) {
-                        for_each(refl::reflect(*_node).members, [&](auto member) {
-                            using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
+                        auto iterate_over_member = [&](auto member) {
+                            using RawType = std::remove_cvref_t<decltype(member(*_node))>;
+                            using Type    = unwrap_if_wrapped_t<RawType>;
                             if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
-                                if (default_tag.shortKey().ends_with(get_display_name(member))) {
+                                auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
+                                    if (str.starts_with(prefix)) {
+                                        str.remove_prefix(prefix.size());
+                                    }
+                                    return str == target;
+                                };
+                                if (matchesIgnoringPrefix(default_tag.shortKey(), std::string_view(GR_TAG_PREFIX), get_display_name(member))) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
                                 _auto_update.emplace(get_display_name(member));
                             }
-                        });
+                        };
+                        if constexpr (detail::HasBaseType<Node>) {
+                            refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                        }
+                        refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                     },
                     fair::graph::tag::DEFAULT_TAGS);
+
+            // handle meta-information for UI and other non-processing-related purposes
+            auto iterate_over_member = [&]<typename Member>(Member member) {
+                using RawType = std::remove_cvref_t<decltype(member(*_node))>;
+                // disable clang format because v16 cannot handle in-line requires clauses with return types nicely yet
+                // clang-format off
+                if constexpr (requires(Node t) { t.meta_information; }) {
+                    static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_node->meta_information)>, property_map>);
+                    if constexpr (requires(Node t) { t.description; }) {
+                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(_node->description)>>, std::string_view>);
+                        _node->meta_information.value["description"] = std::string(_node->description);
+                    }
+
+                    if constexpr (AnnotatedType<RawType>) {
+                        _node->meta_information.value[fmt::format("{}::description", get_display_name(member))] = std::string(RawType::description());
+                        _node->meta_information.value[fmt::format("{}::documentation", get_display_name(member))] = std::string(RawType::documentation());
+                        _node->meta_information.value[fmt::format("{}::unit", get_display_name(member))] = std::string(RawType::unit());
+                        _node->meta_information.value[fmt::format("{}::visible", get_display_name(member))] = RawType::visible();
+                    }
+                }
+                // clang-format on
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
         }
     }
 
@@ -234,10 +277,10 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
             for (const auto &[localKey, localValue] : parameters) {
-                const auto &key    = localKey;
-                const auto &value  = localValue;
-                bool        is_set = false;
-                for_each(refl::reflect(*_node).members, [&, this](auto member) {
+                const auto &key                 = localKey;
+                const auto &value               = localValue;
+                bool        is_set              = false;
+                auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
@@ -249,11 +292,24 @@ public:
                             is_set = true;
                         }
                     }
-                });
+                };
+                if constexpr (detail::HasBaseType<Node>) {
+                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                }
+                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                 if (!is_set) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
             }
+        }
+
+        // copy items that could not be matched to the node's meta_information map (if available)
+        if constexpr (requires(Node t) {
+                          {
+                              unwrap_if_wrapped_t<decltype(t.meta_information)> {}
+                          } -> std::same_as<property_map>;
+                      }) {
+            update_maps(ret, _node->meta_information);
         }
 
         return ret; // N.B. returns those <key:value> parameters that could not be set
@@ -263,9 +319,9 @@ public:
     auto_update(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<Node>()) {
             for (const auto &[localKey, localValue] : parameters) {
-                const auto &key   = localKey;
-                const auto &value = localValue;
-                for_each(refl::reflect(*_node).members, [&](auto member) {
+                const auto &key                 = localKey;
+                const auto &value               = localValue;
+                auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
                     if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
@@ -273,7 +329,11 @@ public:
                             settings_base::_changed.store(true);
                         }
                     }
-                });
+                };
+                if constexpr (detail::HasBaseType<Node>) {
+                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                }
+                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
             }
         }
     }
@@ -335,29 +395,33 @@ public:
             std::lock_guard lg(_lock);
 
             property_map    oldSettings;
-            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
+            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
-                    for_each(refl::reflect(*_node).members, [&, this](auto member) {
+                    auto iterate_over_member = [&, this](auto member) {
                         using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
                         if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                             oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                         }
-                    });
+                    };
+                    if constexpr (detail::HasBaseType<Node>) {
+                        refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                    }
+                    refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                 }
             }
 
             property_map staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
-                const auto &key          = localKey;
-                const auto &staged_value = localStaged_value;
-                for_each(refl::reflect(*_node).members, [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                const auto &key                 = localKey;
+                const auto &staged_value        = localStaged_value;
+                auto        iterate_over_member = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
                     if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (requires { _node->init(/* old settings */ _active, /* new settings */ staged); }) {
+                            if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
                                 staged.insert_or_assign(key, staged_value);
                             } else {
                                 std::ignore = staged; // help clang to see why staged is not unused
@@ -367,18 +431,27 @@ public:
                             }
                         }
                     }
-                });
+                };
+                if constexpr (detail::HasBaseType<Node>) {
+                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+                }
+                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
             }
-            for_each(refl::reflect(*_node).members, [&, this](auto member) {
+            auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
-            });
-            if constexpr (requires(Node d, const property_map &map) { d.init(map, map); }) {
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
+
+            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
                 if (!staged.empty()) {
-                    _node->init(/* old settings */ oldSettings, /* new settings */ staged);
+                    _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged);
                 }
             }
             _staged.clear();
@@ -390,13 +463,17 @@ public:
     update_active_parameters() noexcept override {
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
-            for_each(refl::reflect(*_node).members, [&, this](auto member) {
+            auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
                 if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_node));
                 }
-            });
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
         }
     }
 };

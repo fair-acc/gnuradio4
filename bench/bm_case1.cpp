@@ -19,30 +19,32 @@ inline constexpr std::size_t N_ITER = 10;
 inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000, 1024);
 
 template<typename T, char op>
-class math_op : public fg::node<math_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
-    T _factor = static_cast<T>(1.0f);
+struct math_op : public fg::node<math_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
+    T factor = static_cast<T>(1.0f);
 
-public:
-    math_op() = delete;
-
-    explicit math_op(T factor, std::string name = fair::graph::this_source_location()) : _factor(factor) { this->set_name(name); }
+    // public:
+    //     math_op() = delete;
+    //
+    //     explicit math_op(T factor, std::string name = fair::graph::this_source_location()) : factor(factor) { this->set_name(name); }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(const V &a) const noexcept {
         if constexpr (op == '*') {
-            return a * _factor;
+            return a * factor;
         } else if constexpr (op == '/') {
-            return a / _factor;
+            return a / factor;
         } else if constexpr (op == '+') {
-            return a + _factor;
+            return a + factor;
         } else if constexpr (op == '-') {
-            return a - _factor;
+            return a - factor;
         } else {
             static_assert(fair::meta::always_false<T>, "unknown op");
         }
     }
 };
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (math_op<T, op>), factor);
 
 template<typename T>
 using multiply = math_op<T, '*'>;
@@ -62,7 +64,7 @@ class math_bulk_op : public fg::node<math_bulk_op<T, op>, fg::IN<T, 0, N_MAX, "i
 public:
     math_bulk_op() = delete;
 
-    explicit math_bulk_op(T factor, std::string name = fair::graph::this_source_location()) : _factor(factor) { this->set_name(name); }
+    explicit math_bulk_op(T factor, std::string name_ = fair::graph::this_source_location()) : _factor(factor) { this->name = name_; }
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -124,7 +126,7 @@ public:
 
     converting_multiply() = delete;
 
-    explicit converting_multiply(T factor, std::string name = fair::graph::this_source_location()) : _factor(factor) { this->set_name(name); }
+    explicit converting_multiply(T factor, std::string name_ = fair::graph::this_source_location()) : _factor(factor) { this->name = name_; }
 
     [[nodiscard]] constexpr auto
     process_one(T a) const noexcept {
@@ -182,7 +184,7 @@ class gen_operation_SIMD : public fg::node<gen_operation_SIMD<T, op>, fg::IN<T, 
 public:
     gen_operation_SIMD() = delete;
 
-    explicit gen_operation_SIMD(T value, std::string name = fair::graph::this_source_location()) : _value(value) { this->set_name(name); }
+    explicit gen_operation_SIMD(T value, std::string name_ = fair::graph::this_source_location()) : _value(value) { this->name = name_; }
 
     fair::graph::work_return_t
     work() noexcept {
@@ -447,16 +449,16 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
-        auto gen_mult_block                                                = [&factor] { return merge<"out", "in">(multiply<T>(factor), merge<"out", "in">(divide<T>(factor), add<T, -1>())); };
-        auto merged_node                                                   = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), gen_mult_block()), test::sink<T>());
+        auto gen_mult_block = [&factor] { return merge<"out", "in">(multiply<T>({ { { "factor", factor } } }), merge<"out", "in">(divide<T>({ { { "factor", factor } } }), add<T, -1>())); };
+        auto merged_node    = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), gen_mult_block()), test::sink<T>());
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
     };
     templated_cascaded_test(static_cast<float>(2.0), "merged src->mult(2.0)->divide(2.0)->add(-1)->sink - float");
     templated_cascaded_test(static_cast<int>(2.0), "merged src->mult(2.0)->divide(2.0)->add(-1)->sink - int");
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char *test_name) {
-        auto gen_mult_block                                                = [&factor] { return merge<"out", "in">(multiply<T>(factor), merge<"out", "in">(divide<T>(factor), add<T, -1>())); };
-        auto merged_node                                                   = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), //
+        auto gen_mult_block = [&factor] { return merge<"out", "in">(multiply<T>({ { { "factor", factor } } }), merge<"out", "in">(divide<T>({ { { "factor", factor } } }), add<T, -1>())); };
+        auto merged_node    = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), //
                                                                  test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(), gen_mult_block)),
                                               test::sink<T>());
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
@@ -513,8 +515,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         using copy     = ::copy<float, 0, N_MAX, true, true>;
         std::vector<copy *> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i] = std::addressof(flow_graph.make_node<copy>());
-            cpy[i]->set_name(fmt::format("copy {} at {}", i, fair::graph::this_source_location()));
+            cpy[i] = std::addressof(flow_graph.make_node<copy>({ { "name", fmt::format("copy {} at {}", i, fair::graph::this_source_location()) } }));
 
             if (i == 0) {
                 expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(*cpy[i])));
@@ -551,8 +552,8 @@ inline const boost::ut::suite _runtime_tests = [] {
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
         fg::graph flow_graph;
         auto     &src  = flow_graph.make_node<test::source<T>>(N_SAMPLES);
-        auto     &mult = flow_graph.make_node<multiply<T>>(factor);
-        auto     &div  = flow_graph.make_node<divide<T>>(factor);
+        auto     &mult = flow_graph.make_node<multiply<T>>({ { { "factor", factor } } });
+        auto     &div  = flow_graph.make_node<divide<T>>({ { { "factor", factor } } });
         auto     &add1 = flow_graph.make_node<add<T, -1>>();
         auto     &sink = flow_graph.make_node<test::sink<T>>();
 
@@ -577,8 +578,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         std::vector<divide<T> *>   div1;
         std::vector<add<T, -1> *>  add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(std::addressof(flow_graph.make_node<multiply<T>>(factor, fmt::format("mult1.{}", i))));
-            div1.emplace_back(std::addressof(flow_graph.make_node<divide<T>>(factor, fmt::format("div1.{}", i))));
+            mult1.emplace_back(std::addressof(flow_graph.make_node<multiply<T>>({ { "factor", factor }, { "name", fmt::format("mult1.{}", i) } })));
+            div1.emplace_back(std::addressof(flow_graph.make_node<divide<T>>({ { "factor", factor }, { "name", fmt::format("div1.{}", i) } })));
             add1.emplace_back(std::addressof(flow_graph.make_node<add<T, -1>>()));
         }
 
@@ -680,8 +681,8 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
         fg::graph flow_graph;
         auto     &src  = flow_graph.make_node<test::source<T>>(N_SAMPLES);
-        auto     &mult = flow_graph.make_node<multiply<T>>(factor);
-        auto     &div  = flow_graph.make_node<divide<T>>(factor);
+        auto     &mult = flow_graph.make_node<multiply<T>>({ { { "factor", factor } } });
+        auto     &div  = flow_graph.make_node<divide<T>>({ { { "factor", factor } } });
         auto     &add1 = flow_graph.make_node<add<T, -1>>();
         auto     &sink = flow_graph.make_node<test::sink<T>>();
 
