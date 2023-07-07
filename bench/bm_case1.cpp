@@ -82,7 +82,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr fg::work_return_t
+    [[nodiscard]] constexpr fg::work_return_status_t
     process_bulk(std::span<const T> input, std::span<T> output) const noexcept {
         // classic for-loop
         for (std::size_t i = 0; i < input.size(); i++) {
@@ -95,7 +95,7 @@ public:
         // C++20 ranges
         // std::ranges::transform(input, output.begin(), [this](const T& elem) { return process_one(elem); });
 
-        return fg::work_return_t::OK;
+        return fg::work_return_status_t::OK;
     }
 };
 
@@ -187,7 +187,7 @@ public:
     explicit gen_operation_SIMD(T value, std::string name_ = fair::graph::this_source_location()) : _value(value) { this->name = name_; }
 
     fair::graph::work_return_t
-    work() noexcept {
+    work(std::size_t requested_work) noexcept {
         auto      &out_port   = output_port<0>(this);
         auto      &in_port    = input_port<0>(this);
 
@@ -196,9 +196,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
-            return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+            return { requested_work, 0UL, fair::graph::work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
         } else if (n_writable == 0) {
-            return fair::graph::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+            return { requested_work, 0UL, fair::graph::work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
 
@@ -247,9 +247,9 @@ public:
                 n_to_publish);
 
         if (!reader.consume(n_to_publish)) {
-            return fair::graph::work_return_t::ERROR;
+            return { requested_work, n_to_publish, fair::graph::work_return_status_t::ERROR };
         }
-        return fair::graph::work_return_t::OK;
+        return { requested_work, n_to_publish, fair::graph::work_return_status_t::OK };
     }
 };
 
@@ -278,7 +278,7 @@ public:
     }
 
     fair::graph::work_return_t
-    work() noexcept { // TODO - make this an alternate version to 'process_one'
+    work(std::size_t requested_work) noexcept { // TODO - make this an alternate version to 'process_one'
         auto      &out_port   = out;
         auto      &in_port    = in;
 
@@ -287,9 +287,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
-            return fair::graph::work_return_t::DONE;
+            return { requested_work, 0UL, fair::graph::work_return_status_t::DONE };
         } else if (n_writable == 0) {
-            return fair::graph::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+            return { requested_work, 0UL, fair::graph::work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
 
@@ -308,9 +308,9 @@ public:
                     n_to_publish);
         }
         if (!reader.consume(n_to_publish)) {
-            return fair::graph::work_return_t::ERROR;
+            return { requested_work, 0UL, fair::graph::work_return_status_t::ERROR };
         }
-        return fair::graph::work_return_t::OK;
+        return { requested_work, 0UL, fair::graph::work_return_status_t::OK };
     }
 };
 
@@ -339,7 +339,7 @@ class convert : public fg::node<convert<From, To, N_MIN, N_MAX>, fg::IN<From, N_
     constexpr static std::size_t simd_size      = std::max(from_simd_size, to_simd_size);
 
 public:
-    fair::graph::work_return_t
+    fair::graph::work_return_status_t
     work() noexcept {
         using namespace stdx;
         auto      &out_port   = output_port<"out">(this);
@@ -350,9 +350,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable < to_simd_size) {
-            return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+            return fair::graph::work_return_status_t::INSUFFICIENT_INPUT_ITEMS;
         } else if (n_writable < from_simd_size) {
-            return fair::graph::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+            return fair::graph::work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS;
         }
         const auto n_readable_scalars = n_readable * from_simd_size;
         const auto n_writable_scalars = n_writable * to_simd_size;
@@ -361,7 +361,7 @@ public:
         const auto objects_to_write   = stdx::is_simd_v<To> ? n_simd_to_convert : scalars_to_convert;
         const auto objects_to_read    = stdx::is_simd_v<From> ? n_simd_to_convert : scalars_to_convert;
 
-        auto       return_value       = fair::graph::work_return_t::OK;
+        auto       return_value       = fair::graph::work_return_status_t::OK;
         writer.publish( //
                 [&](std::span<To> output) {
                     const auto input = reader.get();
@@ -377,7 +377,7 @@ public:
                         }
                     }
                     if (!reader.consume(objects_to_read)) {
-                        return_value = fair::graph::work_return_t::ERROR;
+                        return_value = fair::graph::work_return_status_t::ERROR;
                         return;
                     }
                 },
@@ -413,7 +413,7 @@ loop_over_work(auto &node) {
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
     while (test::n_samples_consumed < N_SAMPLES) {
-        node.work();
+        std::ignore = node.work(std::numeric_limits<std::size_t>::max());
     }
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "produced too many/few samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "consumed too many/few samples";

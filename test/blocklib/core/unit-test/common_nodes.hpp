@@ -61,8 +61,12 @@ ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 //  - use node::set_name instead of returning an empty name
 template<typename T>
 class multi_adder : public fair::graph::node_model {
+    static std::atomic_size_t _unique_id_counter;
+
 public:
-    int input_port_count;
+    int               input_port_count;
+    const std::size_t unique_id    = _unique_id_counter++;
+    const std::string unique_name_ = fmt::format("multi_adder#{}", unique_id); // TODO: resolve symbol duplication
 
 protected:
     using in_port_t = fair::graph::IN<T>;
@@ -70,11 +74,6 @@ protected:
     // after connection is established, and vector might reallocate
     std::list<in_port_t> _input_ports;
     fair::graph::OUT<T>  _output_port;
-
-private:
-    static std::atomic_size_t _unique_id_counter;
-    const std::size_t         _unique_id   = _unique_id_counter++;
-    const std::string         _unique_name = fmt::format("multi_adder#{}", _unique_id);
 
 protected:
     using setting_map                                      = std::map<std::string, int, std::less<>>;
@@ -118,7 +117,7 @@ public:
 
     [[nodiscard]] std::string_view
     name() const override {
-        return _unique_name;
+        return unique_name_;
     }
 
     std::string_view
@@ -128,7 +127,7 @@ public:
 
     // TODO: integrate with node::work
     fair::graph::work_return_t
-    work() override {
+    work(std::size_t requested_work) override {
         // TODO: Rewrite with ranges once we can use them
         std::size_t available_samples = -1_UZ;
         for (const auto &input_port : _input_ports) {
@@ -139,7 +138,7 @@ public:
         }
 
         if (available_samples == 0) {
-            return fair::graph::work_return_t::OK;
+            return { requested_work, 0_UZ, fair::graph::work_return_status_t::OK };
         }
 
         std::vector<std::span<const double>> readers;
@@ -160,7 +159,7 @@ public:
         for (auto &input_port [[maybe_unused]] : _input_ports) {
             assert(available_samples == input_port.streamReader().consume(available_samples));
         }
-        return fair::graph::work_return_t::OK;
+        return { requested_work, available_samples, fair::graph::work_return_status_t::OK };
     }
 
     void *
@@ -188,15 +187,17 @@ public:
 
     [[nodiscard]] std::string_view
     unique_name() const override {
-        return _unique_name;
+        return unique_name_;
     }
 };
+
+// static_assert(fair::graph::NodeType<multi_adder<int>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(multi_adder, input_port_count);
 
 template<typename Registry>
 void
-register_builtin_nodes(Registry *registry) {
+                       register_builtin_nodes(Registry *registry) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
     GP_REGISTER_NODE(registry, builtin_multiply, double, float);

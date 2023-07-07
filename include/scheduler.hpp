@@ -112,9 +112,7 @@ public:
             //
             // });
             FMT_FALLTHROUGH;
-        case PAUSED:
-            _state = INITIALISED;
-            break;
+        case PAUSED: _state = INITIALISED; break;
         case SHUTTING_DOWN:
         case INITIALISED:
         case ERROR: break;
@@ -135,7 +133,7 @@ public:
         uint32_t done           = 0;
         uint32_t progress_count = 0;
         while (done < n_batches && !_stop_requested) {
-            bool     something_happened = work() == work_return_t::OK;
+            bool     something_happened = work().status == work_return_status_t::OK;
             uint64_t progress_local, progress_new;
             if (something_happened) { // something happened in this thread => increase progress and reset done count
                 do {
@@ -153,7 +151,7 @@ public:
                     done           = static_cast<std::uint32_t>(progress_local & ((1ULL << 32) - 1));
                     if (progress_count == progress_count_old) { // nothing happened => increase done count
                         progress_new = ((progress_count + 0ULL) << 32) + done + 1;
-                    } else {                                    // something happened in another thread => keep progress and done count and rerun this task without waiting
+                    } else { // something happened in another thread => keep progress and done count and rerun this task without waiting
                         progress_new = ((progress_count + 0ULL) << 32) + done;
                     }
                 } while (!_progress.compare_exchange_strong(progress_local, progress_new));
@@ -200,18 +198,21 @@ public:
     template<typename node_type>
     work_return_t
     work_once(const std::span<node_type> &nodes) {
-        bool something_happened = false;
+        constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
+        bool                  something_happened = false;
+        std::size_t           performed_work     = 0_UZ;
         for (auto &currentNode : nodes) {
-            auto result = currentNode->work();
-            if (result == work_return_t::ERROR) {
-                return work_return_t::ERROR;
-            } else if (result == work_return_t::INSUFFICIENT_INPUT_ITEMS || result == work_return_t::DONE) {
+            auto result = currentNode->work(requested_work);
+            performed_work += result.performed_work;
+            if (result.status == work_return_status_t::ERROR) {
+                return { requested_work, performed_work, work_return_status_t::ERROR };
+            } else if (result.status == work_return_status_t::INSUFFICIENT_INPUT_ITEMS || result.status == work_return_status_t::DONE) {
                 // nothing
-            } else if (result == work_return_t::OK || result == work_return_t::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status == work_return_status_t::OK || result.status == work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
         }
-        return something_happened ? work_return_t::OK : work_return_t::DONE;
+        return { requested_work, performed_work, something_happened ? work_return_status_t::OK : work_return_status_t::DONE };
     }
 
     // todo: could be moved to base class, but would make `start()` virtual or require CRTP
@@ -224,23 +225,16 @@ public:
 
     void
     start() {
-        switch(this->_state) {
-            case IDLE:
-                this->init();
-                break;
-            case STOPPED:
-                reset();
-                break;
-            case PAUSED:
-                this->_state = INITIALISED;
-                break;
-            case INITIALISED:
-            case RUNNING:
-            case REQUESTED_PAUSE:
-            case REQUESTED_STOP:
-            case SHUTTING_DOWN:
-            case ERROR:
-                break;
+        switch (this->_state) {
+        case IDLE: this->init(); break;
+        case STOPPED: reset(); break;
+        case PAUSED: this->_state = INITIALISED; break;
+        case INITIALISED:
+        case RUNNING:
+        case REQUESTED_PAUSE:
+        case REQUESTED_STOP:
+        case SHUTTING_DOWN:
+        case ERROR: break;
         }
         if (this->_state != INITIALISED) {
             throw std::runtime_error("simple scheduler work(): graph not initialised");
@@ -249,8 +243,8 @@ public:
             this->_state = RUNNING;
             work_return_t result;
             auto          nodelist = std::span{ this->_graph.blocks() };
-            while ((result = work_once(nodelist)) == work_return_t::OK) {
-                if (result == work_return_t::ERROR) {
+            while ((result = work_once(nodelist)).status == work_return_status_t::OK) {
+                if (result.status == work_return_status_t::ERROR) {
                     this->_state = ERROR;
                     return;
                 }
@@ -334,18 +328,22 @@ public:
     template<typename node_type>
     work_return_t
     work_once(const std::span<node_type> &nodes) {
-        bool something_happened = false;
+        constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
+        bool                  something_happened = false;
+        std::size_t           performed_work     = 0_UZ;
+
         for (auto &currentNode : nodes) {
-            auto result = currentNode->work();
-            if (result == work_return_t::ERROR) {
-                return work_return_t::ERROR;
-            } else if (result == work_return_t::INSUFFICIENT_INPUT_ITEMS || result == work_return_t::DONE) {
+            auto result = currentNode->work(requested_work);
+            performed_work += result.performed_work;
+            if (result.status == work_return_status_t::ERROR) {
+                return { requested_work, performed_work, work_return_status_t::ERROR };
+            } else if (result.status == work_return_status_t::INSUFFICIENT_INPUT_ITEMS || result.status == work_return_status_t::DONE) {
                 // nothing
-            } else if (result == work_return_t::OK || result == work_return_t::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status == work_return_status_t::OK || result.status == work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
         }
-        return something_happened ? work_return_t::OK : work_return_t::DONE;
+        return { requested_work, performed_work, something_happened ? work_return_status_t::OK : work_return_status_t::DONE };
     }
 
     void
@@ -356,23 +354,16 @@ public:
 
     void
     start() {
-        switch(this->_state) {
-            case IDLE:
-                this->init();
-                break;
-            case STOPPED:
-                reset();
-                break;
-            case PAUSED:
-                this->_state = INITIALISED;
-                break;
-            case INITIALISED:
-            case RUNNING:
-            case REQUESTED_PAUSE:
-            case REQUESTED_STOP:
-            case SHUTTING_DOWN:
-            case ERROR:
-                break;
+        switch (this->_state) {
+        case IDLE: this->init(); break;
+        case STOPPED: reset(); break;
+        case PAUSED: this->_state = INITIALISED; break;
+        case INITIALISED:
+        case RUNNING:
+        case REQUESTED_PAUSE:
+        case REQUESTED_STOP:
+        case SHUTTING_DOWN:
+        case ERROR: break;
         }
         if (this->_state != INITIALISED) {
             throw std::runtime_error("simple scheduler work(): graph not initialised");
@@ -381,8 +372,8 @@ public:
             this->_state = RUNNING;
             work_return_t result;
             auto          nodelist = std::span{ this->_nodelist };
-            while ((result = work_once(nodelist)) == work_return_t::OK) {
-                if (result == work_return_t::ERROR) {
+            while ((result = work_once(nodelist)).status == work_return_status_t::OK) {
+                if (result.status == work_return_status_t::ERROR) {
                     this->_state = ERROR;
                     return;
                 }

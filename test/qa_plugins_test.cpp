@@ -140,9 +140,9 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         expect(connection_2 == fg::connection_result_t::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
-            node_source->work();
-            node_multiply->work();
-            node_sink->work();
+            std::ignore = node_source->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = node_multiply->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = node_sink->work(std::numeric_limits<std::size_t>::max());
         }
     };
 
@@ -155,7 +155,7 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         // Instantiate a built-in node in a static way
         fair::graph::property_map node_multiply_1_params;
         node_multiply_1_params["factor"] = 2.0;
-        auto &node_multiply_1 = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
+        auto &node_multiply_1            = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
 
         // Instantiate a built-in node via the plugin loader
         auto &node_multiply_2 = context().loader.instantiate_in_graph(flow_graph, names::builtin_multiply, "double");
@@ -176,10 +176,10 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         expect(connection_3 == fg::connection_result_t::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
-            node_source.work();
-            node_multiply_1.work();
-            node_multiply_2.work();
-            node_sink.work();
+            std::ignore = node_source.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = node_multiply_1.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = node_multiply_2.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = node_sink.work(std::numeric_limits<std::size_t>::max());
         }
     };
 };

@@ -68,6 +68,7 @@ public:
     }
 };
 
+static_assert(fair::graph::NodeType<cout_sink<float>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10_UZ>
@@ -77,7 +78,7 @@ public:
     std::size_t _counter = 0;
 
     fair::graph::work_return_t
-    work() {
+    work(std::size_t requested_work) {
         if (_counter < count) {
             _counter++;
             auto &writer = output_port<"value">(this).streamWriter();
@@ -85,13 +86,14 @@ public:
             data[0]      = val;
             data.publish(1);
 
-            return fair::graph::work_return_t::OK;
+            return { requested_work, 1_UZ, fair::graph::work_return_status_t::OK };
         } else {
-            return fair::graph::work_return_t::DONE;
+            return { requested_work, 0_UZ, fair::graph::work_return_status_t::DONE };
         }
     }
 };
 
+static_assert(fair::graph::NodeType<repeater_source<int, 42>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
@@ -113,7 +115,7 @@ const boost::ut::suite PortApiTests = [] {
 
     "PortBufferApi"_test = [] {
         OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out0"> output_port;
-        BufferWriter auto                                             &writer    = output_port.streamWriter();
+        BufferWriter auto                                             &writer = output_port.streamWriter();
         // BufferWriter auto                                             &tagWriter = output_port.tagWriter();
         expect(ge(writer.available(), 32_UZ));
 
