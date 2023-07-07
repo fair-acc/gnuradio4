@@ -18,7 +18,7 @@ inline static std::size_t n_samples_produced = 0_UZ;
 template<typename T, std::size_t min = 0_UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
 class source : public fg::node<source<T, min, count>> {
 public:
-    uint64_t _n_samples_max;
+    uint64_t    _n_samples_max;
     std::size_t _n_tag_offset;
     fg::OUT<T>  out;
 
@@ -34,7 +34,7 @@ public:
     [[nodiscard]] constexpr auto
     process_one_simd(auto N) const noexcept -> fair::meta::simdize<T, decltype(N)::value> {
         n_samples_produced += N;
-        fair::meta::simdize<T, N> x {};
+        fair::meta::simdize<T, N> x{};
         benchmark::force_to_memory(x);
         return x;
     }
@@ -48,7 +48,7 @@ public:
     }
 
     fair::graph::work_return_t
-    work() {
+    work(std::size_t requested_work) {
         const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
         if (n_to_publish > 0) {
             auto &port   = out;
@@ -60,7 +60,7 @@ public:
             if constexpr (use_bulk_operation) {
                 std::size_t n_write = std::clamp(n_to_publish, 0UL, std::min(writer.available(), port.max_buffer_size()));
                 if (n_write == 0_UZ) {
-                    return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                    return { requested_work, 0_UZ, fair::graph::work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
                 }
 
                 writer.publish( //
@@ -73,14 +73,14 @@ public:
             } else {
                 auto [data, token] = writer.get(1);
                 if (data.size() == 0_UZ) {
-                    return fair::graph::work_return_t::ERROR;
+                    return { requested_work, 0_UZ, fair::graph::work_return_status_t::ERROR };
                 }
                 data[0] = process_one();
                 writer.publish(token, 1);
             }
-            return fair::graph::work_return_t::OK;
+            return { requested_work, 1_UZ, fair::graph::work_return_status_t::OK };
         } else {
-            return fair::graph::work_return_t::DONE;
+            return { requested_work, 0_UZ, fair::graph::work_return_status_t::DONE };
         }
     }
 };

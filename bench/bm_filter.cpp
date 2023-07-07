@@ -24,7 +24,7 @@ loop_over_work(auto &node) {
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
     while (test::n_samples_consumed < N_SAMPLES) {
-        node.work();
+        std::ignore = node.work(std::numeric_limits<std::size_t>::max());
     }
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "produced too many/few samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "consumed too many/few samples";
@@ -92,7 +92,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
 
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -106,7 +106,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->fir_filter->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -120,7 +120,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->iir_filter->sink - direct-form I"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -134,7 +134,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
         expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        fair::graph::scheduler::simple sched{std::move(flow_graph)};
+        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->iir_filter->sink - direct-form II"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }

@@ -98,11 +98,11 @@ main(int argc, char *argv[]) {
     assert(connection_4 == fg::connection_result_t::SUCCESS);
 
     for (std::size_t i = 0; i < repeats; ++i) {
-        std::ignore = node_source.work();
-        std::ignore = node_multiply_1.work();
-        std::ignore = node_multiply_2.work();
-        std::ignore = node_counter.work();
-        std::ignore = node_sink.work();
+        std::ignore = node_source.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = node_multiply_1.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = node_multiply_2.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = node_counter.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = node_sink.work(std::numeric_limits<std::size_t>::max());
     }
 
     fmt::print("repeats {} event_count {}\n", repeats, builtin_counter<double>::s_event_count);
