@@ -76,7 +76,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         return static_cast<T>(0);
     }
 
-    work_return_t
+    work_return_status_t
     process_bulk(std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
@@ -90,7 +90,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         }
 
         n_samples_produced += output.size();
-        return n_samples_produced < n_samples_max ? work_return_t::OK : work_return_t::DONE;
+        return n_samples_produced < n_samples_max ? work_return_status_t::OK : work_return_status_t::DONE;
     }
 };
 
@@ -118,7 +118,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
         return input;
     }
 
-    constexpr work_return_t
+    constexpr work_return_status_t
     process_bulk(std::span<const T> input, std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
@@ -132,7 +132,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
         n_samples_produced += input.size();
         std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
 
-        return work_return_t::OK;
+        return work_return_status_t::OK;
     }
 };
 
@@ -164,7 +164,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     }
 
     // template<fair::meta::t_or_simd<T> V>
-    constexpr work_return_t
+    constexpr work_return_status_t
     process_bulk(std::span<const T> input) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
@@ -177,7 +177,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
 
         n_samples_produced += input.size();
 
-        return work_return_t::OK;
+        return work_return_status_t::OK;
     }
 };
 

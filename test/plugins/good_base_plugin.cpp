@@ -54,10 +54,10 @@ public:
     T value = 1;
 
     fg::work_return_t
-    work() {
+    work(std::size_t requested_work) {
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
-            return fg::work_return_t::DONE;
+            return { requested_work, 0_UZ, fg::work_return_status_t::DONE };
         }
 
         auto &port   = fair::graph::output_port<0>(this);
@@ -68,11 +68,11 @@ public:
 
         value += 1;
         if (event_count == -1_UZ) {
-            return fg::work_return_t::OK;
+            return { requested_work, 1_UZ, fg::work_return_status_t::OK };
         }
 
         event_count--;
-        return fg::work_return_t::OK;
+        return { requested_work, 1_UZ, fg::work_return_status_t::OK };
     }
 };
 } // namespace good

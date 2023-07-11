@@ -11345,14 +11345,18 @@ simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto off
     }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
-enum class work_return_t {
+enum class work_return_status_t {
     ERROR                     = -100, /// error occurred in the work function
     INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
     INSUFFICIENT_INPUT_ITEMS  = -2,   /// work requires a larger input buffer to produce output
     DONE                      = -1,   /// this block has completed its processing and the flowgraph should be done
     OK                        = 0,    /// work call was successful and return values in i/o structs are valid
-    CALLBACK_INITIATED        = 1,    /// rather than blocking in the work function, the block will call back to the
-                                      /// parent interface when it is ready to be called again
+};
+
+struct work_return_t {
+    std::size_t          requested_work = std::numeric_limits<std::size_t>::max();
+    std::size_t          performed_work = 0;
+    work_return_status_t status         = work_return_status_t::OK;
 };
 
 template<std::size_t Index, typename Self>
@@ -11406,7 +11410,7 @@ output_ports(Self *self) noexcept {
 }
 
 template<typename T>
-concept NodeType = requires(T t) {
+concept NodeType = requires(T t, std::size_t requested_work) {
     { t.unique_name } -> std::same_as<const std::string &>;
     { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
@@ -11415,7 +11419,7 @@ concept NodeType = requires(T t) {
     { t.is_blocking() } noexcept -> std::same_as<bool>;
 
     { t.settings() } -> std::same_as<settings_base &>;
-    { t.work() } -> std::same_as<work_return_t>;
+    { t.work(requested_work) } -> std::same_as<work_return_t>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
@@ -11495,9 +11499,9 @@ concept HasRequiredProcessFunction = HasProcessOneFunction<Derived> != HasProces
  *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
  *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
  *     if (n_readable == 0) {
- *         return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+ *         return { 0, fair::graph::work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
  *     } else if (n_writable == 0) {
- *         return fair::graph::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+ *         return { 0, fair::graph::work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
  *     }
  *     const std::size_t n_to_publish = std::min(n_readable, n_writable); // N.B. here enforcing N_input == N_output
  *
@@ -11509,9 +11513,9 @@ concept HasRequiredProcessFunction = HasProcessOneFunction<Derived> != HasProces
  *     }, n_to_publish);
  *
  *     if (!reader.consume(n_to_publish)) {
- *         return fair::graph::work_return_t::ERROR;
+ *         return { n_to_publish, fair::graph::work_return_status_t::ERROR };
  *     }
- *     return fair::graph::work_return_t::OK;
+ *     return { n_to_publish, fair::graph::work_return_status_t::OK };
  * }
  * @endcode
  * <li> <b>case 4</b>:  Python -> map to cases 1-3 and/or dedicated callback (to-be-implemented)
@@ -11783,9 +11787,14 @@ public:
         std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t &tag) { tag.reset(); });
     }
 
-public:
+protected:
+    /**
+     * @brief
+     * @return struct { std::size_t produced_work, work_return_t}
+     */
     work_return_t
-    work() noexcept {
+    work_internal(std::size_t requested_work) noexcept {
+        using fair::graph::work_return_status_t;
         using input_types                       = traits::node::input_port_types<Derived>;
         using output_types                      = traits::node::output_port_types<Derived>;
 
@@ -11803,17 +11812,17 @@ public:
                 meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
                 const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
                 if (available_samples < 0 && max_buffer > 0) {
-                    return work_return_t::DONE;
+                    return { requested_work, 0_UZ, work_return_status_t::DONE };
                 }
                 if (available_samples == 0) {
-                    return work_return_t::OK;
+                    return { requested_work, 0_UZ, work_return_status_t::OK };
                 }
                 samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
-                    return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                    return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (samples_to_process == 0) {
-                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                    return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
                 }
             } else if constexpr (requires(const Derived &d) {
                                      { available_samples(d) } -> std::same_as<std::size_t>;
@@ -11821,13 +11830,13 @@ public:
                 // the (source) node wants to determine the number of samples to process
                 samples_to_process = available_samples(self());
                 if (samples_to_process == 0) {
-                    return work_return_t::OK;
+                    return { requested_work, 0_UZ, work_return_status_t::OK };
                 }
                 if (not enough_samples_for_output_ports(samples_to_process)) {
-                    return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                    return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (not space_available_on_output_ports(samples_to_process)) {
-                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                    return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
                 }
             } else if constexpr (is_sink_node) {
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
@@ -11840,7 +11849,7 @@ public:
                 // derive value from output buffer size
                 samples_to_process = std::apply([&](const auto &...ports) { return std::min({ ports.streamWriter().available()..., ports.max_buffer_size()... }); }, output_ports(&self()));
                 if (not enough_samples_for_output_ports(samples_to_process)) {
-                    return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                    return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 // space_available_on_output_ports is true by construction of samples_to_process
             }
@@ -11848,15 +11857,15 @@ public:
             // Capturing structured bindings does not work in Clang...
             const auto [at_least_one_input_has_data, available_values_count, n_samples_until_next_tag_] = self().inputs_status(self());
             if (available_values_count == 0) {
-                return at_least_one_input_has_data ? work_return_t::INSUFFICIENT_INPUT_ITEMS : work_return_t::DONE;
+                return { requested_work, 0_UZ, at_least_one_input_has_data ? work_return_status_t::INSUFFICIENT_INPUT_ITEMS : work_return_status_t::DONE };
             }
             samples_to_process       = available_values_count;
             n_samples_until_next_tag = n_samples_until_next_tag_;
             if (not enough_samples_for_output_ports(samples_to_process)) {
-                return work_return_t::INSUFFICIENT_INPUT_ITEMS;
+                return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
             }
             if (not space_available_on_output_ports(samples_to_process)) {
-                return work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+                return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
             }
         }
 
@@ -11925,14 +11934,17 @@ public:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
+        // clamp
+        samples_to_process = std::min(samples_to_process, requested_work);
+
         if constexpr (HasProcessBulkFunction<Derived>) {
-            const work_return_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
-                                                 std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
+            const work_return_status_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
+                                                        std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
 
             write_to_outputs(samples_to_process, writers_tuple);
             const bool success = consume_readers(self(), samples_to_process);
             forward_tags();
-            return success ? ret : work_return_t::ERROR;
+            return { requested_work, samples_to_process, success ? ret : work_return_status_t::ERROR };
         } else {
             //       if constexpr (HasProcessOneFunction<Derived>) { // TODO: nail down the required method parameters and return types
             // handle process_one(...)
@@ -11977,13 +11989,32 @@ public:
             }
 #endif
             forward_tags();
-            return success ? work_return_t::OK : work_return_t::ERROR;
+            return { requested_work, samples_to_process, success ? work_return_status_t::OK : work_return_status_t::ERROR };
         } // process_one(...) handling
         //        else {
         //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
         //        }
-        return work_return_t::ERROR;
-    } // end: work_return_t work() noexcept { ..}
+        return { requested_work, 0_UZ, work_return_status_t::ERROR };
+    } // end: work_return_t work_internal() noexcept { ..}
+
+public:
+    /**
+     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
+     *
+     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
+     * requested_work limit as an affine relation with the returned performed_work.
+     * @return { requested_work, performed_work, status}
+     */
+    work_return_t
+    work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
+        constexpr bool is_blocking = node_template_parameters::template contains<BlockingIO>;
+        if constexpr (is_blocking) {
+            return work_internal(requested_work);
+            //static_assert(fair::meta::always_false<derived_t>, "not yet implemented");
+        } else {
+            return work_internal(requested_work);
+        }
+    }
 };
 
 template<typename Derived, typename... Arguments>
@@ -12027,9 +12058,9 @@ node_description() noexcept {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                                        RawType::visible() ? "" : "_", //
                                        type_name,
-                                       member_name,                   //
+                                       member_name, //
                                        RawType::description(), RawType::unit(),
-                                       RawType::documentation(),      //
+                                       RawType::documentation(), //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
@@ -12224,8 +12255,8 @@ public:
     } // end:: process_one
 
     work_return_t
-    work() noexcept {
-        return base::work();
+    work(std::size_t requested_work) noexcept {
+        return base::work(requested_work);
     }
 };
 
@@ -12774,7 +12805,8 @@ public:
             = 0;
 
     [[nodiscard]] virtual work_return_t
-    work() = 0;
+    work(std::size_t requested_work)
+            = 0;
 
     [[nodiscard]] virtual void *
     raw() = 0;
@@ -12860,8 +12892,8 @@ public:
     }
 
     [[nodiscard]] constexpr work_return_t
-    work() override {
-        return node_ref().work();
+    work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
+        return node_ref().work(requested_work);
     }
 
     [[nodiscard]] std::string_view
@@ -12979,9 +13011,9 @@ public:
 
 class graph {
 private:
-    std::vector<std::function<connection_result_t(graph&)>> _connection_definitions;
-    std::vector<std::unique_ptr<node_model>>                _nodes;
-    std::vector<edge>                                       _edges;
+    std::vector<std::function<connection_result_t(graph &)>> _connection_definitions;
+    std::vector<std::unique_ptr<node_model>>                 _nodes;
+    std::vector<edge>                                        _edges;
 
     template<typename Node>
     std::unique_ptr<node_model> &
@@ -13111,11 +13143,16 @@ private:
     connect(Source &source, Port Source::*member_ptr);
 
 public:
-    graph(graph&) = delete;
-    graph(graph&&) = default;
-    graph() = default;
-    graph &operator=(graph&) = delete;
-    graph &operator=(graph&&) = default;
+    graph(graph &)  = delete;
+    graph(graph &&) = default;
+    graph()         = default;
+    graph &
+    operator=(graph &)
+            = delete;
+    graph &
+    operator=(graph &&)
+            = default;
+
     /**
      * @return a list of all blocks contained in this graph
      * N.B. some 'blocks' may be (sub-)graphs themselves
@@ -13203,7 +13240,7 @@ public:
         return result;
     }
 
-    const std::vector<std::function<connection_result_t(graph&)>> &
+    const std::vector<std::function<connection_result_t(graph &)>> &
     connection_definitions() {
         return _connection_definitions;
     }

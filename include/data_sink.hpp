@@ -473,7 +473,7 @@ public:
         }
     }
 
-    [[nodiscard]] work_return_t
+    [[nodiscard]] work_return_status_t
     process_bulk(std::span<const T> in_data) noexcept {
         std::optional<property_map> tagData;
         if (this->input_tags_present()) {
@@ -499,7 +499,7 @@ public:
             }
         }
 
-        return work_return_t::OK;
+        return work_return_status_t::OK;
     }
 
 private:
@@ -561,7 +561,7 @@ private:
 
     void
     ensure_history_size(std::size_t new_size) {
-        const auto old_size = _history ? _history->capacity() : std::size_t{0};
+        const auto old_size = _history ? _history->capacity() : std::size_t{ 0 };
         if (new_size <= old_size) {
             return;
         }

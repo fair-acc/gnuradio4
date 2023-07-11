@@ -83,9 +83,9 @@ public:
     }
 
     fg::work_return_t
-    work() override {
+    work(std::size_t requested_work) override {
         _scheduler.run_and_wait();
-        return fair::graph::work_return_t::DONE;
+        return { requested_work, requested_work, fair::graph::work_return_status_t::DONE };
     }
 
     void *
@@ -127,7 +127,7 @@ struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out"
     T           value = 1;
 
     fg::work_return_t
-    work() {
+    work(std::size_t requested_work) {
         if (remaining_events_count != 0) {
             using namespace fair::literals;
             auto &port   = fg::output_port<0>(this);
@@ -142,11 +142,10 @@ struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out"
             }
 
             value += 1;
-            return fg::work_return_t::OK;
+            return { requested_work, 1UL, fg::work_return_status_t::OK };
         } else {
-            // TODO: Investigate what schedulers do when there is an event written,
-            // but we return DONE
-            return fg::work_return_t::DONE;
+            // TODO: Investigate what schedulers do when there is an event written, but we return DONE
+            return { requested_work, 1UL, fg::work_return_status_t::DONE };
         }
     }
 };
@@ -187,7 +186,7 @@ make_graph(std::size_t events_count) {
 
 int
 main() {
-    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2,2); // use custom pool to limit number of threads for emscripten
+    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
 
     fg::scheduler::simple scheduler(make_graph(10), thread_pool);
 

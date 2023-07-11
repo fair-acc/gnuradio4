@@ -440,7 +440,8 @@ public:
             = 0;
 
     [[nodiscard]] virtual work_return_t
-    work() = 0;
+    work(std::size_t requested_work)
+            = 0;
 
     [[nodiscard]] virtual void *
     raw() = 0;
@@ -526,8 +527,8 @@ public:
     }
 
     [[nodiscard]] constexpr work_return_t
-    work() override {
-        return node_ref().work();
+    work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
+        return node_ref().work(requested_work);
     }
 
     [[nodiscard]] std::string_view
@@ -645,9 +646,9 @@ public:
 
 class graph {
 private:
-    std::vector<std::function<connection_result_t(graph&)>> _connection_definitions;
-    std::vector<std::unique_ptr<node_model>>                _nodes;
-    std::vector<edge>                                       _edges;
+    std::vector<std::function<connection_result_t(graph &)>> _connection_definitions;
+    std::vector<std::unique_ptr<node_model>>                 _nodes;
+    std::vector<edge>                                        _edges;
 
     template<typename Node>
     std::unique_ptr<node_model> &
@@ -777,11 +778,16 @@ private:
     connect(Source &source, Port Source::*member_ptr);
 
 public:
-    graph(graph&) = delete;
-    graph(graph&&) = default;
-    graph() = default;
-    graph &operator=(graph&) = delete;
-    graph &operator=(graph&&) = default;
+    graph(graph &)  = delete;
+    graph(graph &&) = default;
+    graph()         = default;
+    graph &
+    operator=(graph &)
+            = delete;
+    graph &
+    operator=(graph &&)
+            = default;
+
     /**
      * @return a list of all blocks contained in this graph
      * N.B. some 'blocks' may be (sub-)graphs themselves
@@ -869,7 +875,7 @@ public:
         return result;
     }
 
-    const std::vector<std::function<connection_result_t(graph&)>> &
+    const std::vector<std::function<connection_result_t(graph &)>> &
     connection_definitions() {
         return _connection_definitions;
     }

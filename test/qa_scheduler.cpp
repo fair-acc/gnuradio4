@@ -54,6 +54,8 @@ public:
     }
 };
 
+static_assert(fg::NodeType<count_source<float, 10U>>);
+
 template<typename T, std::int64_t N>
 class expect_sink : public fg::node<expect_sink<T, N>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">> {
     tracer                                         &_tracer;
@@ -65,14 +67,14 @@ public:
 
     ~expect_sink() { boost::ut::expect(boost::ut::that % _count == N); }
 
-    [[nodiscard]] fg::work_return_t
+    [[nodiscard]] fg::work_return_status_t
     process_bulk(std::span<const T> input) noexcept {
         _tracer.trace(this->name);
         for (auto data : input) {
             _checker(_count, data);
             _count++;
         }
-        return fg::work_return_t::OK;
+        return fg::work_return_status_t::OK;
     }
 
     constexpr void
