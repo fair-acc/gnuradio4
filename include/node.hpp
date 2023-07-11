@@ -654,7 +654,7 @@ protected:
 
             if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
                                                                                                   { d.process_one_simd(width) };
-                                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+                                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_one_with_simd<Derived>))) {
                 // SIMD loop
                 std::size_t i = 0;
                 for (; i + width <= samples_to_process; i += width) {
@@ -886,7 +886,7 @@ public:
     }
 
     template<meta::any_simd... Ts>
-        requires traits::node::can_process_simd<Left> && traits::node::can_process_simd<Right>
+        requires traits::node::can_process_one_with_simd<Left> && traits::node::can_process_one_with_simd<Right>
     constexpr meta::simdize<return_type, meta::simdize_size_v<std::tuple<Ts...>>>
     process_one(const Ts &...inputs) {
         static_assert(traits::node::output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
@@ -895,7 +895,7 @@ public:
 
     constexpr auto
     process_one_simd(auto N)
-        requires traits::node::can_process_simd<Right>
+        requires traits::node::can_process_one_with_simd<Right>
     {
         if constexpr (requires(Left &l) {
                           { l.process_one_simd(N) };
@@ -914,7 +914,7 @@ public:
 
     template<typename... Ts>
     // Nicer error messages for the following would be good, but not at the expense of breaking
-    // can_process_simd.
+    // can_process_one_with_simd.
         requires(input_port_types::template are_equal<std::remove_cvref_t<Ts>...>)
     constexpr return_type
     process_one(Ts &&...inputs) {
@@ -1045,8 +1045,10 @@ public:
 
 static_assert(traits::node::input_port_types<copy>::size() == 1);
 static_assert(std::same_as<traits::node::return_type<copy>, float>);
-static_assert(traits::node::can_process_simd<copy>);
-static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+static_assert(traits::node::can_process_one_with_scalar<copy>);
+static_assert(traits::node::can_process_one_with_simd<copy>);
+static_assert(traits::node::can_process_one_with_scalar<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+static_assert(traits::node::can_process_one_with_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
 } // namespace test
 #endif
 

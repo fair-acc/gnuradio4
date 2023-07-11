@@ -161,7 +161,7 @@ can_process_simd_invoke_test(auto &node, const auto &input, std::index_sequence<
  * `process_one_simd(integral_constant)`, which returns SIMD object(s) of width N.
  */
 template<typename Node>
-concept can_process_simd
+concept can_process_one_with_simd
         =
 #if DISABLE_SIMD
         false;
@@ -177,6 +177,17 @@ concept can_process_simd
           };
 #endif
 
-} // namespace node
+template<typename Node>
+concept can_process_one_with_scalar
+= requires(Node &node, const typename traits::node::input_port_types<Node>::template apply<std::tuple> &inputs) {
+  { detail::can_process_simd_invoke_test(
+      node, inputs, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
+  };
+};
+
+template<typename Node>
+concept can_process_one = can_process_one_with_scalar<Node> or can_process_one_with_simd<Node>;
+
+} // namespace fair::graph::traits::node
 
 #endif // include guard

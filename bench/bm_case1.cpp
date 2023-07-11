@@ -54,7 +54,7 @@ using divide = math_op<T, '/'>;
 // template<typename T> using sub = math_op<T, '-'>;
 
 #if !DISABLE_SIMD
-static_assert(fg::traits::node::can_process_simd<multiply<float>>);
+static_assert(fg::traits::node::can_process_one_with_simd<multiply<float>>);
 #endif
 
 template<typename T, char op>
@@ -141,7 +141,7 @@ public:
 
 ENABLE_REFLECTION_FOR_TEMPLATE(converting_multiply, in, out);
 #if !DISABLE_SIMD
-static_assert(fg::traits::node::can_process_simd<converting_multiply<float, double>>);
+static_assert(fg::traits::node::can_process_one_with_simd<converting_multiply<float, double>>);
 #endif
 
 //
@@ -167,7 +167,7 @@ public:
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, int addend), (add<T, addend>), in, out);
 #if !DISABLE_SIMD
-static_assert(fg::traits::node::can_process_simd<add<float, 1>>);
+static_assert(fg::traits::node::can_process_one_with_simd<add<float, 1>>);
 #endif
 
 //
@@ -257,7 +257,7 @@ public:
 
 // gen_operation_SIMD has built-in SIMD-enabled work function, that means
 // we don't see it as a SIMD-enabled node as we can not do simd<simd<something>>
-static_assert(not fg::traits::node::can_process_simd<gen_operation_SIMD<float, '*'>>);
+static_assert(not fg::traits::node::can_process_one_with_simd<gen_operation_SIMD<float, '*'>>);
 
 template<typename T>
 using multiply_SIMD = gen_operation_SIMD<T, '*'>;
