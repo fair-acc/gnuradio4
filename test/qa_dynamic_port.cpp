@@ -110,7 +110,7 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(Port<OUT_MSG<float, 0, 0, "out_msg">>);
 
         static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
-        static_assert(requires { IN<float>("in").name(); });
+        static_assert(requires { IN<float>("in").name; });
     };
 
     "PortBufferApi"_test = [] {
