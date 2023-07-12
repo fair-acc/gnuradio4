@@ -35,8 +35,6 @@ struct fmt::formatter<fair::graph::tag_t> {
 
 namespace fair::graph::data_sink_test {
 
-static constexpr std::int32_t n_samples = 200000;
-
 template<typename T>
 struct Source : public node<Source<T>> {
     OUT<T>             out;
@@ -323,8 +321,6 @@ const boost::ut::suite DataSinkTests = [] {
         auto &sink                  = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
-
-        std::atomic<std::size_t> samples_seen     = 0;
 
         auto                     poller_data_only = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller_data_only, nullptr));
@@ -693,9 +689,11 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "non-blocking polling continuous mode"_test = [] {
-        graph flow_graph;
-        auto &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        constexpr std::int32_t n_samples = 200000;
+
+        graph                  flow_graph;
+        auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
