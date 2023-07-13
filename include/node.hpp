@@ -426,7 +426,7 @@ public:
     void
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
-            meta::tuple_for_each(
+            meta::tuple_for_each_enumerate(
                     [available_values_count](auto i, auto &output_range) {
                         if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
                             output_range.publish(available_values_count);
