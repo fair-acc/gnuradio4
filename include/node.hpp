@@ -368,7 +368,7 @@ public:
             if (availableSamples < port.min_buffer_size()) availableSamples = 0;
             if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
 
-            if (port.tagReader().available() == 0) {
+            if (port.tagReader().available() == 0) [[likely]] {
                 return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
             }
 
