@@ -10186,9 +10186,12 @@ template<class T>
 concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
     typename T::value_type;
     { t.pmt_type() } -> std::same_as<supported_type>;
+    { t.name } -> std::convertible_to<std::string_view>;
+    { t.priority } -> std::convertible_to<std::int32_t>;
+    { t.min_samples } -> std::convertible_to<std::size_t>;
+    { t.max_samples } -> std::convertible_to<std::size_t>;
     { t.type() } -> std::same_as<port_type_t>;
     { t.direction() } -> std::same_as<port_direction_t>;
-    { t.name() } -> std::same_as<std::string_view>;
     { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
     { t.disconnect() } -> std::same_as<connection_result_t>;
 };
@@ -10242,8 +10245,6 @@ public:
     static constexpr bool IS_INPUT  = PortDirection == port_direction_t::INPUT;
     static constexpr bool IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
 
-    using port_tag                  = std::true_type;
-
     template<fixed_string NewName>
     using with_name     = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
 
@@ -10254,15 +10255,16 @@ public:
     using TagWriterType = decltype(std::declval<TagBufferType>().new_writer());
     using TagIoType     = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
 
-private:
-    std::string  _name         = static_cast<std::string>(PortName);
-    std::int16_t _priority     = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t  _min_samples  = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
-    std::size_t  _max_samples  = MAX_SAMPLES;
-    bool         _connected    = false;
+    // public properties
+    const std::string name        = static_cast<std::string>(PortName);
+    std::int16_t      priority    = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t       min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
+    std::size_t       max_samples = MAX_SAMPLES;
 
-    IoType       _ioHandler    = new_io_handler();
-    TagIoType    _tagIoHandler = new_tag_io_handler();
+private:
+    bool      _connected    = false;
+    IoType    _ioHandler    = new_io_handler();
+    TagIoType _tagIoHandler = new_tag_io_handler();
 
 public:
     [[nodiscard]] constexpr auto
@@ -10317,20 +10319,21 @@ public:
     operator=(const port &)
             = delete;
 
-    port(std::string port_name, std::int16_t priority = 0, std::size_t min_samples = 0_UZ, std::size_t max_samples = SIZE_MAX) noexcept
-        : _name(std::move(port_name)), _priority{ priority }, _min_samples(min_samples), _max_samples(max_samples) {
+    port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0_UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
+        : name(std::move(port_name)), priority{ priority_ }, min_samples(min_samples_), max_samples(max_samples_) {
         static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
     }
 
-    constexpr port(port &&other) noexcept : _name(std::move(other._name)), _priority{ other._priority }, _min_samples(other._min_samples), _max_samples(other._max_samples) {}
+    constexpr port(port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples) {}
 
     constexpr port &
     operator=(port &&other) {
         port tmp(std::move(other));
-        std::swap(_name, tmp._name);
-        std::swap(_priority, tmp._priority);
-        std::swap(_min_samples, tmp._min_samples);
-        std::swap(_max_samples, tmp._max_samples);
+        std::swap(name, tmp._name);
+        std::swap(min_samples, tmp._min_samples);
+        std::swap(max_samples, tmp._max_samples);
+        std::swap(priority, tmp._priority);
+
         std::swap(_connected, tmp._connected);
         std::swap(_ioHandler, tmp._ioHandler);
         std::swap(_tagIoHandler, tmp._tagIoHandler);
@@ -10359,20 +10362,6 @@ public:
         return T();
     }
 
-    [[nodiscard]] constexpr std::string_view
-    name() const noexcept {
-        if constexpr (!PortName.empty()) {
-            return static_cast<std::string_view>(PortName);
-        } else {
-            return _name;
-        }
-    }
-
-    [[nodiscard]] constexpr std::int16_t
-    priority() const noexcept {
-        return _priority;
-    }
-
     [[nodiscard]] constexpr static std::size_t
     available() noexcept {
         return 0;
@@ -10381,7 +10370,7 @@ public:
     [[nodiscard]] constexpr std::size_t
     min_buffer_size() const noexcept {
         if constexpr (MIN_SAMPLES == std::dynamic_extent) {
-            return _min_samples;
+            return min_samples;
         } else {
             return MIN_SAMPLES;
         }
@@ -10390,7 +10379,7 @@ public:
     [[nodiscard]] constexpr std::size_t
     max_buffer_size() const noexcept {
         if constexpr (MAX_SAMPLES == std::dynamic_extent) {
-            return _max_samples;
+            return max_samples;
         } else {
             return MAX_SAMPLES;
         }
@@ -10424,11 +10413,11 @@ public:
     void
     setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
         if constexpr (IS_INPUT) {
-            _ioHandler = streamBuffer.new_reader();
+            _ioHandler    = streamBuffer.new_reader();
             _tagIoHandler = tagBuffer.new_reader();
-            _connected = true;
+            _connected    = true;
         } else {
-            _ioHandler = streamBuffer.new_writer();
+            _ioHandler    = streamBuffer.new_writer();
             _tagIoHandler = tagBuffer.new_reader();
         }
     }
@@ -10535,11 +10524,223 @@ static_assert(Port<IN_MSG<float>>);
 static_assert(Port<OUT_MSG<float>>);
 
 static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
-static_assert(requires { IN<float>("in").name(); });
+static_assert(requires { IN<float>("in").name; });
 
 static_assert(OUT_MSG<float, 0, 0, "out_msg">::static_name() == fixed_string("out_msg"));
 static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
 static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
+
+/**
+ *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
+ *  initialisation/connections between blocks that are not in the same compilation unit.
+ *  Ownership is defined by if the strongly-typed port P is either passed
+ *  a) as an lvalue (i.e. P& -> keep reference), or
+ *  b) as an rvalue (P&& -> being moved into dyn_port).
+ *
+ *  N.B. the intended use is within the node/block interface where there is -- once initialised --
+ *  always a strong-reference between the strongly-typed port and it's dyn_port wrapper. I.e no ports
+ *  are added or removed after the initialisation and the port life-time is coupled to that of it's
+ *  parent block/node.
+ */
+class dynamic_port {
+public:
+    const std::string &name;
+    std::int16_t      &priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t       &min_samples;
+    std::size_t       &max_samples;
+
+private:
+    struct model { // intentionally class-private definition to limit interface exposure and enhance composition
+        virtual ~model() = default;
+
+        [[nodiscard]] virtual supported_type
+        pmt_type() const noexcept
+                = 0;
+
+        [[nodiscard]] virtual port_type_t
+        type() const noexcept
+                = 0;
+
+        [[nodiscard]] virtual port_direction_t
+        direction() const noexcept
+                = 0;
+
+        [[nodiscard]] virtual connection_result_t
+        resize_buffer(std::size_t min_size) noexcept
+                = 0;
+
+        [[nodiscard]] virtual connection_result_t
+        disconnect() noexcept
+                = 0;
+
+        [[nodiscard]] virtual connection_result_t
+        connect(dynamic_port &dst_port)
+                = 0;
+
+        // internal runtime polymorphism access
+        [[nodiscard]] virtual bool
+        update_reader_internal(internal_port_buffers buffer_other) noexcept
+                = 0;
+    };
+
+    std::unique_ptr<model> _accessor;
+
+    template<Port T, bool owning>
+    class wrapper final : public model {
+        using PortType = std::decay_t<T>;
+        std::conditional_t<owning, PortType, PortType &> _value;
+
+        [[nodiscard]] internal_port_buffers
+        writer_handler_internal() noexcept {
+            return _value.writer_handler_internal();
+        };
+
+        [[nodiscard]] bool
+        update_reader_internal(internal_port_buffers buffer_other) noexcept override {
+            if constexpr (T::IS_INPUT) {
+                return _value.update_reader_internal(buffer_other);
+            } else {
+                assert(false && "This works only on input ports");
+                return false;
+            }
+        }
+
+    public:
+        wrapper()                = delete;
+
+        wrapper(const wrapper &) = delete;
+
+        auto &
+        operator=(const wrapper &)
+                = delete;
+
+        auto &
+        operator=(wrapper &&)
+                = delete;
+
+        explicit constexpr wrapper(T &arg) noexcept : _value{ arg } {
+            if constexpr (T::IS_INPUT) {
+                static_assert(
+                        requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
+            } else {
+                static_assert(
+                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
+            }
+        }
+
+        explicit constexpr wrapper(T &&arg) noexcept : _value{ std::move(arg) } {
+            if constexpr (T::IS_INPUT) {
+                static_assert(
+                        requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
+            } else {
+                static_assert(
+                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
+            }
+        }
+
+        ~wrapper() override = default;
+
+        [[nodiscard]] constexpr supported_type
+        pmt_type() const noexcept override {
+            return _value.pmt_type();
+        }
+
+        [[nodiscard]] constexpr port_type_t
+        type() const noexcept override {
+            return _value.type();
+        }
+
+        [[nodiscard]] constexpr port_direction_t
+        direction() const noexcept override {
+            return _value.direction();
+        }
+
+        [[nodiscard]] connection_result_t
+        resize_buffer(std::size_t min_size) noexcept override {
+            return _value.resize_buffer(min_size);
+        }
+
+        [[nodiscard]] connection_result_t
+        disconnect() noexcept override {
+            return _value.disconnect();
+        }
+
+        [[nodiscard]] connection_result_t
+        connect(dynamic_port &dst_port) override {
+            if constexpr (T::IS_OUTPUT) {
+                auto src_buffer = _value.writer_handler_internal();
+                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
+            } else {
+                assert(false && "This works only on input ports");
+                return connection_result_t::FAILED;
+            }
+        }
+    };
+
+    bool
+    update_reader_internal(internal_port_buffers buffer_other) noexcept {
+        return _accessor->update_reader_internal(buffer_other);
+    }
+
+public:
+    using value_type                      = void; // a sterile port
+
+    constexpr dynamic_port()              = delete;
+
+    dynamic_port(const dynamic_port &arg) = delete;
+    dynamic_port &
+    operator=(const dynamic_port &arg)
+            = delete;
+
+    dynamic_port(dynamic_port &&arg) = default;
+    dynamic_port &
+    operator=(dynamic_port &&arg)
+            = delete;
+
+    // TODO: Make owning versus non-owning API more explicit
+    template<Port T>
+    explicit constexpr dynamic_port(T &arg) noexcept
+        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
+
+    template<Port T>
+    explicit constexpr dynamic_port(T &&arg) noexcept
+        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
+
+    [[nodiscard]] supported_type
+    pmt_type() const noexcept {
+        return _accessor->pmt_type();
+    }
+
+    [[nodiscard]] port_type_t
+    type() const noexcept {
+        return _accessor->type();
+    }
+
+    [[nodiscard]] port_direction_t
+    direction() const noexcept {
+        return _accessor->direction();
+    }
+
+    [[nodiscard]] connection_result_t
+    resize_buffer(std::size_t min_size) {
+        if (direction() == port_direction_t::OUTPUT) {
+            return _accessor->resize_buffer(min_size);
+        }
+        return connection_result_t::FAILED;
+    }
+
+    [[nodiscard]] connection_result_t
+    disconnect() noexcept {
+        return _accessor->disconnect();
+    }
+
+    [[nodiscard]] connection_result_t
+    connect(dynamic_port &dst_port) {
+        return _accessor->connect(dst_port);
+    }
+};
+
+static_assert(Port<dynamic_port>);
 
 constexpr void
 publish_tag(Port auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
@@ -12397,223 +12598,6 @@ namespace fair::graph {
 
 using namespace fair::literals;
 
-/**
- *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
- *  initialisation/connections between blocks that are not in the same compilation unit.
- *  Ownership is defined by if the strongly-typed port P is either passed
- *  a) as an lvalue (i.e. P& -> keep reference), or
- *  b) as an rvalue (P&& -> being moved into dyn_port).
- *
- *  N.B. the intended use is within the node/block interface where there is -- once initialised --
- *  always a strong-reference between the strongly-typed port and it's dyn_port wrapper. I.e no ports
- *  are added or removed after the initialisation and the port life-time is coupled to that of it's
- *  parent block/node.
- */
-class dynamic_port {
-    struct model { // intentionally class-private definition to limit interface exposure and enhance composition
-        virtual ~model() = default;
-
-        [[nodiscard]] virtual supported_type
-        pmt_type() const noexcept
-                = 0;
-
-        [[nodiscard]] virtual port_type_t
-        type() const noexcept
-                = 0;
-
-        [[nodiscard]] virtual port_direction_t
-        direction() const noexcept
-                = 0;
-
-        [[nodiscard]] virtual std::string_view
-        name() const noexcept
-                = 0;
-
-        [[nodiscard]] virtual connection_result_t
-        resize_buffer(std::size_t min_size) noexcept
-                = 0;
-
-        [[nodiscard]] virtual connection_result_t
-        disconnect() noexcept
-                = 0;
-
-        [[nodiscard]] virtual connection_result_t
-        connect(dynamic_port &dst_port)
-                = 0;
-
-        // internal runtime polymorphism access
-        [[nodiscard]] virtual bool
-        update_reader_internal(internal_port_buffers buffer_other) noexcept
-                = 0;
-    };
-
-    std::unique_ptr<model> _accessor;
-
-    template<Port T, bool owning>
-    class wrapper final : public model {
-        using PortType = std::decay_t<T>;
-        std::conditional_t<owning, PortType, PortType &> _value;
-
-        [[nodiscard]] internal_port_buffers
-        writer_handler_internal() noexcept {
-            return _value.writer_handler_internal();
-        };
-
-        [[nodiscard]] bool
-        update_reader_internal(internal_port_buffers buffer_other) noexcept override {
-            if constexpr (T::IS_INPUT) {
-                return _value.update_reader_internal(buffer_other);
-            } else {
-                assert(false && "This works only on input ports");
-                return false;
-            }
-        }
-
-    public:
-        wrapper()                = delete;
-
-        wrapper(const wrapper &) = delete;
-
-        auto &
-        operator=(const wrapper &)
-                = delete;
-
-        auto &
-        operator=(wrapper &&)
-                = delete;
-
-        explicit constexpr wrapper(T &arg) noexcept : _value{ arg } {
-            if constexpr (T::IS_INPUT) {
-                static_assert(
-                        requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
-            } else {
-                static_assert(
-                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
-            }
-        }
-
-        explicit constexpr wrapper(T &&arg) noexcept : _value{ std::move(arg) } {
-            if constexpr (T::IS_INPUT) {
-                static_assert(
-                        requires { arg.writer_handler_internal(); }, "'private void* writer_handler_internal()' not implemented");
-            } else {
-                static_assert(
-                        requires { arg.update_reader_internal(std::declval<internal_port_buffers>()); }, "'private bool update_reader_internal(void* buffer)' not implemented");
-            }
-        }
-
-        ~wrapper() override = default;
-
-        [[nodiscard]] constexpr supported_type
-        pmt_type() const noexcept override {
-            return _value.pmt_type();
-        }
-
-        [[nodiscard]] constexpr port_type_t
-        type() const noexcept override {
-            return _value.type();
-        }
-
-        [[nodiscard]] constexpr port_direction_t
-        direction() const noexcept override {
-            return _value.direction();
-        }
-
-        [[nodiscard]] constexpr std::string_view
-        name() const noexcept override {
-            return _value.name();
-        }
-
-        [[nodiscard]] connection_result_t
-        resize_buffer(std::size_t min_size) noexcept override {
-            return _value.resize_buffer(min_size);
-        }
-
-        [[nodiscard]] connection_result_t
-        disconnect() noexcept override {
-            return _value.disconnect();
-        }
-
-        [[nodiscard]] connection_result_t
-        connect(dynamic_port &dst_port) override {
-            if constexpr (T::IS_OUTPUT) {
-                auto src_buffer = _value.writer_handler_internal();
-                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
-            } else {
-                assert(false && "This works only on input ports");
-                return connection_result_t::FAILED;
-            }
-        }
-    };
-
-    bool
-    update_reader_internal(internal_port_buffers buffer_other) noexcept {
-        return _accessor->update_reader_internal(buffer_other);
-    }
-
-public:
-    using value_type                      = void; // a sterile port
-
-    constexpr dynamic_port()              = delete;
-
-    dynamic_port(const dynamic_port &arg) = delete;
-    dynamic_port &
-    operator=(const dynamic_port &arg)
-            = delete;
-
-    dynamic_port(dynamic_port &&arg) = default;
-    dynamic_port &
-    operator=(dynamic_port &&arg)
-            = default;
-
-    // TODO: Make owning versus non-owning API more explicit
-    template<Port T>
-    explicit constexpr dynamic_port(T &arg) noexcept : _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
-
-    template<Port T>
-    explicit constexpr dynamic_port(T &&arg) noexcept : _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
-
-    [[nodiscard]] supported_type
-    pmt_type() const noexcept {
-        return _accessor->pmt_type();
-    }
-
-    [[nodiscard]] port_type_t
-    type() const noexcept {
-        return _accessor->type();
-    }
-
-    [[nodiscard]] port_direction_t
-    direction() const noexcept {
-        return _accessor->direction();
-    }
-
-    [[nodiscard]] std::string_view
-    name() const noexcept {
-        return _accessor->name();
-    }
-
-    [[nodiscard]] connection_result_t
-    resize_buffer(std::size_t min_size) {
-        if (direction() == port_direction_t::OUTPUT) {
-            return _accessor->resize_buffer(min_size);
-        }
-        return connection_result_t::FAILED;
-    }
-
-    [[nodiscard]] connection_result_t
-    disconnect() noexcept {
-        return _accessor->disconnect();
-    }
-
-    [[nodiscard]] connection_result_t
-    connect(dynamic_port &dst_port) {
-        return _accessor->connect(dst_port);
-    }
-};
-
-static_assert(Port<dynamic_port>);
-
 #define ENABLE_PYTHON_INTEGRATION
 #ifdef ENABLE_PYTHON_INTEGRATION
 
@@ -12662,7 +12646,7 @@ public:
 
     [[nodiscard]] std::optional<std::size_t>
     dynamic_input_port_index(std::string_view name) const {
-        auto       portNameMatches = [name](const auto &port) { return port.name() == name; };
+        auto       portNameMatches = [name](const auto &port) { return port.name == name; };
         const auto it              = std::find_if(_dynamic_input_ports.cbegin(), _dynamic_input_ports.cend(), portNameMatches);
         return it != _dynamic_input_ports.cend() ? std::optional{ std::distance(_dynamic_input_ports.cbegin(), it) } : std::nullopt;
     }
@@ -12682,7 +12666,7 @@ public:
 
     [[nodiscard]] std::optional<std::size_t>
     dynamic_output_port_index(std::string_view name) const {
-        auto       portNameMatches = [name](const auto &port) { return port.name() == name; };
+        auto       portNameMatches = [name](const auto &port) { return port.name == name; };
         const auto it              = std::find_if(_dynamic_output_ports.cbegin(), _dynamic_output_ports.cend(), portNameMatches);
         return it != _dynamic_output_ports.cend() ? std::optional{ std::distance(_dynamic_output_ports.cbegin(), it) } : std::nullopt;
     }
