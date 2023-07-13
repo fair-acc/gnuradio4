@@ -9,6 +9,10 @@
 
 #include <vir/simd.h>
 
+namespace fair::graph {
+enum class work_return_status_t;
+}
+
 namespace fair::graph::traits::node {
 
 namespace detail {
@@ -215,6 +219,47 @@ concept can_process_one = can_process_one_scalar<Node> or can_process_one_simd<N
 
 template<typename Node>
 concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> or can_process_one_simd_with_offset<Node>;
+
+namespace detail {
+template<typename T>
+struct dummy_input_span : public std::span<const T> {
+    constexpr void consume(std::size_t) noexcept;
+};
+
+template<typename T>
+struct dummy_output_span : public std::span<T> {
+    constexpr void publish(std::size_t) noexcept;
+};
+
+template<typename>
+struct nothing_you_ever_wanted {};
+} // namespace detail
+
+/*
+ * Satisfied if `Derived` has a member function `process_bulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
+ * std::span<const T> or any type satisfying ConsumableSpan<T>. Output arguments must accept either a std::span<T> or any type satisfying PublishableSpan<T>, except for the I-th output argument, which
+ * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
+ */
+template<typename Derived, std::size_t I>
+concept process_bulk_requires_ith_output_as_span = requires(
+        Derived &d, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Derived>>::template apply<std::tuple> inputs,
+        typename meta::transform_conditional<decltype([](auto j) { return j == I; }), std::span, detail::dummy_output_span, traits::node::output_port_types<Derived>>::template apply<std::tuple> outputs,
+        typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
+                                             traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                bad_outputs) {
+    {
+        []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
+                                                        std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
+            return {};
+        }(std::make_index_sequence<traits::node::input_port_types<Derived>::size>(), std::make_index_sequence<traits::node::output_port_types<Derived>::size>())
+    } -> std::same_as<work_return_status_t>;
+    not requires {
+        []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
+                                                        std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
+            return {};
+        }(std::make_index_sequence<traits::node::input_port_types<Derived>::size>(), std::make_index_sequence<traits::node::output_port_types<Derived>::size>());
+    };
+};
 
 } // namespace fair::graph::traits::node
 

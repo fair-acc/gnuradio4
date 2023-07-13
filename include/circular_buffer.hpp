@@ -307,6 +307,11 @@ class circular_buffer
         }
     }
 
+    constexpr bool
+    is_published() const noexcept {
+        return _published_data;
+    }
+
     constexpr std::size_t size() const noexcept { return _n_slots_to_claim; };
     constexpr std::size_t size_bytes() const noexcept { return _n_slots_to_claim * sizeof(T); };
     constexpr bool empty() const noexcept { return _n_slots_to_claim == 0; }

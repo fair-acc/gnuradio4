@@ -142,6 +142,17 @@ concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
 template<typename Derived> // TODO: nail down the required method parameters and return types
 concept HasRequiredProcessFunction = (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
+template<typename T>
+concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
+
+static_assert(ConsumableSpan<traits::node::detail::dummy_input_span<float>>);
+
+template<typename T>
+concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
+                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0); };
+
+static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
+
 /**
  * @brief The 'node<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -412,12 +423,18 @@ public:
                        .samples_until_next_tag      = available_values_and_tag_count.second };
     }
 
-    // This function is a template and static to provide easier
-    // transition to C++23's deducing this later
-    auto
+    void
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
-            meta::tuple_for_each([available_values_count](auto &output_range) { output_range.publish(available_values_count); }, writers_tuple);
+            meta::tuple_for_each(
+                    [available_values_count](auto i, auto &output_range) {
+                        if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
+                            output_range.publish(available_values_count);
+                        } else {
+                            assert(output_range.is_published() && "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.");
+                        }
+                    },
+                    writers_tuple);
         }
     }
 
@@ -643,8 +660,10 @@ protected:
         samples_to_process = std::min(samples_to_process, requested_work);
 
         if constexpr (HasProcessBulkFunction<Derived>) {
-            const work_return_status_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
-                                                        std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
+            // cannot use std::apply because it requires tuple_cat(input_spans, writers_tuple). The latter doesn't work because writers_tuple isn't copyable.
+            const work_return_status_t ret = [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
+                return self().process_bulk(std::get<InIdx>(input_spans)..., std::get<OutIdx>(writers_tuple)...);
+            }(std::make_index_sequence<traits::node::input_ports<Derived>::size>(), std::make_index_sequence<traits::node::output_ports<Derived>::size>());
 
             write_to_outputs(samples_to_process, writers_tuple);
             const bool success = consume_readers(self(), samples_to_process);

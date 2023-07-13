@@ -108,6 +108,8 @@ using add_bulk = math_bulk_op<T, '+'>;
 template<typename T>
 using sub_bulk = math_bulk_op<T, '-'>;
 
+static_assert(fg::traits::node::process_bulk_requires_ith_output_as_span<multiply_bulk<float>, 0>);
+
 //
 // This defines a new node type that has only type template parameters.
 //

@@ -379,11 +379,19 @@ safe_pair_min(Arg &&arg, Args &&...args) {
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto
+void
 tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
+    [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        (
+                [&function](auto I, auto &&t0, auto &&...ts) {
+                    if constexpr (requires { function(std::get<I>(t0), std::get<I>(ts)...); }) {
+                        function(std::get<I>(t0), std::get<I>(ts)...);
+                    } else {
+                        function(I, std::get<I>(t0), std::get<I>(ts)...);
+                    }
+                }(std::integral_constant<std::size_t, Idx>{}, tuple, tuples...),
+                ...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
