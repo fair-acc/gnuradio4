@@ -233,6 +233,10 @@ struct dummy_output_span : public std::span<T> {
 
 template<typename>
 struct nothing_you_ever_wanted {};
+
+// This alias template is only necessary as a workaround for a bug in Clang. Instead of passing dynamic_span to transform_conditional below, C++ allows passing std::span directly.
+template<typename T>
+using dynamic_span = std::span<T>;
 } // namespace detail
 
 /*
@@ -241,12 +245,14 @@ struct nothing_you_ever_wanted {};
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
 template<typename Derived, std::size_t I>
-concept process_bulk_requires_ith_output_as_span = requires(
-        Derived &d, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Derived>>::template apply<std::tuple> inputs,
-        typename meta::transform_conditional<decltype([](auto j) { return j == I; }), std::span, detail::dummy_output_span, traits::node::output_port_types<Derived>>::template apply<std::tuple> outputs,
-        typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
-                                             traits::node::output_port_types<Derived>>::template apply<std::tuple>
-                bad_outputs) {
+concept process_bulk_requires_ith_output_as_span = requires(Derived                                                                                                                      &d,
+                                                            typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Derived>>::template apply<std::tuple> inputs,
+                                                            typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
+                                                                                                 traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                                                                    outputs,
+                                                            typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
+                                                                                                 traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                                                                    bad_outputs) {
     {
         []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                         std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
