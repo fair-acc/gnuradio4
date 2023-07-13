@@ -41,16 +41,15 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     OUT<T>             out;
     std::vector<tag_t> tags{};
     std::size_t        next_tag{ 0 };
-    std::uint64_t      n_samples_max = 1024;
-    std::uint64_t      n_samples_produced{ 0 };
+    std::int64_t       n_samples_max = 1024;
+    std::int64_t       n_samples_produced{ 0 };
 
     constexpr std::make_signed_t<std::size_t>
     available_samples(const TagSource &) noexcept {
         if constexpr (UseProcessOne == ProcessFunction::USE_PROCESS_ONE) {
             return n_samples_produced < n_samples_max ? 1 : -1; // '-1' -> DONE, produced enough samples
         } else if constexpr (UseProcessOne == ProcessFunction::USE_PROCESS_BULK) {
-            std::make_signed_t<std::size_t> nextTagIn = next_tag < tags.size() ? tags[next_tag].index - static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)
-                                                                               : static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
+            tag_t::signed_index_type nextTagIn = next_tag < tags.size() ? tags[next_tag].index - n_samples_produced : n_samples_max - n_samples_produced;
             return n_samples_produced < n_samples_max ? std::max(1L, nextTagIn) : -1L; // '-1L' -> DONE, produced enough samples
         } else {
             static_assert(fair::meta::always_false<T>, "ProcessFunction-type not handled");
@@ -61,7 +60,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     process_one() noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
-        if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
+        if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
             print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name.value, n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
@@ -80,7 +79,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     process_bulk(std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
+        if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
             print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name, n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
@@ -89,7 +88,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
             next_tag++;
         }
 
-        n_samples_produced += output.size();
+        n_samples_produced += static_cast<std::int64_t>(output.size());
         return n_samples_produced < n_samples_max ? work_return_status_t::OK : work_return_status_t::DONE;
     }
 };
@@ -102,7 +101,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
     IN<T>              in;
     OUT<T>             out;
     std::vector<tag_t> tags{};
-    std::uint64_t      n_samples_produced{ 0 };
+    std::int64_t       n_samples_produced{ 0 };
 
     constexpr T
     process_one(const T &input) noexcept
@@ -129,7 +128,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
             this->forward_tags();
         }
 
-        n_samples_produced += input.size();
+        n_samples_produced += static_cast<std::int64_t>(input.size());
         std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
 
         return work_return_status_t::OK;
@@ -147,7 +146,7 @@ template<typename T, ProcessFunction UseProcessOne>
 struct TagSink : public node<TagSink<T, UseProcessOne>> {
     IN<T>              in;
     std::vector<tag_t> tags{};
-    std::uint64_t      n_samples_produced{ 0 };
+    std::int64_t       n_samples_produced{ 0 };
 
     // template<fair::meta::t_or_simd<T> V>
     constexpr void
@@ -175,7 +174,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
             this->forward_tags();
         }
 
-        n_samples_produced += input.size();
+        n_samples_produced += static_cast<std::int64_t>(input.size());
 
         return work_return_status_t::OK;
     }
