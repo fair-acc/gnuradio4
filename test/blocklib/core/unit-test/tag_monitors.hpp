@@ -47,7 +47,8 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     constexpr std::make_signed_t<std::size_t>
     available_samples(const TagSource &) noexcept {
         if constexpr (UseProcessOne == ProcessFunction::USE_PROCESS_ONE) {
-            return n_samples_produced < n_samples_max ? 1 : -1; // '-1' -> DONE, produced enough samples
+            // '-1' -> DONE, produced enough samples
+            return n_samples_max == n_samples_produced ? -1 : n_samples_max - n_samples_produced;
         } else if constexpr (UseProcessOne == ProcessFunction::USE_PROCESS_BULK) {
             tag_t::signed_index_type nextTagIn = next_tag < tags.size() ? tags[next_tag].index - n_samples_produced : n_samples_max - n_samples_produced;
             return n_samples_produced < n_samples_max ? std::max(1L, nextTagIn) : -1L; // '-1L' -> DONE, produced enough samples
@@ -57,14 +58,14 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     }
 
     T
-    process_one() noexcept
+    process_one(std::size_t offset) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
             print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name.value, n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
-            out_tag.index  = 0; // indices > 0 write tags in the future ... handle with care
+            out_tag.index  = offset;
             this->forward_tags();
             next_tag++;
             n_samples_produced++;
@@ -92,9 +93,6 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         return n_samples_produced < n_samples_max ? work_return_status_t::OK : work_return_status_t::DONE;
     }
 };
-
-static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
 
 template<typename T, ProcessFunction UseProcessOne>
 struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
@@ -135,13 +133,6 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
     }
 };
 
-static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-
 template<typename T, ProcessFunction UseProcessOne>
 struct TagSink : public node<TagSink<T, UseProcessOne>> {
     IN<T>              in;
@@ -180,13 +171,30 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     }
 };
 
-static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
-
 } // namespace fair::graph::tag_test
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagSource<T, b>), out, n_samples_max);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagMonitor<T, b>), in, out);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagSink<T, b>), in);
+
+namespace fair::graph::tag_test {
+// the concepts can only work as expected after ENABLE_REFLECTION_FOR_TEMPLATE_FULL
+static_assert(HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(not HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(not HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
+
+static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
+
+static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>);
+static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
+} // namespace fair::graph::tag_test
 
 #endif // GRAPH_PROTOTYPE_TAG_MONITORS_HPP

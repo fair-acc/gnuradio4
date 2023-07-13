@@ -239,7 +239,9 @@ template<typename T, std::size_t N>
 using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
 
 template<typename T, std::size_t N>
-struct simdize_impl;
+struct simdize_impl {
+    using type = T;
+};
 
 template<vectorizable_v T, std::size_t N>
     requires requires { typename stdx::native_simd<T>; }
@@ -270,6 +272,7 @@ struct simdize_impl<Tup, N> {
  * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
  * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
  * stdx::native_simd<U>::size() determines the resulting SIMD width.
+ * If T is neither vectorizable nor a std::tuple with at least one member, simdize produces T.
  */
 template<typename T, std::size_t N = 0>
 using simdize = typename detail::simdize_impl<T, N>::type;
