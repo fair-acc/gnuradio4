@@ -54,7 +54,7 @@ using divide = math_op<T, '/'>;
 // template<typename T> using sub = math_op<T, '-'>;
 
 #if !DISABLE_SIMD
-static_assert(fg::traits::node::can_process_simd<multiply<float>>);
+static_assert(fg::traits::node::can_process_one_simd<multiply<float>>);
 #endif
 
 template<typename T, char op>
@@ -108,6 +108,11 @@ using add_bulk = math_bulk_op<T, '+'>;
 template<typename T>
 using sub_bulk = math_bulk_op<T, '-'>;
 
+// Clang 15 and 16 crash on the following static_assert
+#ifndef __clang__
+static_assert(fg::traits::node::process_bulk_requires_ith_output_as_span<multiply_bulk<float>, 0>);
+#endif
+
 //
 // This defines a new node type that has only type template parameters.
 //
@@ -141,7 +146,7 @@ public:
 
 ENABLE_REFLECTION_FOR_TEMPLATE(converting_multiply, in, out);
 #if !DISABLE_SIMD
-static_assert(fg::traits::node::can_process_simd<converting_multiply<float, double>>);
+static_assert(fg::traits::node::can_process_one_simd<converting_multiply<float, double>>);
 #endif
 
 //
@@ -167,7 +172,7 @@ public:
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, int addend), (add<T, addend>), in, out);
 #if !DISABLE_SIMD
-static_assert(fg::traits::node::can_process_simd<add<float, 1>>);
+static_assert(fg::traits::node::can_process_one_simd<add<float, 1>>);
 #endif
 
 //
@@ -257,7 +262,7 @@ public:
 
 // gen_operation_SIMD has built-in SIMD-enabled work function, that means
 // we don't see it as a SIMD-enabled node as we can not do simd<simd<something>>
-static_assert(not fg::traits::node::can_process_simd<gen_operation_SIMD<float, '*'>>);
+static_assert(not fg::traits::node::can_process_one_simd<gen_operation_SIMD<float, '*'>>);
 
 template<typename T>
 using multiply_SIMD = gen_operation_SIMD<T, '*'>;
@@ -394,12 +399,12 @@ loop_over_process_one(auto &node) {
     test::n_samples_consumed = 0LU;
 #if DISABLE_SIMD
     for (std::size_t i = 0; i < N_SAMPLES; i++) {
-        node.process_one();
+        node.process_one(i);
     }
 #else
     constexpr int N = 32;
     for (std::size_t i = 0; i < N_SAMPLES / N; i++) {
-        node.template process_one_simd(std::integral_constant<std::size_t, N>{});
+        node.template process_one_simd(i, std::integral_constant<std::size_t, N>{});
     }
 #endif
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "produced too many/few samples";
@@ -431,7 +436,11 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto merged_node                                                  = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), copy<float>()), test::sink<float>());
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(test::source<float>(N_SAMPLES), copy<float>()), test::sink<float>());
+#if !DISABLE_SIMD
+        static_assert(fair::graph::traits::node::can_process_one_simd<copy<float>>);
+        static_assert(fair::graph::traits::node::can_process_one_simd<test::sink<float>>);
+#endif
         "merged src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES)      = [&merged_node]() { loop_over_process_one(merged_node); };
         "merged src->copy->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_work(merged_node); };
     }

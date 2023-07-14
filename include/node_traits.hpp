@@ -9,6 +9,10 @@
 
 #include <vir/simd.h>
 
+namespace fair::graph {
+enum class work_return_status_t;
+}
+
 namespace fair::graph::traits::node {
 
 namespace detail {
@@ -127,6 +131,9 @@ template<typename Node>
 using output_port_types = typename fixed_node_ports_data<Node>::output_port_types;
 
 template<typename Node>
+using input_port_types_tuple = typename input_port_types<Node>::tuple_type;
+
+template<typename Node>
 using return_type = typename output_port_types<Node>::tuple_or_type;
 
 template<typename Node>
@@ -147,8 +154,21 @@ using get_port_member_descriptor =
 namespace detail {
 template<std::size_t... Is>
 auto
-can_process_simd_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>)
+can_process_one_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>)
         -> decltype(node.process_one(std::get<Is>(input)...));
+
+template<typename T>
+struct exact_argument_type {
+    template<std::same_as<T> U>
+    constexpr operator U() const noexcept;
+};
+
+template<std::size_t... Is>
+auto
+can_process_one_with_offset_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.process_one(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
+
+template<typename Node>
+using simd_return_type_of_can_process_one = meta::simdize<return_type<Node>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<Node>>>>;
 }
 
 /* A node "can process simd" if its `process_one` function takes at least one argument and all
@@ -161,22 +181,92 @@ can_process_simd_invoke_test(auto &node, const auto &input, std::index_sequence<
  * `process_one_simd(integral_constant)`, which returns SIMD object(s) of width N.
  */
 template<typename Node>
-concept can_process_simd
-        =
+concept can_process_one_simd =
 #if DISABLE_SIMD
         false;
 #else
-        traits::node::input_port_types<Node>::size() > 0
-       && requires(Node &node,
-                   const meta::simdize<typename traits::node::input_port_types<Node>::template apply<std::tuple>>
-                           &input_simds) {
-              {
-                  detail::can_process_simd_invoke_test(
-                          node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
-              };
-          };
+        traits::node::input_port_types<Node>::size() > 0 and requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
+            {
+                detail::can_process_one_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
+            } -> std::same_as<detail::simd_return_type_of_can_process_one<Node>>;
+        };
 #endif
 
-} // namespace node
+template<typename Node>
+concept can_process_one_simd_with_offset =
+#if DISABLE_SIMD
+        false;
+#else
+        traits::node::input_port_types<Node>::size() > 0 && requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
+            {
+                detail::can_process_one_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
+            } -> std::same_as<detail::simd_return_type_of_can_process_one<Node>>;
+        };
+#endif
+
+template<typename Node>
+concept can_process_one_scalar = requires(Node &node, const input_port_types_tuple<Node> &inputs) {
+    { detail::can_process_one_invoke_test(node, inputs, std::make_index_sequence<traits::node::input_ports<Node>::size()>()) } -> std::same_as<return_type<Node>>;
+};
+
+template<typename Node>
+concept can_process_one_scalar_with_offset = requires(Node &node, const input_port_types_tuple<Node> &inputs) {
+    { detail::can_process_one_with_offset_invoke_test(node, inputs, std::make_index_sequence<traits::node::input_ports<Node>::size()>()) } -> std::same_as<return_type<Node>>;
+};
+
+template<typename Node>
+concept can_process_one = can_process_one_scalar<Node> or can_process_one_simd<Node> or can_process_one_scalar_with_offset<Node> or can_process_one_simd_with_offset<Node>;
+
+template<typename Node>
+concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> or can_process_one_simd_with_offset<Node>;
+
+namespace detail {
+template<typename T>
+struct dummy_input_span : public std::span<const T> {
+    constexpr void consume(std::size_t) noexcept;
+};
+
+template<typename T>
+struct dummy_output_span : public std::span<T> {
+    constexpr void publish(std::size_t) noexcept;
+};
+
+template<typename>
+struct nothing_you_ever_wanted {};
+
+// This alias template is only necessary as a workaround for a bug in Clang. Instead of passing dynamic_span to transform_conditional below, C++ allows passing std::span directly.
+template<typename T>
+using dynamic_span = std::span<T>;
+} // namespace detail
+
+/*
+ * Satisfied if `Derived` has a member function `process_bulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
+ * std::span<const T> or any type satisfying ConsumableSpan<T>. Output arguments must accept either a std::span<T> or any type satisfying PublishableSpan<T>, except for the I-th output argument, which
+ * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
+ */
+template<typename Derived, std::size_t I>
+concept process_bulk_requires_ith_output_as_span = requires(Derived                                                                                                                      &d,
+                                                            typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Derived>>::template apply<std::tuple> inputs,
+                                                            typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
+                                                                                                 traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                                                                    outputs,
+                                                            typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
+                                                                                                 traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                                                                    bad_outputs) {
+    {
+        []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
+                                                        std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
+            return {};
+        }(std::make_index_sequence<traits::node::input_port_types<Derived>::size>(), std::make_index_sequence<traits::node::output_port_types<Derived>::size>())
+    } -> std::same_as<work_return_status_t>;
+    not requires {
+        []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
+                                                        std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
+            return {};
+        }(std::make_index_sequence<traits::node::input_port_types<Derived>::size>(), std::make_index_sequence<traits::node::output_port_types<Derived>::size>());
+    };
+};
+
+} // namespace fair::graph::traits::node
 
 #endif // include guard

@@ -239,7 +239,9 @@ template<typename T, std::size_t N>
 using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
 
 template<typename T, std::size_t N>
-struct simdize_impl;
+struct simdize_impl {
+    using type = T;
+};
 
 template<vectorizable_v T, std::size_t N>
     requires requires { typename stdx::native_simd<T>; }
@@ -270,6 +272,7 @@ struct simdize_impl<Tup, N> {
  * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
  * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
  * stdx::native_simd<U>::size() determines the resulting SIMD width.
+ * If T is neither vectorizable nor a std::tuple with at least one member, simdize produces T.
  */
 template<typename T, std::size_t N = 0>
 using simdize = typename detail::simdize_impl<T, N>::type;
@@ -381,6 +384,15 @@ tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
         (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+void
+tuple_for_each_enumerate(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        ([&function](auto I, auto &&t0, auto &&...ts) { function(I, std::get<I>(t0), std::get<I>(ts)...); }(std::integral_constant<std::size_t, Idx>{}, tuple, tuples...), ...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
