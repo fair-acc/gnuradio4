@@ -42,6 +42,14 @@ simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto off
     }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
+template<typename T, typename... Us>
+auto
+invoke_process_one_with_or_without_offset(T &node, std::size_t offset, const Us &...inputs) {
+    if constexpr (traits::node::can_process_one_with_offset<T>) return node.process_one(offset, inputs...);
+    else
+        return node.process_one(inputs...);
+}
+
 enum class work_return_status_t {
     ERROR                     = -100, /// error occurred in the work function
     INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
@@ -125,14 +133,25 @@ concept NodeType = requires(T t, std::size_t requested_work) {
     // requires !std::is_move_assignable_v<T>;
 };
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasProcessOneFunction = requires { &Derived::process_one; };
+template<typename Derived>
+concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
 template<typename Derived> // TODO: nail down the required method parameters and return types
 concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
 
 template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasRequiredProcessFunction = HasProcessOneFunction<Derived> != HasProcessBulkFunction<Derived>;
+concept HasRequiredProcessFunction = (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+
+template<typename T>
+concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
+
+static_assert(ConsumableSpan<traits::node::detail::dummy_input_span<float>>);
+
+template<typename T>
+concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
+                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0); };
+
+static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
 
 /**
  * @brief The 'node<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
@@ -368,7 +387,7 @@ public:
             if (availableSamples < port.min_buffer_size()) availableSamples = 0;
             if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
 
-            if (port.tagReader().available() == 0) {
+            if (port.tagReader().available() == 0) [[likely]] {
                 return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
             }
 
@@ -404,12 +423,18 @@ public:
                        .samples_until_next_tag      = available_values_and_tag_count.second };
     }
 
-    // This function is a template and static to provide easier
-    // transition to C++23's deducing this later
-    auto
+    void
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
-            meta::tuple_for_each([available_values_count](auto &output_range) { output_range.publish(available_values_count); }, writers_tuple);
+            meta::tuple_for_each_enumerate(
+                    [available_values_count](auto i, auto &output_range) {
+                        if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
+                            output_range.publish(available_values_count);
+                        } else {
+                            assert(output_range.is_published() && "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.");
+                        }
+                    },
+                    writers_tuple);
         }
     }
 
@@ -427,31 +452,31 @@ public:
 
     template<typename... Ts>
     constexpr auto
-    invoke_process_one(Ts &&...inputs) {
+    invoke_process_one(std::size_t offset, Ts &&...inputs) {
         if constexpr (traits::node::output_ports<Derived>::size == 0) {
-            self().process_one(std::forward<Ts>(inputs)...);
+            invoke_process_one_with_or_without_offset(self(), offset, std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::node::output_ports<Derived>::size == 1) {
-            return std::tuple{ self().process_one(std::forward<Ts>(inputs)...) };
+            return std::tuple{ invoke_process_one_with_or_without_offset(self(), offset, std::forward<Ts>(inputs)...) };
         } else {
-            return self().process_one(std::forward<Ts>(inputs)...);
+            return invoke_process_one_with_or_without_offset(self(), offset, std::forward<Ts>(inputs)...);
         }
     }
 
     template<typename... Ts>
     constexpr auto
-    invoke_process_one_simd(auto width, Ts &&...input_simds) {
+    invoke_process_one_simd(std::size_t offset, auto width, Ts &&...input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
             if constexpr (traits::node::output_ports<Derived>::size == 0) {
-                self().process_one_simd(width);
+                self().process_one_simd(offset, width);
                 return std::tuple{};
             } else if constexpr (traits::node::output_ports<Derived>::size == 1) {
-                return std::tuple{ self().process_one_simd(width) };
+                return std::tuple{ self().process_one_simd(offset, width) };
             } else {
-                return self().process_one_simd(width);
+                return self().process_one_simd(offset, width);
             }
         } else {
-            return invoke_process_one(std::forward<Ts>(input_simds)...);
+            return invoke_process_one(offset, std::forward<Ts>(input_simds)...);
         }
     }
 
@@ -635,15 +660,16 @@ protected:
         samples_to_process = std::min(samples_to_process, requested_work);
 
         if constexpr (HasProcessBulkFunction<Derived>) {
-            const work_return_status_t ret = std::apply([this](auto... args) { return static_cast<Derived *>(this)->process_bulk(args...); },
-                                                        std::tuple_cat(input_spans, meta::tuple_transform([](auto &output_range) { return std::span(output_range); }, writers_tuple)));
+            // cannot use std::apply because it requires tuple_cat(input_spans, writers_tuple). The latter doesn't work because writers_tuple isn't copyable.
+            const work_return_status_t ret = [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
+                return self().process_bulk(std::get<InIdx>(input_spans)..., std::get<OutIdx>(writers_tuple)...);
+            }(std::make_index_sequence<traits::node::input_ports<Derived>::size>(), std::make_index_sequence<traits::node::output_ports<Derived>::size>());
 
             write_to_outputs(samples_to_process, writers_tuple);
             const bool success = consume_readers(self(), samples_to_process);
             forward_tags();
             return { requested_work, samples_to_process, success ? ret : work_return_status_t::ERROR };
-        } else {
-            //       if constexpr (HasProcessOneFunction<Derived>) { // TODO: nail down the required method parameters and return types
+        } else if constexpr (HasProcessOneFunction<Derived>) {
             // handle process_one(...)
             using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
             using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
@@ -654,16 +680,16 @@ protected:
 
             if constexpr ((is_sink_node or meta::simdize_size_v<output_simd_types> != 0) and ((is_source_node and requires(Derived &d) {
                                                                                                   { d.process_one_simd(width) };
-                                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_simd<Derived>))) {
+                                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_one_simd<Derived>))) {
                 // SIMD loop
                 std::size_t i = 0;
                 for (; i + width <= samples_to_process; i += width) {
-                    const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(width, input_simds...); });
+                    const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(i, width, input_simds...); });
                     meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
                 }
                 simd_epilogue(width, [&](auto w) {
                     if (i + w <= samples_to_process) {
-                        const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(w, input_simds...); });
+                        const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(i, w, input_simds...); });
                         meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
                         i += w;
                     }
@@ -671,7 +697,7 @@ protected:
             } else {
                 // Non-SIMD loop
                 for (std::size_t i = 0; i < samples_to_process; ++i) {
-                    const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(inputs[i]...); }, input_spans);
+                    const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(i, inputs[i]...); }, input_spans);
                     meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
                 }
             }
@@ -772,36 +798,14 @@ node_description() noexcept {
 }
 
 template<typename Node>
-concept source_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
-    {
-        [](Node &n, auto &inputs) {
-            constexpr std::size_t port_count = traits::node::input_port_types<Node>::size;
-            if constexpr (port_count > 0) {
-                return []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) -> decltype(n_inside.process_one(std::get<Is>(tup)...)) {
-                    return {};
-                }(n, inputs, std::make_index_sequence<port_count>());
-            } else {
-                return n.process_one();
-            }
-        }(node, inputs)
-    } -> std::same_as<typename traits::node::return_type<Node>>;
-};
+concept source_node = traits::node::can_process_one<Node> and traits::node::template output_port_types<Node>::size > 0;
+
+static_assert(not source_node<int>);
 
 template<typename Node>
-concept sink_node = requires(Node &node, typename traits::node::input_port_types<Node>::tuple_type const &inputs) {
-    {
-        [](Node &n, auto &inputs) {
-            constexpr std::size_t port_count = traits::node::output_port_types<Node>::size;
-            []<std::size_t... Is>(Node &n_inside, auto const &tup, std::index_sequence<Is...>) {
-                if constexpr (port_count > 0) {
-                    std::ignore = n_inside.process_one(std::get<Is>(tup)...);
-                } else {
-                    n_inside.process_one(std::get<Is>(tup)...);
-                }
-            }(n, inputs, std::make_index_sequence<traits::node::input_port_types<Node>::size>());
-        }(node, inputs)
-    };
-};
+concept sink_node = traits::node::can_process_one<Node> and traits::node::template input_port_types<Node>::size > 0;
+
+static_assert(not sink_node<int>);
 
 template<source_node Left, sink_node Right, std::size_t OutId, std::size_t InId>
 class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::concat<typename traits::node::input_ports<Left>, meta::remove_at<InId, typename traits::node::input_ports<Right>>>,
@@ -853,18 +857,21 @@ private:
 
     template<std::size_t I>
     constexpr auto
-    apply_left(auto &&input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.process_one(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
+    apply_left(std::size_t offset, auto &&input_tuple) noexcept {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return invoke_process_one_with_or_without_offset(left, offset, std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...);
+        }(std::make_index_sequence<I>());
     }
 
     template<std::size_t I, std::size_t J>
     constexpr auto
-    apply_right(auto &&input_tuple, auto &&tmp) noexcept {
+    apply_right(std::size_t offset, auto &&input_tuple, auto &&tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
             constexpr std::size_t first_offset  = traits::node::input_port_types<Left>::size;
             constexpr std::size_t second_offset = traits::node::input_port_types<Left>::size + sizeof...(Is);
             static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return right.process_one(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
+            return invoke_process_one_with_or_without_offset(right, offset, std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp),
+                                                             std::get<second_offset + Js>(input_tuple)...);
         }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
@@ -886,51 +893,56 @@ public:
     }
 
     template<meta::any_simd... Ts>
-        requires traits::node::can_process_simd<Left> && traits::node::can_process_simd<Right>
+        requires traits::node::can_process_one_simd<Left> and traits::node::can_process_one_simd<Right>
     constexpr meta::simdize<return_type, meta::simdize_size_v<std::tuple<Ts...>>>
-    process_one(const Ts &...inputs) {
+    process_one(std::size_t offset, const Ts &...inputs) {
         static_assert(traits::node::output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::node::input_port_types<Left>::size()>(std::tie(inputs...)));
+        return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...),
+                                                                                           apply_left<traits::node::input_port_types<Left>::size()>(offset, std::tie(inputs...)));
     }
 
     constexpr auto
-    process_one_simd(auto N)
-        requires traits::node::can_process_simd<Right>
+    process_one_simd(std::size_t offset, auto N)
+        requires traits::node::can_process_one_simd<Right>
     {
         if constexpr (requires(Left &l) {
-                          { l.process_one_simd(N) };
+                          { l.process_one_simd(offset, N) };
                       }) {
-            return right.process_one(left.process_one_simd(N));
+            return invoke_process_one_with_or_without_offset(right, offset, left.process_one_simd(offset, N));
+        } else if constexpr (requires(Left &l) {
+                                 { l.process_one_simd(N) };
+                             }) {
+            return invoke_process_one_with_or_without_offset(right, offset, left.process_one_simd(N));
         } else {
             using LeftResult = typename traits::node::return_type<Left>;
             using V          = meta::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0; i < V::size(); ++i) {
-                tmp[i] = left.process_one();
+                tmp[i] = invoke_process_one_with_or_without_offset(left, offset + i);
             }
-            return right.process_one(V(tmp, stdx::vector_aligned));
+            return invoke_process_one_with_or_without_offset(right, offset, V(tmp, stdx::vector_aligned));
         }
     }
 
     template<typename... Ts>
-    // Nicer error messages for the following would be good, but not at the expense of breaking
-    // can_process_simd.
+    // Nicer error messages for the following would be good, but not at the expense of breaking can_process_one_simd.
         requires(input_port_types::template are_equal<std::remove_cvref_t<Ts>...>)
     constexpr return_type
-    process_one(Ts &&...inputs) {
+    process_one(std::size_t offset, Ts &&...inputs) {
         // if (sizeof...(Ts) == 0) we could call `return process_one_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
         if constexpr (traits::node::output_port_types<Left>::size == 1) {
             // only the result from the right node needs to be returned
-            return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                               apply_left<traits::node::input_port_types<Left>::size()>(
-                                                                                                       std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+            return apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                                                                                               apply_left<traits::node::input_port_types<Left>::size()>(offset, std::forward_as_tuple(
+                                                                                                                                                                        std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
-            auto left_out  = apply_left<traits::node::input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...));
-            auto right_out = apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
+            auto left_out  = apply_left<traits::node::input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, traits::node::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                                                                                                         std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::node::output_port_types<Left>::size == 2 && traits::node::output_port_types<Right>::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
@@ -1045,8 +1057,14 @@ public:
 
 static_assert(traits::node::input_port_types<copy>::size() == 1);
 static_assert(std::same_as<traits::node::return_type<copy>, float>);
-static_assert(traits::node::can_process_simd<copy>);
-static_assert(traits::node::can_process_simd<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+static_assert(traits::node::can_process_one_scalar<copy>);
+static_assert(traits::node::can_process_one_simd<copy>);
+static_assert(traits::node::can_process_one_scalar_with_offset<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+static_assert(traits::node::can_process_one_simd_with_offset<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+static_assert(source_node<copy>);
+static_assert(sink_node<copy>);
+static_assert(source_node<decltype(merge_by_index<0, 0>(copy(), copy()))>);
+static_assert(sink_node<decltype(merge_by_index<0, 0>(copy(), copy()))>);
 } // namespace test
 #endif
 

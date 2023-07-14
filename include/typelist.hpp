@@ -188,6 +188,37 @@ using transform_types = typename detail::transform_types_impl<Template, List>::t
 template<typename T>
 using transform_value_type = typename T::value_type;
 
+namespace detail {
+template<bool Cond, template<typename> class Tpl1, template<typename> class Tpl2, typename T>
+struct conditional_specialization;
+
+template<template<typename> class Tpl1, template<typename> class Tpl2, typename T>
+struct conditional_specialization<true, Tpl1, Tpl2, T> {
+    using type = Tpl1<T>;
+};
+
+template<template<typename> class Tpl1, template<typename> class Tpl2, typename T>
+struct conditional_specialization<false, Tpl1, Tpl2, T> {
+    using type = Tpl2<T>;
+};
+
+template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename List>
+struct transform_conditional_impl;
+
+template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename... Ts>
+struct transform_conditional_impl<CondFun, Tpl1, Tpl2, typelist<Ts...>> {
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> typelist<typename conditional_specialization<CondFun()(Is), Tpl1, Tpl2, Ts>::type...> {
+        return {};
+    }(std::make_index_sequence<sizeof...(Ts)>()));
+};
+} // namespace detail
+
+// Transform all types in List:
+// For all types T with index I in List:
+// If CondFun()(I) is true use Tpl1<T>, otherwise use Tpl2<T>
+template<class CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename List>
+using transform_conditional = typename detail::transform_conditional_impl<CondFun, Tpl1, Tpl2, List>::type;
+
 // reduce ////////////////
 namespace detail {
 template<template<typename, typename> class Method, typename List>

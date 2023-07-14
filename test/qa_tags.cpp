@@ -60,7 +60,7 @@ const boost::ut::suite TagPropagation = [] {
     using namespace fair::graph::tag_test;
 
     "tag_source"_test = [] {
-        std::uint64_t n_samples = 1024;
+        std::int64_t n_samples = 1024;
         graph flow_graph;
         auto &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(
                 {{"n_samples_max", n_samples},
