@@ -19,6 +19,8 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <stdexcept>
+#include <system_error>
 
 #include <fmt/format.h>
 
@@ -70,40 +72,57 @@ round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
 
 // clang-format off
 class double_mapped_memory_resource : public std::pmr::memory_resource {
-#ifdef HAS_POSIX_MAP_INTERFACE
     [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
+        // the 2nd double mapped memory call mmap may fail and/or return an unsuitable return address which is unavoidable
+        // this workaround retries to get a more favourable allocation up to three times before it throws the regular exception
+        for (int retry_attempt=0; retry_attempt < 3; retry_attempt++) {
+            try {
+                return do_allocate_internal(required_size, alignment);
+            } catch (std::system_error& e) { // explicitly caught for retry
+                fmt::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+            } catch (std::invalid_argument& e) { // explicitly caught for retry
+                fmt::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+            }
+        }
+        return do_allocate_internal(required_size, alignment);
+    }
+#ifdef HAS_POSIX_MAP_INTERFACE
+    [[nodiscard]] static void* do_allocate_internal(const std::size_t required_size, std::size_t alignment) { //NOSONAR
 
         const std::size_t size = 2 * required_size;
         if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            throw std::runtime_error(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
+            throw std::invalid_argument(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
         const std::size_t size_half = size/2;
 
         static std::size_t _counter;
         const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
-        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) -> long {
+        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) {
             return syscall(__NR_memfd_create, name, flags);
         };
-        int shm_fd = static_cast<int>(memfd_create(0));
+        auto shm_fd = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
-            throw std::runtime_error(fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
         if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
+            std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
         void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
+            std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
         // unmap the 2nd half
         if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
+            std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::runtime_error(fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
         }
 
         // Map the first half into the now available hole.
@@ -113,11 +132,15 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         // for our contiguous mapping to work as intended.
         void* second_copy_addr = static_cast<char*> (first_copy) + size_half;
         if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); result != second_copy_addr) {
+            std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
             if (result == MAP_FAILED) {
-                throw std::runtime_error(fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
             } else {
-                throw std::runtime_error(fmt::format("{} - failed mmap for second copy: mismatching address", buffer_name));
+                ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
+                ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
+                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}",
+                                                     buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2*size_half));
             }
         }
 
@@ -125,18 +148,18 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         return first_copy;
 }
 #else
-    [[nodiscard]] void* do_allocate(const std::size_t, std::size_t) override {
-        throw std::runtime_error("OS does not provide POSIX interface for mmap(...) and munmao(...)");
+    [[nodiscard]] static void* do_allocate_internal(const std::size_t, std::size_t) { //NOSONAR
+        throw std::invalid_argument("OS does not provide POSIX interface for mmap(...) and munmao(...)");
         // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
     }
 #endif
 
 
 #ifdef HAS_POSIX_MAP_INTERFACE
-    void  do_deallocate(void* p, std::size_t size, size_t alignment) override {
+    void  do_deallocate(void* p, std::size_t size, size_t alignment) override { //NOSONAR
 
         if (munmap(p, size) == -1) {
-            throw std::runtime_error(fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
+            throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
         }
     }
 #else
