@@ -109,6 +109,23 @@ option(ENABLE_TESTING "Enable Test Builds" ON)
 if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
     enable_testing()
+    if (ENABLE_COVERAGE)
+        message("Coverage reporting enabled")
+        include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake # (License: BSL-1.0)
+        target_compile_options(graph-prototype-options INTERFACE --coverage -O0 -g -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0) # fortify_source is not possible without optimization
+        target_link_libraries(graph-prototype-options INTERFACE --coverage)
+        append_coverage_compiler_flags()
+        setup_target_for_coverage_gcovr_xml(
+                NAME coverage
+                EXECUTABLE ctest
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
+        setup_target_for_coverage_gcovr_html(
+                NAME coverage_html
+                EXECUTABLE ctest
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
+    endif ()
     message("Building Tests.")
     add_subdirectory(test)
     message("Building Benchmarks.")
