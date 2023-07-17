@@ -42,7 +42,7 @@ public:
     count_source(tracer &trace, std::string_view name_) : _tracer{ trace } { this->name = name_; }
 
     constexpr std::make_signed_t<std::size_t>
-    available_samples(const count_source & /*d*/) noexcept {
+    available_samples(const count_source & /*d*/) const noexcept {
         const auto ret = static_cast<std::make_signed_t<std::size_t>>(N - _count);
         return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }

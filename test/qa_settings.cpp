@@ -98,7 +98,7 @@ struct Source : public node<Source<T>> {
     }
 
     constexpr std::make_signed_t<std::size_t>
-    available_samples(const Source & /*self*/) noexcept {
+    available_samples(const Source & /*self*/) const noexcept {
         const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
         return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
     }

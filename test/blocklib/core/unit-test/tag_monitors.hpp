@@ -45,7 +45,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     std::int64_t       n_samples_produced{ 0 };
 
     constexpr std::make_signed_t<std::size_t>
-    available_samples(const TagSource &) noexcept {
+    available_samples(const TagSource &) const noexcept {
         if constexpr (UseProcessOne == ProcessFunction::USE_PROCESS_ONE) {
             // '-1' -> DONE, produced enough samples
             return n_samples_max == n_samples_produced ? -1 : n_samples_max - n_samples_produced;

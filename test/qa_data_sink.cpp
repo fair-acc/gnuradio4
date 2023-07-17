@@ -53,7 +53,7 @@ struct Source : public node<Source<T>> {
     }
 
     constexpr std::make_signed_t<std::size_t>
-    available_samples(const Source &) noexcept {
+    available_samples(const Source &) const noexcept {
         // TODO unify with other test sources
         // split into chunks so that we have a single tag at index 0 (or none)
         auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);

@@ -537,6 +537,10 @@ protected:
         std::size_t    samples_to_process       = 0;
         std::size_t    n_samples_until_next_tag = std::numeric_limits<std::size_t>::max(); // default: no tags in sight
         if constexpr (is_source_node) {
+            if constexpr (requires { &Derived::available_samples; }) {
+                static_assert(
+                        requires(const Derived &d) { d.available_samples(d); }, "Incorrect signature for available_samples. Should be `(signed) size_t available_samples(const NodeType&) const`");
+            }
             if constexpr (requires(const Derived &d) {
                               { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
                           }) {
