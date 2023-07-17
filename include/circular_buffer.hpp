@@ -318,14 +318,14 @@ class circular_buffer
     ~ReservedOutputRange() {
         if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
             if (_n_slots_to_claim) {
-                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples", _n_slots_to_claim);
-                std::terminate();
+                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples\n", _n_slots_to_claim);
+                std::abort();
             }
 
         } else {
             if (_n_slots_to_claim && not _published_data) {
-                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples", _n_slots_to_claim);
-                std::terminate();
+                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples\n", _n_slots_to_claim);
+                std::abort();
             }
         }
     }
