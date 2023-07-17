@@ -29,6 +29,7 @@ endfunction()
 
 add_ut_test(qa_buffer)
 add_ut_test(qa_data_sink)
+add_ut_test(qa_decimator)
 add_ut_test(qa_dynamic_node)
 add_ut_test(qa_dynamic_port)
 add_ut_test(qa_fft)
