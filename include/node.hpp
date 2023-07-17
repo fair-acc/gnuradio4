@@ -139,8 +139,8 @@ concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 template<typename Derived> // TODO: nail down the required method parameters and return types
 concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasRequiredProcessFunction = (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+template<typename Derived>
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename T>
 concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
