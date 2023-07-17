@@ -243,13 +243,14 @@ public:
             this->_state = RUNNING;
             work_return_t result;
             auto          nodelist = std::span{ this->_graph.blocks() };
-            while ((result = work_once(nodelist)).status == work_return_status_t::OK) {
-                if (result.status == work_return_status_t::ERROR) {
-                    this->_state = ERROR;
-                    return;
-                }
+            do {
+                result = work_once(nodelist);
+            } while (result.status == work_return_status_t::OK);
+            if (result.status == work_return_status_t::ERROR) {
+                this->_state = ERROR;
+            } else {
+                this->_state = STOPPED;
             }
-            this->_state = STOPPED;
         } else if (executionPolicy == multi_threaded) {
             this->run_on_pool(this->_job_lists, [this](auto &job) { return this->work_once(job); });
         } else {
