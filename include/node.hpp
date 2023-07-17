@@ -430,8 +430,9 @@ public:
                     [available_values_count](auto i, auto &output_range) {
                         if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
                             output_range.publish(available_values_count);
-                        } else {
-                            assert(output_range.is_published() && "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.");
+                        } else if (not output_range.is_published()) {
+                            fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
+                            std::abort();
                         }
                     },
                     writers_tuple);
