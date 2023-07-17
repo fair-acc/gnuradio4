@@ -222,12 +222,16 @@ concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> o
 
 namespace detail {
 template<typename T>
-struct dummy_input_span : public std::span<const T> {
+struct dummy_input_span : public std::span<const T> {    // NOSONAR
+    dummy_input_span(const dummy_input_span &) = delete; // NOSONAR
+    dummy_input_span(dummy_input_span &&) noexcept;      // NOSONAR
     constexpr void consume(std::size_t) noexcept;
 };
 
 template<typename T>
-struct dummy_output_span : public std::span<T> {
+struct dummy_output_span : public std::span<T> {           // NOSONAR
+    dummy_output_span(const dummy_output_span &) = delete; // NOSONAR
+    dummy_output_span(dummy_output_span &&) noexcept;      // NOSONAR
     constexpr void publish(std::size_t) noexcept;
 };
 
@@ -237,7 +241,20 @@ struct nothing_you_ever_wanted {};
 // This alias template is only necessary as a workaround for a bug in Clang. Instead of passing dynamic_span to transform_conditional below, C++ allows passing std::span directly.
 template<typename T>
 using dynamic_span = std::span<T>;
+
+template<std::size_t... InIdx, std::size_t... OutIdx>
+auto
+can_process_bulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
+        -> decltype(node.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
+
+template<typename Node>
+concept can_process_bulk = requires(Node &n, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Node>>::tuple_type inputs,
+                                    typename meta::transform_types<detail::dummy_output_span, traits::node::output_port_types<Node>>::tuple_type outputs) {
+    {
+        detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
+    } -> std::same_as<work_return_status_t>;
+};
 
 /*
  * Satisfied if `Derived` has a member function `process_bulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a

@@ -136,8 +136,8 @@ concept NodeType = requires(T t, std::size_t requested_work) {
 template<typename Derived>
 concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
+template<typename Derived>
+concept HasProcessBulkFunction = traits::node::can_process_bulk<Derived>;
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
