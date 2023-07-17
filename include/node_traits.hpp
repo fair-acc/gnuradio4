@@ -229,9 +229,19 @@ struct dummy_input_span : public std::span<const T> {    // NOSONAR
 };
 
 template<typename T>
+struct dummy_copyable_input_span : public std::span<const T> {
+    constexpr void consume(std::size_t) noexcept;
+};
+
+template<typename T>
 struct dummy_output_span : public std::span<T> {           // NOSONAR
     dummy_output_span(const dummy_output_span &) = delete; // NOSONAR
     dummy_output_span(dummy_output_span &&) noexcept;      // NOSONAR
+    constexpr void publish(std::size_t) noexcept;
+};
+
+template<typename T>
+struct dummy_copyable_output_span : public std::span<T> {
     constexpr void publish(std::size_t) noexcept;
 };
 
@@ -251,6 +261,14 @@ can_process_bulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std:
 template<typename Node>
 concept can_process_bulk = requires(Node &n, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Node>>::tuple_type inputs,
                                     typename meta::transform_types<detail::dummy_output_span, traits::node::output_port_types<Node>>::tuple_type outputs) {
+    {
+        detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
+    } -> std::same_as<work_return_status_t>;
+};
+
+template<typename Node>
+concept can_process_bulk_by_value = requires(Node &n, typename meta::transform_types<detail::dummy_copyable_input_span, traits::node::input_port_types<Node>>::tuple_type inputs,
+                                             typename meta::transform_types<detail::dummy_copyable_output_span, traits::node::output_port_types<Node>>::tuple_type outputs) {
     {
         detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
     } -> std::same_as<work_return_status_t>;

@@ -186,6 +186,11 @@ static_assert(not HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROC
 static_assert(HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
 static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
 
+// Clang 15 and 16 crash on the following static_assert
+#ifndef __clang__
+static_assert(traits::node::process_bulk_requires_ith_output_as_span<TagSource<int, ProcessFunction::USE_PROCESS_BULK>, 0>);
+#endif
+
 static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
 static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
 static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);

@@ -76,11 +76,6 @@ public:
         }
         return fg::work_return_status_t::OK;
     }
-
-    constexpr void
-    process_one(T /*a*/) noexcept {
-        _tracer.trace(this->name());
-    }
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>

@@ -517,6 +517,16 @@ protected:
      */
     work_return_t
     work_internal(std::size_t requested_work) noexcept {
+        if constexpr (not HasRequiredProcessFunction<Derived>) {
+            if constexpr (HasProcessBulkFunction<Derived> and HasProcessOneFunction<Derived>) {
+                static_assert(HasRequiredProcessFunction<Derived>, "Ambiguous node interface. The node type implements both `process_one` and `process_bulk`. Remove one of them.");
+            } else if constexpr (traits::node::can_process_bulk_by_value<Derived>) {
+                static_assert(not traits::node::can_process_bulk_by_value<Derived>, "Deduced function parameters of `process_bulk` must be passed *by reference not by value*.");
+            } else {
+                static_assert(HasRequiredProcessFunction<Derived>,
+                              "Missing or incorrect node interface. The node type must implement either `process_one` or `process_bulk` with arguments matching the port types.");
+            }
+        }
         using fair::graph::work_return_status_t;
         using input_types                       = traits::node::input_port_types<Derived>;
         using output_types                      = traits::node::output_port_types<Derived>;

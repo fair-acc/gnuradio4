@@ -81,22 +81,6 @@ public:
             static_assert(fair::meta::always_false<T>, "unknown op");
         }
     }
-
-    [[nodiscard]] constexpr fg::work_return_status_t
-    process_bulk(std::span<const T> input, std::span<T> output) const noexcept {
-        // classic for-loop
-        for (std::size_t i = 0; i < input.size(); i++) {
-            output[i] = process_one(input[i]);
-        }
-
-        // C++17 algorithms
-        // std::transform(input.begin(), input.end(), output.begin(), [this](const T& elem) { return process_one(elem);});
-
-        // C++20 ranges
-        // std::ranges::transform(input, output.begin(), [this](const T& elem) { return process_one(elem); });
-
-        return fg::work_return_status_t::OK;
-    }
 };
 
 template<typename T>
@@ -107,11 +91,6 @@ template<typename T>
 using add_bulk = math_bulk_op<T, '+'>;
 template<typename T>
 using sub_bulk = math_bulk_op<T, '-'>;
-
-// Clang 15 and 16 crash on the following static_assert
-#ifndef __clang__
-static_assert(fg::traits::node::process_bulk_requires_ith_output_as_span<multiply_bulk<float>, 0>);
-#endif
 
 //
 // This defines a new node type that has only type template parameters.
