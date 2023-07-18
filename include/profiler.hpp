@@ -47,16 +47,15 @@ struct TraceEvent {
     // Function to format a TraceEvent into JSON format.
     std::string
     toJSON() const {
+        using enum EventType;
         switch (type) {
-        case EventType::DurationBegin:
-        case EventType::DurationEnd:
-        case EventType::Instant:
-            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": "{}"}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, args);
-        case EventType::Complete:
-            return fmt::format(R"({{"name": "{}", "ph": "C", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": "{}"}})", name, ts.count(), pid, tid, dur.count(), cat, args);
-        case EventType::AsyncStart:
-        case EventType::AsyncStep:
-        case EventType::AsyncEnd:
+        case DurationBegin:
+        case DurationEnd:
+        case Instant: return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": "{}"}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, args);
+        case Complete: return fmt::format(R"({{"name": "{}", "ph": "C", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": "{}"}})", name, ts.count(), pid, tid, dur.count(), cat, args);
+        case AsyncStart:
+        case AsyncStep:
+        case AsyncEnd:
             return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": {}, "cat": "{}", "args": "{}"}})", name, static_cast<char>(type), ts.count(), pid, tid, dur.count(),
                                id, cat, args);
         default: // TODO
@@ -91,32 +90,32 @@ namespace null {
 class step_event {
 public:
     constexpr void
-    step() noexcept {}
+    step() const noexcept {}
 
     constexpr void
-    finish() noexcept {}
+    finish() const noexcept {}
 };
 
 class simple_event {
 public:
     constexpr void
-    finish() noexcept {}
+    finish() const noexcept {}
 };
 
 class profiler {
 public:
     constexpr void
-    reset() {}
+    reset() const {}
 
     constexpr void
-    instant_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) noexcept {
+    instant_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) const noexcept {
         std::ignore = name;
         std::ignore = categories;
         std::ignore = args;
     }
 
     [[nodiscard]] constexpr simple_event
-    start_duration_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) noexcept {
+    start_duration_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) const noexcept {
         std::ignore = name;
         std::ignore = categories;
         std::ignore = args;
@@ -124,7 +123,7 @@ public:
     }
 
     [[nodiscard]] constexpr simple_event
-    start_complete_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) noexcept {
+    start_complete_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) const noexcept {
         std::ignore = name;
         std::ignore = categories;
         std::ignore = args;
@@ -132,7 +131,7 @@ public:
     }
 
     [[nodiscard]] constexpr step_event
-    start_async_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) noexcept {
+    start_async_event(std::string_view name, std::string_view categories = {}, std::string_view args = {}) const noexcept {
         std::ignore = name;
         std::ignore = categories;
         std::ignore = args;
@@ -163,6 +162,15 @@ public:
 
     ~duration_event() { finish(); }
 
+    duration_event(const duration_event &) = delete;
+    duration_event &
+    operator=(const duration_event &)
+            = delete;
+    duration_event(duration_event &&) noexcept = default;
+    duration_event &
+    operator=(duration_event &&) noexcept
+            = default;
+
     void
     finish() noexcept {
         if (_finished) {
@@ -189,6 +197,15 @@ public:
         : _profiler(profiler), _name{ name }, _categories{ categories }, _args{ args } {}
 
     ~complete_event() { finish(); }
+
+    complete_event(const complete_event &) = delete;
+    complete_event &
+    operator=(const complete_event &)
+            = delete;
+    complete_event(complete_event &&) noexcept = default;
+    complete_event &
+    operator=(complete_event &&) noexcept
+            = default;
 
     void
     finish() noexcept {
@@ -221,6 +238,15 @@ public:
     }
 
     ~async_event() { finish(); }
+
+    async_event(const async_event &) = delete;
+    async_event &
+    operator=(const async_event &)
+            = delete;
+    async_event(async_event &&) noexcept = default;
+    async_event &
+    operator=(async_event &&) noexcept
+            = default;
 
     void
     step() noexcept {

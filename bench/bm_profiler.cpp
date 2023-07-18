@@ -44,12 +44,12 @@ run_with_profiler(P &p) {
     using namespace benchmark;
 
     profiler prof;
-    "default profiler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&p = prof]() { run_with_profiler(p); };
+    "default profiler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&p = prof] { run_with_profiler(p); };
 
     null::profiler null_prof;
-    "null profiler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&p = null_prof]() { run_with_profiler(p); };
+    "null profiler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&p = null_prof] { run_with_profiler(p); };
 
-    "no profiler"_benchmark.repeat<N_ITER>(N_SAMPLES)   = [&p = null_prof]() { run_without_profiler(); };
+    "no profiler"_benchmark.repeat<N_ITER>(N_SAMPLES)   = [] { run_without_profiler(); };
 };
 
 int
