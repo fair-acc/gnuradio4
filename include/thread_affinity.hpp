@@ -88,7 +88,7 @@ getThreadName(const pthread_t &handle) {
     if (int rc = pthread_getname_np(handle, threadName, THREAD_MAX_NAME_LENGTH); rc != 0) {
         throw std::system_error(rc, thread_exception(), "getThreadName(thread_type)");
     }
-    return std::string{ threadName, std::min(strlen(threadName), THREAD_MAX_NAME_LENGTH) };
+    return std::string{ threadName, strnlen(threadName, THREAD_MAX_NAME_LENGTH) };
 }
 
 inline int
