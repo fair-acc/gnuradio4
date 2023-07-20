@@ -494,10 +494,10 @@ public:
                         port_id++;
                         return;
                     }
-                    auto data           = output_port.tagWriter().reserve_output_range(1);
-                    auto offset         = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
-                    data[port_id].index = _tags_at_output[port_id].index + offset;
-                    data[port_id].map   = _tags_at_output[port_id].map;
+                    auto data                 = output_port.tagWriter().reserve_output_range(1);
+                    auto stream_writer_offset = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
+                    data[0].index             = stream_writer_offset + _tags_at_output[port_id].index;
+                    data[0].map               = _tags_at_output[port_id].map;
                     data.publish(1);
                     port_id++;
                 },
@@ -733,7 +733,7 @@ public:
         constexpr bool is_blocking = node_template_parameters::template contains<BlockingIO>;
         if constexpr (is_blocking) {
             return work_internal(requested_work);
-            //static_assert(fair::meta::always_false<derived_t>, "not yet implemented");
+            // static_assert(fair::meta::always_false<derived_t>, "not yet implemented");
         } else {
             return work_internal(requested_work);
         }
@@ -781,9 +781,9 @@ node_description() noexcept {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                                        RawType::visible() ? "" : "_", //
                                        type_name,
-                                       member_name, //
+                                       member_name,                   //
                                        RawType::description(), RawType::unit(),
-                                       RawType::documentation(), //
+                                       RawType::documentation(),      //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
