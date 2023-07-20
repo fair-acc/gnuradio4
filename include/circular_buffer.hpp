@@ -30,7 +30,9 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
+#ifdef __NR_memfd_create
 namespace gr {
 static constexpr bool has_posix_mmap_interface = true;
 }
