@@ -702,7 +702,7 @@ operator<<(std::ostream &os, const port_domain_t &value) {
     return os << static_cast<int>(value);
 }
 
-#ifndef __EMSCRIPTEN__
+#if HAVE_SOURCE_LOCATION
 inline auto
 this_source_location(std::source_location l = std::source_location::current()) {
     return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
@@ -712,7 +712,7 @@ inline auto
 this_source_location() {
     return "not yet implemented";
 }
-#endif // __EMSCRIPTEN__
+#endif // HAVE_SOURCE_LOCATION
 
 } // namespace fair::graph
 
