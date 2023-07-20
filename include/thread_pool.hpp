@@ -455,8 +455,13 @@ public:
             [[nodiscard]] std::future<R> execute(Callable &&func, Args &&...funcArgs) {
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+#ifdef _LIBCPP_VERSION
+                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask",
+                        cpuID, _affinityMask.size()));
+#else
                 throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]",
                         cpuID, _affinityMask.size(), _affinityMask));
+#endif
             }
         }
         std::promise<R> promise;

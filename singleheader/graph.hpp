@@ -143,7 +143,9 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
+#ifdef __NR_memfd_create
 namespace gr {
 static constexpr bool has_posix_mmap_interface = true;
 }
@@ -4597,14 +4599,14 @@ class circular_buffer
     ~ReservedOutputRange() {
         if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
             if (_n_slots_to_claim) {
-                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples", _n_slots_to_claim);
-                std::terminate();
+                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples\n", _n_slots_to_claim);
+                std::abort();
             }
 
         } else {
             if (_n_slots_to_claim && not _published_data) {
-                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples", _n_slots_to_claim);
-                std::terminate();
+                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples\n", _n_slots_to_claim);
+                std::abort();
             }
         }
     }
@@ -11129,12 +11131,16 @@ concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> o
 
 namespace detail {
 template<typename T>
-struct dummy_input_span : public std::span<const T> {
+struct dummy_input_span : public std::span<const T> {    // NOSONAR
+    dummy_input_span(const dummy_input_span &) = delete; // NOSONAR
+    dummy_input_span(dummy_input_span &&) noexcept;      // NOSONAR
     constexpr void consume(std::size_t) noexcept;
 };
 
 template<typename T>
-struct dummy_output_span : public std::span<T> {
+struct dummy_output_span : public std::span<T> {           // NOSONAR
+    dummy_output_span(const dummy_output_span &) = delete; // NOSONAR
+    dummy_output_span(dummy_output_span &&) noexcept;      // NOSONAR
     constexpr void publish(std::size_t) noexcept;
 };
 
@@ -11144,7 +11150,20 @@ struct nothing_you_ever_wanted {};
 // This alias template is only necessary as a workaround for a bug in Clang. Instead of passing dynamic_span to transform_conditional below, C++ allows passing std::span directly.
 template<typename T>
 using dynamic_span = std::span<T>;
+
+template<std::size_t... InIdx, std::size_t... OutIdx>
+auto
+can_process_bulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
+        -> decltype(node.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
+
+template<typename Node>
+concept can_process_bulk = requires(Node &n, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Node>>::tuple_type inputs,
+                                    typename meta::transform_types<detail::dummy_output_span, traits::node::output_port_types<Node>>::tuple_type outputs) {
+    {
+        detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
+    } -> std::same_as<work_return_status_t>;
+};
 
 /*
  * Satisfied if `Derived` has a member function `process_bulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
@@ -11803,11 +11822,11 @@ concept NodeType = requires(T t, std::size_t requested_work) {
 template<typename Derived>
 concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
+template<typename Derived>
+concept HasProcessBulkFunction = traits::node::can_process_bulk<Derived>;
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasRequiredProcessFunction = (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+template<typename Derived>
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename T>
 concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
@@ -12097,8 +12116,9 @@ public:
                     [available_values_count](auto i, auto &output_range) {
                         if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
                             output_range.publish(available_values_count);
-                        } else {
-                            assert(output_range.is_published() && "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.");
+                        } else if (not output_range.is_published()) {
+                            fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
+                            std::abort();
                         }
                     },
                     writers_tuple);
@@ -13449,7 +13469,7 @@ operator<<(std::ostream &os, const port_domain_t &value) {
     return os << static_cast<int>(value);
 }
 
-#ifndef __EMSCRIPTEN__
+#if HAVE_SOURCE_LOCATION
 inline auto
 this_source_location(std::source_location l = std::source_location::current()) {
     return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
@@ -13459,7 +13479,7 @@ inline auto
 this_source_location() {
     return "not yet implemented";
 }
-#endif // __EMSCRIPTEN__
+#endif // HAVE_SOURCE_LOCATION
 
 } // namespace fair::graph
 

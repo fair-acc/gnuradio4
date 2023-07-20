@@ -136,11 +136,11 @@ concept NodeType = requires(T t, std::size_t requested_work) {
 template<typename Derived>
 concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasProcessBulkFunction = requires { &Derived::process_bulk; };
+template<typename Derived>
+concept HasProcessBulkFunction = traits::node::can_process_bulk<Derived>;
 
-template<typename Derived> // TODO: nail down the required method parameters and return types
-concept HasRequiredProcessFunction = (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+template<typename Derived>
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename T>
 concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
@@ -430,8 +430,9 @@ public:
                     [available_values_count](auto i, auto &output_range) {
                         if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
                             output_range.publish(available_values_count);
-                        } else {
-                            assert(output_range.is_published() && "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.");
+                        } else if (not output_range.is_published()) {
+                            fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
+                            std::abort();
                         }
                     },
                     writers_tuple);
