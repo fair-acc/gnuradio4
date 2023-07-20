@@ -15,6 +15,21 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
+template <typename T>
+struct fmt::formatter<std::complex<T>>{
+    template<typename ParseContext>
+    auto
+    parse(ParseContext &ctx) {
+        return std::begin(ctx);
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const std::complex<T> value, FormatContext &ctx) const {
+        return format_to(ctx.out(), "({}+{}i)", value.real(), value.imag());
+    }
+};
+
 namespace fair::graph::setting_test {
 
 namespace utils {
@@ -24,18 +39,12 @@ format_variant(const auto &value) noexcept {
     return std::visit(
             [](auto &&arg) {
                 using Type = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string>) {
+                if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
                     return fmt::format("{}", arg);
                 } else if constexpr (std::is_same_v<Type, std::monostate>) {
                     return fmt::format("monostate");
-                } else if constexpr (std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
-                    return fmt::format("({}, {})", arg.real(), arg.imag());
                 } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
-                    return fmt::format("[");
-                    for (const auto &c : arg) {
-                        return fmt::format("({}, {}), ", c.real(), c.imag());
-                    }
-                    return fmt::format("]");
+                    return fmt::format("[{}]", fmt::join(arg, ", "));
                 } else if constexpr (std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>> || std::is_same_v<Type, std::vector<unsigned short>>
                                      || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>> || std::is_same_v<Type, std::vector<signed char>>
                                      || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>> || std::is_same_v<Type, std::vector<long>>

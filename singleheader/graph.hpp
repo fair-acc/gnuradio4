@@ -4714,9 +4714,11 @@ class circular_buffer
                 const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
                 std::span<U> writable_data(&data[index], n_slots_to_claim);
                 if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
+                    std::invoke(std::forward<Translator>(translator), writable_data, publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
+                } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), writable_data, args...);
                 } else {
-                    std::invoke(std::forward<Translator>(translator), std::forward<std::span<T>&>(writable_data), args...);
+                    static_assert(fair::meta::always_false<Translator>, "Translator does not provide a matching signature");
                 }
 
                 if (!_is_mmap_allocated) {

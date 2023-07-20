@@ -551,7 +551,7 @@ const boost::ut::suite DataSinkTests = [] {
                 r.push_back(dataset.signal_values.front());
                 r.push_back(dataset.signal_values.back());
             };
-            expect(eq(data_sink_registry::instance().register_multiplexed_callback<int32_t>(data_sink_query::sink_name("test_sink"), Matcher(matchers[i]), 100000, callback), true));
+            expect(eq(data_sink_registry::instance().register_multiplexed_callback<int32_t>(data_sink_query::sink_name("test_sink"), Matcher(matchers[i]), 100000, std::move(callback)), true));
 
             pollers[i] = data_sink_registry::instance().get_multiplexed_poller<int32_t>(data_sink_query::sink_name("test_sink"), Matcher(matchers[i]), 100000, blocking_mode::Blocking);
             expect(neq(pollers[i], nullptr));
