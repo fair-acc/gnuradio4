@@ -56,10 +56,10 @@ public:
 };
 
 template<class type>
-#ifdef __EMSCRIPTEN__
-concept thread_type = std::is_same_v<type, std::thread>;
-#else
+#if __cpp_lib_jthread >= 201911L
 concept thread_type = std::is_same_v<type, std::thread> || std::is_same_v<type, std::jthread>;
+#else
+concept thread_type = std::is_same_v<type, std::thread>;
 #endif
 
 namespace detail {
