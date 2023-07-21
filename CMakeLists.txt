@@ -5,19 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
-# Initialize a variable to hold all the compiler flags -> exported into global config.h(.in)
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES Release)
-    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
-    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
-    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
-endif()
-# Replace ; with space
-string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
-
 # Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
 if (NOT DEFINED GR_TOPLEVEL_PROJECT)
     set(GR_TOPLEVEL_PROJECT OFF)
@@ -26,6 +13,48 @@ if (NOT DEFINED GR_TOPLEVEL_PROJECT)
         message(STATUS "CMake version: ${CMAKE_VERSION}")
     endif ()
 endif ()
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
+    # -Og is a much more reasonable default for debugging. Also enable gdb extensions.
+    set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb" CACHE INTERNAL
+        "Flags used by the compiler during debug builds.")
+
+    # Add a build type that keeps runtime checks enabled
+    set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O3" CACHE INTERNAL
+        "Flags used by the compiler during release builds containing runtime checks.")
+
+    # The default value is often an empty string, but this is usually not desirable and one of the
+    # other standard build types is usually more appropriate.
+    if(NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE "RelWithAssert" CACHE STRING
+            "Choose the type of build. Options are: None Debug Release RelWithAssert RelWithDebInfo MinSizeRel.\n\
+ - None: no compiler flags, defaults and target-specific flags apply\n\
+ - Debug: best/complete debugging experience; as optimized as reasonable\n\
+ - Release: full optimization; some runtime checks disabled\n\
+ - RelWithAssert: full optimization; runtime checks enabled\n\
+ - RelWithDebInfo: optimized; debug info; some runtime checks disabled"
+            FORCE)
+    endif(NOT CMAKE_BUILD_TYPE)
+
+    if (CMAKE_BUILD_TYPE STREQUAL "" AND NOT CMAKE_CXX_FLAGS MATCHES "-O[123gs]")
+        message(WARNING "It seems you are compiling without optimization. Please set CMAKE_BUILD_TYPE or CMAKE_CXX_FLAGS.")
+    endif ()
+endif ()
+
+# Initialize a variable to hold all the compiler flags -> exported into global config.h(.in)
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES RelWithAssert)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHASSERT} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
+endif()
+# Replace ; with space
+string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
