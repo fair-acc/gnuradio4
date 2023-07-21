@@ -125,6 +125,21 @@ public:
         return _type_name;
     }
 
+    constexpr bool
+    is_blocking() const noexcept override {
+        return false;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &) const noexcept override {
+        return 0_UZ;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &) const noexcept override {
+        return 0_UZ;
+    }
+
     // TODO: integrate with node::work
     fair::graph::work_return_t
     work(std::size_t requested_work) override {

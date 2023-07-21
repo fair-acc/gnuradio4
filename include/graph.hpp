@@ -181,6 +181,27 @@ public:
             = 0;
 
     /**
+     * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
+     */
+    [[nodiscard]] virtual constexpr bool
+    is_blocking() const noexcept
+            = 0;
+
+    /**
+     * @brief number of available readable samples at the block's input ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &) const noexcept
+            = 0;
+
+    /**
+     * @brief number of available writable samples at the block's output ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &) const noexcept
+            = 0;
+
+    /**
      * @brief user defined name
      */
     [[nodiscard]] virtual std::string_view
@@ -315,6 +336,21 @@ public:
     [[nodiscard]] constexpr work_return_t
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return node_ref().work(requested_work);
+    }
+
+    [[nodiscard]] constexpr bool
+    is_blocking() const noexcept override {
+        return node_ref().is_blocking();
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &data) const noexcept override {
+        return node_ref().available_input_samples(data);
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &data) const noexcept override {
+        return node_ref().available_output_samples(data);
     }
 
     [[nodiscard]] std::string_view

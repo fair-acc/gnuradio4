@@ -368,6 +368,34 @@ public:
         //  * ...
     }
 
+    template<fair::meta::array_or_vector_type Container>
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(Container &data) const noexcept {
+        if constexpr (fair::meta::vector_type<Container>) {
+            data.resize(traits::node::input_port_types<Derived>::size);
+        } else if constexpr (fair::meta::array_type<Container>) {
+            static_assert(std::tuple_size<Container>::value >= traits::node::input_port_types<Derived>::size);
+        } else {
+            static_assert(fair::meta::always_false<Container>, "type not supported");
+        }
+        meta::tuple_for_each_enumerate([&data](auto index, auto &input_port) { data[index] = input_port.streamReader().available(); }, input_ports(&self()));
+        return traits::node::input_port_types<Derived>::size;
+    }
+
+    template<fair::meta::array_or_vector_type Container>
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(Container &data) const noexcept {
+        if constexpr (fair::meta::vector_type<Container>) {
+            data.resize(traits::node::output_port_types<Derived>::size);
+        } else if constexpr (fair::meta::array_type<Container>) {
+            static_assert(std::tuple_size<Container>::value >= traits::node::output_port_types<Derived>::size);
+        } else {
+            static_assert(fair::meta::always_false<Container>, "type not supported");
+        }
+        meta::tuple_for_each_enumerate([&data](auto index, auto &output_port) { data[index] = output_port.streamWriter().available(); }, output_ports(&self()));
+        return traits::node::output_port_types<Derived>::size;
+    }
+
     [[nodiscard]] constexpr bool
     is_blocking() const noexcept {
         return std::disjunction_v<std::is_same<BlockingIO, Arguments>...>;
@@ -806,6 +834,17 @@ public:
             }
             const work_return_status_t lastStatus                 = ioLastWorkStatus.exchange(work_return_status_t::OK, std::memory_order_relaxed);
             const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
+            // TODO: kept this print-out to check for a race condition w.r.t. evaluating the DONE condition which is non-trivial in a multi-threaded scenario
+            //            fmt::print("{} performedWork {} : lastStatus: ", name, performedWork);
+            //            switch (lastStatus) {
+            //                case work_return_status_t::OK : fmt::print("OK\n"); break;
+            //                case work_return_status_t::INSUFFICIENT_INPUT_ITEMS : fmt::print("INSUFFICIENT_INPUT_ITEMS\n"); break;
+            //                case work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS : fmt::print("INSUFFICIENT_OUTPUT_ITEMS\n"); break;
+            //                case work_return_status_t::DONE : fmt::print("DONE\n"); break;
+            //                case work_return_status_t::ERROR: fmt::print("ERROR\n"); break;
+            //                default: fmt::print("UNKNOWN\n"); break;
+            //
+            //            }
             return { accumulatedRequestedWork, performedWork, performedWork > 0 ? work_return_status_t::OK : lastStatus };
         } else {
             return work_internal(requested_work);

@@ -82,6 +82,21 @@ public:
         return _type_name;
     }
 
+    constexpr bool
+    is_blocking() const noexcept override {
+        return false;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &) const noexcept override {
+        return 0UL;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &) const noexcept override {
+        return 0UL;
+    }
+
     fg::work_return_t
     work(std::size_t requested_work) override {
         _scheduler.run_and_wait();

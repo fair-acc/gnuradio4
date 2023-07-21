@@ -40,7 +40,7 @@ add_ut_test(qa_sources)
 add_ut_test(qa_tags)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
-
+add_ut_test(qa_traits)
 
 if (NOT EMSCRIPTEN)
     add_subdirectory(plugins)
