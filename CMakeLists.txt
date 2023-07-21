@@ -5,6 +5,33 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
+    # -Og is a much more reasonable default for debugging. Also enable gdb extensions.
+    set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb" CACHE INTERNAL
+        "Flags used by the compiler during debug builds.")
+
+    # Add a build type that keeps runtime checks enabled
+    set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O3" CACHE INTERNAL
+        "Flags used by the compiler during release builds containing runtime checks.")
+
+    # The default value is often an empty string, but this is usually not desirable and one of the
+    # other standard build types is usually more appropriate.
+    if(NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE "RelWithAssert" CACHE STRING
+            "Choose the type of build. Options are: None Debug Release RelWithAssert RelWithDebInfo MinSizeRel.\n\
+ - None: no compiler flags, defaults and target-specific flags apply\n\
+ - Debug: best/complete debugging experience; as optimized as reasonable\n\
+ - Release: full optimization; some runtime checks disabled\n\
+ - RelWithAssert: full optimization; runtime checks enabled\n\
+ - RelWithDebInfo: optimized; debug info; some runtime checks disabled"
+            FORCE)
+    endif(NOT CMAKE_BUILD_TYPE)
+
+    if (CMAKE_BUILD_TYPE STREQUAL "" AND NOT CMAKE_CXX_FLAGS MATCHES "-O[123gs]")
+        message(WARNING "It seems you are compiling without optimization. Please set CMAKE_BUILD_TYPE or CMAKE_CXX_FLAGS.")
+    endif ()
+endif ()
+
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
