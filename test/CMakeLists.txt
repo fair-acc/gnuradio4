@@ -5,7 +5,7 @@ configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
 
 function(add_ut_test TEST_NAME)
     add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
-    if ((CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"))
+    if ((CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")) # needed for clang15 (false positives, fixed in clang16)
         target_compile_options(${TEST_NAME} PRIVATE -Wall)
         target_link_options(${TEST_NAME} PRIVATE -Wall)
     else ()
