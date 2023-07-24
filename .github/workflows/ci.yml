@@ -79,9 +79,9 @@ jobs:
         git clone --depth=1 https://github.com/emscripten-core/emsdk.git
         cd emsdk
         # Download and install the latest SDK tools.
-        ./emsdk install releases-03ecb526947f6a3702a0d083083799fe410d3893-64bit
+        ./emsdk install releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
         # Make the "latest" SDK "active" for the current user. (writes .emscripten file)
-        ./emsdk activate releases-03ecb526947f6a3702a0d083083799fe410d3893-64bit
+        ./emsdk activate releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
 
     - name: Install sonar-scanner and build-wrapper
       if: matrix.configurations.compiler == 'gcc' && matrix.cmake-build-type == 'Debug'
