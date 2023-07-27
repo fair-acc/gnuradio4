@@ -605,6 +605,26 @@ publish_tag(Port auto &port, const property_map &tag_data, std::size_t tag_offse
             1_UZ);
 }
 
+constexpr std::size_t
+samples_to_next_tag(const Port auto &port) {
+    if (port.tagReader().available() == 0) [[likely]] {
+        return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
+    }
+
+    // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+    const auto &tagData           = port.tagReader().get();
+    const auto &readPosition      = port.streamReader().position();
+    const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
+
+    if (future_tags_begin == tagData.begin()) {
+        const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
+        const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+        return n_samples_until_next_tag;
+    } else {
+        return 0;
+    }
+}
+
 } // namespace fair::graph
 
 #endif // include guard
