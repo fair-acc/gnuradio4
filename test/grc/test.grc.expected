@@ -2,9 +2,16 @@ blocks:
   - name: main_source
     id: good::fixed_source
     parameters:
+      denominator: 1
       event_count: 100
       name: main_source
+      numerator: 1
+      stride: 1
       unique_name: good::fixed_source<double>#0
+      denominator::description: denominator
+      denominator::documentation: decimation/interpolation settings
+      denominator::unit: ""
+      denominator::visible: 0
       description: ""
       meta_information::description: meta-information
       meta_information::documentation: store non-graph-processing information like UI block position etc.
@@ -14,12 +21,27 @@ blocks:
       name::documentation: N.B. may not be unique -> ::unique_name
       name::unit: ""
       name::visible: 0
+      numerator::description: numerator
+      numerator::documentation: decimation/interpolation settings
+      numerator::unit: ""
+      numerator::visible: 0
+      stride::description: stride
+      stride::documentation: stride doc
+      stride::unit: ""
+      stride::visible: 0
       unknown_property: 42
   - name: multiplier
     id: good::multiply
     parameters:
+      denominator: 1
       name: multiplier
+      numerator: 1
+      stride: 1
       unique_name: good::multiply<double>#0
+      denominator::description: denominator
+      denominator::documentation: decimation/interpolation settings
+      denominator::unit: ""
+      denominator::visible: 0
       description: ""
       meta_information::description: meta-information
       meta_information::documentation: store non-graph-processing information like UI block position etc.
@@ -29,11 +51,26 @@ blocks:
       name::documentation: N.B. may not be unique -> ::unique_name
       name::unit: ""
       name::visible: 0
+      numerator::description: numerator
+      numerator::documentation: decimation/interpolation settings
+      numerator::unit: ""
+      numerator::visible: 0
+      stride::description: stride
+      stride::documentation: stride doc
+      stride::unit: ""
+      stride::visible: 0
   - name: counter
     id: builtin_counter
     parameters:
+      denominator: 1
       name: counter
+      numerator: 1
+      stride: 1
       unique_name: builtin_counter<double>#0
+      denominator::description: denominator
+      denominator::documentation: decimation/interpolation settings
+      denominator::unit: ""
+      denominator::visible: 0
       description: ""
       meta_information::description: meta-information
       meta_information::documentation: store non-graph-processing information like UI block position etc.
@@ -43,12 +80,27 @@ blocks:
       name::documentation: N.B. may not be unique -> ::unique_name
       name::unit: ""
       name::visible: 0
+      numerator::description: numerator
+      numerator::documentation: decimation/interpolation settings
+      numerator::unit: ""
+      numerator::visible: 0
+      stride::description: stride
+      stride::documentation: stride doc
+      stride::unit: ""
+      stride::visible: 0
   - name: sink
     id: good::cout_sink
     parameters:
+      denominator: 1
       name: sink
+      numerator: 1
+      stride: 1
       total_count: 100
       unique_name: good::cout_sink<double>#0
+      denominator::description: denominator
+      denominator::documentation: decimation/interpolation settings
+      denominator::unit: ""
+      denominator::visible: 0
       description: ""
       meta_information::description: meta-information
       meta_information::documentation: store non-graph-processing information like UI block position etc.
@@ -58,6 +110,14 @@ blocks:
       name::documentation: N.B. may not be unique -> ::unique_name
       name::unit: ""
       name::visible: 0
+      numerator::description: numerator
+      numerator::documentation: decimation/interpolation settings
+      numerator::unit: ""
+      numerator::visible: 0
+      stride::description: stride
+      stride::documentation: stride doc
+      stride::unit: ""
+      stride::visible: 0
       unknown_property: 42
 connections:
   - [main_source, 0, multiplier, 0]

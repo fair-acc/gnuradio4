@@ -8,8 +8,8 @@
 #include <fstream>
 #include <sstream>
 
-#include "build_configure.hpp"
 #include "blocklib/core/unit-test/common_nodes.hpp"
+#include "build_configure.hpp"
 
 namespace fg = fair::graph;
 
@@ -64,12 +64,12 @@ main(int argc, char *argv[]) {
         using namespace fair::graph;
         register_builtin_nodes(&context.registry);
 
-        auto graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
+        auto                  graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
-        auto graph_1            = fg::load_grc(context.loader, graph_source);
-        auto graph_saved_source = fg::save_grc(graph_1);
+        auto                  graph_1            = fg::load_grc(context.loader, graph_source);
+        auto                  graph_saved_source = fg::save_grc(graph_1);
 
-        auto graph_2            = fg::load_grc(context.loader, graph_saved_source);
+        auto                  graph_2            = fg::load_grc(context.loader, graph_saved_source);
 
         [[maybe_unused]] auto collect_nodes      = [](fg::graph &graph) {
             std::set<std::string> result;
