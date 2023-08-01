@@ -56,8 +56,6 @@ jobs:
     - name: Install clang-15
       if: matrix.configurations.compiler == 'clang15'
       run: |
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-        sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-15 main'
         sudo apt update
         sudo apt install -y clang-15 libc++-15-dev libc++abi-15-dev
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-15 110
