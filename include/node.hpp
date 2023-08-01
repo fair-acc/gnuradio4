@@ -613,6 +613,12 @@ protected:
             }
 
             if (numerator != 1. || denominator != 1.) {
+                bool is_ill_defined = (denominator > ports_status.in_max_samples);
+                assert(!is_ill_defined);
+                if (is_ill_defined) {
+                    return { requested_work, 0_UZ, work_return_status_t::ERROR };
+                }
+                
                 ports_status.in_samples          = static_cast<std::size_t>(ports_status.in_samples / denominator) * denominator; // remove reminder
 
                 const std::size_t out_min_limit  = ports_status.out_min_samples;
@@ -627,7 +633,6 @@ protected:
                 std::size_t       in_max_wo_reminder = static_cast<std::size_t>(in_max_samples / denominator) * denominator;
 
                 if (ports_status.in_samples < in_min_wo_reminder) return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
-
                 ports_status.in_samples  = std::clamp(ports_status.in_samples, in_min_wo_reminder, in_max_wo_reminder);
                 ports_status.out_samples = numerator * (ports_status.in_samples / denominator);
             }
