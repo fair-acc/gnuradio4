@@ -254,11 +254,43 @@ public:
     using node_template_parameters = meta::typelist<Arguments...>;
     using Description              = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     constexpr static tag_propagation_policy_t                                                                      tag_policy  = tag_propagation_policy_t::TPP_ALL_TO_ALL;
+    A<uint64_t, "numerator", Doc<"decimation/interpolation settings">>                                             numerator   = 1_UZ;
+    A<uint64_t, "denominator", Doc<"decimation/interpolation settings">>                                           denominator = 1_UZ;
+    A<uint64_t, "stride", Doc<"stride doc">>                                                                       stride      = 1_UZ;
     const std::size_t                                                                                              unique_id   = _unique_id_counter++;
     const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(fair::meta::type_name<Derived>()) };
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
     constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
+
+    struct ports_status_t {
+        std::size_t in_min_samples{ std::numeric_limits<std::size_t>::min() };         // max of `port.min_buffer_size()` of all input ports
+        std::size_t in_max_samples{ std::numeric_limits<std::size_t>::max() };         // min of `port.max_buffer_size()` of all input ports
+        std::size_t in_available{ std::numeric_limits<std::size_t>::max() };           // min of `port.streamReader().available()` of all input ports
+        std::size_t in_samples_to_next_tag{ std::numeric_limits<std::size_t>::max() }; // min of `port.samples_to_next_tag` of all input ports
+
+        std::size_t out_min_samples{ std::numeric_limits<std::size_t>::min() };        // max of `port.min_buffer_size()` of all output ports
+        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() };        // min of `port.max_buffer_size()` of all output ports
+        std::size_t out_available{ std::numeric_limits<std::size_t>::max() };          // min of `port.streamWriter().available()` of all input ports
+
+        std::size_t in_samples{ 0 };                                                   // number of input samples to process
+        std::size_t out_samples{ 0 };                                                  // number of output samples, calculated based on `numerator` and `denominator`
+
+        bool        in_at_least_one_port_has_data{ false };                            // at least one port has data
+        bool        in_at_least_one_tag_available{ false };                            // at least one port has a tag
+
+        constexpr bool
+        enough_samples_for_output_ports(std::size_t n) {
+            return n >= out_min_samples;
+        }
+
+        constexpr bool
+        space_available_on_output_ports(std::size_t n) {
+            return n <= out_available;
+        }
+    };
+
+    ports_status_t ports_status{};
 
 protected:
     bool               _input_tags_present  = false;
@@ -279,14 +311,40 @@ protected:
         return *static_cast<const Derived *>(this);
     }
 
-    constexpr bool
-    enough_samples_for_output_ports(std::size_t n) {
-        return std::apply([n](const auto &...port) noexcept { return ((n >= port.min_buffer_size()) && ... && true); }, output_ports(&self()));
-    }
+    void
+    update_ports_status() {
+        ports_status = ports_status_t();
+        meta::tuple_for_each(
+                [&ps = ports_status](Port auto &port) {
+                    ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
+                    ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
+                    ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
+                    ps.in_samples_to_next_tag        = std::min(ps.in_samples_to_next_tag, samples_to_next_tag(port));
+                    ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
+                    ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
+                },
+                input_ports(&self()));
 
-    constexpr bool
-    space_available_on_output_ports(std::size_t n) {
-        return std::apply([n](const auto &...port) noexcept { return ((n <= port.streamWriter().available()) && ... && true); }, output_ports(&self()));
+        meta::tuple_for_each(
+                [&ps = ports_status](Port auto &port) {
+                    ps.out_min_samples = std::max(ps.out_min_samples, port.min_buffer_size());
+                    ps.out_max_samples = std::min(ps.out_max_samples, port.max_buffer_size());
+                    ps.out_available   = std::min(ps.out_available, port.streamWriter().available());
+                },
+                output_ports(&self()));
+
+        ports_status.in_samples = ports_status.in_available;
+        if (ports_status.in_samples < ports_status.in_min_samples) ports_status.in_samples = 0;
+        if (ports_status.in_samples > ports_status.in_max_samples) ports_status.in_samples = ports_status.in_max_samples;
+
+        // By default N-in == N-out
+        // TODO: adjust `samples_to_proceed` to output limits?
+        ports_status.out_samples = ports_status.in_samples;
+
+        if (ports_status.in_min_samples > ports_status.in_max_samples)
+            throw std::runtime_error(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", ports_status.in_min_samples, ports_status.in_max_samples));
+        if (ports_status.out_min_samples > ports_status.out_max_samples)
+            throw std::runtime_error(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", ports_status.out_min_samples, ports_status.out_max_samples));
     }
 
 public:
@@ -373,55 +431,6 @@ public:
     template<fixed_string Name, typename Self>
     friend constexpr auto &
     output_port(Self *self) noexcept;
-
-    // This function is a template and static to provide easier
-    // transition to C++23's deducing this later
-    template<typename Self>
-    [[nodiscard]] constexpr auto static inputs_status(Self &self) noexcept {
-        static_assert(traits::node::input_ports<Derived>::size > 0, "A source node has no inputs, therefore no inputs status.");
-        bool       at_least_one_input_has_data = false;
-        const auto availableForPort            = [&at_least_one_input_has_data]<typename Port>(Port &port) noexcept -> std::pair<std::size_t, size_t> {
-            std::size_t availableSamples = port.streamReader().available();
-            at_least_one_input_has_data  = at_least_one_input_has_data || (availableSamples > 0);
-
-            if (availableSamples < port.min_buffer_size()) availableSamples = 0;
-            if (availableSamples > port.max_buffer_size()) availableSamples = port.max_buffer_size();
-
-            if (port.tagReader().available() == 0) [[likely]] {
-                return { availableSamples, std::numeric_limits<std::size_t>::max() }; // default: no tags in sight
-            }
-
-            // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-            const auto &tagData           = port.tagReader().get();
-            const auto &readPosition      = port.streamReader().position();
-
-            const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
-
-            if (future_tags_begin == tagData.begin()) {
-                const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
-                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
-                assert(n_samples_until_next_tag >= 0 && "causality error: tag should not be placed in the past");
-                return { std::min(availableSamples, n_samples_until_next_tag), n_samples_until_next_tag };
-            } else {
-                const std::size_t first_future_tag_index   = future_tags_begin == tagData.end() ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(future_tags_begin->index);
-                const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
-                return { std::min(availableSamples, n_samples_until_next_tag), 0 };
-            }
-        };
-
-        const std::pair<std::size_t, std::size_t> available_values_and_tag_count = std::apply([&availableForPort](auto &...input_port) { return meta::safe_pair_min(availableForPort(input_port)...); },
-                                                                                              input_ports(&self));
-
-        struct result {
-            bool        at_least_one_input_has_data;
-            std::size_t available_values_count;
-            std::size_t samples_until_next_tag;
-        };
-
-        return result{ .at_least_one_input_has_data = at_least_one_input_has_data,
-                       .available_values_count      = available_values_and_tag_count.first,
-                       .samples_until_next_tag      = available_values_and_tag_count.second };
-    }
 
     void
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
@@ -518,21 +527,33 @@ protected:
     work_return_t
     work_internal(std::size_t requested_work) noexcept {
         using fair::graph::work_return_status_t;
-        using input_types                       = traits::node::input_port_types<Derived>;
-        using output_types                      = traits::node::output_port_types<Derived>;
+        using input_types             = traits::node::input_port_types<Derived>;
+        using output_types            = traits::node::output_port_types<Derived>;
 
-        constexpr bool is_source_node           = input_types::size == 0;
-        constexpr bool is_sink_node             = output_types::size == 0;
+        constexpr bool is_source_node = input_types::size == 0;
+        constexpr bool is_sink_node   = output_types::size == 0;
 
-        std::size_t    samples_to_process       = 0;
-        std::size_t    n_samples_until_next_tag = std::numeric_limits<std::size_t>::max(); // default: no tags in sight
+        if constexpr (node_template_parameters::template contains<PerformDecimationInterpolation>) {
+            static_assert(!is_sink_node, "Decimation/interpolation is not available for sink blocks. Remove 'PerformDecimationInterpolation' from the block definition.");
+            static_assert(!is_source_node, "Decimation/interpolation is not available for source blocks. Remove 'PerformDecimationInterpolation' from the block definition.");
+            static_assert(HasProcessBulkFunction<Derived>,
+                          "Blocks which allow decimation/interpolation must implement process_bulk(...) method. Remove 'PerformDecimationInterpolation' from the block definition.");
+        } else {
+            if (numerator != 1 || denominator != 1) {
+                throw std::runtime_error(
+                        fmt::format("Block is not defined as `PerformDecimationInterpolation`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+            }
+        }
+
+        update_ports_status();
+
         if constexpr (is_source_node) {
+            ports_status.in_samples_to_next_tag = std::numeric_limits<std::size_t>::max(); // no tags to processed for source node
             if constexpr (requires(const Derived &d) {
                               { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
                           }) {
                 // the (source) node wants to determine the number of samples to process
-                std::size_t max_buffer = std::numeric_limits<std::size_t>::max();
-                meta::tuple_for_each([&max_buffer](auto &&out) { max_buffer = std::min(max_buffer, out.streamWriter().available()); }, output_ports(&self()));
+                std::size_t                           max_buffer        = ports_status.out_available;
                 const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
                 if (available_samples < 0 && max_buffer > 0) {
                     return { requested_work, 0_UZ, work_return_status_t::DONE };
@@ -540,68 +561,98 @@ protected:
                 if (available_samples == 0) {
                     return { requested_work, 0_UZ, work_return_status_t::OK };
                 }
-                samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
-                if (not enough_samples_for_output_ports(samples_to_process)) {
+                std::size_t samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
+                if (not ports_status.enough_samples_for_output_ports(samples_to_process)) {
                     return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (samples_to_process == 0) {
                     return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
                 }
+                ports_status.in_samples  = std::min(samples_to_process, requested_work);
+                ports_status.out_samples = ports_status.in_samples;
             } else if constexpr (requires(const Derived &d) {
                                      { available_samples(d) } -> std::same_as<std::size_t>;
                                  }) {
                 // the (source) node wants to determine the number of samples to process
-                samples_to_process = available_samples(self());
+                std::size_t samples_to_process = available_samples(self());
                 if (samples_to_process == 0) {
                     return { requested_work, 0_UZ, work_return_status_t::OK };
                 }
-                if (not enough_samples_for_output_ports(samples_to_process)) {
+                if (not ports_status.enough_samples_for_output_ports(samples_to_process)) {
                     return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
                 }
-                if (not space_available_on_output_ports(samples_to_process)) {
+                if (not ports_status.space_available_on_output_ports(samples_to_process)) {
                     return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
                 }
+                ports_status.in_samples  = std::min(samples_to_process, requested_work);
+                ports_status.out_samples = ports_status.in_samples;
             } else if constexpr (is_sink_node) {
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
                 // buffer size would be if the node were not merged)
                 constexpr std::size_t chunk_size = Derived::merged_work_chunk_size();
                 static_assert(chunk_size != std::dynamic_extent && chunk_size > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                                    "friend function `available_samples(const NodeType&)` must be defined.");
-                samples_to_process = chunk_size;
+                ports_status.in_samples  = std::min(chunk_size, requested_work);
+                ports_status.out_samples = ports_status.in_samples;
             } else {
                 // derive value from output buffer size
-                samples_to_process = std::apply([&](const auto &...ports) { return std::min({ ports.streamWriter().available()..., ports.max_buffer_size()... }); }, output_ports(&self()));
-                if (not enough_samples_for_output_ports(samples_to_process)) {
+                std::size_t samples_to_process = std::min(ports_status.out_available, ports_status.out_max_samples);
+                if (not ports_status.enough_samples_for_output_ports(samples_to_process)) {
                     return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
                 }
+                ports_status.in_samples  = std::min(samples_to_process, requested_work);
+                ports_status.out_samples = ports_status.in_samples;
                 // space_available_on_output_ports is true by construction of samples_to_process
             }
         } else {
-            // Capturing structured bindings does not work in Clang...
-            const auto [at_least_one_input_has_data, available_values_count, n_samples_until_next_tag_] = self().inputs_status(self());
-            if (available_values_count == 0) {
-                return { requested_work, 0_UZ, at_least_one_input_has_data ? work_return_status_t::INSUFFICIENT_INPUT_ITEMS : work_return_status_t::DONE };
+            ports_status.in_samples  = std::min(ports_status.in_samples, requested_work);
+            ports_status.out_samples = ports_status.in_samples;
+
+            if (ports_status.in_available == 0) {
+                return { requested_work, 0_UZ, ports_status.in_at_least_one_port_has_data ? work_return_status_t::INSUFFICIENT_INPUT_ITEMS : work_return_status_t::DONE };
             }
-            samples_to_process       = available_values_count;
-            n_samples_until_next_tag = n_samples_until_next_tag_;
-            if (not enough_samples_for_output_ports(samples_to_process)) {
+
+            if (numerator != 1. || denominator != 1.) {
+                bool is_ill_defined = (denominator > ports_status.in_max_samples);
+                assert(!is_ill_defined);
+                if (is_ill_defined) {
+                    return { requested_work, 0_UZ, work_return_status_t::ERROR };
+                }
+                
+                ports_status.in_samples          = static_cast<std::size_t>(ports_status.in_samples / denominator) * denominator; // remove reminder
+
+                const std::size_t out_min_limit  = ports_status.out_min_samples;
+                const std::size_t out_max_limit  = std::min(ports_status.out_available, ports_status.out_max_samples);
+                const double      ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
+
+                std::size_t       in_min_samples = static_cast<std::size_t>(static_cast<double>(out_min_limit) / ratio);
+                if (in_min_samples % denominator != 0) in_min_samples += denominator;
+                std::size_t       in_min_wo_reminder = static_cast<std::size_t>(in_min_samples / denominator) * denominator;
+
+                const std::size_t in_max_samples     = static_cast<std::size_t>(static_cast<double>(out_max_limit) / ratio);
+                std::size_t       in_max_wo_reminder = static_cast<std::size_t>(in_max_samples / denominator) * denominator;
+
+                if (ports_status.in_samples < in_min_wo_reminder) return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
+                ports_status.in_samples  = std::clamp(ports_status.in_samples, in_min_wo_reminder, in_max_wo_reminder);
+                ports_status.out_samples = numerator * (ports_status.in_samples / denominator);
+            }
+
+            // TODO: special case for ports_status.in_samples == 0 ?
+
+            if (not ports_status.enough_samples_for_output_ports(ports_status.out_samples)) {
                 return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
             }
-            if (not space_available_on_output_ports(samples_to_process)) {
+            if (not ports_status.space_available_on_output_ports(ports_status.out_samples)) {
                 return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
             }
         }
 
-        const auto input_spans   = meta::tuple_transform([samples_to_process](auto &input_port) noexcept { return input_port.streamReader().get(samples_to_process); }, input_ports(&self()));
-
-        auto       writers_tuple = meta::tuple_transform([samples_to_process](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(samples_to_process); },
-                                                   output_ports(&self()));
-
-        _input_tags_present      = false;
-        _output_tags_changed     = false;
-        if (n_samples_until_next_tag == 0) {
+        _input_tags_present  = false;
+        _output_tags_changed = false;
+        if (ports_status.in_samples_to_next_tag == 0) {
             if constexpr (HasProcessOneFunction<Derived>) {
-                samples_to_process = 1; // N.B. limit to one so that only one process_on(...) invocation receives the tag
+                ports_status.in_samples  = 1; // N.B. limit to one so that only one process_on(...) invocation receives the tag
+                ports_status.out_samples = 1;
             }
             property_map merged_tag_map;
             _input_tags_present    = true;
@@ -657,8 +708,9 @@ protected:
         // case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
-        // clamp
-        samples_to_process = std::min(samples_to_process, requested_work);
+        const auto input_spans   = meta::tuple_transform([in_samples = ports_status.in_samples](auto &input_port) noexcept { return input_port.streamReader().get(in_samples); }, input_ports(&self()));
+        auto       writers_tuple = meta::tuple_transform([out_samples = ports_status.out_samples](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(out_samples); },
+                                                   output_ports(&self()));
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             // cannot use std::apply because it requires tuple_cat(input_spans, writers_tuple). The latter doesn't work because writers_tuple isn't copyable.
@@ -666,11 +718,13 @@ protected:
                 return self().process_bulk(std::get<InIdx>(input_spans)..., std::get<OutIdx>(writers_tuple)...);
             }(std::make_index_sequence<traits::node::input_ports<Derived>::size>(), std::make_index_sequence<traits::node::output_ports<Derived>::size>());
 
-            write_to_outputs(samples_to_process, writers_tuple);
-            const bool success = consume_readers(self(), samples_to_process);
+            write_to_outputs(ports_status.out_samples, writers_tuple);
+            const bool success = consume_readers(self(), ports_status.in_samples);
             forward_tags();
-            return { requested_work, samples_to_process, success ? ret : work_return_status_t::ERROR };
+            return { requested_work, ports_status.in_samples, success ? ret : work_return_status_t::ERROR };
         } else if constexpr (HasProcessOneFunction<Derived>) {
+            if (ports_status.in_samples != ports_status.out_samples)
+                throw std::runtime_error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for process_one() method.", ports_status.in_samples, ports_status.out_samples));
             // handle process_one(...)
             using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
             using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
@@ -684,12 +738,12 @@ protected:
                                                                                               }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::node::can_process_one_simd<Derived>))) {
                 // SIMD loop
                 std::size_t i = 0;
-                for (; i + width <= samples_to_process; i += width) {
+                for (; i + width <= ports_status.in_samples; i += width) {
                     const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_process_one_simd(i, width, input_simds...); });
                     meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
                 }
                 simd_epilogue(width, [&](auto w) {
-                    if (i + w <= samples_to_process) {
+                    if (i + w <= ports_status.in_samples) {
                         const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_process_one_simd(i, w, input_simds...); });
                         meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
                         i += w;
@@ -697,15 +751,15 @@ protected:
                 });
             } else {
                 // Non-SIMD loop
-                for (std::size_t i = 0; i < samples_to_process; ++i) {
+                for (std::size_t i = 0; i < ports_status.in_samples; ++i) {
                     const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_process_one(i, inputs[i]...); }, input_spans);
                     meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writers_tuple, results);
                 }
             }
 
-            write_to_outputs(samples_to_process, writers_tuple);
+            write_to_outputs(ports_status.out_samples, writers_tuple);
 
-            const bool success = consume_readers(self(), samples_to_process);
+            const bool success = consume_readers(self(), ports_status.in_samples);
 
 #ifdef _DEBUG
             if (!success) {
@@ -713,7 +767,7 @@ protected:
             }
 #endif
             forward_tags();
-            return { requested_work, samples_to_process, success ? work_return_status_t::OK : work_return_status_t::ERROR };
+            return { requested_work, ports_status.in_samples, success ? work_return_status_t::OK : work_return_status_t::ERROR };
         } // process_one(...) handling
         //        else {
         //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
@@ -745,7 +799,7 @@ template<typename Derived, typename... Arguments>
 inline std::atomic_size_t node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
 } // namespace fair::graph
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (fair::graph::node<T, Arguments...>), unique_name, name, meta_information);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (fair::graph::node<T, Arguments...>), numerator, denominator, stride, unique_name, name, meta_information);
 
 namespace fair::graph {
 
