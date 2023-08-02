@@ -613,17 +613,19 @@ protected:
             }
 
             if (numerator != 1. || denominator != 1.) {
-                bool is_ill_defined = (denominator > ports_status.in_max_samples);
+                // TODO: this ill-defined checks can be done only once after parameters were changed
+                const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
+                bool         is_ill_defined = (denominator > ports_status.in_max_samples) || (ports_status.in_min_samples * ratio > ports_status.out_max_samples)
+                                   || (ports_status.in_max_samples * ratio < ports_status.out_min_samples);
                 assert(!is_ill_defined);
                 if (is_ill_defined) {
                     return { requested_work, 0_UZ, work_return_status_t::ERROR };
                 }
-                
+
                 ports_status.in_samples          = static_cast<std::size_t>(ports_status.in_samples / denominator) * denominator; // remove reminder
 
                 const std::size_t out_min_limit  = ports_status.out_min_samples;
                 const std::size_t out_max_limit  = std::min(ports_status.out_available, ports_status.out_max_samples);
-                const double      ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
 
                 std::size_t       in_min_samples = static_cast<std::size_t>(static_cast<double>(out_min_limit) / ratio);
                 if (in_min_samples % denominator != 0) in_min_samples += denominator;

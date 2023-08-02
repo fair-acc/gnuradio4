@@ -107,7 +107,7 @@ const boost::ut::suite _fft_tests = [] {
         interpolation_decimation_test({ .n_samples{ 549 }, .numerator{ 1 }, .denominator{ 50 }, .expected_in{ 500 }, .expected_out{ 10 }, .expected_counter{ 1 } }, thread_pool);
         interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 3 }, .denominator{ 7 }, .expected_in{ 98 }, .expected_out{ 42 }, .expected_counter{ 1 } }, thread_pool);
         interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 100 }, .denominator{ 100 }, .expected_in{ 100 }, .expected_out{ 100 }, .expected_counter{ 1 } }, thread_pool);
-        
+
         interpolation_decimation_test({ .n_samples{ 1000 }, .numerator{ 10 }, .denominator{ 1100 }, .expected_in{ 0 }, .expected_out{ 0 }, .expected_counter{ 0 } }, thread_pool);
         interpolation_decimation_test({ .n_samples{ 1000 }, .numerator{ 1 }, .denominator{ 1001 }, .expected_in{ 0 }, .expected_out{ 0 }, .expected_counter{ 0 } }, thread_pool);
         interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 100000 }, .denominator{ 1 }, .expected_in{ 0 }, .expected_out{ 0 }, .expected_counter{ 0 } }, thread_pool);
