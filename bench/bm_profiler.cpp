@@ -6,7 +6,7 @@
 
 using namespace flow::graph::profiling;
 
-inline constexpr std::size_t N_ITER    = 3;
+inline constexpr std::size_t N_ITER    = 7;
 inline constexpr std::size_t N_SAMPLES = 1;
 
 inline void

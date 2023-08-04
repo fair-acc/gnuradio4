@@ -1,7 +1,7 @@
 #ifndef GNURADIO_PROFILER_H
 #define GNURADIO_PROFILER_H
 
-#include <circular_buffer.hpp>
+#include "circular_buffer.hpp"
 
 #include <fmt/format.h>
 
@@ -285,7 +285,7 @@ class profiler {
     detail::time_point                      _start = detail::clock::now();
 
 public:
-    explicit profiler() : _buffer(10000) {
+    explicit profiler() : _buffer(500000) {
         _eventHandler = std::jthread([&reader = _reader, &finished = _finished]() {
             static std::atomic<int> counter  = 0;
             auto                    out_file = std::ofstream(fmt::format("profile.{}.{}.trace", getpid(), counter++), std::ios::out | std::ios::binary);
