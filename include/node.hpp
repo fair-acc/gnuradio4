@@ -1,16 +1,16 @@
 #ifndef GNURADIO_NODE_HPP
 #define GNURADIO_NODE_HPP
 
+#include <fmt/format.h>
 #include <map>
 
-#include <annotated.hpp>
 #include <node_traits.hpp>
 #include <port.hpp>
 #include <tag.hpp>
 #include <typelist.hpp>
 #include <utils.hpp>
 
-#include <fmt/format.h>
+#include <annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include <refl.hpp>
 #include <reflection.hpp>
 #include <settings.hpp>
