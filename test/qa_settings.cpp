@@ -120,7 +120,7 @@ some test doc documentation
 )"">;
 
 template<typename T>
-struct TestBlock : public node<TestBlock<T>, BlockingIO, TestBlockDoc, SupportedTypes<float, double>> {
+struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, SupportedTypes<float, double>> {
     IN<T>  in{};
     OUT<T> out{};
     // parameters

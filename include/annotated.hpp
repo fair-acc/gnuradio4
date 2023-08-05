@@ -60,7 +60,10 @@ struct Visible {};
 /**
  * @brief Annotates node, indicating to calling schedulers that it may block due IO.
  */
-struct BlockingIO {};
+template<bool UseIoThread = true>
+struct BlockingIO {
+    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
+};
 
 /**
  * @brief Annotates node, indicating to perform decimation/interpolation
