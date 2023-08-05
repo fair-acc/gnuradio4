@@ -24,8 +24,8 @@ namespace fair::graph::sources {
 template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
 using A = Annotated<T, description, Arguments...>;
 
-template<typename T, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
-struct ClockSource : public node<ClockSource<T, ClockSourceType>, BlockingIO, Doc<R""(
+template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
+struct ClockSource : public node<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
 ClockSource Documentation -- add here
 )"">> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
@@ -38,6 +38,49 @@ ClockSource Documentation -- add here
     std::uint32_t                                                                n_samples_produced{ 0 };
     A<float, "avg. sample rate", Visible>                                        sample_rate = 1000.f;
     A<std::uint32_t, "chunk_size", Visible, Doc<"number of samples per update">> chunk_size  = 100;
+    std::thread                                                                  userProvidedThread;
+
+    ~ClockSource() { stopThread(); }
+
+    [[maybe_unused]] bool
+    tryStartThread() {
+        if constexpr (useIoThread) {
+            return false;
+        }
+        if (bool expectedThreadState = false; this->ioThreadShallRun.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
+            // mocks re-using a user-provided thread
+            fmt::print("mocking a user-provided io-Thread for {}\n", this->name);
+            std::atomic_store_explicit(&this->ioThreadShallRun, true, std::memory_order_release);
+            this->ioThreadShallRun.notify_all();
+            userProvidedThread = std::thread([this]() {
+                fmt::print("started user-provided thread\n");
+                for (int retry = 2; this->ioThreadShallRun.load() && retry > 0; --retry) {
+                    while (this->ioThreadShallRun.load()) {
+                        std::this_thread::sleep_until(nextTimePoint);
+                        // invoke and execute work function from user-provided thread
+                        if (this->invokeWork() == work_return_status_t::DONE) {
+                            break;
+                        } else {
+                            retry = 2;
+                        }
+                    }
+                    // delayed shut-down in case there are more tasks to be processed
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                this->stopThread();
+                fmt::print("stopped user-provided thread\n");
+            });
+            userProvidedThread.detach();
+            return true;
+        }
+        return false;
+    }
+
+    void
+    stopThread() {
+        std::atomic_store_explicit(&this->ioThreadShallRun, false, std::memory_order_release);
+        this->ioThreadShallRun.notify_all();
+    }
 
     void
     settings_changed(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
@@ -51,8 +94,10 @@ ClockSource Documentation -- add here
             return work_return_status_t::DONE;
         }
 
-        // sleep until next update period -- the following call blocks
-        std::this_thread::sleep_until(nextTimePoint);
+        if constexpr (useIoThread) { // using scheduler-graph provided user thread
+            // sleep until next update period -- the following call blocks
+            std::this_thread::sleep_until(nextTimePoint);
+        }
         const auto writableSamples = static_cast<std::uint32_t>(output.size());
         if (writableSamples < chunk_size) {
             output.publish(0_UZ);
@@ -98,7 +143,8 @@ ClockSource Documentation -- add here
 
 } // namespace fair::graph::sources
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename ClockSourceType), (fair::graph::sources::ClockSource<T, ClockSourceType>), out, n_samples_max, chunk_size, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (fair::graph::sources::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size,
+                                    sample_rate);
 
 namespace fair::graph::sources {
 static_assert(HasProcessBulkFunction<ClockSource<float>>);

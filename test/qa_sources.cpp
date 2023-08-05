@@ -23,11 +23,12 @@ const boost::ut::suite TagTests = [] {
     using namespace fair::graph::tag_test;
 
     "source_test"_test = [] {
-        constexpr std::uint32_t n_samples   = 1900;
-        constexpr float         sample_rate = 2000.f;
+        constexpr bool          useIoThreadPool = true; // true: scheduler/graph-provided thread, false: use user-provided call-back or thread
+        constexpr std::uint32_t n_samples       = 1900;
+        constexpr float         sample_rate     = 2000.f;
         graph                   flow_graph;
-        auto                   &src = flow_graph.make_node<fair::graph::sources::ClockSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
-        src.tags                    = {
+        auto &src = flow_graph.make_node<fair::graph::sources::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
+        src.tags  = {
             { 0, { { "key", "value@0" } } },       //
             { 1, { { "key", "value@1" } } },       //
             { 100, { { "key", "value@100" } } },   //
@@ -43,7 +44,13 @@ const boost::ut::suite TagTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink2)));
 
         scheduler::simple sched{ std::move(flow_graph) };
+        if constexpr (!useIoThreadPool) {
+            src.tryStartThread();
+        }
         sched.run_and_wait();
+        if constexpr (!useIoThreadPool) {
+            src.stopThread();
+        }
 
         expect(eq(src.n_samples_max, n_samples)) << "src did not accept require max input samples";
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";

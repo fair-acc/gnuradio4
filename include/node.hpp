@@ -298,12 +298,13 @@ template<typename Derived, typename... Arguments>
 struct node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, fair::meta::fixed_string description = "", typename... Args>
-    using A                        = Annotated<T, description, Args...>;
+    using A                          = Annotated<T, description, Args...>;
 
-    using base_t                   = node<Derived, Arguments...>;
-    using derived_t                = Derived;
-    using node_template_parameters = meta::typelist<Arguments...>;
-    using Description              = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    using base_t                     = node<Derived, Arguments...>;
+    using derived_t                  = Derived;
+    using node_template_parameters   = meta::typelist<Arguments...>;
+    using Description                = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
     alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadShallRun{ false };
@@ -478,7 +479,7 @@ public:
 
     [[nodiscard]] constexpr bool
     is_blocking() const noexcept {
-        return std::disjunction_v<std::is_same<BlockingIO, Arguments>...>;
+        return blockingIO;
     }
 
     [[nodiscard]] constexpr bool
@@ -926,6 +927,25 @@ protected:
     } // end: work_return_t work_internal() noexcept { ..}
 
 public:
+    work_return_status_t
+    invokeWork()
+        requires(blockingIO)
+    {
+        auto [work_requested, work_done, last_status] = work_internal(ioRequestedWork.load(std::memory_order_relaxed));
+        ioWorkDone.increment(work_requested, work_done);
+        if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == work_return_status_t::DONE && incWorkDone > 0) {
+            // finished local iteration but need to report more work to be done until
+            // external scheduler loop acknowledged all samples being processed
+            // via the 'ioWorkDone.getAndReset()' call
+            last_status = work_return_status_t::OK;
+        }
+        ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
+
+        std::ignore = progress->incrementAndGet();
+        progress->notify_all();
+        return last_status;
+    }
+
     /**
      * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
      *
@@ -935,49 +955,41 @@ public:
      */
     work_return_t
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
-        constexpr bool is_blocking = node_template_parameters::template contains<BlockingIO>;
-        if constexpr (is_blocking) {
+        if constexpr (blockingIO) {
+            constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
             if (bool expectedThreadState = false; ioThreadShallRun.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
-                ioThreadPool->execute([this]() {
+                if constexpr (useIoThread) { // use graph-provided ioThreadPool
+                    ioThreadPool->execute([this]() {
 #ifdef _DEBUG
-                    fmt::print("starting thread for {} count {}\n", name, ioThreadRunning.fetch_add(1));
+                        fmt::print("starting thread for {} count {}\n", name, ioThreadRunning.fetch_add(1));
 #else
-                    ioThreadRunning.fetch_add(1);
+                        ioThreadRunning.fetch_add(1);
 #endif
-                    for (int retryCount = 1; ioThreadShallRun && retryCount > 0; retryCount--) {
-                        while (ioThreadShallRun && retryCount) {
-                            auto [work_requested, work_done, last_status] = work_internal(ioRequestedWork.load(std::memory_order_relaxed));
-                            ioWorkDone.increment(work_requested, work_done);
-                            if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == work_return_status_t::DONE && incWorkDone > 0) {
-                                // finished local iteration but need to report more work to be done until
-                                // external scheduler loop acknowledged all samples being processed
-                                // via the 'ioWorkDone.getAndReset()' call
-                                last_status = work_return_status_t::OK;
+                        for (int retryCount = 2; ioThreadShallRun && retryCount > 0; retryCount--) {
+                            while (ioThreadShallRun && retryCount) {
+                                if (invokeWork() == work_return_status_t::DONE) {
+                                    break;
+                                } else {
+                                    // processed data before shutting down wait (see below) and retry (here: once)
+                                    retryCount = 2;
+                                }
                             }
-                            ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
-
-                            std::ignore = progress->incrementAndGet();
-                            progress->notify_all();
-                            if (last_status == work_return_status_t::DONE) {
-                                break;
-                            } else {
-                                // processed data before shutting down wait (see below) and retry (here: once)
-                                retryCount = 1;
-                            }
+                            // delayed shut-down in case there are more tasks to be processed
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
                         }
-                        // delayed shut-down in case there are more tasks to be processed
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
-                    std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
-                    ioThreadShallRun.notify_all();
+                        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
+                        ioThreadShallRun.notify_all();
 #ifdef _DEBUG
-                    fmt::print("shutting down thread for {} count {}\n", name, ioThreadRunning.fetch_sub(1));
+                        fmt::print("shutting down thread for {} count {}\n", name, ioThreadRunning.fetch_sub(1));
 #else
-                    ioThreadRunning.fetch_sub(1);
+                        ioThreadRunning.fetch_sub(1);
 #endif
-                    ioThreadRunning.notify_all();
-                });
+                        ioThreadRunning.notify_all();
+                    });
+                } else {
+                    // let user call '' explicitly
+                }
             }
             const work_return_status_t lastStatus                 = ioLastWorkStatus.exchange(work_return_status_t::OK, std::memory_order_relaxed);
             const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
@@ -1010,7 +1022,7 @@ node_description() noexcept {
     using ArgumentList         = typename Node::node_template_parameters;
     using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
     using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
-    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO>;
+    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
