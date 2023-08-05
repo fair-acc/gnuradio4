@@ -68,6 +68,11 @@ struct BlockingIO {};
 struct PerformDecimationInterpolation {};
 
 /**
+ * @brief Annotates node, indicating to perform stride
+ */
+struct PerformStride {};
+
+/**
  * @brief Annotates templated node, indicating which port data types are supported.
  */
 template<typename... Ts>
