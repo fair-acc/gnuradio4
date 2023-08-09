@@ -13,7 +13,7 @@
 
 #include <unistd.h>
 
-namespace flow::graph::profiling {
+namespace fair::graph::profiling {
 
 using arg_value = std::pair<std::string, std::variant<std::string, int, double>>;
 
@@ -90,6 +90,22 @@ struct TraceEvent {
         }
 
         return {};
+    }
+
+    TraceEvent()                       = default;
+    ~TraceEvent()                      = default;
+    TraceEvent(TraceEvent &&) noexcept = default;
+    TraceEvent &
+    operator=(TraceEvent &&) noexcept
+            = default;
+
+    // the default implementations slow down publish() even if never called at runtime (branch prediction going wrong for the non-mmap case?)
+    // seen with -O3 on gcc 12.3.0
+    TraceEvent(const TraceEvent &) { throw std::logic_error("unexpected copy"); }
+
+    TraceEvent &
+    operator=(const TraceEvent &) {
+        throw std::logic_error("unexpected assignment");
     }
 };
 } // namespace detail
@@ -416,6 +432,6 @@ public:
     }
 };
 
-} // namespace flow::graph::profiling
+} // namespace fair::graph::profiling
 
 #endif // include guard

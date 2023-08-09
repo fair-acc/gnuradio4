@@ -4,7 +4,7 @@
 
 #include <iostream>
 
-using namespace flow::graph::profiling;
+using namespace fair::graph::profiling;
 
 inline constexpr std::size_t N_ITER    = 7;
 inline constexpr std::size_t N_SAMPLES = 1;
@@ -29,10 +29,10 @@ run_without_profiler() {
 template<Profiler P>
 inline void
 run_with_profiler(P &p) {
-    const auto start                   = detail::clock::now();
+    const auto            start                   = detail::clock::now();
 
-    auto       whole_calculation_event = p.start_complete_event("whole_calculation");
-    long long  r                       = 0;
+    [[maybe_unused]] auto whole_calculation_event = p.start_complete_event("whole_calculation");
+    long long             r                       = 0;
     for (std::size_t i = 0; i < 1000; ++i) {
         auto async_event = p.start_async_event("iteration", {}, { { "arg1", 2 }, { "arg2", "hello" } });
         for (std::size_t j = 0; j < 1000; ++j) {
@@ -51,13 +51,13 @@ run_with_profiler(P &p) {
     using namespace boost::ut;
     using namespace benchmark;
 
-    profiler prof;
-    "default profiler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&p = prof] { run_with_profiler(p); };
-
     null::profiler null_prof;
     "null profiler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&p = null_prof] { run_with_profiler(p); };
 
     "no profiler"_benchmark.repeat<N_ITER>(N_SAMPLES)   = [] { run_without_profiler(); };
+
+    profiler prof;
+    "default profiler"_benchmark.repeat<1>(N_SAMPLES) = [&p = prof] { run_with_profiler(p); };
 };
 
 int
