@@ -184,7 +184,7 @@ public:
     constexpr move_only_function() = default;
 
     template<typename F>
-        requires(!std::is_reference_v<F>)
+        requires(!std::same_as<move_only_function, std::remove_cvref<F>> && !std::is_reference_v<F>)
     constexpr move_only_function(F &&fun) : _erased_fun(new F(std::forward<F>(fun)), [](void *ptr) { delete static_cast<F *>(ptr); }), _call([](void *ptr) { (*static_cast<F *>(ptr))(); }) {}
 
     template<typename F>
