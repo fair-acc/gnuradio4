@@ -61,32 +61,23 @@ const boost::ut::suite TagPropagation = [] {
 
     "tag_source"_test = [] {
         std::int64_t n_samples = 1024;
-        graph flow_graph;
-        auto &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(
-                {{"n_samples_max", n_samples},
-                 {"name",          "TagSource"}});
-        src.tags = {
-                // TODO: allow parameter settings to include maps?!?
-                {0,    {{"key", "value@0"}}},       //
-                {1,    {{"key", "value@1"}}},       //
-                {100,  {{"key", "value@100"}}},   //
-                {150,  {{"key", "value@150"}}},   //
-                {1000, {{"key", "value@1000"}}}, //
-                {1001, {{"key", "value@1001"}}}, //
-                {1002, {{"key", "value@1002"}}}, //
-                {1023, {{"key", "value@1023"}}}  //
+        graph        flow_graph;
+        auto        &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
+        src.tags         = {
+            // TODO: allow parameter settings to include maps?!?
+            { 0, { { "key", "value@0" } } },       //
+            { 1, { { "key", "value@1" } } },       //
+            { 100, { { "key", "value@100" } } },   //
+            { 150, { { "key", "value@150" } } },   //
+            { 1000, { { "key", "value@1000" } } }, //
+            { 1001, { { "key", "value@1001" } } }, //
+            { 1002, { { "key", "value@1002" } } }, //
+            { 1023, { { "key", "value@1023" } } }  //
         };
-        src.name = "TagSource"; // TODO: enable property_map to base-class parameter propagation
-        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>(
-                {{"name", "TagMonitor1"}});
-        monitor1.name = "TagMonitor1";
-        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>(
-                {{"name", "TagMonitor2"}});
-        monitor2.name = "TagMonitor2";
-        auto &sink1 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink1"}});
-        sink1.name = "TagSink1";
-        auto &sink2 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink2"}});
-        sink2.name = "TagSink2";
+        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
+        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
+        auto &sink1    = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
+        auto &sink2    = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink1)));
@@ -100,39 +91,6 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(monitor2.n_samples_produced, n_samples)) << "monitor2 did not consume enough input samples";
         expect(eq(sink1.n_samples_produced, n_samples)) << "sink1 did not consume enough input samples";
         expect(eq(sink2.n_samples_produced, n_samples)) << "sink2 did not consume enough input samples";
-
-        auto equal_tag_lists = [](const std::vector<tag_t> &tags1, const std::vector<tag_t> &tags2) {
-            if (tags1.size() != tags2.size()) {
-                fmt::print("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
-                return false;
-            }
-
-            if (const auto [mismatchedTag1, mismatchedTag2] = std::mismatch(tags1.begin(), tags1.end(), tags2.begin(), std::equal_to<>()); mismatchedTag1 != tags1.end()) {
-                const auto index = static_cast<size_t>(std::distance(tags1.begin(), mismatchedTag1));
-                fmt::print("mismatch at index {}", index);
-                if (mismatchedTag1->index != mismatchedTag2->index) {
-                    fmt::print("  - different index: {} vs {}\n", mismatchedTag1->index, mismatchedTag2->index);
-                }
-                if (mismatchedTag1->map != mismatchedTag2->map) {
-                    fmt::print("  - different map content:\n");
-                    for (const auto &[key, value] : mismatchedTag1->map) {
-                        if (!mismatchedTag2->map.contains(key)) {
-                            fmt::print("    key '{}' is present in the first map but not in the second\n", key);
-                        } else if (mismatchedTag2->map.at(key) != value) {
-                            fmt::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, mismatchedTag2->map.at(key));
-                        }
-                    }
-                    for (const auto &[key, value] : mismatchedTag2->map) {
-                        if (!mismatchedTag1->map.contains(key)) {
-                            fmt::print("    key '{}' is present in the second map but not in the first\n", key);
-                        }
-                    }
-                }
-                return false;
-            }
-
-            return true;
-        };
 
         expect(equal_tag_lists(src.tags, monitor1.tags)) << "monitor1 did not receive the required tags";
         expect(equal_tag_lists(src.tags, monitor2.tags)) << "monitor2 did not receive the required tags";

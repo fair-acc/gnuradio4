@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.25)
 
 project(graph-prototype CXX)
 set(CMAKE_CXX_STANDARD 20)
@@ -99,7 +99,7 @@ include_directories(${FFTW_PREFIX}/install/include)
 add_library(fftw INTERFACE)
 target_link_libraries(fftw INTERFACE fftw3 INTERFACE fftw3f INTERFACE m)
 target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include)
-target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib)
+target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
 
 add_subdirectory(include)

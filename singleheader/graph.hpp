@@ -211,9 +211,7 @@ static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L
  * Also attempts to be more efficient with regards to false sharing by adding padding
  * around the volatile field.
  */
-// clang-format off
-class Sequence
-{
+class Sequence {
 public:
     using signed_index_type = std::make_signed_t<std::size_t>;
 
@@ -221,47 +219,56 @@ private:
     alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
 
 public:
-    Sequence(const Sequence&) = delete;
-    Sequence(const Sequence&&) = delete;
-    void operator=(const Sequence&) = delete;
-    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept
-        : _fieldsValue(initialValue)
-    {
-    }
+    Sequence(const Sequence &)  = delete;
+    Sequence(const Sequence &&) = delete;
+    void
+    operator=(const Sequence &)
+            = delete;
 
-    [[nodiscard]] forceinline signed_index_type value() const noexcept
-    {
+    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+
+    [[nodiscard]] forceinline signed_index_type
+    value() const noexcept {
         return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
     }
 
-    forceinline void setValue(const signed_index_type value) noexcept
-    {
+    forceinline void
+    setValue(const signed_index_type value) noexcept {
         std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
     }
 
-    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence,
-                                                 signed_index_type nextSequence) noexcept
-    {
+    [[nodiscard]] forceinline bool
+    compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(
-            &_fieldsValue, &expectedSequence, nextSequence);
+        return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept
-    {
+    [[nodiscard]] forceinline signed_index_type
+    incrementAndGet() noexcept {
         return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
     }
 
-    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept
-    {
+    [[nodiscard]] forceinline signed_index_type
+    addAndGet(signed_index_type value) noexcept {
         return std::atomic_fetch_add(&_fieldsValue, value) + value;
+    }
+
+    void
+    wait(signed_index_type oldValue) const noexcept {
+        atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire);
+    }
+
+    void
+    notify_all() noexcept {
+        _fieldsValue.notify_all();
     }
 };
 
 namespace detail {
 
 using signed_index_type = Sequence::signed_index_type;
+
 /**
  * Get the minimum sequence from an array of Sequences.
  *
@@ -269,13 +276,11 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type getMinimumSequence(
-    const std::vector<std::shared_ptr<Sequence>>& sequences,
-    signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept
-{
+inline signed_index_type
+getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
-    for (const auto& s : sequences) {
+    for (const auto &s : sequences) {
         const signed_index_type v = s->value();
         if (v < minimum) {
             minimum = v;
@@ -284,11 +289,9 @@ inline signed_index_type getMinimumSequence(
     return minimum;
 }
 
-inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences,
-             const Sequence& cursor,
-             const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd)
-{
-    signed_index_type cursorSequence;
+inline void
+addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &sequencesToAdd) {
+    signed_index_type                                       cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
@@ -304,8 +307,8 @@ inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>
 
         cursorSequence = cursor.value();
 
-        auto index = currentSequences->size();
-        for (auto&& sequence : sequencesToAdd) {
+        auto index     = currentSequences->size();
+        for (auto &&sequence : sequencesToAdd) {
             sequence->setValue(cursorSequence);
             (*updatedSequences)[index] = sequence;
             index++;
@@ -314,14 +317,14 @@ inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>
 
     cursorSequence = cursor.value();
 
-    for (auto&& sequence : sequencesToAdd) {
+    for (auto &&sequence : sequencesToAdd) {
         sequence->setValue(cursorSequence);
     }
 }
 
-inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence)
-{
-    std::uint32_t numToRemove;
+inline bool
+removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const std::shared_ptr<Sequence> &sequence) {
+    std::uint32_t                                           numToRemove;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
 
@@ -337,11 +340,10 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
         }
 
         auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
-        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(
-            oldSize - numToRemove);
+        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(oldSize - numToRemove);
 
         for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto& testSequence = (*oldSequences)[i];
+            const auto &testSequence = (*oldSequences)[i];
             if (sequence != testSequence) {
                 (*newSequences)[pos] = testSequence;
                 pos++;
@@ -351,8 +353,6 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
     return numToRemove != 0;
 }
-
-// clang-format on
 
 } // namespace detail
 
@@ -3290,9 +3290,9 @@ struct fixed_string {
 
     [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return { _data, N }; }
 
-    [[nodiscard]] explicit           operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
 
-    [[nodiscard]]                    operator const char *() const noexcept { return _data; }
+    [[nodiscard]] operator const char *() const noexcept { return _data; }
 
     [[nodiscard]] constexpr bool
     operator==(const fixed_string &other) const noexcept {
@@ -3396,18 +3396,8 @@ precondition(bool cond) {
  */
 template<typename T>
 concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
-                                                            { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
-                                                        };
-
-static_assert(!tuple_like<int>);
-static_assert(!tuple_like<std::tuple<>>);
-static_assert(tuple_like<std::tuple<int>>);
-static_assert(tuple_like<std::tuple<int &>>);
-static_assert(tuple_like<std::tuple<const int &>>);
-static_assert(tuple_like<std::tuple<const int>>);
-static_assert(!tuple_like<std::array<int, 0>>);
-static_assert(tuple_like<std::array<int, 2>>);
-static_assert(tuple_like<std::pair<int, short>>);
+    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+};
 
 template<template<typename...> class Template, typename Class>
 struct is_instantiation : std::false_type {};
@@ -3421,9 +3411,21 @@ template<typename T>
 concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
 
 template<typename T>
-concept vector_type = is_instantiation_of<T, std::vector>;
+concept vector_type = is_instantiation_of<std::remove_cv_t<T>, std::vector>;
 
-namespace stdx      = vir::stdx;
+template<typename T>
+struct is_std_array_type : std::false_type {};
+
+template<typename T, std::size_t N>
+struct is_std_array_type<std::array<T, N>> : std::true_type {};
+
+template<typename T>
+concept array_type = is_std_array_type<std::remove_cv_t<T>>::value;
+
+template<typename T, typename V = void>
+concept array_or_vector_type = (vector_type<T> || array_type<T>) &&(std::same_as<V, void> || std::same_as<typename T::value_type, V>);
+
+namespace stdx               = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
@@ -3600,9 +3602,7 @@ safe_pair_min(Arg &&arg, Args &&...args) {
     if constexpr (sizeof...(Args) == 0) {
         return arg;
     } else {
-        return std::make_pair(
-                std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first ...),
-                std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second ...));
+        return std::make_pair(std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first...), std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second...));
     }
 }
 
@@ -10982,7 +10982,1205 @@ concept process_bulk_requires_ith_output_as_span = requires(Derived             
 
 // #include <port.hpp>
 
+// #include <sequence.hpp>
+
 // #include <tag.hpp>
+
+// #include <thread_pool.hpp>
+#ifndef THREADPOOL_HPP
+#define THREADPOOL_HPP
+
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <list>
+#include <mutex>
+#include <span>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <utility>
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
+// #include <thread_affinity.hpp>
+#ifndef THREADAFFINITY_HPP
+#define THREADAFFINITY_HPP
+
+#include <algorithm>
+#include <fmt/core.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <system_error>
+#include <thread>
+#include <vector>
+
+#if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__))) // UNIX-style OS
+#include <unistd.h>
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+#include <pthread.h>
+#include <sched.h>
+#endif
+#endif
+
+namespace fair::thread_pool::thread {
+
+constexpr size_t THREAD_MAX_NAME_LENGTH  = 16;
+constexpr int    THREAD_UNINITIALISED    = 1;
+constexpr int    THREAD_ERROR_UNKNOWN    = 2;
+constexpr int    THREAD_VALUE_RANGE      = 3;
+constexpr int    THREAD_INVALID_ARGUMENT = 22;
+constexpr int    THREAD_ERANGE           = 34;
+
+class thread_exception : public std::error_category {
+    using std::error_category::error_category;
+
+public:
+    constexpr thread_exception() : std::error_category(){};
+
+    const char *
+    name() const noexcept override {
+        return "thread_exception";
+    };
+
+    std::string
+    message(int errorCode) const override {
+        switch (errorCode) {
+        case THREAD_UNINITIALISED: return "thread uninitialised or user does not have the appropriate rights (ie. CAP_SYS_NICE capability)";
+        case THREAD_ERROR_UNKNOWN: return "thread error code 2";
+        case THREAD_INVALID_ARGUMENT: return "invalid argument";
+        case THREAD_ERANGE: return fmt::format("length of the string specified pointed to by name exceeds the allowed limit THREAD_MAX_NAME_LENGTH = '{}'", THREAD_MAX_NAME_LENGTH);
+        case THREAD_VALUE_RANGE: return fmt::format("priority out of valid range for scheduling policy", THREAD_MAX_NAME_LENGTH);
+        default: return fmt::format("unknown threading error code {}", errorCode);
+        }
+    };
+};
+
+template<class type>
+#if __cpp_lib_jthread >= 201911L
+concept thread_type = std::is_same_v<type, std::thread> || std::is_same_v<type, std::jthread>;
+#else
+concept thread_type = std::is_same_v<type, std::thread>;
+#endif
+
+namespace detail {
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+template<typename Tp, typename... Us>
+constexpr decltype(auto)
+firstElement(Tp &&t, Us &&...) noexcept {
+    return std::forward<Tp>(t);
+}
+
+inline constexpr pthread_t
+getPosixHandler(thread_type auto &...t) noexcept {
+    if constexpr (sizeof...(t) > 0) {
+        return firstElement(t...).native_handle();
+    } else {
+        return pthread_self();
+    }
+}
+
+inline std::string
+getThreadName(const pthread_t &handle) {
+    if (handle == 0U) {
+        return "uninitialised thread";
+    }
+    char threadName[THREAD_MAX_NAME_LENGTH];
+    if (int rc = pthread_getname_np(handle, threadName, THREAD_MAX_NAME_LENGTH); rc != 0) {
+        throw std::system_error(rc, thread_exception(), "getThreadName(thread_type)");
+    }
+    return std::string{ threadName, strnlen(threadName, THREAD_MAX_NAME_LENGTH) };
+}
+
+inline int
+getPid() {
+    return getpid();
+}
+#else
+int
+getPid() {
+    return 0;
+}
+#endif
+} // namespace detail
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline std::string
+getProcessName(const int pid = detail::getPid()) {
+    if (std::ifstream in(fmt::format("/proc/{}/comm", pid), std::ios::in); in.is_open()) {
+        std::string fileContent;
+        std::getline(in, fileContent, '\n');
+        return fileContent;
+    }
+    return "unknown_process";
+}
+#else
+inline std::string
+getProcessName(const int /*pid*/ = -1) {
+    return "unknown_process";
+}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline std::string
+getThreadName(thread_type auto &...thread) {
+    const pthread_t handle = detail::getPosixHandler(thread...);
+    if (handle == 0U) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), "getThreadName(thread_type)");
+    }
+    return detail::getThreadName(handle);
+}
+#else
+inline std::string
+getThreadName(thread_type auto &.../*thread*/) {
+    return "unknown thread name";
+}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline void
+setProcessName(const std::string_view &processName, int pid = detail::getPid()) {
+    std::ofstream out(fmt::format("/proc/{}/comm", pid), std::ios::out);
+    if (!out.is_open()) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessName({},{})", processName, pid));
+    }
+    out << std::string{ processName.cbegin(), std::min(15LU, processName.size()) };
+    out.close();
+}
+#else
+inline void
+setProcessName(const std::string_view & /*processName*/, int /*pid*/ = -1) {}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline void
+setThreadName(const std::string_view &threadName, thread_type auto &...thread) {
+    const pthread_t handle = detail::getPosixHandler(thread...);
+    if (handle == 0U) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle)));
+    }
+    if (int rc = pthread_setname_np(handle, threadName.data()); rc < 0) {
+        throw std::system_error(rc, thread_exception(), fmt::format("setThreadName({},{}) - error code '{}'", threadName, detail::getThreadName(handle), rc));
+    }
+}
+#else
+inline void
+setThreadName(const std::string_view & /*threadName*/, thread_type auto &.../*thread*/) {}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+namespace detail {
+inline std::vector<bool>
+getAffinityMask(const cpu_set_t &cpuSet) {
+    std::vector<bool> bitMask(std::min(sizeof(cpu_set_t), static_cast<size_t>(std::thread::hardware_concurrency())));
+    for (size_t i = 0; i < bitMask.size(); i++) {
+        bitMask[i] = CPU_ISSET(i, &cpuSet);
+    }
+    return bitMask;
+}
+
+template<class T>
+    requires requires(T value) { value[0]; }
+inline constexpr cpu_set_t
+getAffinityMask(const T &threadMap) {
+    cpu_set_t cpuSet;
+    CPU_ZERO(&cpuSet);
+    size_t nMax = std::min(threadMap.size(), static_cast<size_t>(std::thread::hardware_concurrency()));
+    for (size_t i = 0; i < nMax; i++) {
+        if (threadMap[i]) {
+            CPU_SET(i, &cpuSet);
+        } else {
+            CPU_CLR(i, &cpuSet);
+        }
+    }
+    return cpuSet;
+}
+} // namespace detail
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline std::vector<bool>
+getThreadAffinity(thread_type auto &...thread) {
+    const pthread_t handle = detail::getPosixHandler(thread...);
+    if (handle == 0U) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getThreadAffinity(thread_type)"));
+    }
+    cpu_set_t cpuSet;
+    if (int rc = pthread_getaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
+        throw std::system_error(rc, thread_exception(), fmt::format("getThreadAffinity({})", detail::getThreadName(handle)));
+    }
+    return detail::getAffinityMask(cpuSet);
+}
+#else
+std::vector<bool>
+getThreadAffinity(thread_type auto &...) {
+    return std::vector<bool>(std::thread::hardware_concurrency()); // cannot set affinity for non-posix threads
+}
+#endif
+
+template<class T>
+    requires requires(T value) { value[0]; }
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline constexpr void
+setThreadAffinity(const T &threadMap, thread_type auto &...thread) {
+    const pthread_t handle = detail::getPosixHandler(thread...);
+    if (handle == 0U) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(),
+                                fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", ")));
+    }
+    cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
+    if (int rc = pthread_setaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
+        throw std::system_error(rc, thread_exception(),
+                                fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "),
+                                            detail::getThreadName(handle)));
+    }
+}
+#else
+constexpr bool
+setThreadAffinity(const T & /*threadMap*/, thread_type auto &...) {
+    return false; // cannot set affinity for non-posix threads
+}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline std::vector<bool>
+getProcessAffinity(const int pid = detail::getPid()) {
+    if (pid <= 0) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getProcessAffinity({}) -- invalid pid", pid));
+    }
+    cpu_set_t cpuSet;
+    if (int rc = sched_getaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
+        throw std::system_error(rc, thread_exception(), fmt::format("getProcessAffinity(std::bitset<{{}}> = {{}}, thread_type)")); // todo: fix format string
+    }
+    return detail::getAffinityMask(cpuSet);
+}
+#else
+inline std::vector<bool>
+getProcessAffinity(const int /*pid*/ = -1) {
+    return std::vector<bool>(std::thread::hardware_concurrency()); // cannot set affinity for non-posix threads
+}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+template<class T>
+    requires requires(T value) { std::get<0>(value); }
+inline constexpr bool
+setProcessAffinity(const T &threadMap, const int pid = detail::getPid()) {
+    if (pid <= 0) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(),
+                                fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), pid));
+    }
+    cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
+    if (int rc = sched_setaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
+        throw std::system_error(rc, thread_exception(),
+                                fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), pid));
+    }
+
+    return true;
+}
+#else
+template<class T>
+    requires requires(T value) { std::get<0>(value); }
+inline constexpr bool
+setProcessAffinity(const T & /*threadMap*/, const int /*pid*/ = -1) {
+    return false; // cannot set affinity for non-posix threads
+}
+#endif
+enum Policy { UNKNOWN = -1, OTHER = 0, FIFO = 1, ROUND_ROBIN = 2 };
+} // namespace fair::thread_pool::thread
+
+template<>
+struct fmt::formatter<fair::thread_pool::thread::Policy> {
+    using Policy = fair::thread_pool::thread::Policy;
+
+    template<typename ParseContext>
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    auto
+    format(Policy policy, FormatContext &ctx) {
+        std::string policy_name;
+        switch (policy) {
+        case Policy::UNKNOWN: policy_name = "UNKNOWN"; break;
+        case Policy::OTHER: policy_name = "OTHER"; break;
+        case Policy::FIFO: policy_name = "FIFO"; break;
+        case Policy::ROUND_ROBIN: policy_name = "ROUND_ROBIN"; break;
+        default: policy_name = "INVALID_POLICY"; break;
+        }
+        return fmt::format_to(ctx.out(), "{}", policy_name);
+    }
+};
+
+namespace fair::thread_pool::thread {
+
+struct SchedulingParameter {
+    Policy policy; // e.g. SCHED_OTHER, SCHED_RR, FSCHED_FIFO
+    int    priority;
+};
+
+namespace detail {
+inline Policy
+getEnumPolicy(const int policy) {
+    switch (policy) {
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+    case SCHED_FIFO: return Policy::FIFO;
+    case SCHED_RR: return Policy::ROUND_ROBIN;
+    case SCHED_OTHER: return Policy::OTHER;
+#endif
+    default: return Policy::UNKNOWN;
+    }
+}
+} // namespace detail
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline struct SchedulingParameter
+getProcessSchedulingParameter(const int pid = detail::getPid()) {
+    if (pid <= 0) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getProcessSchedulingParameter({}) -- invalid pid", pid));
+    }
+    struct sched_param param;
+    const int          policy = sched_getscheduler(pid);
+    if (int rc = sched_getparam(pid, &param); rc != 0) {
+        throw std::system_error(rc, thread_exception(), fmt::format("getProcessSchedulingParameter({}) - sched_getparam error", pid));
+    }
+    return SchedulingParameter{ .policy = detail::getEnumPolicy(policy), .priority = param.sched_priority };
+}
+#else
+inline struct SchedulingParameter
+getProcessSchedulingParameter(const int /*pid*/ = -1) {
+    return {};
+}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline void
+setProcessSchedulingParameter(Policy scheduler, int priority, const int pid = detail::getPid()) {
+    if (pid <= 0) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid));
+    }
+    const int minPriority = sched_get_priority_min(scheduler);
+    const int maxPriority = sched_get_priority_max(scheduler);
+    if (priority < minPriority || priority > maxPriority) {
+        throw std::system_error(THREAD_VALUE_RANGE, thread_exception(),
+                                fmt::format("setProcessSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, pid, minPriority, maxPriority));
+    }
+
+    struct sched_param param {
+        .sched_priority = priority
+    };
+
+    if (int rc = sched_setscheduler(pid, scheduler, &param); rc != 0) {
+        throw std::system_error(rc, thread_exception(), fmt::format("setProcessSchedulingParameter({}, {}, {}) - sched_setscheduler return code: {}", scheduler, priority, pid, rc));
+    }
+}
+#else
+inline void
+setProcessSchedulingParameter(Policy /*scheduler*/, int /*priority*/, const int /*pid*/ = -1) {}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline struct SchedulingParameter
+getThreadSchedulingParameter(thread_type auto &...thread) {
+    const pthread_t handle = detail::getPosixHandler(thread...);
+    if (handle == 0U) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getThreadSchedulingParameter(thread_type) -- invalid thread"));
+    }
+    struct sched_param param;
+    int                policy;
+    if (int rc = pthread_getschedparam(handle, &policy, &param); rc != 0) {
+        throw std::system_error(rc, thread_exception(), fmt::format("getThreadSchedulingParameter({}) - sched_getparam error", detail::getThreadName(handle)));
+    }
+    return { .policy = detail::getEnumPolicy(policy), .priority = param.sched_priority };
+}
+#else
+inline struct SchedulingParameter
+getThreadSchedulingParameter(thread_type auto &.../*thread*/) {
+    return {};
+}
+#endif
+
+#if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__)
+inline void
+setThreadSchedulingParameter(Policy scheduler, int priority, thread_type auto &...thread) {
+    const pthread_t handle = detail::getPosixHandler(thread...);
+    if (handle == 0U) {
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadSchedulingParameter({}, {}, thread_type) -- invalid thread", scheduler, priority));
+    }
+    const int minPriority = sched_get_priority_min(scheduler);
+    const int maxPriority = sched_get_priority_max(scheduler);
+    if (priority < minPriority || priority > maxPriority) {
+        throw std::system_error(THREAD_VALUE_RANGE, thread_exception(),
+                                fmt::format("setThreadSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, detail::getThreadName(handle), minPriority,
+                                            maxPriority));
+    }
+
+    struct sched_param param {
+        .sched_priority = priority
+    };
+
+    if (int rc = pthread_setschedparam(handle, scheduler, &param); rc != 0) {
+        throw std::system_error(rc, thread_exception(),
+                                fmt::format("setThreadSchedulingParameter({}, {}, {}) - pthread_setschedparam return code: {}", scheduler, priority, detail::getThreadName(handle), rc));
+    }
+}
+#else
+inline void
+setThreadSchedulingParameter(Policy /*scheduler*/, int /*priority*/, thread_type auto &.../*thread*/) {}
+#endif
+
+} // namespace fair::thread_pool::thread
+
+#endif // THREADAFFINITY_HPP
+
+// #include <wait_strategy.hpp>
+
+
+namespace fair::thread_pool {
+namespace detail {
+
+// TODO remove all the below and use std when moved to modules // support code from mpunits for basic_fixed_string
+template<class InputIt1, class InputIt2>
+constexpr bool
+equal(InputIt1 first1, InputIt1 last1, InputIt2 first2) {
+    for (; first1 != last1; ++first1, ++first2) {
+        if (!(*first1 == *first2)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template<class I1, class I2, class Cmp>
+constexpr auto
+lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2, Cmp comp) -> decltype(comp(*f1, *f2)) {
+    using ret_t = decltype(comp(*f1, *f2));
+    static_assert(std::disjunction_v<std::is_same<ret_t, std::strong_ordering>, std::is_same<ret_t, std::weak_ordering>, std::is_same<ret_t, std::partial_ordering>>,
+                  "The return type must be a comparison category type.");
+
+    bool exhaust1 = (f1 == l1);
+    bool exhaust2 = (f2 == l2);
+    for (; !exhaust1 && !exhaust2; exhaust1 = (++f1 == l1), exhaust2 = (++f2 == l2))
+        if (auto c = comp(*f1, *f2); c != 0) return c;
+
+    return !exhaust1 ? std::strong_ordering::greater : !exhaust2 ? std::strong_ordering::less : std::strong_ordering::equal;
+}
+
+template<class I1, class I2>
+constexpr auto
+lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2) {
+    return lexicographical_compare_three_way(f1, l1, f2, l2, std::compare_three_way());
+}
+
+/**
+ * @brief A compile-time fixed string
+ * taken from https://github.com/mpusz/units/blob/master/src/core/include/units/bits/external/fixed_string.h
+ *
+ * @tparam CharT Character type to be used by the string
+ * @tparam N The size of the string
+ */
+template<typename CharT, std::size_t N>
+struct basic_fixed_string {
+    CharT data_[N + 1]   = {};
+
+    using iterator       = CharT *;
+    using const_iterator = const CharT *;
+
+    constexpr explicit(false) basic_fixed_string(CharT ch) noexcept { data_[0] = ch; }
+
+    constexpr explicit(false) basic_fixed_string(const CharT (&txt)[N + 1]) noexcept {
+        if constexpr (N != 0)
+            for (std::size_t i = 0; i < N; ++i) data_[i] = txt[i];
+    }
+
+    [[nodiscard]] constexpr bool
+    empty() const noexcept {
+        return N == 0;
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    size() const noexcept {
+        return N;
+    }
+
+    [[nodiscard]] constexpr const CharT *
+    data() const noexcept {
+        return data_;
+    }
+
+    [[nodiscard]] constexpr const CharT *
+    c_str() const noexcept {
+        return data();
+    }
+
+    [[nodiscard]] constexpr const CharT &
+    operator[](std::size_t index) const noexcept {
+        return data()[index];
+    }
+
+    [[nodiscard]] constexpr CharT
+    operator[](std::size_t index) noexcept {
+        return data()[index];
+    }
+
+    [[nodiscard]] constexpr iterator
+    begin() noexcept {
+        return data();
+    }
+
+    [[nodiscard]] constexpr const_iterator
+    begin() const noexcept {
+        return data();
+    }
+
+    [[nodiscard]] constexpr iterator
+    end() noexcept {
+        return data() + size();
+    }
+
+    [[nodiscard]] constexpr const_iterator
+    end() const noexcept {
+        return data() + size();
+    }
+
+    template<std::size_t N2>
+    [[nodiscard]] constexpr friend basic_fixed_string<CharT, N + N2>
+    operator+(const basic_fixed_string &lhs, const basic_fixed_string<CharT, N2> &rhs) noexcept {
+        CharT txt[N + N2 + 1] = {};
+
+        for (size_t i = 0; i != N; ++i) txt[i] = lhs[i];
+        for (size_t i = 0; i != N2; ++i) txt[N + i] = rhs[i];
+
+        return basic_fixed_string<CharT, N + N2>(txt);
+    }
+
+    [[nodiscard]] constexpr bool
+    operator==(const basic_fixed_string &other) const {
+        if (size() != other.size()) return false;
+        return detail::equal(begin(), end(), other.begin()); // TODO std::ranges::equal(*this, other)
+    }
+
+    template<std::size_t N2>
+    [[nodiscard]] friend constexpr bool
+    operator==(const basic_fixed_string &, const basic_fixed_string<CharT, N2> &) {
+        return false;
+    }
+
+    template<std::size_t N2>
+    [[nodiscard]] friend constexpr auto
+    operator<=>(const basic_fixed_string &lhs, const basic_fixed_string<CharT, N2> &rhs) {
+        // TODO std::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+        return detail::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+    }
+};
+
+template<typename CharT, std::size_t N>
+basic_fixed_string(const CharT (&str)[N]) -> basic_fixed_string<CharT, N - 1>;
+
+template<typename CharT>
+basic_fixed_string(CharT) -> basic_fixed_string<CharT, 1>;
+
+template<std::size_t N>
+using fixed_string = basic_fixed_string<char, N>;
+
+/**
+ * @brief a move-only implementation of std::function by Matthias Kretz, GSI
+ * TODO(C++23): to be replaced once C++23's STL version is out/available:
+ * https://en.cppreference.com/w/cpp/utility/functional/move_only_function/move_only_function
+ */
+class move_only_function {
+    using FunPtr          = std::unique_ptr<void, void (*)(void *)>;
+    FunPtr _erased_fun    = { nullptr, [](void *) {} };
+    void (*_call)(void *) = nullptr;
+
+public:
+    constexpr move_only_function() = default;
+
+    template<typename F>
+        requires(!std::same_as<move_only_function, std::remove_cvref<F>> && !std::is_reference_v<F>)
+    constexpr move_only_function(F &&fun) : _erased_fun(new F(std::forward<F>(fun)), [](void *ptr) { delete static_cast<F *>(ptr); }), _call([](void *ptr) { (*static_cast<F *>(ptr))(); }) {}
+
+    template<typename F>
+        requires(!std::is_reference_v<F>)
+    constexpr move_only_function &
+    operator=(F &&fun) {
+        _erased_fun = FunPtr(new F(std::forward<F>(fun)), [](void *ptr) { delete static_cast<F *>(ptr); });
+        _call       = [](void *ptr) { (*static_cast<F *>(ptr))(); };
+        return *this;
+    }
+
+    constexpr void
+    operator()() {
+        if (_call) {
+            _call(_erased_fun.get());
+        }
+    }
+
+    constexpr void
+    operator()() const {
+        if (_call) {
+            _call(_erased_fun.get());
+        }
+    }
+};
+
+struct Task {
+    uint64_t           id;
+    move_only_function func;
+    std::string        name{}; // Default value provided to avoid warnings on construction with {.id = ..., .func = ...}
+    int32_t            priority = 0;
+    int32_t            cpuID    = -1;
+
+    std::weak_ordering
+    operator<=>(const Task &other) const noexcept {
+        return priority <=> other.priority;
+    }
+
+    // We want to reuse objects to avoid reallocations
+    void
+    reset() noexcept {
+        *this = Task();
+    }
+};
+
+template<bool lock, typename... Args>
+struct conditional_lock : public std::scoped_lock<Args...> {
+    using std::scoped_lock<Args...>::scoped_lock;
+};
+
+template<typename... Args>
+struct conditional_lock<false, Args...> {
+    conditional_lock(const Args &...){};
+};
+
+class TaskQueue {
+public:
+    using TaskContainer = std::list<Task>;
+
+private:
+    mutable gr::AtomicMutex<> _mutex;
+
+    TaskContainer             _tasks;
+
+    template<bool shouldLock>
+    using conditional_lock = conditional_lock<shouldLock, gr::AtomicMutex<>>;
+
+public:
+    TaskQueue()                       = default;
+    TaskQueue(const TaskQueue &queue) = delete;
+    TaskQueue &
+    operator=(const TaskQueue &queue)
+            = delete;
+
+    ~TaskQueue() { clear(); }
+
+    template<bool shouldLock = true>
+    void
+    clear() {
+        conditional_lock<shouldLock> lock(_mutex);
+        _tasks.clear();
+    }
+
+    template<bool shouldLock = true>
+    std::size_t
+    size() const {
+        conditional_lock<shouldLock> lock(_mutex);
+        return _tasks.size();
+    }
+
+    template<bool shouldLock = true>
+    void
+    push(TaskContainer jobContainer) {
+        conditional_lock<shouldLock> lock(_mutex);
+        assert(!jobContainer.empty());
+        auto      &job                = jobContainer.front();
+        const auto currentJobPriority = job.priority;
+
+        const auto insertPosition     = [&] {
+            if (currentJobPriority == 0) {
+                return _tasks.end();
+            } else {
+                return std::find_if(_tasks.begin(), _tasks.end(), [currentJobPriority](const auto &task) { return task.priority < currentJobPriority; });
+            }
+        }();
+
+        _tasks.splice(insertPosition, jobContainer, jobContainer.begin(), jobContainer.end());
+    }
+
+    template<bool shouldLock = true>
+    TaskContainer
+    pop() {
+        conditional_lock<shouldLock> lock(_mutex);
+        TaskContainer                result;
+        if (!_tasks.empty()) {
+            result.splice(result.begin(), _tasks, _tasks.begin(), std::next(_tasks.begin()));
+        }
+        return result;
+    }
+};
+
+} // namespace detail
+
+class TaskQueue;
+
+enum TaskType { IO_BOUND = 0, CPU_BOUND = 1 };
+
+template<typename T>
+concept ThreadPool = requires(T t, std::function<void()> &&func) {
+    { t.execute(std::move(func)) } -> std::same_as<void>;
+};
+
+/**
+ * <h2>Basic thread pool that uses a fixed-number or optionally grow/shrink between a [min, max] number of threads.</h2>
+ * The growth policy is controlled by the TaskType template parameter:
+ * <ol type="A">
+ *   <li> <code>TaskType::IO_BOUND</code> if the task is IO bound, i.e. it is likely to block the thread for a long time, or
+ *   <li> <code>TaskType::CPU_BOUND</code> if the task is CPU bound, i.e. it is primarily limited by the CPU and memory bandwidth.
+ * </ol>
+ * <br>
+ * For the IO_BOUND policy, unused threads are kept alive for a pre-defined amount of time to be reused and gracefully
+ * shut down to the minimum number of threads when unused.
+ * <br>
+ * For the CPU_BOUND policy, the threads are equally spread and pinned across the set CPU affinity.
+ * <br>
+ * The CPU affinity and OS scheduling policy and priorities are controlled by:
+ * <ul>
+ *  <li> <code>setAffinityMask(std::vector&lt;bool&gt; threadAffinityMask);</code> </li>
+ *  <li> <code>setThreadSchedulingPolicy(const thread::Policy schedulingPolicy, const int schedulingPriority)</code> </li>
+ * </ul>
+ * Some user-level examples: <br>
+ * @code
+ *
+ * // pool for CPU-bound tasks with exactly 1 thread
+ * opencmw::BasicThreadPool&lt;opencmw::CPU_BOUND&gt; poolWork("CustomCpuPool", 1, 1);
+ * // enqueue and add task to list -- w/o return type
+ * poolWork.execute([] { fmt::print("Hello World from thread '{}'!\n", getThreadName()); }); // here: caller thread-name
+ * poolWork.execute([](const auto &...args) { fmt::print(fmt::runtime("Hello World from thread '{}'!\n"), args...); }, getThreadName()); // here: executor thread-name
+ * // [..]
+ *
+ * // pool for IO-bound (potentially blocking) tasks with at least 1 and a max of 1000 threads
+ * opencmw::BasicThreadPool&lt;opencmw::IO_BOUND&gt;  poolIO("CustomIOPool", 1, 1000);
+ * poolIO.keepAliveDuration = seconds(10);              // keeps idling threads alive for 10 seconds (optional)
+ * poolIO.waitUntilInitialised();                       // wait until the pool is initialised (optional)
+ * poolIO.setAffinityMask({ true, true, true, false }); // allows executor threads to run on the first four CPU cores
+ *
+ * constexpr auto           func1  = [](const auto &...args) { return fmt::format(fmt::runtime("thread '{1}' scheduled task '{0}'!\n"), getThreadName(), args...); };
+ * std::future&lt;std::string&gt; result = poolIO.execute&lt;"customTaskName"&gt;(func1, getThreadName()); // N.B. the calling thread is owner of the std::future
+ *
+ * // execute a task with a name, a priority and single-core affinity (here: 2)
+ * poolIO.execute&lt;"task name", 20U, 2&gt;([]() { fmt::print("Hello World from custom thread '{}'!\n", getThreadName()); });
+ *
+ * try {
+ *     poolIO.execute&lt;"customName", 20U, 3&gt;([]() {  [..] this potentially long-running task is trackable via it's 'customName' thread name [..] });
+ * } catch (const std::invalid_argument &e) {
+ *     fmt::print("caught exception: {}\n", e.what());
+ * }
+ * @endcode
+ */
+class BasicThreadPool {
+    using Task      = thread_pool::detail::Task;
+    using TaskQueue = thread_pool::detail::TaskQueue;
+    static std::atomic<uint64_t> _globalPoolId;
+    static std::atomic<uint64_t> _taskID;
+
+    static std::string
+    generateName() {
+        return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1));
+    }
+
+    std::atomic_bool        _initialised = ATOMIC_FLAG_INIT;
+    bool                    _shutdown    = false;
+
+    std::condition_variable _condition;
+    std::atomic_size_t      _numTaskedQueued = 0U; // cache for _taskQueue.size()
+    std::atomic_size_t      _numTasksRunning = 0U;
+    TaskQueue               _taskQueue;
+    TaskQueue               _recycledTasks;
+
+    std::mutex              _threadListMutex;
+    std::atomic_size_t      _numThreads = 0U;
+    std::list<std::thread>  _threads;
+
+    std::vector<bool>       _affinityMask;
+    thread::Policy          _schedulingPolicy   = thread::Policy::OTHER;
+    int                     _schedulingPriority = 0;
+
+    const std::string       _poolName;
+    const TaskType          _taskType;
+    const uint32_t          _minThreads;
+    const uint32_t          _maxThreads;
+
+public:
+    std::chrono::microseconds sleepDuration     = std::chrono::milliseconds(1);
+    std::chrono::milliseconds keepAliveDuration = std::chrono::seconds(10);
+
+    BasicThreadPool(const std::string_view &name = generateName(), const TaskType taskType = TaskType::CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(),
+                    uint32_t max = std::thread::hardware_concurrency())
+        : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
+        assert(min > 0 && "minimum number of threads must be > 0");
+        for (uint32_t i = 0; i < _minThreads; ++i) {
+            createWorkerThread();
+        }
+    }
+
+    ~BasicThreadPool() {
+        _shutdown = true;
+        _condition.notify_all();
+        for (auto &t : _threads) {
+            t.join();
+        }
+    }
+
+    BasicThreadPool(const BasicThreadPool &) = delete;
+    BasicThreadPool(BasicThreadPool &&)      = delete;
+    BasicThreadPool &
+    operator=(const BasicThreadPool &)
+            = delete;
+    BasicThreadPool &
+    operator=(BasicThreadPool &&)
+            = delete;
+
+    [[nodiscard]] std::string
+    poolName() const noexcept {
+        return _poolName;
+    }
+
+    [[nodiscard]] uint32_t
+    minThreads() const noexcept {
+        return _minThreads;
+    };
+
+    [[nodiscard]] uint32_t
+    maxThreads() const noexcept {
+        return _maxThreads;
+    };
+
+    [[nodiscard]] std::size_t
+    numThreads() const noexcept {
+        return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::size_t
+    numTasksRunning() const noexcept {
+        return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::size_t
+    numTasksQueued() const {
+        return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::size_t
+    numTasksRecycled() const {
+        return _recycledTasks.size();
+    }
+
+    [[nodiscard]] bool
+    isInitialised() const {
+        return _initialised.load(std::memory_order::acquire);
+    }
+
+    void
+    waitUntilInitialised() const {
+        _initialised.wait(false);
+    }
+
+    void
+    requestShutdown() {
+        _shutdown = true;
+        _condition.notify_all();
+        for (auto &t : _threads) {
+            t.join();
+        }
+    }
+
+    [[nodiscard]] bool
+    isShutdown() const {
+        return _shutdown;
+    }
+
+    //
+
+    [[nodiscard]] std::vector<bool>
+    getAffinityMask() const {
+        return _affinityMask;
+    }
+
+    void
+    setAffinityMask(const std::vector<bool> &threadAffinityMask) {
+        _affinityMask.clear();
+        std::copy(threadAffinityMask.begin(), threadAffinityMask.end(), std::back_inserter(_affinityMask));
+        cleanupFinishedThreads();
+        updateThreadConstraints();
+    }
+
+    [[nodiscard]] auto
+    getSchedulingPolicy() const {
+        return _schedulingPolicy;
+    }
+
+    [[nodiscard]] auto
+    getSchedulingPriority() const {
+        return _schedulingPriority;
+    }
+
+    void
+    setThreadSchedulingPolicy(const thread::Policy schedulingPolicy = thread::Policy::OTHER, const int schedulingPriority = 0) {
+        _schedulingPolicy   = schedulingPolicy;
+        _schedulingPriority = schedulingPriority;
+        cleanupFinishedThreads();
+        updateThreadConstraints();
+    }
+
+    // TODO: Do we need support for cancellation?
+    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = std::invoke_result_t<Callable, Args...>>
+        requires(std::is_same_v<R, void>)
+    void
+    execute(Callable &&func, Args &&...args) {
+        static thread_local gr::SpinWait spinWait;
+        if constexpr (cpuID >= 0) {
+            if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+                throw std::invalid_argument(
+                        fmt::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), fmt::join(_affinityMask.begin(), _affinityMask.end(), ", ")));
+            }
+        }
+        _numTaskedQueued.fetch_add(1U);
+
+        _taskQueue.push(createTask<taskName, priority, cpuID>(std::forward<decltype(func)>(func), std::forward<decltype(func)>(args)...));
+        _condition.notify_one();
+        if (_taskType == TaskType::IO_BOUND) {
+            spinWait.spinOnce();
+            spinWait.spinOnce();
+            while (_taskQueue.size() > 0) {
+                if (const auto nThreads = numThreads(); nThreads <= numTasksRunning() && nThreads <= _maxThreads) {
+                    createWorkerThread();
+                }
+                _condition.notify_one();
+                spinWait.spinOnce();
+                spinWait.spinOnce();
+            }
+            spinWait.reset();
+        }
+    }
+
+    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = std::invoke_result_t<Callable, Args...>>
+        requires(!std::is_same_v<R, void>)
+    [[nodiscard]] std::future<R>
+    execute(Callable &&func, Args &&...funcArgs) {
+        if constexpr (cpuID >= 0) {
+            if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+#ifdef _LIBCPP_VERSION
+                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
+#else
+                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", cpuID, _affinityMask.size(), _affinityMask));
+#endif
+            }
+        }
+        std::promise<R> promise;
+        auto            result = promise.get_future();
+        auto            lambda = [promise = std::move(promise), func = std::forward<decltype(func)>(func), ... args = std::forward<decltype(func)>(funcArgs)]() mutable {
+            try {
+                promise.set_value(func(args...));
+            } catch (...) {
+                promise.set_exception(std::current_exception());
+            }
+        };
+        execute<taskName, priority, cpuID>(std::move(lambda));
+        return result;
+    }
+
+private:
+    void
+    cleanupFinishedThreads() {
+        std::scoped_lock lock(_threadListMutex);
+        // TODO:
+        // (C++Ref) A thread that has finished executing code, but has not yet been
+        // joined is still considered an active thread of execution and is
+        // therefore joinable.
+        // std::erase_if(_threads, [](auto &thread) { return !thread.joinable(); });
+    }
+
+    void
+    updateThreadConstraints() {
+        std::scoped_lock lock(_threadListMutex);
+        // std::erase_if(_threads, [](auto &thread) { return !thread.joinable(); });
+
+        std::for_each(_threads.begin(), _threads.end(), [this, threadID = std::size_t{ 0 }](auto &thread) mutable { this->updateThreadConstraints(threadID++, thread); });
+    }
+
+    void
+    updateThreadConstraints(const std::size_t threadID, std::thread &thread) const {
+        thread::setThreadName(fmt::format("{}#{}", _poolName, threadID), thread);
+        thread::setThreadSchedulingParameter(_schedulingPolicy, _schedulingPriority, thread);
+        if (!_affinityMask.empty()) {
+            if (_taskType == TaskType::IO_BOUND) {
+                thread::setThreadAffinity(_affinityMask);
+                return;
+            }
+            const std::vector<bool> affinityMask = distributeThreadAffinityAcrossCores(_affinityMask, threadID);
+            std::cout << fmt::format("{}#{} affinity mask: {}", _poolName, threadID, fmt::join(affinityMask.begin(), affinityMask.end(), ",")) << std::endl;
+            thread::setThreadAffinity(affinityMask);
+        }
+    }
+
+    std::vector<bool>
+    distributeThreadAffinityAcrossCores(const std::vector<bool> &globalAffinityMask, const std::size_t threadID) const {
+        if (globalAffinityMask.empty()) {
+            return {};
+        }
+        std::vector<bool> affinityMask;
+        std::size_t       coreCount = 0;
+        for (bool value : globalAffinityMask) {
+            if (value) {
+                affinityMask.push_back(coreCount++ % _minThreads == threadID);
+            } else {
+                affinityMask.push_back(false);
+            }
+        }
+        return affinityMask;
+    }
+
+    void
+    createWorkerThread() {
+        std::scoped_lock  lock(_threadListMutex);
+        const std::size_t nThreads = numThreads();
+        std::thread      &thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
+        updateThreadConstraints(nThreads + 1, thread);
+    }
+
+    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args>
+    auto
+    createTask(Callable &&func, Args &&...funcArgs) {
+        const auto getTask = [&recycledTasks = _recycledTasks](Callable &&f, Args &&...args) {
+            auto extracted = recycledTasks.pop();
+            if (extracted.empty()) {
+                if constexpr (sizeof...(Args) == 0) {
+                    extracted.push_front(Task{ .id = _taskID.fetch_add(1U) + 1U, .func = std::move(f) });
+                } else {
+                    extracted.push_front(Task{ .id = _taskID.fetch_add(1U) + 1U, .func = std::move(std::bind_front(std::forward<decltype(func)>(f), std::forward<decltype(func)>(args)...)) });
+                }
+            } else {
+                auto &task = extracted.front();
+                task.id    = _taskID.fetch_add(1U) + 1U;
+                if constexpr (sizeof...(Args) == 0) {
+                    task.func = std::move(f);
+                } else {
+                    task.func = std::move(std::bind_front(std::forward<decltype(func)>(f), std::forward<decltype(func)>(args)...));
+                }
+            }
+            return extracted;
+        };
+
+        auto  taskContainer = getTask(std::forward<decltype(func)>(func), std::forward<decltype(func)>(funcArgs)...);
+        auto &task          = taskContainer.front();
+
+        if constexpr (!taskName.empty()) {
+            task.name = taskName.c_str();
+        }
+        task.priority = priority;
+        task.cpuID    = cpuID;
+
+        return taskContainer;
+    }
+
+    TaskQueue::TaskContainer
+    popTask() {
+        auto result = _taskQueue.pop();
+        if (!result.empty()) {
+            _numTaskedQueued.fetch_sub(1U);
+        }
+        return result;
+    }
+
+    void
+    worker() {
+        constexpr uint32_t N_SPIN       = 1 << 8;
+        uint32_t           noop_counter = 0;
+        const auto         threadID     = _numThreads.fetch_add(1);
+        std::mutex         mutex;
+        std::unique_lock   lock(mutex);
+        auto               lastUsed              = std::chrono::steady_clock::now();
+        auto               timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
+        if (numThreads() >= _minThreads) {
+            std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
+            _initialised.notify_all();
+        }
+        _numThreads.notify_one();
+        bool running = true;
+        do {
+            if (TaskQueue::TaskContainer currentTaskContainer = popTask(); !currentTaskContainer.empty()) {
+                assert(!currentTaskContainer.empty());
+                auto &currentTask = currentTaskContainer.front();
+                _numTasksRunning.fetch_add(1);
+                bool nameSet = !(currentTask.name.empty());
+                if (nameSet) {
+                    thread::setThreadName(currentTask.name);
+                }
+                currentTask.func();
+                // execute dependent children
+                currentTask.reset();
+                _recycledTasks.push(std::move(currentTaskContainer));
+                _numTasksRunning.fetch_sub(1);
+                if (nameSet) {
+                    thread::setThreadName(fmt::format("{}#{}", _poolName, threadID));
+                }
+                lastUsed     = std::chrono::steady_clock::now();
+                noop_counter = 0;
+            } else if (++noop_counter > N_SPIN) [[unlikely]] {
+                // perform some thread maintenance tasks before going to sleep
+                noop_counter = noop_counter / 2;
+                cleanupFinishedThreads();
+
+                _condition.wait_for(lock, keepAliveDuration, [this] { return numTasksQueued() > 0 || isShutdown(); });
+            }
+            // check if this thread is to be kept
+            timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
+            if (isShutdown()) {
+                auto nThread = _numThreads.fetch_sub(1);
+                _numThreads.notify_all();
+                if (nThread == 1) { // cleanup last thread
+                    _recycledTasks.clear();
+                    _taskQueue.clear();
+                }
+                running = false;
+            } else if (timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
+                unsigned long nThreads = numThreads();
+                while (nThreads > minThreads()) {                   // compare and swap loop
+                    if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
+                        _numThreads.notify_all();
+                        if (nThreads == 1) { // cleanup last thread
+                            _recycledTasks.clear();
+                            _taskQueue.clear();
+                        }
+                        running = false;
+                        break;
+                    }
+                }
+            }
+        } while (running);
+    }
+};
+
+inline std::atomic<uint64_t> BasicThreadPool::_globalPoolId = 0U;
+inline std::atomic<uint64_t> BasicThreadPool::_taskID       = 0U;
+static_assert(ThreadPool<BasicThreadPool>);
+
+} // namespace fair::thread_pool
+
+#endif // THREADPOOL_HPP
 
 // #include <typelist.hpp>
 
@@ -11053,7 +12251,10 @@ struct Visible {};
 /**
  * @brief Annotates node, indicating to calling schedulers that it may block due IO.
  */
-struct BlockingIO {};
+template<bool UseIoThread = true>
+struct BlockingIO {
+    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
+};
 
 /**
  * @brief Annotates node, indicating to perform decimation/interpolation
@@ -11464,7 +12665,7 @@ public:
                 if constexpr (requires(Node t) { t.meta_information; }) {
                     static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_node->meta_information)>, property_map>);
                     if constexpr (requires(Node t) { t.description; }) {
-                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(_node->description)>>, std::string_view>);
+                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(Node::description)>>, std::string_view>);
                         _node->meta_information.value["description"] = std::string(_node->description);
                     }
 
@@ -11706,6 +12907,7 @@ public:
             }
             _staged.clear();
         }
+        settings_base::_changed.store(false);
         return forward_parameters;
     }
 
@@ -11733,6 +12935,11 @@ static_assert(Settings<basic_settings<int>>);
 } // namespace fair::graph
 #endif // GRAPH_PROTOTYPE_SETTINGS_HPP
 
+
+#ifdef FMT_FORMAT_H_
+#include <fmt/core.h>
+#include <limits>
+#endif
 
 namespace fair::graph {
 
@@ -11852,6 +13059,51 @@ concept NodeType = requires(T t, std::size_t requested_work) {
     // requires !std::is_move_assignable_v<T>;
 };
 
+namespace detail {
+class WorkCounter {
+    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<std::uint32_t>::max()) << 32 };
+
+public:
+    void
+    increment(std::size_t workRequestedInc, std::size_t workDoneInc) {
+        uint64_t oldCounter;
+        uint64_t newCounter;
+        do {
+            oldCounter         = encodedCounter;
+            auto workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+            auto workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+            if (workRequested != std::numeric_limits<std::uint32_t>::max()) {
+                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())));
+            }
+            workDone += static_cast<std::uint32_t>(workDoneInc);
+            newCounter = (static_cast<uint64_t>(workRequested) << 32) | workDone;
+        } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
+    }
+
+    std::pair<std::size_t, std::size_t>
+    getAndReset() {
+        uint64_t oldCounter    = encodedCounter.exchange(0);
+        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+        }
+        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+    }
+
+    std::pair<std::size_t, std::size_t>
+    get() {
+        uint64_t oldCounter    = encodedCounter.load();
+        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+        }
+        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+    }
+};
+} // namespace detail
+
 template<typename Derived>
 concept HasProcessOneFunction = traits::node::can_process_one<Derived>;
 
@@ -11868,7 +13120,7 @@ static_assert(ConsumableSpan<traits::node::detail::dummy_input_span<float>>);
 
 template<typename T>
 concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
-                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0); };
+                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0_UZ); };
 
 static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
 
@@ -11962,16 +13214,26 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class node : protected std::tuple<Arguments...> {
+struct node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, fair::meta::fixed_string description = "", typename... Args>
-    using A = Annotated<T, description, Args...>;
+    using A                          = Annotated<T, description, Args...>;
 
-public:
-    using base_t                                         = node<Derived, Arguments...>;
-    using derived_t                                      = Derived;
-    using node_template_parameters                       = meta::typelist<Arguments...>;
-    using Description                                    = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    using base_t                     = node<Derived, Arguments...>;
+    using derived_t                  = Derived;
+    using node_template_parameters   = meta::typelist<Arguments...>;
+    using Description                = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
+
+    alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
+    alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadShallRun{ false };
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
+    alignas(hardware_destructive_interference_size) detail::WorkCounter ioWorkDone{};
+    alignas(hardware_destructive_interference_size) std::atomic<work_return_status_t> ioLastWorkStatus{ work_return_status_t::OK };
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
+            "node_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
     A<std::size_t, "numerator", Doc<"The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">>      numerator   = 1_UZ;
     A<std::size_t, "denominator", Doc<"The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">> denominator = 1_UZ;
@@ -11989,15 +13251,15 @@ public:
         std::size_t in_available{ std::numeric_limits<std::size_t>::max() };           // min of `port.streamReader().available()` of all input ports
         std::size_t in_samples_to_next_tag{ std::numeric_limits<std::size_t>::max() }; // min of `port.samples_to_next_tag` of all input ports
 
-        std::size_t out_min_samples{ std::numeric_limits<std::size_t>::min() };        // max of `port.min_buffer_size()` of all output ports
-        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() };        // min of `port.max_buffer_size()` of all output ports
-        std::size_t out_available{ std::numeric_limits<std::size_t>::max() };          // min of `port.streamWriter().available()` of all input ports
+        std::size_t out_min_samples{ std::numeric_limits<std::size_t>::min() }; // max of `port.min_buffer_size()` of all output ports
+        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() }; // min of `port.max_buffer_size()` of all output ports
+        std::size_t out_available{ std::numeric_limits<std::size_t>::max() };   // min of `port.streamWriter().available()` of all input ports
 
-        std::size_t in_samples{ 0 };                                                   // number of input samples to process
-        std::size_t out_samples{ 0 };                                                  // number of output samples, calculated based on `numerator` and `denominator`
+        std::size_t in_samples{ 0 };  // number of input samples to process
+        std::size_t out_samples{ 0 }; // number of output samples, calculated based on `numerator` and `denominator`
 
-        bool        in_at_least_one_port_has_data{ false };                            // at least one port has data
-        bool        in_at_least_one_tag_available{ false };                            // at least one port has a tag
+        bool        in_at_least_one_port_has_data{ false }; // at least one port has data
+        bool        in_at_least_one_tag_available{ false }; // at least one port has a tag
 
         constexpr bool
         enough_samples_for_output_ports(std::size_t n) {
@@ -12082,18 +13344,61 @@ public:
     node(node &&other) noexcept
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
+    ~node() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+        stop();
+    }
+
     void
-    init() {
-        std::ignore = settings().apply_staged_parameters();
+    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool_) {
+        progress     = std::move(progress_);
+        ioThreadPool = std::move(ioThreadPool_);
+        std::ignore  = settings().apply_staged_parameters();
         // TODO: expand on this init function:
         //  * store initial setting -> needed for `reset()` call
-        //  * push settings that cannot be applied to block parameters to meta-information
         //  * ...
+    }
+
+    void
+    stop() {
+        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
+        ioThreadShallRun.notify_all();
+        // wait for done
+        for (auto running = ioThreadRunning.load(); running > 0; running = ioThreadRunning.load()) {
+            ioThreadRunning.wait(running);
+        }
+    }
+
+    template<fair::meta::array_or_vector_type Container>
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(Container &data) const noexcept {
+        if constexpr (fair::meta::vector_type<Container>) {
+            data.resize(traits::node::input_port_types<Derived>::size);
+        } else if constexpr (fair::meta::array_type<Container>) {
+            static_assert(std::tuple_size<Container>::value >= traits::node::input_port_types<Derived>::size);
+        } else {
+            static_assert(fair::meta::always_false<Container>, "type not supported");
+        }
+        meta::tuple_for_each_enumerate([&data](auto index, auto &input_port) { data[index] = input_port.streamReader().available(); }, input_ports(&self()));
+        return traits::node::input_port_types<Derived>::size;
+    }
+
+    template<fair::meta::array_or_vector_type Container>
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(Container &data) const noexcept {
+        if constexpr (fair::meta::vector_type<Container>) {
+            data.resize(traits::node::output_port_types<Derived>::size);
+        } else if constexpr (fair::meta::array_type<Container>) {
+            static_assert(std::tuple_size<Container>::value >= traits::node::output_port_types<Derived>::size);
+        } else {
+            static_assert(fair::meta::always_false<Container>, "type not supported");
+        }
+        meta::tuple_for_each_enumerate([&data](auto index, auto &output_port) { data[index] = output_port.streamWriter().available(); }, output_ports(&self()));
+        return traits::node::output_port_types<Derived>::size;
     }
 
     [[nodiscard]] constexpr bool
     is_blocking() const noexcept {
-        return std::disjunction_v<std::is_same<BlockingIO, Arguments>...>;
+        return blockingIO;
     }
 
     [[nodiscard]] constexpr bool
@@ -12245,7 +13550,7 @@ protected:
      * @return struct { std::size_t produced_work, work_return_t}
      */
     work_return_t
-    work_internal(std::size_t requested_work) noexcept {
+    work_internal(std::size_t requested_work) {
         using fair::graph::work_return_status_t;
         using input_types             = traits::node::input_port_types<Derived>;
         using output_types            = traits::node::output_port_types<Derived>;
@@ -12260,7 +13565,7 @@ protected:
             static_assert(HasProcessBulkFunction<Derived>,
                           "Blocks which allow decimation/interpolation must implement process_bulk(...) method. Remove 'PerformDecimationInterpolation' from the block definition.");
         } else {
-            if (numerator != 1 || denominator != 1) {
+            if (numerator != 1_UZ || denominator != 1_UZ) {
                 throw std::runtime_error(
                         fmt::format("Block is not defined as `PerformDecimationInterpolation`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
@@ -12269,7 +13574,7 @@ protected:
         if constexpr (node_template_parameters::template contains<PerformStride>) {
             static_assert(!is_source_node, "Stride is not available for source blocks. Remove 'PerformStride' from the block definition.");
         } else {
-            if (stride != 0) {
+            if (stride != 0_UZ) {
                 throw std::runtime_error(fmt::format("Block is not defined as `PerformStride`, but stride = {}, it must equal to 0.", stride));
             }
         }
@@ -12541,6 +13846,25 @@ protected:
     } // end: work_return_t work_internal() noexcept { ..}
 
 public:
+    work_return_status_t
+    invokeWork()
+        requires(blockingIO)
+    {
+        auto [work_requested, work_done, last_status] = work_internal(ioRequestedWork.load(std::memory_order_relaxed));
+        ioWorkDone.increment(work_requested, work_done);
+        if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == work_return_status_t::DONE && incWorkDone > 0) {
+            // finished local iteration but need to report more work to be done until
+            // external scheduler loop acknowledged all samples being processed
+            // via the 'ioWorkDone.getAndReset()' call
+            last_status = work_return_status_t::OK;
+        }
+        ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
+
+        std::ignore = progress->incrementAndGet();
+        progress->notify_all();
+        return last_status;
+    }
+
     /**
      * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
      *
@@ -12550,10 +13874,49 @@ public:
      */
     work_return_t
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
-        constexpr bool is_blocking = node_template_parameters::template contains<BlockingIO>;
-        if constexpr (is_blocking) {
-            return work_internal(requested_work);
-            // static_assert(fair::meta::always_false<derived_t>, "not yet implemented");
+        if constexpr (blockingIO) {
+            constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
+            std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
+            if (bool expectedThreadState = false; ioThreadShallRun.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
+                if constexpr (useIoThread) { // use graph-provided ioThreadPool
+                    ioThreadPool->execute([this]() {
+#ifdef _DEBUG
+                        fmt::print("starting thread for {} count {}\n", name, ioThreadRunning.fetch_add(1));
+#else
+                        ioThreadRunning.fetch_add(1);
+#endif
+                        for (int retryCount = 2; ioThreadShallRun && retryCount > 0; retryCount--) {
+                            while (ioThreadShallRun && retryCount) {
+                                if (invokeWork() == work_return_status_t::DONE) {
+                                    break;
+                                } else {
+                                    // processed data before shutting down wait (see below) and retry (here: once)
+                                    retryCount = 2;
+                                }
+                            }
+                            // delayed shut-down in case there are more tasks to be processed
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        }
+                        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
+                        ioThreadShallRun.notify_all();
+#ifdef _DEBUG
+                        fmt::print("shutting down thread for {} count {}\n", name, ioThreadRunning.fetch_sub(1));
+#else
+                        ioThreadRunning.fetch_sub(1);
+#endif
+                        ioThreadRunning.notify_all();
+                    });
+                } else {
+                    // let user call '' explicitly
+                }
+            }
+            const work_return_status_t lastStatus                 = ioLastWorkStatus.exchange(work_return_status_t::OK, std::memory_order_relaxed);
+            const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
+            // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
+#if defined(__EMSCRIPTEN__)
+            std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+#endif
+            return { accumulatedRequestedWork, performedWork, performedWork > 0 ? work_return_status_t::OK : lastStatus };
         } else {
             return work_internal(requested_work);
         }
@@ -12578,7 +13941,7 @@ node_description() noexcept {
     using ArgumentList         = typename Node::node_template_parameters;
     using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
     using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
-    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO>;
+    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
@@ -12601,9 +13964,9 @@ node_description() noexcept {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                                        RawType::visible() ? "" : "_", //
                                        type_name,
-                                       member_name,                   //
+                                       member_name, //
                                        RawType::description(), RawType::unit(),
-                                       RawType::documentation(),      //
+                                       RawType::documentation(), //
                                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
@@ -12900,11 +14263,60 @@ struct register_node {
 
 } // namespace fair::graph
 
+#ifdef FMT_FORMAT_H_
+
+template<>
+struct fmt::formatter<fair::graph::work_return_status_t> {
+    static constexpr auto
+    parse(const format_parse_context &ctx) {
+        const auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::work_return_status_t &status, FormatContext &ctx) {
+        using enum fair::graph::work_return_status_t;
+        switch (status) {
+        case ERROR: return fmt::format_to(ctx.out(), "ERROR");
+        case INSUFFICIENT_OUTPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_OUTPUT_ITEMS");
+        case INSUFFICIENT_INPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_INPUT_ITEMS");
+        case DONE: return fmt::format_to(ctx.out(), "DONE");
+        case OK: return fmt::format_to(ctx.out(), "OK");
+        default: return fmt::format_to(ctx.out(), "UNKNOWN");
+        }
+        return fmt::format_to(ctx.out(), "UNKNOWN");
+    }
+};
+
+template<>
+struct fmt::formatter<fair::graph::work_return_t> {
+    static constexpr auto
+    parse(const format_parse_context &ctx) {
+        const auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::work_return_t &work_return, FormatContext &ctx) {
+        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
+    }
+};
+
+#endif // FMT_FORMAT_H_
+
 #endif // include guard
 
 // #include "port.hpp"
 
+// #include "sequence.hpp"
+
 // #include "typelist.hpp"
+
+// #include <thread_pool.hpp>
 
 
 #include <algorithm>
@@ -13075,7 +14487,29 @@ public:
      * @brief to be called by scheduler->graph to initialise block
      */
     virtual void
-    init() = 0;
+    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool)
+            = 0;
+
+    /**
+     * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
+     */
+    [[nodiscard]] virtual constexpr bool
+    is_blocking() const noexcept
+            = 0;
+
+    /**
+     * @brief number of available readable samples at the block's input ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &) const noexcept
+            = 0;
+
+    /**
+     * @brief number of available writable samples at the block's output ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &) const noexcept
+            = 0;
 
     /**
      * @brief user defined name
@@ -13205,13 +14639,28 @@ public:
     }
 
     void
-    init() override {
-        return node_ref().init();
+    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool) override {
+        return node_ref().init(progress, ioThreadPool);
     }
 
     [[nodiscard]] constexpr work_return_t
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return node_ref().work(requested_work);
+    }
+
+    [[nodiscard]] constexpr bool
+    is_blocking() const noexcept override {
+        return node_ref().is_blocking();
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_input_samples(std::vector<std::size_t> &data) const noexcept override {
+        return node_ref().available_input_samples(data);
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    available_output_samples(std::vector<std::size_t> &data) const noexcept override {
+        return node_ref().available_output_samples(data);
     }
 
     [[nodiscard]] std::string_view
@@ -13327,7 +14776,11 @@ public:
     }
 };
 
-class graph {
+struct graph {
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
+            "graph_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+
 private:
     std::vector<std::function<connection_result_t(graph &)>> _connection_definitions;
     std::vector<std::unique_ptr<node_model>>                 _nodes;
@@ -13491,8 +14944,7 @@ public:
     node_model &
     add_node(std::unique_ptr<node_model> node) {
         auto &new_node_ref = _nodes.emplace_back(std::move(node));
-        new_node_ref->init();
-        ;
+        new_node_ref->init(progress, ioThreadPool);
         return *new_node_ref.get();
     }
 
@@ -13502,8 +14954,7 @@ public:
         static_assert(std::is_same_v<Node, std::remove_reference_t<Node>>);
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>(std::forward<Args>(args)...));
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
-        raw_ref->init();
-        ;
+        raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
 
@@ -13514,7 +14965,7 @@ public:
         auto &new_node_ref = _nodes.emplace_back(std::make_unique<node_wrapper<Node>>());
         auto  raw_ref      = static_cast<Node *>(new_node_ref->raw());
         std::ignore        = raw_ref->settings().set(initial_settings);
-        raw_ref->init();
+        raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
 

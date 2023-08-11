@@ -124,7 +124,9 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
         }
 
         std::ignore = current_node.settings().set(new_properties);
-        current_node.init();
+        // current_node.init(); TODO: reverse and first initialise block via property_map constructor and then add to flow-graph -> does the init implicitely then, this is a workaround for the
+        // apply_staged_settigns
+        std::ignore = current_node.settings().apply_staged_parameters();
     }
 
     for (const auto &connection : tree["connections"]) {
