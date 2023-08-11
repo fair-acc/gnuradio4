@@ -9,6 +9,7 @@
 
 #include <any>
 #include <chrono>
+#include <deque>
 #include <limits>
 
 namespace fair::graph {
