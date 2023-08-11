@@ -1,3 +1,4 @@
+#include "tag.hpp"
 #include <boost/ut.hpp>
 
 #include <buffer.hpp>
@@ -7,7 +8,6 @@
 #include <scheduler.hpp>
 #include <stdexcept>
 #include <string>
-#include <timingctx.hpp>
 #include <transactions.hpp>
 
 #include <fmt/format.h>
@@ -530,186 +530,79 @@ const boost::ut::suite AnnotationTests = [] {
     };
 };
 
+const boost::ut::suite SettingsCtxTests = [] {
+    using namespace boost::ut;
+    using namespace fair::graph;
+    using namespace fair::graph::setting_test;
+
+    "SettingsCtx basic"_test = [] {
+        SettingsCtx a;
+        SettingsCtx b;
+        expect(a == b);
+        a.time = std::chrono::system_clock::now();
+        b.time = std::chrono::system_clock::now() + std::chrono::seconds(1);
+        // chronologically sorted
+        expect(a < b);
+    };
+};
+
 const boost::ut::suite TransactionTests = [] {
     using namespace boost::ut;
     using namespace fair::graph;
     using namespace fair::graph::setting_test;
 
-    "Settingsbase"_test = [] {
-        SettingBase<int, int> a;
-        expect(eq(a.nHistory(), 1U));
-        auto [r1, t1] = a.commit(42);
-        expect(r1);
-        expect(eq(a.nHistory(), 2U));
-        auto commitResult2 = a.commit(43);
-        expect(commitResult2);
-        expect(eq(a.nHistory(), 3U));
+    "CtxSettings"_test = [] {
+        graph flow_graph;
+        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto  s     = ctx_settings(block);
+        auto  ctx0  = SettingsCtx(std::chrono::system_clock::now());
+        std::ignore = s.set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
+        auto ctx1   = SettingsCtx(std::chrono::system_clock::now() + std::chrono::seconds(1));
+        std::ignore = s.set({ { "name", "TestNameNew" }, { "scaling_factor", 43.f } }, ctx1);
 
-        expect(eq(a.get(), 43));
-        expect(eq(a.get(commitResult2.timeStamp), 43));
-        expect(eq(a.get(-1), 42));
-        expect(eq(a.get(t1), 42));
-
-        expect(eq(a.getPendingTransactions().size(), 0U));
-        auto [r3, t3] = a.stage(53, "transactionToken#1");
-        expect(!r3);
-        expect(eq(a.getPendingTransactions().size(), 1U));
-        expect(eq(a.nHistory(), 3U));
-        auto [r4, t4] = a.commit(40);
-        expect(r4);
-        expect(eq(a.nHistory(), 4U));
-        expect(eq(a.get(t4), 40));
-        expect(eq(a.get(t3), 43)); // transaction not yet committed
-        expect(eq(a.get(), 40));   // transaction not yet committed
-
-        auto [r5, t5] = a.commit("transactionToken#1"); // commit transaction
-        expect(r5);
-        expect(eq(a.nHistory(), 5U));
-        expect(eq(a.get(), 53));
-        expect(eq(a.get(t5), 53));
-        expect(eq(a.getPendingTransactions().size(), 0U));
-
-        auto [r6, t] = a.stage(80, "transactionToken#2");
-        expect(!r6);
-        expect(eq(a.nHistory(), 5U));
-        expect(eq(a.getPendingTransactions().size(), 1U));
-        expect(eq(a.getPendingTransactions().front(), "transactionToken#2"s));
-        expect(!a.retireStaged("unknownToken"));
-        expect(eq(a.nHistory(), 5U));
-        expect(eq(a.getPendingTransactions().size(), 1U));
-        expect(a.retireStaged("transactionToken#2"));
-        expect(eq(a.nHistory(), 5U));
-        expect(eq(a.getPendingTransactions().size(), 0U));
-
-        // test staging duplicate transaction token -- last should survive
-        expect(eq(a.getPendingTransactions().size(), 0U));
-        expect(!a.stage(80, "transactionToken#2").isCommitted);
-        expect(eq(a.getPendingTransactions().size(), 1U));
-        expect(!a.stage(81, "transactionToken#2")); // short-hand notation w/o 'isCommitted'
-        expect(eq(a.getPendingTransactions().size(), 1U));
-        expect(a.commit("transactionToken#2"));
-        expect(eq(a.get(), 81));
+        expect(eq(std::get<float>(*s.get("scaling_factor")), 43.f));       // get the latest value
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx1)), 43.f)); // get same value, but over the context
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx0)), 42.f)); // get value with an older timestamp
     };
 
-    "SettingBase time-out and expiry"_test = [] {
-        const auto timeStart = std::chrono::system_clock::now();
-        using namespace std::chrono_literals;
-        SettingBase<int, int, std::string, 16, std::chrono::milliseconds, 100> a;
-        expect(eq(a.nHistory(), 1U));
-        expect(throws<std::out_of_range>([&] { std::ignore = a.get(timeStart); }));
-        expect(throws<std::out_of_range>([&] { std::ignore = a.get(1); }));
-        expect(throws<std::out_of_range>([&] { std::ignore = a.get(static_cast<int64_t>(-a.nHistory())); }));
-        expect(nothrow([&] { std::ignore = a.get(static_cast<int64_t>(-a.nHistory() + 1)); }));
-
-        for (int i = 0; i < 8; ++i) {
-            auto [r1, t1] = a.commit(std::forward<int>(i));
-            expect(r1);
-            expect(eq(a.nHistory(), static_cast<std::size_t>(i + 2)));
-        }
-
-        for (int i = 0; i < 8; ++i) {
-            auto [r1, t1] = a.commit(std::forward<int>(i));
-            expect(r1);
-        }
-        expect(eq(a.nHistory(), 16U - 8 + 1));
-
-        SettingBase<int, int, std::string, 16, std::chrono::milliseconds, -1, 100> b;
-        expect(eq(b.getPendingTransactions().size(), 0U));
-        for (int i = 0; i < 5; ++i) {
-            auto [r1, t1] = b.stage(std::forward<int>(i), fmt::format("token#{}", i));
-            expect(!r1);
-        }
-        expect(eq(b.getPendingTransactions().size(), 5U));
-
-        std::this_thread::sleep_for(200ms); // wait for timeout to expire for both 'a' and 'b'
-        expect(eq(a.nHistory(), static_cast<std::size_t>(16 - 8 + 1)));
-        a.retireExpired();
-        expect(eq(a.nHistory(), 1U));
-
-        expect(eq(b.getPendingTransactions().size(), 5U));
-        b.retireExpired();
-        expect(eq(b.getPendingTransactions().size(), 0U));
-
-        expect(eq(a.nHistory(), 1U));
-        a.commit(0);
-        a.retireExpired();
-        expect(eq(a.nHistory(), 1U));
-        expect(a.modifySetting([](const int &oldValue) -> int { return oldValue; }));
-        expect(eq(a.nHistory(), 2U));
+    auto matchPred = [](const auto &lhs, const auto &rhs) {
+        return !lhs.empty() && std::all_of(lhs.begin(), lhs.end(), [&](const auto &v) { return rhs.contains(v.first) && rhs.at(v.first) == v.second; });
     };
 
-    "SettingBase constructors"_test = [] {
-        Setting<int, 128> a;
-        expect(eq(a.nHistory(), 1U));
-        Setting<int, 128, std::chrono::milliseconds, 100> b;
-        expect(eq(b.nHistory(), 1U));
-        TransactionSetting<int, std::string, 128> c;
-        expect(eq(c.nHistory(), 1U));
-        TransactionSetting<int, std::string, 128, std::chrono::milliseconds, 100> d;
-        expect(eq(d.nHistory(), 1U));
-        CtxSetting<int, std::string, 128> e;
-        expect(eq(e.nHistory(), 1U));
+    "CtxSettings Parsing"_test = [&] {
+        graph      flow_graph;
+        auto      &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto       s     = ctx_settings(block, matchPred);
+        const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 } });
+        std::ignore      = s.set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
+        const auto ctx1  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 2 } });
+        std::ignore      = s.set({ { "name", "TestNameNew" }, { "scaling_factor", 43.f } }, ctx1);
+
+        // exact matches for contexts work
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx0)), 42.f));
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx1)), 43.f));
+
+        // matching by using the custom predicate
+        auto ctx3 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 2 }, { "BPID", 1 } });
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx3)), 43.f));
+        auto ctx4   = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 2 }, { "BPID", 3 } });
+        std::ignore = s.set({ { "scaling_factor", 44.f } }, ctx4);
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx4)), 44.f));
+
+        // doesn't exist
+        auto ctx6 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 9 }, { "SID", 9 }, { "BPID", 9 }, { "GID", 9 } });
+        expect(s.get("scaling_factor", ctx6) == std::nullopt);
     };
 
-    // a simple parse function that just stores every ordered number from a selector string "val0:val1:val2:..."
-    auto parsePred = [](auto t) {
-        auto sel     = t->selector.value;
-        auto strView = std::string_view{ sel.data(), sel.data() + sel.length() };
-        for (char c = 'a';; ++c) {
-            const auto posColon               = strView.find(':');
-            const auto tag                    = posColon != std::string_view::npos ? strView.substr(0, posColon) : strView;
-            int32_t    value                  = -1;
-            std::ignore                       = std::from_chars(tag.begin(), tag.end(), value);
-            t->_identifier[std::string(1, c)] = value;
-
-            if (posColon == std::string_view::npos) {
-                return;
-            }
-
-            // advance to after the ":"
-            strView.remove_prefix(posColon + 1);
-        }
-    };
-    auto matchPred    = [](const auto lhs, const auto rhs) { return std::all_of(lhs._identifier.begin(), lhs._identifier.end(), [&](auto v) { return rhs._identifier.contains(v.first) && rhs._identifier[v.first] == v.second; }); };
-
-    "CtxSetting"_test = [&] {
-        CtxSetting<int, std::string, 16> a;
-        expect(eq(a.nHistory(), 1U));
-
-        auto [r1, t1] = a.commit(NullTimingCtx, 42);
-        expect(r1);
-        expect(eq(a.nHistory(), 2U));
-        auto [r2, t2] = a.commit(NullTimingCtx, 43);
-        expect(r2);
-        expect(eq(a.nHistory(), 3U));
-
-        expect(eq(a.get().settingValue, 43));
-        expect(eq(a.get(), 43)); // short-hand notation
-        expect(eq(a.get(NullTimingCtx, t2), 43));
-        expect(eq(a.get(NullTimingCtx, -1), 42));
-        expect(eq(a.get(NullTimingCtx, t1), 42));
-
-        auto [r3, t3] = a.commit(TimingCtx(parsePred, matchPred, "1"), 55);
-        expect(r3);
-        expect(eq(a.nHistory(), 4U));
-        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1")), 55));
-        auto e = a.get(TimingCtx(parsePred, matchPred, "2"));
-        expect(neq(a.get(TimingCtx(parsePred, matchPred, "2")).timingCtx, TimingCtx(parsePred, matchPred, "2"))); // non-matching context
-        expect(neq(a.get(TimingCtx(parsePred, matchPred, "2")), TimingCtx(parsePred, matchPred, "2")));           // non-matching context, short-hand notation
-
-        auto [r4, t4] = a.commit(TimingCtx(parsePred, matchPred, "2"), 56);
-        expect(r4);
-        expect(eq(a.nHistory(), 5U));
-        expect(eq(a.get(NullTimingCtx), 43));
-        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1")), 55));
-        expect(eq(a.get(TimingCtx(parsePred, matchPred, "2")), 56));
-
-        expect(a.commit(TimingCtx(parsePred, matchPred, "1:1:1:1"), 101));
-        expect(a.commit(TimingCtx(parsePred, matchPred, "1:1:1"), 102));
-        expect(a.commit(TimingCtx(parsePred, matchPred, "1:1"), 103));
-        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1")), 55));
-        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1:1:1:1")), 101));
-        expect(eq(a.get(TimingCtx(parsePred, matchPred, "1:1:1:1")).timingCtx, TimingCtx(parsePred, matchPred, "1:1:1:1")));
+    "CtxSettings Drop-In Settings replacement"_test = [&] {
+        // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
+        graph flow_graph;
+        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto  s     = std::make_unique<ctx_settings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
+        block.setSettings(s);
+        auto ctx0   = SettingsCtx(std::chrono::system_clock::now());
+        std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
+        expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 42.f));
     };
 };
 
