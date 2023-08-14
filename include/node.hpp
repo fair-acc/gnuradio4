@@ -405,9 +405,9 @@ protected:
         ports_status.out_samples = ports_status.in_samples;
 
         if (ports_status.in_min_samples > ports_status.in_max_samples)
-            throw std::runtime_error(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", ports_status.in_min_samples, ports_status.in_max_samples));
+            throw std::runtime_error(""); // fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", ports_status.in_min_samples, ports_status.in_max_samples));
         if (ports_status.out_min_samples > ports_status.out_max_samples)
-            throw std::runtime_error(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", ports_status.out_min_samples, ports_status.out_max_samples));
+            throw std::runtime_error(""); // mt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", ports_status.out_min_samples, ports_status.out_max_samples));
     }
 
 public:
@@ -648,7 +648,7 @@ protected:
         } else {
             if (numerator != 1_UZ || denominator != 1_UZ) {
                 throw std::runtime_error(
-                        fmt::format("Block is not defined as `PerformDecimationInterpolation`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+                        ""); // mt::format("Block is not defined as `PerformDecimationInterpolation`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
         }
 
@@ -656,7 +656,7 @@ protected:
             static_assert(!is_source_node, "Stride is not available for source blocks. Remove 'PerformStride' from the block definition.");
         } else {
             if (stride != 0_UZ) {
-                throw std::runtime_error(fmt::format("Block is not defined as `PerformStride`, but stride = {}, it must equal to 0.", stride));
+                throw std::runtime_error(""); // mt::format("Block is not defined as `PerformStride`, but stride = {}, it must equal to 0.", stride));
             }
         }
 

@@ -512,7 +512,7 @@ private:
 
         if (!std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(src_node_raw); })
             || !std::any_of(_nodes.begin(), _nodes.end(), [&](const auto &registered_node) { return registered_node->raw() == std::addressof(dst_node_raw); })) {
-            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name, src_port_index, dst_node_raw.name, dst_port_index));
+            throw std::runtime_error(""); // fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_node_raw.name, src_port_index, dst_node_raw.name, dst_port_index));
         }
 
         auto result = source_port.connect(destination_port);
@@ -546,7 +546,7 @@ private:
                 return std::any_of(self._nodes.cbegin(), self._nodes.cend(), [&query_node](const auto &known_node) { return known_node->raw() == std::addressof(query_node); });
             };
             if (!is_node_known(source) || !is_node_known(destination)) {
-                throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
+                throw std::string{}; // fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
             }
             self._connection_definitions.push_back([source = &source, source_port = &port, destination = &destination, destination_port = &destination_port](graph &graph) {
                 return graph.connect_impl<src_port_index, dst_port_index>(*source, *source_port, *destination, *destination_port);
