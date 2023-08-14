@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <variant>
 
 #include <unistd.h>
 
@@ -136,6 +137,13 @@ concept Profiler = requires(T p) {
     { p.for_this_thread() } -> ProfilerHandler;
 };
 
+enum class output_mode_t { StdOut, File };
+
+struct options {
+    std::string   output_file;
+    output_mode_t output_mode = output_mode_t::File;
+};
+
 namespace null {
 class step_event {
 public:
@@ -197,6 +205,8 @@ class profiler {
     handler _handler;
 
 public:
+    constexpr explicit profiler(const options & = {}) {}
+
     constexpr void
     reset() const {}
 
@@ -343,10 +353,6 @@ private:
     }
 };
 
-struct options {
-    std::string output_file;
-};
-
 template<typename Profiler, typename WriterType>
 class handler {
     using this_t = handler<Profiler, WriterType>;
@@ -360,10 +366,10 @@ public:
     this_t &
     operator=(const this_t &)
             = delete;
-    handler(this_t &&) noexcept = default;
+    handler(this_t &&) noexcept = delete;
     this_t &
     operator=(this_t &&) noexcept
-            = default;
+            = delete;
 
     auto
     reserve_event() noexcept {
@@ -414,23 +420,26 @@ class profiler {
     gr::circular_buffer<detail::TraceEvent> _buffer;
     using WriterType  = decltype(_buffer.new_writer());
     using HandlerType = handler<profiler, WriterType>;
-    std::shared_mutex                                    _handlers_lock;
-    std::vector<std::pair<std::thread::id, HandlerType>> _handlers;
-    decltype(_buffer.new_reader())                       _reader   = _buffer.new_reader();
-    std::atomic<bool>                                    _finished = false;
-    std::jthread                                         _eventHandler;
-    detail::time_point                                   _start = detail::clock::now();
+    std::shared_mutex                      _handlers_lock;
+    std::map<std::thread::id, HandlerType> _handlers;
+    std::atomic<bool>                      _finished = false;
+    decltype(_buffer.new_reader())         _reader   = _buffer.new_reader();
+    std::jthread                           _event_handler;
+    detail::time_point                     _start = detail::clock::now();
 
 public:
     explicit profiler(const options &options = {}) : _buffer(500000) {
-        _eventHandler = std::jthread([options, &reader = _reader, &finished = _finished]() {
-            auto file_name = options.output_file;
-            if (file_name.empty()) {
+        _event_handler = std::jthread([options, &reader = _reader, &finished = _finished]() {
+            auto          file_name = options.output_file;
+            std::ofstream out_file;
+            if (file_name.empty() && options.output_mode == output_mode_t::File) {
                 static std::atomic<int> counter = 0;
                 file_name                       = fmt::format("profile.{}.{}.trace", getpid(), counter++);
+                out_file                        = std::ofstream(file_name, std::ios::out | std::ios::binary);
             }
-            auto out_file = std::ofstream(file_name, std::ios::out | std::ios::binary);
-            int  pid      = getpid();
+
+            std::ostream &out_stream = options.output_mode == output_mode_t::File ? out_file : std::cout;
+            const int     pid        = getpid();
 
             // assign numerical values to threads as we see them
             std::unordered_map<std::thread::id, int> mapped_threads;
@@ -444,18 +453,18 @@ public:
                     auto event = reader.get(1);
                     auto it    = mapped_threads.find(event[0].thread_id);
                     if (it == mapped_threads.end()) {
-                        it = mapped_threads.insert({ event[0].thread_id, static_cast<int>(mapped_threads.size()) }).first;
+                        it = mapped_threads.emplace(event[0].thread_id, static_cast<int>(mapped_threads.size())).first;
                     }
                     if (!is_first) {
-                        fmt::print(out_file, ",\n{}", event[0].toJSON(pid, it->second));
+                        fmt::print(out_stream, ",\n{}", event[0].toJSON(pid, it->second));
                     } else {
-                        fmt::print(out_file, "{}", event[0].toJSON(pid, it->second));
+                        fmt::print(out_stream, "{}", event[0].toJSON(pid, it->second));
                     }
                     is_first    = false;
                     std::ignore = reader.consume(1);
                 }
             }
-            fmt::print(out_file, "\n]\n");
+            fmt::print(out_stream, "\n]\n");
         });
 
         reset();
@@ -478,15 +487,15 @@ public:
         const auto this_id = std::this_thread::get_id();
         {
             const std::shared_lock read_lock(_handlers_lock);
-            const auto             it = std::find_if(_handlers.begin(), _handlers.end(), [&this_id](const auto &v) { return v.first == this_id; });
+            const auto             it = _handlers.find(this_id);
             if (it != _handlers.end()) {
                 return it->second;
             }
         }
 
         const std::unique_lock write_lock(_handlers_lock);
-        _handlers.emplace_back(this_id, HandlerType{ *this, _buffer.new_writer() });
-        return _handlers.back().second;
+        auto [it, _] = _handlers.try_emplace(this_id, *this, _buffer.new_writer());
+        return it->second;
     }
 };
 
