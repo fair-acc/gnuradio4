@@ -9917,7 +9917,7 @@ ENABLE_REFLECTION(fair::graph::tag_t, index, map);
 namespace fair::graph {
 using meta::fixed_string;
 
-void
+inline void
 update_maps(const property_map &src, property_map &dest) {
     for (const auto &[key, value] : src) {
         if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
