@@ -421,7 +421,6 @@ public:
         return _job_lists;
     }
 };
-
 } // namespace fair::graph::scheduler
 
 #endif // GRAPH_PROTOTYPE_SCHEDULER_HPP

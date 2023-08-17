@@ -7,7 +7,6 @@
 
 #include <chrono>
 #include <fstream>
-#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -421,16 +420,16 @@ class profiler {
     gr::circular_buffer<detail::TraceEvent> _buffer;
     using WriterType  = decltype(_buffer.new_writer());
     using HandlerType = handler<profiler, WriterType>;
-    std::shared_mutex                      _handlers_lock;
+    std::mutex                             _handlers_lock;
     std::map<std::thread::id, HandlerType> _handlers;
     std::atomic<bool>                      _finished = false;
     decltype(_buffer.new_reader())         _reader   = _buffer.new_reader();
-    std::jthread                           _event_handler;
+    std::thread                            _event_handler;
     detail::time_point                     _start = detail::clock::now();
 
 public:
     explicit profiler(const options &options = {}) : _buffer(500000) {
-        _event_handler = std::jthread([options, &reader = _reader, &finished = _finished]() {
+        _event_handler = std::thread([options, &reader = _reader, &finished = _finished]() {
             auto          file_name = options.output_file;
             std::ofstream out_file;
             if (file_name.empty() && options.output_mode == output_mode_t::File) {
@@ -471,7 +470,10 @@ public:
         reset();
     }
 
-    ~profiler() { _finished = true; }
+    ~profiler() {
+        _finished = true;
+        _event_handler.join();
+    }
 
     detail::time_point
     start() const {
@@ -485,17 +487,14 @@ public:
 
     handler<profiler, WriterType> &
     for_this_thread() {
-        const auto this_id = std::this_thread::get_id();
-        {
-            const std::shared_lock read_lock(_handlers_lock);
-            const auto             it = _handlers.find(this_id);
-            if (it != _handlers.end()) {
-                return it->second;
-            }
+        const auto            this_id = std::this_thread::get_id();
+        const std::lock_guard lock{ _handlers_lock };
+        auto                  it = _handlers.find(this_id);
+        if (it == _handlers.end()) {
+            auto [new_it, _] = _handlers.try_emplace(this_id, *this, _buffer.new_writer());
+            it               = new_it;
         }
 
-        const std::unique_lock write_lock(_handlers_lock);
-        auto [it, _] = _handlers.try_emplace(this_id, *this, _buffer.new_writer());
         return it->second;
     }
 };
