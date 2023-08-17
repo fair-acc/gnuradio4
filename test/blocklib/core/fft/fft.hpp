@@ -27,9 +27,32 @@ struct fft : node<fft<T>> {
 public:
     static_assert(not LongDoubleType<T>, "long double is not supported");
 
+    struct fftw_base {
+    private:
+        static inline int        counter = 0;
+        static inline std::mutex mutex;
+
+    protected:
+        template<auto F>
+        static void
+        cleanup_impl() {
+            std::lock_guard lock(mutex);
+            if (--counter == 0) {
+                F();
+            }
+        }
+
+    public:
+        static void
+        ref() {
+            std::lock_guard lock(mutex);
+            counter++;
+        }
+    };
+
     // clang-format off
     template<typename FftwT>
-    struct fftw {
+    struct fftw : fftw_base {
         using plan_type     = fftwf_plan;
         using in_data_type  = std::conditional_t<ComplexType<FftwT>, fftwf_complex, float>;
         using out_data_type = fftwf_complex;
@@ -39,7 +62,7 @@ public:
         static void execute(const plan_type p) { fftwf_execute(p); }
         static void destroy_plan(plan_type p) { fftwf_destroy_plan(p); }
         static void free(void *p) { fftwf_free(p); }
-        static void cleanup() { fftwf_cleanup(); }
+        static void cleanup() { fftw_base::template cleanup_impl<fftwf_cleanup>(); }
         static void * malloc(std::size_t n) { return fftwf_malloc(n);}
         static plan_type plan(int p_n, in_data_type *p_in, out_data_type *p_out, int p_sign, unsigned int p_flags) {
             if constexpr (std::is_same_v<in_data_type, float>) {
@@ -53,7 +76,7 @@ public:
     };
 
     template<DoubleType FftwDoubleT>
-    struct fftw<FftwDoubleT> {
+    struct fftw<FftwDoubleT> : fftw_base {
         using plan_type     = fftw_plan;
         using in_data_type  = std::conditional_t<ComplexType<FftwDoubleT>, fftw_complex, double>;
         using out_data_type = fftw_complex;
@@ -63,7 +86,7 @@ public:
         static void execute(const plan_type p) { fftw_execute(p); }
         static void destroy_plan(plan_type p) { fftw_destroy_plan(p); }
         static void free(void *p) { fftw_free(p); }
-        static void cleanup() { fftw_cleanup(); }
+        static void cleanup() { fftw_base::template cleanup_impl<fftw_cleanup>(); }
         static void * malloc(std::size_t n) { return fftw_malloc(n);}
         static plan_type plan(int p_n, in_data_type *p_in, out_data_type *p_out, int p_sign, unsigned int p_flags) {
             if constexpr (std::is_same_v<in_data_type, double>) {
@@ -208,7 +231,9 @@ public:
 
     void
     init_all() {
+        fftw<T>::ref();
         clear_fftw();
+        fftw<T>::ref();
         fftw_in = static_cast<in_data_type *>(fftw<T>::malloc(sizeof(in_data_type) * fft_size));
         if constexpr (ComplexType<T>) {
             fftw_out = static_cast<out_data_type *>(fftw<T>::malloc(sizeof(out_data_type) * fft_size));
