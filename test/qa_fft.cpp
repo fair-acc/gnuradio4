@@ -8,10 +8,32 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 
 #include "blocklib/core/fft/fft.hpp"
 #include <fmt/format.h>
+#include <graph.hpp>
 #include <node.hpp>
 #include <numbers>
+#include <scheduler.hpp>
 
 namespace fg = fair::graph;
+
+template<typename T>
+struct CountSource : public fg::node<CountSource<T>> {
+    fg::OUT<T> out{};
+    int        count{ 0 };
+    int        n_samples{ 1024 };
+
+    constexpr std::make_signed_t<std::size_t>
+    available_samples(const CountSource & /*d*/) noexcept {
+        const auto ret = n_samples - count;
+        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
+    }
+
+    constexpr T
+    process_one() {
+        return static_cast<T>(count++);
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, n_samples);
 
 template<typename T>
 std::vector<T>
@@ -188,6 +210,33 @@ const boost::ut::suite _fft_tests = [] {
         test_fftw_types<double, double, fftw_complex, fftw_plan>();
         test_fftw_types<int, float, fftwf_complex, fftwf_plan>();
         test_fftw_types<unsigned int, float, fftwf_complex, fftwf_plan>();
+    };
+
+    "FFT flow graph example"_test = [] {
+        // This test checks how fftw works if one creates and destroys several fft blocks in different graph flows
+        using namespace boost::ut;
+        using scheduler       = fair::graph::scheduler::simple<>;
+        auto      thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
+
+        fg::graph flow1;
+        auto     &source1 = flow1.make_node<CountSource<double>>();
+        auto     &fft1    = flow1.make_node<fft<double>>({ { "fft_size", 16 } });
+        std::ignore       = flow1.connect<"out">(source1).to<"in">(fft1);
+        auto sched1       = scheduler(std::move(flow1), thread_pool);
+
+        // run 2 times to check potential memory problems
+        for (int i = 0; i < 2; i++) {
+            fg::graph flow2;
+            auto     &source2 = flow2.make_node<CountSource<double>>();
+            auto     &fft2    = flow2.make_node<fft<double>>({ { "fft_size", 16 } });
+            std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);
+            auto sched2       = scheduler(std::move(flow2), thread_pool);
+            sched2.run_and_wait();
+            expect(approx(source2.count, source2.n_samples, 1e-4));
+        }
+
+        sched1.run_and_wait();
+        expect(approx(source1.count, source1.n_samples, 1e-4));
     };
 };
 
