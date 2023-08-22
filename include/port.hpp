@@ -202,7 +202,12 @@ public:
         return PortName;
     }
 
+    // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
+#if defined(__EMSCRIPTEN__)
+    [[nodiscard]] supported_type
+#else
     [[nodiscard]] constexpr supported_type
+#endif
     pmt_type() const noexcept {
         return T();
     }
@@ -484,8 +489,13 @@ private:
         }
 
         ~wrapper() override = default;
-
+        
+        // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
+#if defined(__EMSCRIPTEN__)
+        [[nodiscard]] supported_type
+#else
         [[nodiscard]] constexpr supported_type
+#endif
         pmt_type() const noexcept override {
             return _value.pmt_type();
         }
