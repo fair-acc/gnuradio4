@@ -12,8 +12,7 @@ install(
 if (NOT EMSCRIPTEN)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
     add_library(graph-prototype-plugin SHARED plugin.cpp)
-    target_include_directories(graph-prototype-plugin PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include/>)
-    target_include_directories(graph-prototype-plugin PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_include_directories(graph-prototype-plugin PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR};${CMAKE_CURRENT_BINARY_DIR}> $<INSTALL_INTERFACE:include/>)
     target_link_libraries(graph-prototype-plugin PUBLIC graph-prototype graph-prototype-options pmtv fmt)
 
     include(GenerateExportHeader)
