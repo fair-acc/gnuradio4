@@ -10,7 +10,6 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #include <fmt/format.h>
 #include <graph.hpp>
 #include <node.hpp>
-#include <numbers>
 #include <scheduler.hpp>
 
 namespace fg = fair::graph;
@@ -116,8 +115,8 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<fair::
     auto &int_dec_block       = flow.make_node<IntDecBlock<int>>();
     int_dec_block.numerator   = data.numerator;
     int_dec_block.denominator = data.denominator;
-    if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<int>(data.out_port_max);
-    if (data.out_port_min >= 0) int_dec_block.out.min_samples = static_cast<int>(data.out_port_min);
+    if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
+    if (data.out_port_min >= 0) int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
 
     std::ignore = flow.connect<"out">(source).to<"in">(int_dec_block);
     auto sched  = scheduler(std::move(flow), thread_pool);
@@ -144,8 +143,8 @@ stride_test(const StrideTestData &data, std::shared_ptr<fair::thread_pool::Basic
     int_dec_block.numerator       = data.numerator;
     int_dec_block.denominator     = data.denominator;
     int_dec_block.stride          = data.stride;
-    if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<int>(data.in_port_max);
-    if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<int>(data.in_port_min);
+    if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
+    if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
 
     std::ignore = flow.connect<"out">(source).to<"in">(int_dec_block);
     auto sched  = scheduler(std::move(flow), thread_pool);
@@ -167,53 +166,47 @@ const boost::ut::suite _fft_tests = [] {
 
     auto thread_pool                      = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
 
+    // clang-format off
     "Interpolation/Decimation tests"_test = [&thread_pool] {
-        interpolation_decimation_test({ .n_samples{ 1024 }, .numerator{ 1 }, .denominator{ 1 }, .exp_in{ 1024 }, .exp_out{ 1024 }, .exp_counter{ 1 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 1024 }, .numerator{ 1 }, .denominator{ 2 }, .exp_in{ 1024 }, .exp_out{ 512 }, .exp_counter{ 1 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 1024 }, .numerator{ 2 }, .denominator{ 1 }, .exp_in{ 1024 }, .exp_out{ 2048 }, .exp_counter{ 1 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 1000 }, .numerator{ 5 }, .denominator{ 6 }, .exp_in{ 996 }, .exp_out{ 830 }, .exp_counter{ 1 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 549 }, .numerator{ 1 }, .denominator{ 50 }, .exp_in{ 500 }, .exp_out{ 10 }, .exp_counter{ 1 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 3 }, .denominator{ 7 }, .exp_in{ 98 }, .exp_out{ 42 }, .exp_counter{ 1 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 100 }, .denominator{ 100 }, .exp_in{ 100 }, .exp_out{ 100 }, .exp_counter{ 1 } }, thread_pool);
+        interpolation_decimation_test({ .n_samples = 1024, .numerator =   1, .denominator =   1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples = 1024, .numerator =   1, .denominator =   2, .exp_in = 1024, .exp_out =  512, .exp_counter = 1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples = 1024, .numerator =   2, .denominator =   1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples = 1000, .numerator =   5, .denominator =   6, .exp_in =  996, .exp_out =  830, .exp_counter = 1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  549, .numerator =   1, .denominator =  50, .exp_in =  500, .exp_out =   10, .exp_counter = 1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator =   3, .denominator =   7, .exp_in =   98, .exp_out =   42, .exp_counter = 1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator = 100, .denominator = 100, .exp_in =  100, .exp_out =  100, .exp_counter = 1 }, thread_pool);
 
-        interpolation_decimation_test({ .n_samples{ 1000 }, .numerator{ 10 }, .denominator{ 1100 }, .exp_in{ 0 }, .exp_out{ 0 }, .exp_counter{ 0 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 1000 }, .numerator{ 1 }, .denominator{ 1001 }, .exp_in{ 0 }, .exp_out{ 0 }, .exp_counter{ 0 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 100000 }, .denominator{ 1 }, .exp_in{ 0 }, .exp_out{ 0 }, .exp_counter{ 0 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 101 }, .denominator{ 101 }, .exp_in{ 0 }, .exp_out{ 0 }, .exp_counter{ 0 } }, thread_pool);
+        interpolation_decimation_test({ .n_samples = 1000, .numerator =     10, .denominator = 1100, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
+        interpolation_decimation_test({ .n_samples = 1000, .numerator =      1, .denominator = 1001, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator = 100000, .denominator =    1, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator =    101, .denominator =  101, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
 
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 5 }, .denominator{ 11 }, .out_port_min{ 10 }, .out_port_max{ 41 }, .exp_in{ 88 }, .exp_out{ 40 }, .exp_counter{ 1 } },
-                                      thread_pool);
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 7 }, .denominator{ 3 }, .out_port_min{ 10 }, .out_port_max{ 10 }, .exp_in{ 0 }, .exp_out{ 0 }, .exp_counter{ 0 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 80 }, .numerator{ 2 }, .denominator{ 4 }, .out_port_min{ 20 }, .out_port_max{ 20 }, .exp_in{ 40 }, .exp_out{ 20 }, .exp_counter{ 2 } }, thread_pool);
-        interpolation_decimation_test({ .n_samples{ 100 }, .numerator{ 7 }, .denominator{ 3 }, .out_port_min{ 10 }, .out_port_max{ 20 }, .exp_in{ 6 }, .exp_out{ 14 }, .exp_counter{ 16 } },
-                                      thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator = 5, .denominator = 11, .out_port_min = 10 , .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter =  1 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator = 7, .denominator =  3, .out_port_min = 10 , .out_port_max = 10, .exp_in =  0, .exp_out =  0, .exp_counter =  0 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =   80, .numerator = 2, .denominator =  4, .out_port_min = 20 , .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter =  2 }, thread_pool);
+        interpolation_decimation_test({ .n_samples =  100, .numerator = 7, .denominator =  3, .out_port_min = 10 , .out_port_max = 20, .exp_in =  6, .exp_out = 14, .exp_counter = 16 }, thread_pool);
     };
 
     "Stride tests"_test = [&thread_pool] {
-        stride_test({ .n_samples{ 1024 }, .stride{ 0 }, .in_port_max{ 1024 }, .exp_in{ 1024 }, .exp_out{ 1024 }, .exp_counter{ 1 }, .exp_total_in{ 1024 }, .exp_total_out{ 1024 } }, thread_pool);
-        stride_test({ .n_samples{ 1000 }, .stride{ 100 }, .in_port_max{ 50 }, .exp_in{ 50 }, .exp_out{ 50 }, .exp_counter{ 10 }, .exp_total_in{ 500 }, .exp_total_out{ 500 } }, thread_pool);
-        stride_test({ .n_samples{ 1000 }, .stride{ 133 }, .in_port_max{ 50 }, .exp_in{ 50 }, .exp_out{ 50 }, .exp_counter{ 8 }, .exp_total_in{ 400 }, .exp_total_out{ 400 } }, thread_pool);
-        stride_test({ .n_samples{ 1000 }, .stride{ 50 }, .in_port_max{ 100 }, .exp_in{ 50 }, .exp_out{ 50 }, .exp_counter{ 20 }, .exp_total_in{ 1950 }, .exp_total_out{ 1950 } }, thread_pool);
-        stride_test({ .n_samples{ 1000 }, .stride{ 33 }, .in_port_max{ 100 }, .exp_in{ 10 }, .exp_out{ 10 }, .exp_counter{ 31 }, .exp_total_in{ 2929 }, .exp_total_out{ 2929 } }, thread_pool);
-        // clang-format off
-        stride_test({ .n_samples{ 1000 }, .numerator{ 2 }, .denominator{ 4 }, .stride{ 50 }, .in_port_max{ 100 }, .exp_in{ 48 }, .exp_out{ 24 }, .exp_counter{ 20 }, .exp_total_in{ 1948 }, .exp_total_out{ 974 } },
-                    thread_pool);
-        stride_test({ .n_samples{ 1000 }, .numerator{ 2 }, .denominator{ 4 }, .stride{ 50 }, .in_port_max{ 50 }, .exp_in{ 48 }, .exp_out{ 24 }, .exp_counter{ 20 }, .exp_total_in{ 960 }, .exp_total_out{ 480 } },
-                    thread_pool);
-        // clang-format on
+        stride_test( {.n_samples = 1024 , .stride =   0 , .in_port_max = 1024 , .exp_in = 1024 , .exp_out = 1024 , .exp_counter =  1 , .exp_total_in = 1024 , .exp_total_out = 1024 }, thread_pool);
+        stride_test( {.n_samples = 1000 , .stride = 100 , .in_port_max =   50 , .exp_in =   50 , .exp_out =   50 , .exp_counter = 10 , .exp_total_in =  500 , .exp_total_out =  500 }, thread_pool);
+        stride_test( {.n_samples = 1000 , .stride = 133 , .in_port_max =   50 , .exp_in =   50 , .exp_out =   50 , .exp_counter =  8 , .exp_total_in =  400 , .exp_total_out =  400 }, thread_pool);
+        stride_test( {.n_samples = 1000 , .stride =  50 , .in_port_max =  100 , .exp_in =   50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 }, thread_pool);
+        stride_test( {.n_samples = 1000 , .stride =  33 , .in_port_max =  100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 }, thread_pool);
+        stride_test( {.n_samples = 1000 , .numerator = 2 , .denominator = 4 , .stride = 50 , .in_port_max = 100 , .exp_in = 48 , .exp_out = 24 , .exp_counter = 20 , .exp_total_in = 1948 , .exp_total_out = 974 }, thread_pool);
+        stride_test( {.n_samples = 1000 , .numerator = 2 , .denominator = 4 , .stride = 50 , .in_port_max =  50 , .exp_in = 48 , .exp_out = 24 , .exp_counter = 20 , .exp_total_in =  960 , .exp_total_out = 480 }, thread_pool);
 
-        std::vector<int> exp_v1 = { 0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14 };
-        stride_test({ .n_samples{ 15 }, .stride{ 3 }, .in_port_max{ 5 }, .exp_in{ 3 }, .exp_out{ 3 }, .exp_counter{ 5 }, .exp_total_in{ 23 }, .exp_total_out{ 23 }, .exp_in_vector{ exp_v1 } },
-                    thread_pool);
+        std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
+        stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 }, thread_pool);
 
-        std::vector<int> exp_v2 = { 0, 1, 2, 5, 6, 7, 10, 11, 12 };
-        stride_test({ .n_samples{ 15 }, .stride{ 5 }, .in_port_max{ 3 }, .exp_in{ 3 }, .exp_out{ 3 }, .exp_counter{ 3 }, .exp_total_in{ 9 }, .exp_total_out{ 9 }, .exp_in_vector{ exp_v2 } },
-                    thread_pool);
+        std::vector<int> exp_v2 = {0, 1, 2, 5, 6, 7, 10, 11, 12};
+        stride_test( {.n_samples = 15, .stride = 5, .in_port_max = 3, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2 }, thread_pool);
 
         // assuming buffer size is approx 65k
-        stride_test({ .n_samples{ 1000000 }, .stride{ 250000 }, .in_port_max{ 100 }, .exp_in{ 100 }, .exp_out{ 100 }, .exp_counter{ 4 }, .exp_total_in{ 400 }, .exp_total_out{ 400 } }, thread_pool);
-        stride_test({ .n_samples{ 1000000 }, .stride{ 249900 }, .in_port_max{ 100 }, .exp_in{ 100 }, .exp_out{ 100 }, .exp_counter{ 5 }, .exp_total_in{ 500 }, .exp_total_out{ 500 } }, thread_pool);
+        stride_test( {.n_samples = 1000000, .stride = 250000, .in_port_max = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400 }, thread_pool);
+        stride_test( {.n_samples = 1000000, .stride = 249900, .in_port_max = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500 }, thread_pool);
     };
+    // clang-format on
 };
 
 int
