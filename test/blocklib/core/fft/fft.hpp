@@ -22,6 +22,8 @@ concept LongDoubleType = std::is_same_v<T, std::complex<long double>> || std::is
 template<typename T>
 concept FFTSupportedTypes = ComplexType<T> || std::integral<T> || std::floating_point<T>;
 
+inline static std::mutex fftw_plan_mutex;
+
 template<FFTSupportedTypes T>
 struct fft : node<fft<T>> {
 public:
@@ -219,14 +221,18 @@ public:
             magnitude_spectrum.resize(fft_size / 2);
             phase_spectrum.resize(fft_size / 2);
         }
-        import_wisdom();
-        fftw_p = fftw<T>::plan(static_cast<int>(fft_size), fftw_in, fftw_out, sign, flags);
-        export_wisdom();
+        {
+            std::lock_guard lg{ fftw_plan_mutex };
+            import_wisdom();
+            fftw_p = fftw<T>::plan(static_cast<int>(fft_size), fftw_in, fftw_out, sign, flags);
+            export_wisdom();
+        }
     }
 
     void
     clear_fftw() {
         if (fftw_p != nullptr) {
+            std::lock_guard lg{ fftw_plan_mutex };
             fftw<T>::destroy_plan(fftw_p);
             fftw_p = nullptr;
         }
@@ -238,18 +244,20 @@ public:
             fftw<T>::free(fftw_out);
             fftw_out = nullptr;
         }
-        fftw<T>::cleanup();
+        // fftw<T>::cleanup(); // No need for fftw_cleanup -> After calling it, all existing plans become undefined
         magnitude_spectrum.clear();
         phase_spectrum.clear();
     }
 
     void
     import_wisdom() {
+        // TODO: lock file while importing wisdom?
         fftw<T>::import_wisdom_from_filename(wisdom_path);
     }
 
     void
     export_wisdom() {
+        // TODO: lock file while exporting wisdom?
         fftw<T>::export_wisdom_to_filename(wisdom_path);
     }
 };
