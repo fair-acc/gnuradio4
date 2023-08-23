@@ -47,9 +47,14 @@ if (NOT EMSCRIPTEN)
     add_subdirectory(plugins)
 
     if (NOT (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"))
-        # Clang has issues with ut, app_plugins_test (the target below) tests
-        # the plugin system without ut
-        add_ut_test(qa_plugins_test)
+        # add add target manually without asan TODO: reenable once it builds on the CI again
+        # add_ut_test(qa_plugins_test)
+        add_executable(qa_plugins_test qa_plugins_test.cpp)
+        target_compile_options(qa_plugins_test PRIVATE -Wall)
+        target_link_options(qa_plugins_test PRIVATE -Wall)
+        target_include_directories(qa_plugins_test PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
+        target_link_libraries(qa_plugins_test PRIVATE graph-prototype-options graph-prototype fmt refl-cpp ut fftw)
+        add_test(NAME qa_plugins_test COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_plugins_test)
         target_link_libraries(qa_plugins_test PRIVATE graph-prototype-plugin)
         add_dependencies(qa_plugins_test good_math_plugin good_base_plugin bad_plugin)
     endif ()
