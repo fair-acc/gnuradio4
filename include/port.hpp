@@ -1,13 +1,14 @@
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
-#include <complex>
-#include <span>
-#include <variant>
-
 #include "circular_buffer.hpp"
 #include "tag.hpp"
 #include "utils.hpp"
+#include <complex>
+#include <dataset.hpp>
+#include <node.hpp>
+#include <span>
+#include <variant>
 
 namespace fair::graph {
 
@@ -15,7 +16,8 @@ using fair::meta::fixed_string;
 using namespace fair::literals;
 
 // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
-using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> /*, ...*/>;
+// Only DataSet<double> and DataSet<float> are added => consider to support more Dataset<T>
+using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, DataSet<double>, DataSet<float> /*, ...*/>;
 
 enum class port_direction_t { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
 enum class connection_result_t { SUCCESS, FAILED };
@@ -200,7 +202,12 @@ public:
         return PortName;
     }
 
+    // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
+#if defined(__EMSCRIPTEN__)
+    [[nodiscard]] supported_type
+#else
     [[nodiscard]] constexpr supported_type
+#endif
     pmt_type() const noexcept {
         return T();
     }
@@ -482,8 +489,13 @@ private:
         }
 
         ~wrapper() override = default;
-
+        
+        // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
+#if defined(__EMSCRIPTEN__)
+        [[nodiscard]] supported_type
+#else
         [[nodiscard]] constexpr supported_type
+#endif
         pmt_type() const noexcept override {
             return _value.pmt_type();
         }

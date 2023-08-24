@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstdint>
 #include <map>
-#include <node.hpp>
 #include <pmtv/pmt.hpp>
 #include <reflection.hpp>
 #include <tag.hpp>
@@ -22,27 +21,27 @@ struct layout_left {};
  */
 template<typename T>
 concept packet = requires(T t, const std::size_t n_items) {
-                     typename T::value_type;
-                     typename T::pmt_map;
-                     std::is_same_v<decltype(t.timestamp), int64_t>;
-                     std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-                     std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-                 };
+    typename T::value_type;
+    typename T::pmt_map;
+    std::is_same_v<decltype(t.timestamp), int64_t>;
+    std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+};
 
 /**
  * @brief A concept that describes a tensor, which is a subset of the DataSet struct.
  */
 template<typename T>
 concept tensor = packet<T> && requires(T t, const std::size_t n_items) {
-                                  typename T::value_type;
-                                  typename T::pmt_map;
-                                  typename T::tensor_layout_type;
-                                  std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
-                                  std::is_same_v<decltype(t.layout), std::vector<typename T::tensor_layout_type>>;
-                                  std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-                                  std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-                                  std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-                              };
+    typename T::value_type;
+    typename T::pmt_map;
+    typename T::tensor_layout_type;
+    std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
+    std::is_same_v<decltype(t.layout), std::vector<typename T::tensor_layout_type>>;
+    std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
+    std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+};
 
 /**
  * @brief: a dataset consists of signal data, metadata, and associated axis information.
@@ -54,27 +53,27 @@ concept tensor = packet<T> && requires(T t, const std::size_t n_items) {
  */
 template<typename T>
 concept dataset = tensor<T> && requires(T t, const std::size_t n_items) {
-                                   typename T::value_type;
-                                   typename T::pmt_map;
-                                   typename T::tensor_layout_type;
-                                   std::is_same_v<decltype(t.timestamp), int64_t>;
+    typename T::value_type;
+    typename T::pmt_map;
+    typename T::tensor_layout_type;
+    std::is_same_v<decltype(t.timestamp), int64_t>;
 
-                                   // axis layout:
-                                   std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
-                                   std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
-                                   std::is_same_v<decltype(t.axis_values), std::vector<typename T::value_type>>;
+    // axis layout:
+    std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
+    std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
+    std::is_same_v<decltype(t.axis_values), std::vector<typename T::value_type>>;
 
-                                   // signal data storage
-                                   std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
-                                   std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
-                                   std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-                                   std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-                                   std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
+    // signal data storage
+    std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
+    std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
+    std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
+    std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
 
-                                   // meta data
-                                   std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-                                   std::is_same_v<decltype(t.timing_events), std::vector<std::vector<tag_t>>>;
-                               };
+    // meta data
+    std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    std::is_same_v<decltype(t.timing_events), std::vector<std::vector<tag_t>>>;
+};
 
 template<typename T>
 struct DataSet {
@@ -119,8 +118,8 @@ struct Tensor {
     using pmt_map                       = std::map<std::string, pmtv::pmt>;
     std::int64_t              timestamp = 0; // UTC timestamp [ns]
 
-    std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout;  // row-major, column-major, “special”
+    std::vector<std::int32_t> extents;       // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout;        // row-major, column-major, “special”
 
     std::vector<T>            signal_values; // size = \PI_i extents[i]
     std::vector<T>            signal_errors; // size = \PI_i extents[i] or '0' if not applicable
@@ -147,7 +146,7 @@ static_assert(packet<Packet<std::byte>>, "Packet<std::byte> concept conformity")
 static_assert(packet<Packet<float>>, "Packet<std::byte> concept conformity");
 static_assert(packet<Packet<double>>, "Packet<std::byte> concept conformity");
 
-} // namespace graph::dataset
+} // namespace fair::graph
 
 ENABLE_REFLECTION(fair::graph::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
                   meta_information, timing_events)
