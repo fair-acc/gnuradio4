@@ -445,7 +445,7 @@ public:
             std::unordered_map<std::thread::id, int> mapped_threads;
             bool                                     seen_finished = false;
 
-            fmt::print(out_file, "[\n");
+            fmt::print(out_stream, "[\n");
             bool is_first = true;
             while (!seen_finished) {
                 seen_finished = finished;
