@@ -13647,11 +13647,12 @@ protected:
             }
 
             if constexpr (node_template_parameters::template contains<PerformDecimationInterpolation>) {
-                if (numerator != 1. || denominator != 1.) {
+                if (numerator != 1_UZ || denominator != 1_UZ) {
                     // TODO: this ill-defined checks can be done only once after parameters were changed
                     const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
-                    bool         is_ill_defined = (denominator > ports_status.in_max_samples) || (ports_status.in_min_samples * ratio > ports_status.out_max_samples)
-                                       || (ports_status.in_max_samples * ratio < ports_status.out_min_samples);
+                    bool         is_ill_defined = (denominator > ports_status.in_max_samples)
+                            || (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples))
+                            || (static_cast<double>(ports_status.in_max_samples) * ratio < static_cast<double>(ports_status.out_min_samples));
                     assert(!is_ill_defined);
                     if (is_ill_defined) {
                         return { requested_work, 0_UZ, work_return_status_t::ERROR };
@@ -13664,10 +13665,10 @@ protected:
 
                     std::size_t       in_min_samples = static_cast<std::size_t>(static_cast<double>(out_min_limit) / ratio);
                     if (in_min_samples % denominator != 0) in_min_samples += denominator;
-                    std::size_t       in_min_wo_reminder = static_cast<std::size_t>(in_min_samples / denominator) * denominator;
+                    std::size_t       in_min_wo_reminder = (in_min_samples / denominator) * denominator;
 
                     const std::size_t in_max_samples     = static_cast<std::size_t>(static_cast<double>(out_max_limit) / ratio);
-                    std::size_t       in_max_wo_reminder = static_cast<std::size_t>(in_max_samples / denominator) * denominator;
+                    std::size_t       in_max_wo_reminder = (in_max_samples / denominator) * denominator;
 
                     if (ports_status.in_samples < in_min_wo_reminder) return { requested_work, 0_UZ, work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
                     ports_status.in_samples  = std::clamp(ports_status.in_samples, in_min_wo_reminder, in_max_wo_reminder);
@@ -13748,7 +13749,7 @@ protected:
 
         std::size_t n_samples_to_consume = ports_status.in_samples; // default stride == 0
         if constexpr (node_template_parameters::template contains<PerformStride>) {
-            if (stride != 0) {
+            if (stride != 0_UZ) {
                 const bool first_time_stride = stride_counter == 0;
                 if (first_time_stride) {
                     // sample processing are done as usual, ports_status.in_samples samples will be processed

@@ -104,9 +104,9 @@ ClockSource Documentation -- add here
             return work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
-        const auto          remaining_samples  = static_cast<std::uint32_t>(n_samples_max - n_samples_produced);
+        const std::uint32_t remaining_samples  = n_samples_max - n_samples_produced;
         const std::uint32_t limit              = std::min(writableSamples, remaining_samples);
-        const std::uint32_t n_available        = std::min(limit, static_cast<std::uint32_t>(chunk_size.value));
+        const std::uint32_t n_available        = std::min(limit, chunk_size.value);
 
         std::uint32_t       samples_to_produce = n_available;
         while (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced + n_available)) {
@@ -114,11 +114,11 @@ ClockSource Documentation -- add here
             tag_t &out_tag     = this->output_tags()[0];
             out_tag            = tags[next_tag];
             out_tag.index      = tags[next_tag].index - static_cast<std::make_signed_t<std::size_t>>(n_samples_produced);
-            samples_to_produce = static_cast<std::uint32_t>(static_cast<std::uint32_t>(tags[next_tag].index) - n_samples_produced);
+            samples_to_produce = static_cast<std::uint32_t>(tags[next_tag].index) - n_samples_produced;
             this->forward_tags();
             next_tag++;
         }
-        samples_to_produce = std::min(samples_to_produce, static_cast<std::uint32_t>(n_samples_max.value));
+        samples_to_produce = std::min(samples_to_produce, n_samples_max.value);
 
         output.publish(samples_to_produce);
         n_samples_produced += samples_to_produce;

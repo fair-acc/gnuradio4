@@ -90,7 +90,7 @@ const boost::ut::suite _fft_tests = [] {
             const auto peak_frequency{ static_cast<double>(peak_index) * t.sample_rate / static_cast<double>(t.N) };
 
             const auto expected_amplitude = t.output_in_dB ? 20. * log10(std::abs(t.amplitude)) : t.amplitude;
-            expect(approx(peak_amplitude, expected_amplitude, tolerance)) << fmt::format("<{}> equal amplitude", type_name<T>());
+            expect(approx(static_cast<double>(peak_amplitude), expected_amplitude, tolerance)) << fmt::format("<{}> equal amplitude", type_name<T>());
             expect(approx(peak_frequency, t.frequency, tolerance)) << fmt::format("<{}> equal frequency", type_name<T>());
         }
     } | types_to_test;
@@ -105,7 +105,7 @@ const boost::ut::suite _fft_tests = [] {
         std::vector<T> signal(N);
 
         static_assert(N == 16, "expected values are calculated for N == 16");
-        int    expected_peak_index{ 0 };
+        std::size_t expected_peak_index{ 0 };
         T      expected_fft0{ 0., 0. };
         double expected_peak_amplitude{ 0. };
         for (std::size_t iT = 0; iT < 5; iT++) {
@@ -141,9 +141,9 @@ const boost::ut::suite _fft_tests = [] {
             const auto peak_amplitude{ fft1.magnitude_spectrum[peak_index] };
 
             expect(eq(peak_index, expected_peak_index)) << fmt::format("<{}> equal peak index", type_name<T>());
-            expect(approx(peak_amplitude, expected_peak_amplitude, tolerance)) << fmt::format("<{}> equal amplitude", type_name<T>());
-            expect(approx(fft1.fftw_out[0][0], expected_fft0.real(), tolerance)) << fmt::format("<{}> equal fft[0].real()", type_name<T>());
-            expect(approx(fft1.fftw_out[0][1], expected_fft0.imag(), tolerance)) << fmt::format("<{}> equal fft[0].imag()", type_name<T>());
+            expect(approx(static_cast<double>(peak_amplitude), expected_peak_amplitude, tolerance)) << fmt::format("<{}> equal amplitude", type_name<T>());
+            expect(approx(static_cast<double>(fft1.fftw_out[0][0]), static_cast<double>(expected_fft0.real()), tolerance)) << fmt::format("<{}> equal fft[0].real()", type_name<T>());
+            expect(approx(static_cast<double>(fft1.fftw_out[0][1]), static_cast<double>(expected_fft0.imag()), tolerance)) << fmt::format("<{}> equal fft[0].imag()", type_name<T>());
         }
     } | complex_types_to_test;
 
