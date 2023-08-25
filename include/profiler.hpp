@@ -86,7 +86,7 @@ struct TraceEvent {
             return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat,
                                format_args(args));
         default: // TODO
-            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat,
+            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat,
                                format_args(args));
         }
 
