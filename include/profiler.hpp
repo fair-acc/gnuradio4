@@ -80,7 +80,7 @@ struct TraceEvent {
         case Instant:
             return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
         case Complete:
-            return fmt::format(R"({{"name": "{}", "ph": "C", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": {}}})", name, ts.count(), pid, tid, dur.count(), cat, format_args(args));
+            return fmt::format(R"({{"name": "{}", "ph": "X", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": {}}})", name, ts.count(), pid, tid, dur.count(), cat, format_args(args));
         case AsyncStart:
         case AsyncStep:
         case AsyncEnd:
