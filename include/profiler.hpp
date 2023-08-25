@@ -129,7 +129,6 @@ concept StepEvent = requires(T e) {
 
 template<typename T>
 concept ProfilerHandler = requires(T h, std::string_view name, std::string_view categories, std::initializer_list<arg_value> args) {
-    { h.start_duration_event(name, categories, args) } -> SimpleEvent;
     { h.start_complete_event(name, categories, args) } -> SimpleEvent;
     { h.start_async_event(name, categories, args) } -> StepEvent;
     { h.instant_event(name, categories, args) } -> std::same_as<void>;
@@ -182,14 +181,6 @@ public:
     }
 
     [[nodiscard]] constexpr simple_event
-    start_duration_event(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) const noexcept {
-        std::ignore = name;
-        std::ignore = categories;
-        std::ignore = args;
-        return simple_event{};
-    }
-
-    [[nodiscard]] constexpr simple_event
     start_complete_event(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) const noexcept {
         std::ignore = name;
         std::ignore = categories;
@@ -222,49 +213,6 @@ public:
 };
 
 } // namespace null
-
-template<typename Handler>
-class duration_event {
-    Handler               &_handler;
-    std::string            _name;
-    std::string            _categories;
-    std::vector<arg_value> _args;
-    bool                   _finished = false;
-    detail::time_point     _start    = detail::clock::now();
-
-public:
-    explicit duration_event(Handler &handler, std::string_view name, std::string_view categories, std::initializer_list<arg_value> args)
-        : _handler(handler), _name{ name }, _categories{ categories }, _args{ args } {
-        auto r    = _handler.reserve_event();
-        r[0].name = _name;
-        r[0].type = detail::EventType::DurationBegin;
-        r[0].cat  = _categories;
-        r[0].args = _args;
-        r.publish(1);
-    }
-
-    ~duration_event() { finish(); }
-
-    duration_event(const duration_event &) = delete;
-    duration_event &
-    operator=(const duration_event &)
-            = delete;
-    duration_event(duration_event &&) noexcept = default;
-    duration_event &
-    operator=(duration_event &&) noexcept
-            = default;
-
-    void
-    finish() noexcept {
-        if (_finished) {
-            return;
-        }
-        auto r    = _handler.reserve_event();
-        r[0].type = detail::EventType::DurationEnd;
-        r.publish(1);
-        _finished = true;
-    }
-};
 
 template<typename Handler>
 class complete_event {
@@ -403,11 +351,6 @@ public:
         r[0].cat  = std::string{ categories };
         r[0].args = args;
         r.publish(1);
-    }
-
-    [[nodiscard]] duration_event<this_t>
-    start_duration_event(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
-        return duration_event<this_t>{ *this, name, categories, args };
     }
 
     [[nodiscard]] complete_event<this_t>
