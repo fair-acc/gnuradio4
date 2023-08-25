@@ -67,6 +67,7 @@ struct TraceEvent {
     std::string               id;   // ID for matching async or flow events.
     std::string               cat;  // Event categories.
     std::vector<arg_value>    args; // Event arguments.
+    char filler[104]; // fills up to power of 2 size, see static_assert below
 
     // Function to format a TraceEvent into JSON format.
     std::string
@@ -109,6 +110,10 @@ struct TraceEvent {
         throw std::logic_error("unexpected assignment");
     }
 };
+
+// size of TraceEvent must be power of 2, otherwise circular_buffer doesn't work correctly
+static_assert(std::has_single_bit(sizeof(TraceEvent)));
+
 } // namespace detail
 
 template<typename T>
