@@ -247,6 +247,7 @@ public:
         auto       r       = _handler.reserve_event();
         r[0].name          = _name;
         r[0].type          = detail::EventType::Complete;
+        r[0].ts            = std::chrono::duration_cast<std::chrono::microseconds>(_start - _handler.profiler().start());
         r[0].dur           = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
         r[0].cat           = _categories;
         r[0].args          = _args;
@@ -323,6 +324,10 @@ public:
     this_t &
     operator=(this_t &&) noexcept
             = delete;
+
+    const Profiler& profiler() const {
+        return _profiler;
+    }
 
     auto
     reserve_event() noexcept {
