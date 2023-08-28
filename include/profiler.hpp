@@ -58,7 +58,7 @@ format_args(const std::vector<arg_value> &args) {
     return r;
 }
 
-struct TraceEvent {
+struct alignas(256) TraceEvent { // fills up to power of 2 size, see static_assert below. unaligned size is 152
     std::thread::id           thread_id;
     std::string               name; // Event name.
     EventType                 type; // Event type.
@@ -67,7 +67,6 @@ struct TraceEvent {
     std::string               id;   // ID for matching async or flow events.
     std::string               cat;  // Event categories.
     std::vector<arg_value>    args; // Event arguments.
-    char filler[104]; // fills up to power of 2 size, see static_assert below
 
     // Function to format a TraceEvent into JSON format.
     std::string
