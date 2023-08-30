@@ -18,6 +18,7 @@ add_benchmark(bm_case1)
 add_benchmark(bm_filter)
 add_benchmark(bm_fft)
 add_benchmark(bm_history_buffer)
+add_benchmark(bm_profiler)
 add_benchmark(bm_scheduler)
 
 add_executable(bm_case1_nosimd bm_case1.cpp)

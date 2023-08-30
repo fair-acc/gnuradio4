@@ -2,6 +2,7 @@
 #define GRAPH_PROTOTYPE_SCHEDULER_HPP
 #include <barrier>
 #include <graph.hpp>
+#include <profiler.hpp>
 #include <set>
 #include <thread_pool.hpp>
 #include <utility>
@@ -14,18 +15,22 @@ enum execution_policy { single_threaded, multi_threaded };
 
 enum SchedulerState { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, SHUTTING_DOWN, ERROR };
 
+template<profiling::Profiler Profiler = profiling::null::profiler>
 class scheduler_base {
 protected:
-    SchedulerState                   _state = IDLE;
-    fair::graph::graph               _graph;
-    std::shared_ptr<BasicThreadPool> _pool;
-    std::atomic_uint64_t             _progress;
-    std::atomic_size_t               _running_threads;
-    std::atomic_bool                 _stop_requested;
+    SchedulerState                        _state = IDLE;
+    fair::graph::graph                    _graph;
+    Profiler                              _profiler;
+    decltype(_profiler.for_this_thread()) _profiler_handler;
+    std::shared_ptr<BasicThreadPool>      _pool;
+    std::atomic_uint64_t                  _progress;
+    std::atomic_size_t                    _running_threads;
+    std::atomic_bool                      _stop_requested;
 
 public:
-    explicit scheduler_base(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND))
-        : _graph(std::move(graph)), _pool(std::move(thread_pool)){};
+    explicit scheduler_base(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+                            const profiling::options &profiling_options = {})
+        : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.for_this_thread() }, _pool(std::move(thread_pool)) {}
 
     ~scheduler_base() {
         stop();
@@ -58,6 +63,7 @@ public:
 
     void
     wait_done() {
+        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.wait_done");
         for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
             _running_threads.wait(running);
         }
@@ -82,6 +88,7 @@ public:
 
     void
     init() {
+        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.init");
         if (_state != IDLE) {
             return;
         }
@@ -121,8 +128,9 @@ public:
 
     void
     run_on_pool(const std::vector<std::vector<node_model *>> &jobs, const std::function<work_return_t(const std::span<node_model *const> &)> work_function) {
-        _progress        = 0;
-        _running_threads = jobs.size();
+        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.run_on_pool");
+        _progress                      = 0;
+        _running_threads               = jobs.size();
         for (auto &jobset : jobs) {
             _pool->execute([this, &jobset, work_function, &jobs]() { pool_worker([&work_function, &jobset]() { return work_function(jobset); }, jobs.size()); });
         }
@@ -130,10 +138,14 @@ public:
 
     void
     pool_worker(const std::function<work_return_t()> &work, std::size_t n_batches) {
-        uint32_t done           = 0;
-        uint32_t progress_count = 0;
+        auto    &profiler_handler = _profiler.for_this_thread();
+
+        uint32_t done             = 0;
+        uint32_t progress_count   = 0;
         while (done < n_batches && !_stop_requested) {
-            bool     something_happened = work().status == work_return_status_t::OK;
+            auto pe                 = profiler_handler.start_complete_event("scheduler_base.work");
+            bool something_happened = work().status == work_return_status_t::OK;
+            pe.finish();
             uint64_t progress_local, progress_new;
             if (something_happened) { // something happened in this thread => increase progress and reset done count
                 do {
@@ -169,17 +181,19 @@ public:
 /**
  * Trivial loop based scheduler, which iterates over all nodes in definition order in the graph until no node did any processing
  */
-template<execution_policy executionPolicy = single_threaded>
-class simple : public scheduler_base {
+template<execution_policy executionPolicy = single_threaded, profiling::Profiler Profiler = profiling::null::profiler>
+class simple : public scheduler_base<Profiler> {
     std::vector<std::vector<node_model *>> _job_lists{};
 
 public:
-    explicit simple(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND))
-        : scheduler_base(std::forward<fair::graph::graph>(graph), thread_pool) {}
+    explicit simple(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+                    const profiling::options &profiling_options = {})
+        : scheduler_base<Profiler>(std::forward<fair::graph::graph>(graph), thread_pool, profiling_options) {}
 
     void
     init() {
-        scheduler_base::init();
+        scheduler_base<Profiler>::init();
+        [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("scheduler_simple.init");
         // generate job list
         if constexpr (executionPolicy == multi_threaded) {
             const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), this->_graph.blocks().size());
@@ -224,6 +238,7 @@ public:
     // todo: iterate api for continuous flowgraphs vs ones that become "DONE" at some point
     void
     run_and_wait() {
+        [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("scheduler_simple.run_and_wait");
         start();
         this->wait_done();
     }
@@ -232,7 +247,7 @@ public:
     start() {
         switch (this->_state) {
         case IDLE: this->init(); break;
-        case STOPPED: reset(); break;
+        case STOPPED: this->reset(); break;
         case PAUSED: this->_state = INITIALISED; break;
         case INITIALISED:
         case RUNNING:
@@ -268,19 +283,21 @@ public:
  * Breadth first traversal scheduler which traverses the graph starting from the source nodes in a breath first fashion
  * detecting cycles and nodes which can be reached from several source nodes.
  */
-template<execution_policy executionPolicy = single_threaded>
-class breadth_first : public scheduler_base {
+template<execution_policy executionPolicy = single_threaded, profiling::Profiler Profiler = profiling::null::profiler>
+class breadth_first : public scheduler_base<Profiler> {
     std::vector<node_model *>              _nodelist;
     std::vector<std::vector<node_model *>> _job_lists{};
 
 public:
-    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND))
-        : scheduler_base(std::move(graph), thread_pool) {}
+    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
+                           const profiling::options &profiling_options = {})
+        : scheduler_base<Profiler>(std::move(graph), thread_pool, profiling_options) {}
 
     void
     init() {
-        using node_t = node_model *;
-        scheduler_base::init();
+        [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("breadth_first.init");
+        using node_t                   = node_model *;
+        scheduler_base<Profiler>::init();
         // calculate adjacency list
         std::map<node_t, std::vector<node_t>> _adjacency_list{};
         std::vector<node_t>                   _source_nodes{};
@@ -369,7 +386,7 @@ public:
     start() {
         switch (this->_state) {
         case IDLE: this->init(); break;
-        case STOPPED: reset(); break;
+        case STOPPED: this->reset(); break;
         case PAUSED: this->_state = INITIALISED; break;
         case INITIALISED:
         case RUNNING:

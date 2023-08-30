@@ -4578,7 +4578,7 @@ class circular_buffer
         _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
     ReservedOutputRange(const ReservedOutputRange&) = delete;
     ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
-    explicit ReservedOutputRange(ReservedOutputRange&& other) noexcept
+    ReservedOutputRange(ReservedOutputRange&& other) noexcept
         : _parent(std::exchange(other._parent, nullptr))
         , _index(std::exchange(other._index, 0))
         , _n_slots_to_claim(std::exchange(other._n_slots_to_claim, 0))

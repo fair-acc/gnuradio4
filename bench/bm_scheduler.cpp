@@ -2,6 +2,7 @@
 
 #include <boost/ut.hpp>
 #include <graph.hpp>
+#include <profiler.hpp>
 #include <scheduler.hpp>
 
 #include "bm_test_helper.hpp"
@@ -109,6 +110,7 @@ exec_bm(auto &scheduler, const std::string &test_case) {
 }
 
 [[maybe_unused]] inline const boost::ut::suite scheduler_tests = [] {
+    using namespace fair::graph::profiling;
     using namespace boost::ut;
     using namespace benchmark;
     using thread_pool = fair::thread_pool::BasicThreadPool;
@@ -139,6 +141,11 @@ exec_bm(auto &scheduler, const std::string &test_case) {
 
     fg::scheduler::breadth_first<multi_threaded> sched4_mt(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt]() { exec_bm(sched4_mt, "bifurcated-graph BFS-sched (multi-threaded)"); };
+
+    fg::scheduler::breadth_first<multi_threaded, profiler> sched4_mt_prof(test_graph_bifurcated<float>(N_NODES), pool);
+    "bifurcated graph - BFS scheduler (multi-threaded) with profiling"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt_prof]() {
+        exec_bm(sched4_mt_prof, "bifurcated-graph BFS-sched (multi-threaded) with profiling");
+    };
 };
 
 int
