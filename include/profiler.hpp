@@ -60,13 +60,13 @@ format_args(const std::vector<arg_value> &args) {
 
 struct alignas(256) TraceEvent { // fills up to power of 2 size, see static_assert below. unaligned size is 152
     std::thread::id           thread_id;
-    std::string               name; // Event name.
-    EventType                 type; // Event type.
-    std::chrono::microseconds ts;   // Timestamp
-    std::chrono::microseconds dur;  // Duration of the event, for 'X' type.
-    std::string               id;   // ID for matching async or flow events.
-    std::string               cat;  // Event categories.
-    std::vector<arg_value>    args; // Event arguments.
+    std::string               name;   // Event name.
+    EventType                 type;   // Event type.
+    std::chrono::microseconds ts;     // Timestamp
+    std::chrono::microseconds dur;    // Duration of the event, for 'X' type.
+    int                       id = 0; // ID for matching async or flow events.
+    std::string               cat;    // Event categories.
+    std::vector<arg_value>    args;   // Event arguments.
 
     // Function to format a TraceEvent into JSON format.
     std::string
@@ -86,8 +86,7 @@ struct alignas(256) TraceEvent { // fills up to power of 2 size, see static_asse
             return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": "{}", "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat,
                                format_args(args));
         default: // TODO
-            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat,
-                               format_args(args));
+            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
         }
 
         return {};
@@ -259,12 +258,11 @@ template<typename Handler>
 class async_event {
     Handler    &_handler;
     bool        _finished = false;
-    std::string _id;
+    int         _id;
     std::string _name;
 
 public:
-    explicit async_event(Handler &handler, std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) : _handler(handler), _name{ name } {
-        // TODO generate ID or pass as argument?
+    explicit async_event(Handler &handler, std::string_view name, int id, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) : _handler(handler), _id{ id }, _name{ name } {
         post_event(detail::EventType::AsyncStart, categories, args);
     }
 
@@ -311,6 +309,7 @@ class handler {
     using this_t = handler<Profiler, WriterType>;
     Profiler  &_profiler;
     WriterType _writer;
+    int        _nextId = 1;
 
 public:
     explicit handler(Profiler &profiler, WriterType &&writer) : _profiler(profiler), _writer{ std::move(writer) } {}
@@ -324,7 +323,8 @@ public:
     operator=(this_t &&) noexcept
             = delete;
 
-    const Profiler& profiler() const {
+    const Profiler &
+    profiler() const {
         return _profiler;
     }
 
@@ -364,7 +364,9 @@ public:
 
     [[nodiscard]] async_event<this_t>
     start_async_event(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
-        return async_event<this_t>{ *this, name, categories, args };
+        const auto id = _nextId;
+        ++_nextId;
+        return async_event<this_t>{ *this, name, id, categories, args };
     }
 };
 
