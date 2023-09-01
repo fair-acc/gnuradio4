@@ -164,7 +164,7 @@ const boost::ut::suite _fft_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
-    auto thread_pool                      = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
+    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
 
     // clang-format off
     "Interpolation/Decimation tests"_test = [&thread_pool] {
