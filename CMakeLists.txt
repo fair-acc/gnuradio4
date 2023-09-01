@@ -17,13 +17,13 @@ if (EMSCRIPTEN)
     target_compile_options(graph-prototype-options INTERFACE
             -fwasm-exceptions
             -pthread
-            )
+    )
     target_link_options(graph-prototype-options INTERFACE
             "SHELL:-s ALLOW_MEMORY_GROWTH=1"
             -fwasm-exceptions
             -pthread
             "SHELL:-s PTHREAD_POOL_SIZE=30"
-            )
+    )
 endif ()
 
 
@@ -92,7 +92,7 @@ ExternalProject_Add(fftw_ext
         BUILD_COMMAND ""
         INSTALL_COMMAND ""
         LOG_DOWNLOAD ON
-        )
+)
 
 include_directories(${FFTW_PREFIX}/install/include)
 
