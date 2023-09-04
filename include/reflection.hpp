@@ -83,7 +83,6 @@
  *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
  */
 
-
 /**
  * This macro can be used for simple non-templated structs and classes, e.g.
  * @code
@@ -133,6 +132,8 @@
 #define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
 
 #define GP_REGISTER_NODE(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_NODE_MULTI_PARAMETER(Register, Name, ...) fair::graph::detail::register_node_multi_parameter<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_NODE_EXPERIMENTAL(Register, Name, ...) fair::graph::detail::register_node_experimental<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
 
 #pragma GCC diagnostic pop
-#endif //GRAPH_PROTOTYPE_REFLECTION_HPP
+#endif // GRAPH_PROTOTYPE_REFLECTION_HPP

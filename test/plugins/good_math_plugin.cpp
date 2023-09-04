@@ -66,4 +66,4 @@ ENABLE_REFLECTION_FOR_TEMPLATE(good::multiply, in, out);
 GP_PLUGIN_REGISTER_NODE(good::multiply, float, double);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::divide, in, out);
-GP_PLUGIN_REGISTER_NODE(good::divide, float, double);
+GP_PLUGIN_REGISTER_NODE_EXPERIMENTAL(good::divide, float, double);

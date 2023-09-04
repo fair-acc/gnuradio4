@@ -9,4 +9,5 @@ endfunction()
 
 add_gp_plugin(good_math_plugin)
 add_gp_plugin(good_base_plugin)
+add_gp_plugin(good_conversion_plugin)
 add_gp_plugin(bad_plugin)

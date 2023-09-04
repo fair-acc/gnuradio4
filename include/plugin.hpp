@@ -64,7 +64,7 @@ public:
         return registry.create_node(name, type, params);
     }
 
-    template<template<typename> typename NodeTemplate, typename... Args>
+    template<template<typename...> typename NodeTemplate, typename... Args>
     void
     add_node_type(std::string node_type) {
         registry.add_node_type<NodeTemplate, Args...>(std::move(node_type));
@@ -102,5 +102,7 @@ public:
     }
 
 #define GP_PLUGIN_REGISTER_NODE(...) GP_REGISTER_NODE(gp_plugin_instance(), __VA_ARGS__);
+#define GP_PLUGIN_REGISTER_NODE_MULTI_PARAMETER(...) GP_REGISTER_NODE_MULTI_PARAMETER(gp_plugin_instance(), __VA_ARGS__);
+#define GP_PLUGIN_REGISTER_NODE_EXPERIMENTAL(...) GP_REGISTER_NODE_EXPERIMENTAL(gp_plugin_instance(), __VA_ARGS__);
 
 #endif // include guard
