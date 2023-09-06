@@ -24,11 +24,7 @@ public:
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::convert, in, out);
 
-// One option is to invoke the macro for each desired parameter combination
-// GP_PLUGIN_REGISTER_NODE_MULTI_PARAMETER(good::convert, float, double);
-// GP_PLUGIN_REGISTER_NODE_MULTI_PARAMETER(good::convert, double, float);
-
 // Another is to use the same macro for both single-parametrised
 // and mulciple-parametrised nodes, just to have the parameter
 // packs wrapped in some special type like this:
-GP_PLUGIN_REGISTER_NODE_EXPERIMENTAL(good::convert, fair::graph::node_type_parameters<double, float>, fair::graph::node_type_parameters<float, double>);
+GP_PLUGIN_REGISTER_NODE(good::convert, node_parameters<double, float>, node_parameters<float, double>);
