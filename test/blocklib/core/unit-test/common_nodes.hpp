@@ -215,8 +215,8 @@ void
                        register_builtin_nodes(Registry *registry) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    GP_REGISTER_NODE(registry, builtin_multiply, double, float);
-    GP_REGISTER_NODE(registry, builtin_counter, double, float);
+    GP_REGISTER_NODE_RUNTIME(registry, builtin_multiply, double, float);
+    GP_REGISTER_NODE_RUNTIME(registry, builtin_counter, double, float);
 #pragma GCC diagnostic pop
 }
 

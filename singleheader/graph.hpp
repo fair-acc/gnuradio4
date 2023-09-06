@@ -9733,7 +9733,6 @@ REFL_END
  *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
  */
 
-
 /**
  * This macro can be used for simple non-templated structs and classes, e.g.
  * @code
@@ -9782,10 +9781,20 @@ REFL_END
 #define GP_CONCAT_IMPL(x, y) x##y
 #define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
 
-#define GP_REGISTER_NODE(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_NODE_IMPL(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_NODE(Register, Name, ...) \
+    namespace { \
+    using fair::graph::detail::node_parameters; \
+    GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
+    }
+#define GP_REGISTER_NODE_RUNTIME(Register, Name, ...) \
+    { \
+        using fair::graph::detail::node_parameters; \
+        GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
+    }
 
 #pragma GCC diagnostic pop
-#endif //GRAPH_PROTOTYPE_REFLECTION_HPP
+#endif // GRAPH_PROTOTYPE_REFLECTION_HPP
 
 
 // #include <port.hpp>
@@ -14424,11 +14433,27 @@ static_assert(sink_node<decltype(merge_by_index<0, 0>(copy(), copy()))>);
 #endif
 
 namespace detail {
-template<template<typename> typename NodeTemplate, typename... AllowedTypes>
+template<typename... Types>
+struct node_parameters {
+    template<template<typename...> typename NodeTemplate, typename RegisterInstance>
+    void
+    register_on(RegisterInstance *plugin_instance, std::string node_type) const {
+        plugin_instance->template add_node_type<NodeTemplate, Types...>(node_type);
+    }
+};
+
+template<template<typename...> typename NodeTemplate, typename... NodeParameters>
 struct register_node {
     template<typename RegisterInstance>
     register_node(RegisterInstance *plugin_instance, std::string node_type) {
-        plugin_instance->template add_node_type<NodeTemplate, AllowedTypes...>(node_type);
+        auto add_node_type = [&]<typename Type> {
+            if constexpr (meta::is_instantiation_of<Type, node_parameters>) {
+                Type().template register_on<NodeTemplate>(plugin_instance, node_type);
+            } else {
+                plugin_instance->template add_node_type<NodeTemplate, Type>(node_type);
+            }
+        };
+        ((add_node_type.template operator()<NodeParameters>()), ...);
     }
 };
 } // namespace detail
