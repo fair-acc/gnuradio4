@@ -19,11 +19,11 @@ private:
     std::vector<std::string>                                                            _node_types;
     std::unordered_map<std::string, std::unordered_map<std::string, node_type_handler>> _node_type_handlers;
 
-    template<template<typename> typename NodeTemplate, typename ValueType>
+    template<template<typename...> typename NodeTemplate, typename... NodeParameters>
     static auto
     create_handler() {
         return [](std::unique_ptr<fair::graph::node_model> &result, const property_map &params) {
-            using NodeType = NodeTemplate<ValueType>;
+            using NodeType = NodeTemplate<NodeParameters...>;
 
             if constexpr (std::is_constructible_v<NodeType, const property_map &>) {
                 result = std::make_unique<fair::graph::node_wrapper<NodeType>>(params); // gp_plugin_node::wrap(std::make_shared<NodeType>(params));
@@ -36,14 +36,41 @@ private:
         };
     }
 
+    auto &
+    find_node_type_handlers_map(const std::string &node_type) {
+        if (auto it = _node_type_handlers.find(node_type); it != _node_type_handlers.end()) {
+            return it->second;
+        } else {
+            _node_types.emplace_back(node_type);
+            return _node_type_handlers[node_type];
+        }
+    }
+
+    template<typename... Types>
+    static std::string
+    encoded_list_of_types() {
+        struct accumulator {
+            std::string value;
+
+            accumulator &
+            operator%(const std::string &type) {
+                if (value.empty()) value = type;
+                else
+                    value += ";"s + type;
+                return *this;
+            }
+        };
+
+        return (accumulator{} % ... % meta::type_name<Types>()).value;
+    }
+
 public:
-    template<template<typename> typename NodeTemplate, typename... AllowedTypes>
+    template<template<typename...> typename NodeTemplate, typename... NodeParameters>
     void
     add_node_type(std::string node_type) {
-        _node_types.push_back(node_type);
-        auto &node_handlers = _node_type_handlers[node_type];
-
-        ((node_handlers[std::string(meta::type_name<AllowedTypes>())] = create_handler<NodeTemplate, AllowedTypes>()), ...);
+        auto &node_handlers                                       = find_node_type_handlers_map(node_type);
+        node_handlers[encoded_list_of_types<NodeParameters...>()] = create_handler<NodeTemplate, NodeParameters...>();
+        fmt::print("Registered {} {}\n", node_type, encoded_list_of_types<NodeParameters...>());
     }
 
     std::span<const std::string>

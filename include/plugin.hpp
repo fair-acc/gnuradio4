@@ -64,7 +64,7 @@ public:
         return registry.create_node(name, type, params);
     }
 
-    template<template<typename> typename NodeTemplate, typename... Args>
+    template<template<typename...> typename NodeTemplate, typename... Args>
     void
     add_node_type(std::string node_type) {
         registry.add_node_type<NodeTemplate, Args...>(std::move(node_type));

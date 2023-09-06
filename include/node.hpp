@@ -1334,11 +1334,27 @@ static_assert(sink_node<decltype(merge_by_index<0, 0>(copy(), copy()))>);
 #endif
 
 namespace detail {
-template<template<typename> typename NodeTemplate, typename... AllowedTypes>
+template<typename... Types>
+struct node_parameters {
+    template<template<typename...> typename NodeTemplate, typename RegisterInstance>
+    void
+    register_on(RegisterInstance *plugin_instance, std::string node_type) const {
+        plugin_instance->template add_node_type<NodeTemplate, Types...>(node_type);
+    }
+};
+
+template<template<typename...> typename NodeTemplate, typename... NodeParameters>
 struct register_node {
     template<typename RegisterInstance>
     register_node(RegisterInstance *plugin_instance, std::string node_type) {
-        plugin_instance->template add_node_type<NodeTemplate, AllowedTypes...>(node_type);
+        auto add_node_type = [&]<typename Type> {
+            if constexpr (meta::is_instantiation_of<Type, node_parameters>) {
+                Type().template register_on<NodeTemplate>(plugin_instance, node_type);
+            } else {
+                plugin_instance->template add_node_type<NodeTemplate, Type>(node_type);
+            }
+        };
+        ((add_node_type.template operator()<NodeParameters>()), ...);
     }
 };
 } // namespace detail
