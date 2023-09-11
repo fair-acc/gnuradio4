@@ -395,7 +395,9 @@ public:
             std::lock_guard lg(_lock);
 
             property_map    oldSettings;
-            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
+            if constexpr (
+                    requires(const property_map &cmap, property_map &map) { _node->settings_changed(/* old settings */ cmap, /* new settings */ map); } or //
+                    requires(const property_map &cmap, property_map &map) { _node->settings_changed(/* old settings */ cmap, /* new settings */ map, /* new forward settings */ map); }) {
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
                     auto iterate_over_member = [&, this](auto member) {
@@ -421,14 +423,16 @@ public:
                     if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
+                            if constexpr (
+                                    requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); } or //
+                                    requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
                                 staged.insert_or_assign(key, staged_value);
                             } else {
                                 std::ignore = staged; // help clang to see why staged is not unused
                             }
-                            if (_auto_forward.contains(get_display_name(member))) {
-                                forward_parameters.insert_or_assign(key, staged_value);
-                            }
+                        }
+                        if (_auto_forward.contains(key)) {
+                            forward_parameters.insert_or_assign(key, staged_value);
                         }
                     }
                 };
@@ -449,9 +453,11 @@ public:
             }
             refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
 
-            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
-                if (!staged.empty()) {
+            if (!staged.empty()) {
+                if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
                     _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged);
+                } else if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
+                    _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
                 }
             }
             _staged.clear();
