@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <numbers>
+#include <ranges>
 #include <vector>
 
 namespace gr::blocks::fft {
@@ -20,80 +21,88 @@ enum class WindowFunction : int { None, Rectangular, Hamming, Hann, HannExp, Bla
 template<FloatOrDoubleType T>
 std::vector<T>
 createWindowFunction(WindowFunction func, const std::size_t n) {
-    constexpr T    pi   = std::numbers::pi_v<T>;
-    constexpr T    pi2  = static_cast<T>(2.) * pi;
-    const T        exp0 = std::exp(static_cast<T>(0.));
-    constexpr T    c1   = 1.;
-    constexpr T    c2   = 2.;
-    constexpr T    c3   = 3.;
-    constexpr T    c4   = 4.;
-    std::vector<T> res(n);
+    constexpr T pi  = std::numbers::pi_v<T>;
+    constexpr T pi2 = static_cast<T>(2.) * pi;
+    constexpr T c1  = 1.;
+    constexpr T c2  = 2.;
+    constexpr T c3  = 3.;
+    constexpr T c4  = 4.;
+
     switch (func) {
     case WindowFunction::None: {
         return {};
     }
     case WindowFunction::Rectangular: {
-        for (std::size_t i = 0; i < n; i++) res[i] = 1.;
-        return res;
+        return std::vector<T>(n, T(1.));
     }
     case WindowFunction::Hamming: {
-        const T a = pi2 / static_cast<T>(n);
-        for (std::size_t i = 0; i < n; i++) res[i] = static_cast<T>(0.53836) - static_cast<T>(0.46164) * std::cos(a * static_cast<T>(i));
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) { return T(0.53836) - T(0.46164) * std::cos(a * static_cast<T>(i)); });
         return res;
     }
     case WindowFunction::Hann: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) res[i] = static_cast<T>(0.5) - static_cast<T>(0.5) * std::cos(a * static_cast<T>(i));
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) { return T(0.5) - T(0.5) * std::cos(a * static_cast<T>(i)); });
         return res;
     }
     case WindowFunction::HannExp: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) res[i] = std::pow(std::sin(a * static_cast<T>(i)), c2);
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) { return std::pow(std::sin(a * static_cast<T>(i)), c2); });
         return res;
     }
     case WindowFunction::Blackman: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) {
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) {
             const T ai = a * static_cast<T>(i);
-            res[i]     = static_cast<T>(0.42) - static_cast<T>(0.5) * std::cos(ai) + static_cast<T>(0.08) * std::cos(c2 * ai);
-        }
+            return T(0.42) - T(0.5) * std::cos(ai) + T(0.08) * std::cos(c2 * ai);
+        });
         return res;
     }
     case WindowFunction::Nuttall: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) {
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) {
             const T ai = a * static_cast<T>(i);
-            res[i]     = static_cast<T>(0.355768) - static_cast<T>(0.487396) * std::cos(ai) + static_cast<T>(0.144232) * std::cos(c2 * ai) - static_cast<T>(0.012604) * std::cos(c3 * ai);
-        }
+            return T(0.355768) - T(0.487396) * std::cos(ai) + T(0.144232) * std::cos(c2 * ai) - T(0.012604) * std::cos(c3 * ai);
+        });
         return res;
     }
     case WindowFunction::BlackmanHarris: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) {
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) {
             const T ai = a * static_cast<T>(i);
-            res[i]     = static_cast<T>(0.35875) - static_cast<T>(0.48829) * std::cos(ai) + static_cast<T>(0.14128) * std::cos(c2 * ai) - static_cast<T>(0.01168) * std::cos(c3 * ai);
-        }
+            return T(0.35875) - T(0.48829) * std::cos(ai) + T(0.14128) * std::cos(c2 * ai) - T(0.01168) * std::cos(c3 * ai);
+        });
         return res;
     }
     case WindowFunction::BlackmanNuttall: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) {
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) {
             const T ai = a * static_cast<T>(i);
-            res[i]     = static_cast<T>(0.3635819) - static_cast<T>(0.4891775) * std::cos(ai) + static_cast<T>(0.1365995) * std::cos(c2 * ai) - static_cast<T>(0.0106411) * std::cos(c3 * ai);
-        }
+            return T(0.3635819) - T(0.4891775) * std::cos(ai) + T(0.1365995) * std::cos(c2 * ai) - T(0.0106411) * std::cos(c3 * ai);
+        });
         return res;
     }
     case WindowFunction::FlatTop: {
-        const T a = pi2 / static_cast<T>(n - 1);
-        for (std::size_t i = 0; i < n; i++) {
+        std::vector<T> res(n);
+        const T        a = pi2 / static_cast<T>(n - 1);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a](const auto i) {
             const T ai = a * static_cast<T>(i);
-            res[i]     = c1 - static_cast<T>(1.93) * std::cos(ai) + static_cast<T>(1.29) * std::cos(c2 * ai) - static_cast<T>(0.388) * std::cos(c3 * ai) + static_cast<T>(0.032) * std::cos(c4 * ai);
-        }
+            return c1 - T(1.93) * std::cos(ai) + T(1.29) * std::cos(c2 * ai) - T(0.388) * std::cos(c3 * ai) + T(0.032) * std::cos(c4 * ai);
+        });
         return res;
     }
     case WindowFunction::Exponential: {
-        const T a = c3 * static_cast<T>(n);
-        for (std::size_t i = 0; i < n; i++) res[i] = std::exp(static_cast<T>(i) / a) / exp0;
+        std::vector<T> res(n);
+        const T        exp0 = std::exp(T(0.));
+        const T        a    = c3 * static_cast<T>(n);
+        std::ranges::transform(std::views::iota(std::size_t(0), n), std::ranges::begin(res), [a, exp0](const auto i) { return std::exp(static_cast<T>(i) / a) / exp0; });
         return res;
     }
     default: {
