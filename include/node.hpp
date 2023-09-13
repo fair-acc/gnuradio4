@@ -442,9 +442,8 @@ public:
             _output_tags_changed = true;
         }
 
-        // TODO: expand on this init function:
-        //  * store initial setting -> needed for `reset()` call
-        //  * ...
+        // store default settings -> can be recovered with 'reset_defaults()'
+        settings().store_defaults();
     }
 
     void

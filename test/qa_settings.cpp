@@ -131,6 +131,7 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
     std::vector<T>                                                vector_setting{ T(3), T(2), T(1) };
     int                                                           update_count = 0;
     bool                                                          debug        = false;
+    bool                                                          resetCalled  = false;
 
     void
     settings_changed(const property_map &old_settings, property_map &new_settings) noexcept {
@@ -141,6 +142,12 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
             fmt::print("settings changed - update_count: {}\n", update_count);
             utils::printChanges(old_settings, new_settings);
         }
+    }
+
+    void
+    reset() {
+        // optional reset function
+        resetCalled = true;
     }
 
     template<fair::meta::t_or_simd<T> V>
@@ -165,7 +172,7 @@ struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double
     void
     settings_changed(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
         if (new_settings.contains(std::string(fair::graph::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
-            const float fwdSampleRate = sample_rate / static_cast<float>(this->denominator);
+            const float fwdSampleRate                                           = sample_rate / static_cast<float>(this->denominator);
             fwd_settings[std::string(fair::graph::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
         }
     }
@@ -431,6 +438,39 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.sample_rate, 1000.0f)) << "block1 matching sample_rate";
         expect(eq(block2.sample_rate, 500.0f)) << "block2 matching sample_rate";
         expect(eq(sink.sample_rate, 100.0f)) << "sink matching src sample_rate";
+    };
+
+    "basic store/reset settings"_test = []() {
+        graph flow_graph;
+        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        expect(block.name == "TestName");
+        expect(eq(block.scaling_factor, 2.f));
+
+        std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } });
+        std::ignore = block.settings().apply_staged_parameters();
+        expect(block.name == "TestNameAlt");
+        expect(eq(block.scaling_factor, 42.f));
+
+        expect(not block.resetCalled);
+        block.settings().reset_defaults();
+        expect(block.resetCalled);
+        block.resetCalled = false;
+        expect(block.name == "TestName");
+        expect(eq(block.scaling_factor, 2.f));
+
+        std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } });
+        std::ignore = block.settings().apply_staged_parameters();
+        expect(block.name == "TestNameAlt");
+        expect(eq(block.scaling_factor, 42.f));
+        block.settings().store_defaults();
+        std::ignore = block.settings().set({ { "name", "TestNameAlt2" }, { "scaling_factor", 43.f } });
+        std::ignore = block.settings().apply_staged_parameters();
+        expect(block.name == "TestNameAlt2");
+        expect(eq(block.scaling_factor, 43.f));
+        block.settings().reset_defaults();
+        expect(block.resetCalled);
+        expect(block.name == "TestNameAlt");
+        expect(eq(block.scaling_factor, 42.f));
     };
 };
 

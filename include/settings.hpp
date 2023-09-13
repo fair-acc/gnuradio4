@@ -21,6 +21,31 @@ struct SettingsCtx {
     property_map             context;             /// user-defined multiplexing context for which the setting is valid
 };
 
+/**
+ * @brief a concept verifying whether a processing block optionally provides a `settings_changed` callback to react to
+ * block configuration changes and/or to influence forwarded downstream parameters.
+ *
+ * Implementers may have:
+ * 1. `settings_changed(oldSettings, newSettings)`
+ * 2. `settings_changed(oldSettings, newSettings, forwardSettings)`
+ *    - where `forwardSettings` is for influencing subsequent blocks. E.g., a decimating block might adjust the `sample_rate` for downstream blocks.
+ */
+template<typename BlockType>
+concept HasSettingsChangedCallback = requires(BlockType *node, const property_map &oldSettings, property_map &newSettings) {
+    { node->settings_changed(oldSettings, newSettings) };
+} or requires(BlockType *node, const property_map &oldSettings, property_map &newSettings, property_map &forwardSettings) {
+    { node->settings_changed(oldSettings, newSettings, forwardSettings) };
+};
+
+/**
+ * @brief a concept verifying whether a processing block optionally provides a `reset` callback to react to
+ * block reset requests (being called after the settings have been reverted(.
+ */
+template<typename BlockType>
+concept HasSettingsResetCallback = requires(BlockType *node) {
+    { node->reset() };
+};
+
 template<typename T>
 concept Settings = requires(T t, std::span<const std::string> parameter_keys, const std::string &parameter_key, const property_map &parameters, SettingsCtx ctx) {
     /**
@@ -110,6 +135,13 @@ struct settings_base {
     set(const property_map &parameters, SettingsCtx ctx = {})
             = 0;
 
+    virtual void
+    store_defaults()
+            = 0;
+    virtual void
+    reset_defaults()
+            = 0;
+
     /**
      * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
      * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
@@ -174,12 +206,22 @@ class basic_settings : public settings_base {
     property_map                       _staged{}; // parameters to become active before the next work() call
     std::set<std::string, std::less<>> _auto_update{};
     std::set<std::string, std::less<>> _auto_forward{};
+    property_map                       _default_settings{};
 
 public:
     basic_settings()  = delete;
     ~basic_settings() = default;
 
     explicit constexpr basic_settings(Node &node) noexcept : settings_base(), _node(&node) {
+        if constexpr (requires { &Node::settings_changed; }) { // if settings_changed is defined
+            static_assert(HasSettingsChangedCallback<Node>, "if provided, settings_changed must have either a `(const property_map& old, property_map& new, property_map& fwd)`"
+                                                            "or `(const property_map& old, property_map& new)` paremeter signatures.");
+        }
+
+        if constexpr (requires { &Node::reset; }) { // if reset is defined
+            static_assert(HasSettingsResetCallback<Node>, "if provided, reset() may have no function parameters");
+        }
+
         if constexpr (refl::is_reflectable<Node>()) {
             meta::tuple_for_each(
                     [this](auto &&default_tag) {
@@ -316,6 +358,20 @@ public:
     }
 
     void
+    store_defaults() override {
+        this->store_default_settings(_default_settings);
+    }
+
+    void
+    reset_defaults() override {
+        _staged     = _default_settings;
+        std::ignore = apply_staged_parameters();
+        if constexpr (HasSettingsResetCallback<Node>) {
+            _node->reset();
+        }
+    }
+
+    void
     auto_update(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<Node>()) {
             for (const auto &[localKey, localValue] : parameters) {
@@ -394,38 +450,29 @@ public:
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
 
-            property_map    oldSettings;
-            if constexpr (
-                    requires(const property_map &cmap, property_map &map) { _node->settings_changed(/* old settings */ cmap, /* new settings */ map); } or //
-                    requires(const property_map &cmap, property_map &map) { _node->settings_changed(/* old settings */ cmap, /* new settings */ map, /* new forward settings */ map); }) {
-                // take a copy of the field -> map value of the old settings
-                if constexpr (refl::is_reflectable<Node>()) {
-                    auto iterate_over_member = [&, this](auto member) {
-                        using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-
-                        if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
-                            oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
-                        }
-                    };
-                    if constexpr (detail::HasBaseType<Node>) {
-                        refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
-                    }
-                    refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
-                }
+            // prepare old settings if required
+            property_map oldSettings;
+            if constexpr (HasSettingsChangedCallback<Node>) {
+                store_default_settings(oldSettings);
             }
 
+            // check if reset of settings should be performed
+            if (_staged.contains(fair::graph::tag::RESET_DEFAULTS)) {
+                _staged.clear();
+                reset_defaults();
+            }
+
+            // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto &[localKey, localStaged_value] : _staged) {
-                const auto &key                 = localKey;
-                const auto &staged_value        = localStaged_value;
-                auto        iterate_over_member = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                const auto &key                  = localKey;
+                const auto &staged_value         = localStaged_value;
+                auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr (is_writable(member) && is_supported_type<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (
-                                    requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); } or //
-                                    requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
+                            if constexpr (HasSettingsChangedCallback<Node>) {
                                 staged.insert_or_assign(key, staged_value);
                             } else {
                                 std::ignore = staged; // help clang to see why staged is not unused
@@ -436,23 +483,19 @@ public:
                         }
                     }
                 };
-                if constexpr (detail::HasBaseType<Node>) {
-                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
-                }
-                refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
+                process_members<Node>(apply_member_changes);
             }
-            auto iterate_over_member = [&, this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
-                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+            // update active parameters
+            auto update_active = [this](auto member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
+                if constexpr (is_readable(member) && is_supported_type<Type>()) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             };
-            if constexpr (detail::HasBaseType<Node>) {
-                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
-            }
-            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
+            process_members<Node>(update_active);
 
+            // invoke user-callback function if staged is not empty
             if (!staged.empty()) {
                 if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
                     _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged);
@@ -460,8 +503,20 @@ public:
                     _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
                 }
             }
+
+            if (_staged.contains(fair::graph::tag::STORE_DEFAULTS)) {
+                store_defaults();
+            }
+
+            if constexpr (HasSettingsResetCallback<Node>) {
+                if (_staged.contains(fair::graph::tag::RESET_DEFAULTS)) {
+                    _node->reset();
+                }
+            }
+
             _staged.clear();
         }
+
         settings_base::_changed.store(false);
         return forward_parameters;
     }
@@ -473,7 +528,7 @@ public:
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
-                if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+                if constexpr (is_readable(member) && is_supported_type<Type>()) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_node));
                 }
             };
@@ -482,6 +537,40 @@ public:
             }
             refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
         }
+    }
+
+private:
+    void
+    store_default_settings(property_map &oldSettings) {
+        // take a copy of the field -> map value of the old settings
+        if constexpr (refl::is_reflectable<Node>()) {
+            auto iterate_over_member = [&, this](auto member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
+
+                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                    oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
+                }
+            };
+            if constexpr (detail::HasBaseType<Node>) {
+                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<Node>::base_t>().members, iterate_over_member);
+            }
+            refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
+        }
+    }
+
+    template<typename Type>
+    inline constexpr static bool
+    is_supported_type() {
+        return std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>;
+    }
+
+    template<typename NodeType, typename Func>
+    inline constexpr static void
+    process_members(Func func) {
+        if constexpr (detail::HasBaseType<NodeType>) {
+            refl::util::for_each(refl::reflect<typename std::remove_cvref_t<NodeType>::base_t>().members, func);
+        }
+        refl::util::for_each(refl::reflect<NodeType>().members, func);
     }
 };
 
