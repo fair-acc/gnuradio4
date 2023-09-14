@@ -316,11 +316,11 @@ struct node : protected std::tuple<Arguments...> {
             "node_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
-    A<std::size_t, "numerator", Doc<"The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">>      numerator   = 1_UZ;
-    A<std::size_t, "denominator", Doc<"The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">> denominator = 1_UZ;
-    A<std::size_t, "stride", Doc<"Number of samples between two data processing: overlap (stride < N), skip (stride > N), undefined-default (stride = 0)">>                          stride      = 0_UZ;
-    std::size_t                                                                                                    stride_counter                                                                = 0_UZ;
-    const std::size_t                                                                                              unique_id   = _unique_id_counter++;
+    A<std::size_t, "numerator", Doc<"top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>>      numerator      = 1_UZ;
+    A<std::size_t, "denominator", Doc<"bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>> denominator    = 1_UZ;
+    A<std::size_t, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                                                stride         = 0_UZ;
+    std::size_t                                                                                                                                                        stride_counter = 0_UZ;
+    const std::size_t                                                                                                                                                  unique_id = _unique_id_counter++;
     const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(fair::meta::type_name<Derived>()) };
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
@@ -605,7 +605,7 @@ public:
 
     constexpr void
     forward_tags() noexcept {
-        if (!_output_tags_changed && !_input_tags_present) {
+        if (!(_output_tags_changed || _input_tags_present)) {
             return;
         }
         std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument

@@ -124,14 +124,14 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
     IN<T>  in{};
     OUT<T> out{};
     // parameters
-    A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">> scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
-    A<std::string, "context information", Visible>                context{};
-    std::int32_t                                                  n_samples_max = -1;
-    float                                                         sample_rate   = 1000.0f;
-    std::vector<T>                                                vector_setting{ T(3), T(2), T(1) };
-    int                                                           update_count = 0;
-    bool                                                          debug        = false;
-    bool                                                          resetCalled  = false;
+    A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">>                    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
+    A<std::string, "context information", Visible>                                   context{};
+    std::int32_t                                                                     n_samples_max = -1;
+    A<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1000.0f;
+    std::vector<T>                                                                   vector_setting{ T(3), T(2), T(1) };
+    int                                                                              update_count = 0;
+    bool                                                                             debug        = false;
+    bool                                                                             resetCalled  = false;
 
     void
     settings_changed(const property_map &old_settings, property_map &new_settings) noexcept {
@@ -500,6 +500,25 @@ const boost::ut::suite AnnotationTests = [] {
         expect(block.scaling_factor == 42.f) << "the answer to everything failed -- equal operator";
         expect(eq(block.scaling_factor.value, 42.f)) << "the answer to everything failed -- by value";
         expect(eq(block.scaling_factor, 42.f)) << "the answer to everything failed -- direct";
+
+        // check validator
+        expect(block.sample_rate.validate_and_set(1.f));
+        expect(not block.sample_rate.validate_and_set(-1.f));
+
+        constexpr auto                                             isPowerOfTwo   = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+        Annotated<int, "power of two", Limits<0, 0, isPowerOfTwo>> needPowerOfTwo = 2;
+        expect(isPowerOfTwo(4));
+        expect(!isPowerOfTwo(5));
+        expect(needPowerOfTwo.validate_and_set(4));
+        expect(not needPowerOfTwo.validate_and_set(5));
+        expect(eq(needPowerOfTwo.value, 4));
+
+        Annotated<int, "power of two", Limits<0, 0, [](const int &val) { return (val > 0) && (val & (val - 1)) == 0; }>> needPowerOfTwoAlt = 2;
+        expect(needPowerOfTwoAlt.validate_and_set(4));
+        expect(not needPowerOfTwoAlt.validate_and_set(5));
+
+        std::ignore = block.settings().set({ { "sample_rate", -1.0f } });
+        std::ignore = block.settings().apply_staged_parameters(); // should print out a warning -> TODO: replace with pmt error message on msgOut port
 
         // fmt::print("description:\n {}", fair::graph::node_description<TestBlock<float>>());
     };
