@@ -19,10 +19,10 @@ jobs:
         configurations:
           - name: Ubuntu gcc12
             os: ubuntu-22.04
-            compiler: gcc
-          - name: Ubuntu clang15
+            compiler: gcc12
+          - name: Ubuntu gcc13
             os: ubuntu-22.04
-            compiler: clang15
+            compiler: gcc13
           - name: Ubuntu Latest clang16
             os: ubuntu-22.04
             compiler: clang16
@@ -34,116 +34,114 @@ jobs:
       BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory
 
     steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-    - name: Cache
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-fetchContent-cache
-      with:
-        path: ${{runner.workspace}}/build/_deps
-        key: ${{ runner.os }}-${{ matrix.configurations.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+      - name: Cache
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-fetchContent-cache
+        with:
+          path: ${{runner.workspace}}/build/_deps
+          key: ${{ runner.os }}-${{ matrix.configurations.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
 
-    - name: Install gcc-12
-      if: matrix.configurations.compiler == 'gcc'
-      run: |
-        sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa # provides newer gcc 12.2.0 instead of 12.1.0
-        sudo apt-get install -y gcc-12 g++-12 gcovr
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 110 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+      - name: Install gcc-12
+        if: matrix.configurations.compiler == 'gcc12'
+        run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa # provides newer gcc 12.2.0 instead of 12.1.0
+          sudo apt-get install -y gcc-12 g++-12 gcovr
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 110 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
-    - name: Install clang-15
-      if: matrix.configurations.compiler == 'clang15'
-      run: |
-        sudo apt update
-        sudo apt upgrade -y # update clang14 to fix packaging conflicts
-        sudo apt install -y clang-15 libc++-15-dev libc++abi-15-dev
-        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-15 110
+      - name: Install gcc-13
+        if: matrix.configurations.compiler == 'gcc13'
+        run: |
+          sudo apt-get install -y gcc-13 g++-13 gcovr
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 110 --slave /usr/bin/g++ g++ /usr/bin/g++-13 --slave /usr/bin/gcov gcov /usr/bin/gcov-13
 
-    - name: Install clang-16
-      if: matrix.configurations.compiler == 'clang16'
-      run: |
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-        sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-16 main'
-        sudo apt update
-        sudo apt upgrade -y # update clang14 to fix packaging conflicts
-        sudo apt install -y clang-16 libc++-16-dev libc++abi-16-dev
-        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 110
+      - name: Install clang-16
+        if: matrix.configurations.compiler == 'clang16'
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+          sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-16 main'
+          sudo apt update
+          sudo apt upgrade -y # update clang14 to fix packaging conflicts
+          sudo apt install -y clang-16 libc++-16-dev libc++abi-16-dev
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 110
 
-    - name: Install emscripten
-      if: matrix.configurations.compiler == 'emscripten'
-      shell: bash
-      run: |
-        cd
-        git clone --depth=1 https://github.com/emscripten-core/emsdk.git
-        cd emsdk
-        # Download and install the latest SDK tools.
-        ./emsdk install releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
-        # Make the "latest" SDK "active" for the current user. (writes .emscripten file)
-        ./emsdk activate releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
+      - name: Install emscripten
+        if: matrix.configurations.compiler == 'emscripten'
+        shell: bash
+        run: |
+          cd
+          git clone --depth=1 https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          # Download and install the latest SDK tools.
+          ./emsdk install releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
+          # Make the "latest" SDK "active" for the current user. (writes .emscripten file)
+          ./emsdk activate releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
 
-    - name: Install sonar-scanner and build-wrapper
-      if: matrix.configurations.compiler == 'gcc' && matrix.cmake-build-type == 'Debug'
-      uses: SonarSource/sonarcloud-github-c-cpp@v1
+      - name: Install sonar-scanner and build-wrapper
+        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        uses: SonarSource/sonarcloud-github-c-cpp@v1
 
-    - name: Configure CMake
-      if: matrix.configurations.compiler != 'emscripten'
-      shell: bash
-      run: |
-        cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.configurations.compiler == 'gcc' &&  matrix.cmake-build-type == 'Debug'}}
+      - name: Configure CMake
+        if: matrix.configurations.compiler != 'emscripten'
+        shell: bash
+        run: |
+          cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.configurations.compiler == 'gcc12' &&  matrix.cmake-build-type == 'Debug'}}
 
-    - name: Configure CMake Emscripten
-      if: matrix.configurations.compiler == 'emscripten'
-      shell: bash
-      run: |
-        source ~/emsdk/emsdk_env.sh
-        emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF
+      - name: Configure CMake Emscripten
+        if: matrix.configurations.compiler == 'emscripten'
+        shell: bash
+        run: |
+          source ~/emsdk/emsdk_env.sh
+          emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF
 
-    - name: Build
-      if: matrix.configurations.compiler != 'gcc' || matrix.cmake-build-type != 'Debug'
-      shell: bash
-      run: |
-        test -f ~/emsdk/emsdk_env.sh && source ~/emsdk/emsdk_env.sh
-        cmake --build ../build
+      - name: Build
+        if: matrix.configurations.compiler != 'gcc12' || matrix.cmake-build-type != 'Debug'
+        shell: bash
+        run: |
+          test -f ~/emsdk/emsdk_env.sh && source ~/emsdk/emsdk_env.sh
+          cmake --build ../build
 
-    - name: Build with Coverage and SonarCube
-      if: matrix.configurations.compiler == 'gcc' && matrix.cmake-build-type == 'Debug'
-      shell: bash
-      run: build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build ../build
+      - name: Build with Coverage and SonarCube
+        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        shell: bash
+        run: build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build ../build
 
-    - name: execute tests
-      if: matrix.configurations.compiler != 'gcc' || matrix.cmake-build-type != 'Debug'
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
-      run: ctest --output-on-failure
+      - name: execute tests
+        if: matrix.configurations.compiler != 'gcc12' || matrix.cmake-build-type != 'Debug'
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: ctest --output-on-failure
 
-    - name: execute tests with coverage
-      if: matrix.configurations.compiler == 'gcc' && matrix.cmake-build-type == 'Debug'
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
-      run: cmake --build . --target coverage
+      - name: execute tests with coverage
+        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: cmake --build . --target coverage
 
-    - name: execute native main binary
-      if: matrix.configurations.compiler != 'emscripten'
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
-      run: ./src/main
+      - name: execute native main binary
+        if: matrix.configurations.compiler != 'emscripten'
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: ./src/main
 
-    - name: execute wasm main binary with nodejs
-      if: matrix.configurations.compiler == 'emscripten'
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
-      run: |
-        node --experimental-wasm-threads ./src/main.js
+      - name: execute wasm main binary with nodejs
+        if: matrix.configurations.compiler == 'emscripten'
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: |
+          node --experimental-wasm-threads ./src/main.js
 
-    - name: Run sonar-scanner
-      if: matrix.configurations.compiler == 'gcc' && matrix.cmake-build-type == 'Debug'
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      run: |
-        test -f ~/emsdk/emsdk_env.sh && source ~/emsdk/emsdk_env.sh
-        sonar-scanner --define sonar.cfamily.build-wrapper-output="${{ env.BUILD_WRAPPER_OUT_DIR }}"
-      # Consult https://docs.sonarcloud.io/advanced-setup/ci-based-analysis/sonarscanner-cli/ for more information and options
+      - name: Run sonar-scanner
+        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          test -f ~/emsdk/emsdk_env.sh && source ~/emsdk/emsdk_env.sh
+          sonar-scanner --define sonar.cfamily.build-wrapper-output="${{ env.BUILD_WRAPPER_OUT_DIR }}"
+        # Consult https://docs.sonarcloud.io/advanced-setup/ci-based-analysis/sonarscanner-cli/ for more information and options
