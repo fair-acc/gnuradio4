@@ -9,7 +9,7 @@ blocks:
       stride: 0
       unique_name: good::fixed_source<double>#0
       denominator::description: denominator
-      denominator::documentation: "The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -22,11 +22,11 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
-      stride::documentation: "Number of samples between two data processing: overlap (stride < N), skip (stride > N), undefined-default (stride = 0)"
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
       stride::unit: ""
       stride::visible: 0
       unknown_property: 42
@@ -39,7 +39,7 @@ blocks:
       stride: 0
       unique_name: good::multiply<double>#0
       denominator::description: denominator
-      denominator::documentation: "The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -52,11 +52,11 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
-      stride::documentation: "Number of samples between two data processing: overlap (stride < N), skip (stride > N), undefined-default (stride = 0)"
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
       stride::unit: ""
       stride::visible: 0
   - name: counter
@@ -68,7 +68,7 @@ blocks:
       stride: 0
       unique_name: builtin_counter<double>#0
       denominator::description: denominator
-      denominator::documentation: "The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -81,11 +81,11 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
-      stride::documentation: "Number of samples between two data processing: overlap (stride < N), skip (stride > N), undefined-default (stride = 0)"
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
       stride::unit: ""
       stride::visible: 0
   - name: sink
@@ -98,7 +98,7 @@ blocks:
       total_count: 100
       unique_name: good::cout_sink<double>#0
       denominator::description: denominator
-      denominator::documentation: "The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -111,11 +111,11 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)"
+      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
-      stride::documentation: "Number of samples between two data processing: overlap (stride < N), skip (stride > N), undefined-default (stride = 0)"
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
       stride::unit: ""
       stride::visible: 0
       unknown_property: 42

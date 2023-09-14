@@ -468,14 +468,40 @@ public:
                 const auto &key                  = localKey;
                 const auto &staged_value         = localStaged_value;
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
+                    using RawType = std::remove_cvref_t<decltype(member(*_node))>;
+                    using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (is_writable(member) && is_supported_type<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
-                            member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (HasSettingsChangedCallback<Node>) {
-                                staged.insert_or_assign(key, staged_value);
+                            if constexpr (is_annotated<RawType>()) {
+                                if (member(*_node).validate_and_set(std::get<Type>(staged_value))) {
+                                    if constexpr (HasSettingsChangedCallback<Node>) {
+                                        staged.insert_or_assign(key, staged_value);
+                                    } else {
+                                        std::ignore = staged; // help clang to see why staged is not unused
+                                    }
+                                } else {
+                                    // TODO: replace with pmt error message on msgOut port (to note: clang compiler bug/issue)
+#if !defined(__EMSCRIPTEN__) && !defined(__clang__)
+                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                               _node->unique_name, _node->name, member(*_node), std::get<Type>(staged_value),                                     //
+                                               std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                               RawType::LimitType::MaxRange, //
+                                               RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+#else
+                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                               "_node->unique_name", "_node->name", member(*_node), std::get<Type>(staged_value),                                 //
+                                               std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                               RawType::LimitType::MaxRange, //
+                                               RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+#endif
+                                }
                             } else {
-                                std::ignore = staged; // help clang to see why staged is not unused
+                                member(*_node) = std::get<Type>(staged_value);
+                                if constexpr (HasSettingsChangedCallback<Node>) {
+                                    staged.insert_or_assign(key, staged_value);
+                                } else {
+                                    std::ignore = staged; // help clang to see why staged is not unused
+                                }
                             }
                         }
                         if (_auto_forward.contains(key)) {
