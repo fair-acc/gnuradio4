@@ -18,9 +18,9 @@ inline static std::size_t n_samples_produced = 0_UZ;
 template<typename T, std::size_t min = 0_UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
 class source : public fg::node<source<T, min, count>> {
 public:
-    uint64_t    _n_samples_max;
-    std::size_t _n_tag_offset;
-    fg::OUT<T>  out;
+    uint64_t       _n_samples_max;
+    std::size_t    _n_tag_offset;
+    fg::PortOut<T> out;
 
     source() = delete;
 
@@ -87,11 +87,11 @@ public:
 
 inline static std::size_t n_samples_consumed = 0_UZ;
 
-template<typename T, std::size_t N_MIN = 0_UZ, std::size_t N_MAX = N_MAX>
+template<typename T, std::size_t N_MIN = 1_UZ, std::size_t N_MAX = N_MAX>
 struct sink : public fg::node<sink<T, N_MIN, N_MAX>> {
-    fg::IN<T, N_MIN, N_MAX> in;
-    std::size_t             should_receive_n_samples = 0;
-    int64_t                 _last_tag_position       = -1;
+    fg::PortIn<T, fg::RequiredSamples<N_MIN, N_MAX>> in;
+    std::size_t                                      should_receive_n_samples = 0;
+    int64_t                                          _last_tag_position       = -1;
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto

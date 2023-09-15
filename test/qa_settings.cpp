@@ -85,7 +85,7 @@ printChanges(const property_map &oldMap, const property_map &newMap) noexcept {
 
 template<typename T>
 struct Source : public node<Source<T>> {
-    OUT<T>       out;
+    PortOut<T>   out;
     std::int32_t n_samples_produced = 0;
     std::int32_t n_samples_max      = 1024;
     std::int32_t n_tag_offset       = 0;
@@ -121,8 +121,8 @@ some test doc documentation
 
 template<typename T>
 struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, SupportedTypes<float, double>> {
-    IN<T>  in{};
-    OUT<T> out{};
+    PortIn<T>  in{};
+    PortOut<T> out{};
     // parameters
     A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">>                    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
     A<std::string, "context information", Visible>                                   context{};
@@ -165,8 +165,8 @@ template<typename T, bool Average = false>
 struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double>, PerformDecimationInterpolation, Doc<R""(
 @brief reduces sample rate by given fraction controlled by denominator
 )"">> {
-    IN<T>                            in{};
-    OUT<T>                           out{};
+    PortIn<T>                        in{};
+    PortOut<T>                       out{};
     A<float, "sample rate", Visible> sample_rate = 1.f;
 
     void
@@ -205,7 +205,7 @@ static_assert(NodeType<Decimate<double>>);
 
 template<typename T>
 struct Sink : public node<Sink<T>> {
-    IN<T>        in;
+    PortIn<T>    in;
     std::int32_t n_samples_consumed = 0;
     std::int32_t n_samples_max      = -1;
     int64_t      last_tag_position  = -1;

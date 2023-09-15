@@ -11,8 +11,8 @@ namespace fg = fair::graph;
 template<typename From, typename To>
 class convert : public fg::node<convert<From, To>> {
 public:
-    fg::IN<From> in;
-    fg::OUT<To>  out;
+    fg::PortIn<From> in;
+    fg::PortOut<To>  out;
 
     [[nodiscard]] constexpr auto
     process_one(From value) const noexcept {

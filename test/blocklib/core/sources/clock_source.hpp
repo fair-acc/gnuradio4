@@ -30,7 +30,7 @@ ClockSource Documentation -- add here
 )"">> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
     //
-    OUT<T>             out;
+    PortOut<T>         out;
     std::vector<tag_t> tags{};
     std::size_t        next_tag{ 0 };
     //

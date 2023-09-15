@@ -738,9 +738,10 @@ operator<<(std::ostream &os, const port_direction_t &value) {
     return os << static_cast<int>(value);
 }
 
+template<PortDomainType T>
 inline std::ostream &
-operator<<(std::ostream &os, const port_domain_t &value) {
-    return os << static_cast<int>(value);
+operator<<(std::ostream &os, const T &value) {
+    return os << value.Name;
 }
 
 #if HAVE_SOURCE_LOCATION

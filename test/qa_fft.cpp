@@ -17,9 +17,9 @@ namespace fg = fair::graph;
 
 template<typename T>
 struct CountSource : public fg::node<CountSource<T>> {
-    fg::OUT<T> out{};
-    int        count{ 0 };
-    int        nSamples{ 1024 };
+    fg::PortOut<T> out{};
+    int            count{ 0 };
+    int            nSamples{ 1024 };
 
     constexpr std::make_signed_t<std::size_t>
     available_samples(const CountSource & /*d*/) noexcept {

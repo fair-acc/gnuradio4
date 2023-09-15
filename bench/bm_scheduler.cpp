@@ -14,7 +14,7 @@ inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000'000, 1024);
 inline constexpr std::size_t N_NODES   = 5;
 
 template<typename T, char op>
-class math_op : public fg::node<math_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
+class math_op : public fg::node<math_op<T, op>, fg::PortInNamed<T, "in">, fg::PortOutNamed<T, "out">> {
     T _factor = static_cast<T>(1.0f);
 
 public:

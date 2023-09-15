@@ -29,8 +29,8 @@ public:
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 class scale : public fg::node<scale<T, Scale, R>> {
 public:
-    fg::IN<T>  original;
-    fg::OUT<R> scaled;
+    fg::PortIn<T>  original;
+    fg::PortOut<R> scaled;
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -44,9 +44,9 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T,
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public fg::node<adder<T>> {
 public:
-    fg::IN<T>  addend0;
-    fg::IN<T>  addend1;
-    fg::OUT<T> sum;
+    fg::PortIn<T>  addend0;
+    fg::PortIn<T>  addend1;
+    fg::PortOut<T> sum;
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -60,7 +60,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), add
 template<typename T>
 class cout_sink : public fg::node<cout_sink<T>> {
 public:
-    fg::IN<T> sink;
+    fg::PortIn<T> sink;
 
     void
     process_one(T value) {
@@ -74,8 +74,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 template<typename T, T val, std::size_t count = 10_UZ>
 class repeater_source : public fg::node<repeater_source<T, val>> {
 public:
-    fg::OUT<T>  value;
-    std::size_t _counter = 0;
+    fg::PortOut<T> value;
+    std::size_t    _counter = 0;
 
     fair::graph::work_return_t
     work(std::size_t requested_work) {
@@ -103,24 +103,33 @@ const boost::ut::suite PortApiTests = [] {
     using namespace fair::graph;
 
     "PortApi"_test = [] {
-        static_assert(Port<IN<float, 0, 0, "in">>);
-        static_assert(Port<decltype(IN<float>("in"))>);
-        static_assert(Port<OUT<float, 0, 0, "out">>);
-        static_assert(Port<IN_MSG<float, 0, 0, "in_msg">>);
-        static_assert(Port<OUT_MSG<float, 0, 0, "out_msg">>);
+        static_assert(PortType<PortIn<float>>);
+        static_assert(PortType<decltype(PortIn<float>())>);
+        static_assert(PortType<PortOut<float>>);
+        static_assert(PortType<MsgPortIn<float>>);
+        static_assert(PortType<MsgPortOut<float>>);
 
-        static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
-        static_assert(requires { IN<float>("in").name; });
+        static_assert(PortType<PortInNamed<float, "in">>);
+        static_assert(PortType<decltype(PortInNamed<float>("in"))>);
+        static_assert(PortType<PortOutNamed<float, "out">>);
+        static_assert(PortType<MsgPortInNamed<"in_msg">>);
+        static_assert(PortType<MsgPortOutNamed<"out_msg">>);
+
+        static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MinSamples == 1);
+        static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MaxSamples == 2);
+        static_assert(PortIn<float>::direction() == port_direction_t::INPUT);
+        static_assert(PortOut<float>::direction() == port_direction_t::OUTPUT);
     };
 
     "PortBufferApi"_test = [] {
-        OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out0"> output_port;
-        BufferWriter auto                                             &writer = output_port.streamWriter();
+        PortOut<float>     output_port;
+        BufferWriter auto &writer = output_port.streamWriter();
         // BufferWriter auto                                             &tagWriter = output_port.tagWriter();
         expect(ge(writer.available(), 32_UZ));
 
-        IN<float, 0, std::numeric_limits<std::size_t>::max(), "int0"> input_port;
-        const BufferReader auto                                      &reader = input_port.streamReader();
+        using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
+        PortIn<float, ExplicitUnlimitedSize> input_port;
+        const BufferReader auto             &reader = input_port.streamReader();
         expect(eq(reader.available(), 0_UZ));
         auto buffers = output_port.buffer();
         input_port.setBuffer(buffers.streamBuffer, buffers.tagBufferType);
@@ -139,9 +148,10 @@ const boost::ut::suite PortApiTests = [] {
 
     "RuntimePortApi"_test = [] {
         // declare in block
-        OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out"> out;
-        IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">   in;
-        std::vector<dynamic_port>                                     port_list;
+        using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
+        PortOut<float, ExplicitUnlimitedSize> out;
+        PortIn<float, ExplicitUnlimitedSize>  in;
+        std::vector<dynamic_port>             port_list;
 
         port_list.emplace_back(out);
         port_list.emplace_back(in);

@@ -19,10 +19,10 @@ continuously improve this document.
   through a general `work()` function. Blocks are the building blocks of a flow-graph and can be thought of as vertices
   in a graph, and *ports* are their input/output connections to neighboring blocks for data streaming, streaming tags,
   and asynchronous messages. For the specific implementation, see [node.hpp](node.hpp).
-* [port](#Ports) is an interface through which data flows into or out of a block. Each block may have zero, one or
-  more input ports, and zero, one or more output ports. Data is passed between blocks by connecting the output port of
-  one block to the input port of another. For the specific implementation, see [port.hpp](port.hpp).
-* [buffer](#Buffer)  is an area of memory where data is temporarily stored in the runtime-connected graph. Each port
+* [Port](#Ports) is an interface through which data flows into or out of a block. Each block may have zero, one or
+  more input ports, and zero, one or more output ports. Data is passed between blocks by connecting the output Port of
+  one block to the input Port of another. For the specific implementation, see [port.hpp](port.hpp).
+* [buffer](#Buffer)  is an area of memory where data is temporarily stored in the runtime-connected graph. Each Port
   has its own buffer to store the data, tags, or other messages it needs to perform its computations. Buffer
   implementations are typically domain-specific (e.g. for blocks/ports implemented on the CPU, GPU, etc.) and are often,
   but not necessarily, implemented as circular buffers. For the specific interface see [Buffer.hpp](Buffer.hpp) and one
@@ -54,31 +54,36 @@ switch and adopt the provided low-level graph algorithms.
 
 ### Ports
 
-Ports in this framework are designed to interconnect blocks in a graph, similar to RF connectors. The port class
+Ports in this framework are designed to interconnect blocks in a graph, similar to RF connectors. The Port class
 template has several parameters that define its behaviour, including the type of data it handles (`T`), its
-name (`PortName`), type (`PortType`), direction (`PortDirection` <-> input/output), and the minimum and maximum number
-of samples (`MIN_SAMPLES` and `MAX_SAMPLES`) the user requires for a given block before the `work()` is invoked by the
-scheduler. The buffer type used by the port can also be specified using the `BufferType` parameter,
-with `gr::circular_buffer<T>` being the default:
-
+name (`PortName`), type (`PortType`), direction (`PortDirection` <-> input/output), and optional list of `Arguments`
+that may constrain the port behaviour on the `Block` or `Scheduler` level::
 ```cpp
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
-         std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent,
-         gr::Buffer BufferType = gr::circular_buffer<T>>
-class port { /* ... */ };
+class template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, typename... Arguments>
+struct Port { /* ... */ };
 ```
+
+Some of the possible optional port annotation attributes are:
+
+* `RequiredSamples` to describe the min/max number of samples required from this port before invoking the blocks work
+  function,
+* `Optional` informing the graph/scheduler that a given port does not require to be connected,
+* `PortDomain<fixed_string>` described whether the port can be handled within the same scheduling domain (e.g. `CPU`
+  or `GPU`),
+* `StreamBufferType` and `TagBufferType` to inject specific user-provided buffer implementations to the port, or
+* `Async` for making a port asynchronous in a signal flow-graph block.
 
 When connecting ports, either a single-step or a two-step connection method can be used:
 
 1. single-step connection: which allocates a buffer and passes the corresponding `BufferWriter` and `BufferReader`
-   instances to the source and destination port. The buffer size is determined only once based on
+   instances to the source and destination Port. The buffer size is determined only once based on
    the `[MIN, MAX]_SAMPLES` constraints and is inherited/fixed for further connected input ports.
 2. two-step connection (usually done by the graph):
     * register all ports that shall be connected to each other
-    * determine the minimum buffer size required by the set of connected port and then perform the actual connections as
+    * determine the minimum buffer size required by the set of connected Port and then perform the actual connections as
       outlined in the single-step connection method.
 
-Each port belongs to a single computing domain, which is specified using the port_domain_t enumeration:
+Each Port belongs to a single computing domain, which is specified using the port_domain_t enumeration:
 
 ```cpp
 enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU /*, ...*/ };
@@ -97,8 +102,8 @@ favour low-latency execution (e.g. few bytes) to keep the data and L1/L2/L3 cach
 including, for example, GPUs this choice would cause significant overhead when copying data from the CPU to GPU that
 favour DMA-type block-transfer to exchange data for best efficiency.
 
-Additionally, the usage of one buffer type and port per computation domain, along with explicit data conversion, enables
-users to easily extend the framework. This approach provides the flexibility for users to define custom buffer and port
+Additionally, the usage of one buffer type and Port per computation domain, along with explicit data conversion, enables
+users to easily extend the framework. This approach provides the flexibility for users to define custom buffer and Port
 implementations that cater to the specific requirements of their applications, thus offering optimal performance and
 scalability. The ability to create specialized implementations for specific use cases, coupled with the framework's
 openness to user-defined extensions, makes it a versatile and customizable solution.
@@ -113,8 +118,8 @@ For example:
 
 ```cpp
 struct user_defined_block : node<user_defined_block> {
-  IN<float> in;
-  OUT<float> out;
+  PortIn<float> in;
+  PortOut<float> out;
   // implement either:
   [[nodiscard]] constexpr work_return_t work() noexcept {...}
   // or one of the convenience functions outlined below
@@ -127,7 +132,7 @@ types through templating the input 'T' and return type 'R':
 
 ```cpp
 template<typename T, typename R>
-struct user_defined_block : node<user_defined_block, IN<T, 0, N_MAX, "in">, OUT<R, 0, N_MAX, "out">> {
+struct user_defined_block : node<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
   // implement either:
   [[nodiscard]] constexpr work_return_t work() noexcept {...}
   // or one of the convenience functions outlined below
@@ -146,7 +151,7 @@ The following defaults are defined for one of the two 'user_defined_block' block
 * **case 1a** - non-decimating N-in->N-out mechanic and automatic handling of streaming tags and settings changes:
   ```cpp
   template<typename T, typename R>
-  struct user_defined_block : node<user_defined_block, IN<T, 0, N_MAX, "in">, OUT<R, 0, N_MAX, "out">> {
+  struct user_defined_block : node<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
     T _factor = T{1};
     // constuctor setting _factor etc.
 
@@ -155,12 +160,12 @@ The following defaults are defined for one of the two 'user_defined_block' block
     }
   };
   ```
-  The number, type, and ordering of input and arguments of `process_one(..)` are defined by the port definitions.
+  The number, type, and ordering of input and arguments of `process_one(..)` are defined by the Port definitions.
 * **case 1b** - non-decimating N-in->N-out mechanic providing bulk access to the input/output data and automatic
   handling of streaming tags and settings changes:
   ```cpp
   template<typename T, typename R>
-  struct user_defined_block : node<user_defined_block, IN<T, 0, N_MAX, "in">, OUT<R, 0, N_MAX, "out">> {
+  struct user_defined_block : node<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
     T _factor = T{1};
     // constuctor setting _factor etc.
 

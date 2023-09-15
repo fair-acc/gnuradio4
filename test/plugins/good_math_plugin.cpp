@@ -28,8 +28,8 @@ protected:
     T _factor = static_cast<T>(1.0f);
 
 public:
-    fg::IN<T, 0, 1024>  in;
-    fg::OUT<T, 0, 1024> out;
+    fg::PortIn<T, fg::RequiredSamples<1, 1024>>  in;
+    fg::PortOut<T, fg::RequiredSamples<1, 1024>> out;
 
     math_base() = delete;
 

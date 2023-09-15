@@ -37,7 +37,7 @@ namespace fair::graph::data_sink_test {
 
 template<typename T>
 struct Source : public node<Source<T>> {
-    OUT<T>             out;
+    PortOut<T>         out;
     std::int32_t       n_samples_produced = 0;
     std::int32_t       n_samples_max      = 1024;
     std::size_t        n_tag_offset       = 0;
@@ -322,7 +322,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        auto                     poller_data_only = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);
+        auto poller_data_only = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller_data_only, nullptr));
 
         auto poller_with_tags = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);

@@ -10,7 +10,7 @@ template<typename T>
 std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
 
 template<typename T>
-struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {
+struct fixed_source : public fg::node<fixed_source<T>, fg::PortOutNamed<T, "out">> {
     T value = 1;
 
     fg::work_return_t
@@ -30,7 +30,7 @@ struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out"
 static_assert(fair::graph::NodeType<fixed_source<int>>);
 
 template<typename T>
-struct cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
+struct cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
     std::size_t remaining = 0;
 
     void

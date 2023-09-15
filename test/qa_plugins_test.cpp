@@ -40,8 +40,8 @@ class builtin_multiply : public fg::node<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
-    fg::IN<T>  in;
-    fg::OUT<T> out;
+    fg::PortIn<T>  in;
+    fg::PortOut<T> out;
 
     builtin_multiply() = delete;
 

@@ -19,7 +19,7 @@ inline constexpr std::size_t N_ITER = 10;
 inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000, 1024);
 
 template<typename T, char op>
-struct math_op : public fg::node<math_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
+struct math_op : public fg::node<math_op<T, op>, fg::PortInNamed<T, "in">, fg::PortOutNamed<T, "out">> {
     T factor = static_cast<T>(1.0f);
 
     // public:
@@ -58,7 +58,7 @@ static_assert(fg::traits::node::can_process_one_simd<multiply<float>>);
 #endif
 
 template<typename T, char op>
-class math_bulk_op : public fg::node<math_bulk_op<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
+class math_bulk_op : public fg::node<math_bulk_op<T, op>, fg::PortInNamed<T, "in", fg::RequiredSamples<1, N_MAX>>, fg::PortOutNamed<T, "out", fg::RequiredSamples<1, N_MAX>>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
@@ -126,8 +126,8 @@ class converting_multiply : public fg::node<converting_multiply<T, R>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
-    fg::IN<T>  in;
-    fg::OUT<R> out;
+    fg::PortIn<T>  in;
+    fg::PortOut<R> out;
 
     converting_multiply() = delete;
 
@@ -160,8 +160,8 @@ static_assert(fg::traits::node::can_process_one_simd<converting_multiply<float, 
 template<typename T, int addend>
 class add : public fg::node<add<T, addend>> {
 public:
-    fg::IN<T>  in;
-    fg::OUT<T> out;
+    fg::PortIn<T>  in;
+    fg::PortOut<T> out;
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
@@ -183,7 +183,7 @@ static_assert(fg::traits::node::can_process_one_simd<add<float, 1>>);
 // It doesn't need to be enabled for reflection.
 //
 template<typename T, char op>
-class gen_operation_SIMD : public fg::node<gen_operation_SIMD<T, op>, fg::IN<T, 0, N_MAX, "in">, fg::OUT<T, 0, N_MAX, "out">> {
+class gen_operation_SIMD : public fg::node<gen_operation_SIMD<T, op>, fg::PortInNamed<T, "in", fg::RequiredSamples<1, N_MAX>>, fg::PortOutNamed<T, "out", fg::RequiredSamples<1, N_MAX>>> {
     T _value = static_cast<T>(1.0f);
 
 public:
@@ -270,11 +270,11 @@ using multiply_SIMD = gen_operation_SIMD<T, '*'>;
 template<typename T>
 using add_SIMD = gen_operation_SIMD<T, '+'>;
 
-template<typename T, std::size_t N_MIN = 0, std::size_t N_MAX = N_MAX, bool use_bulk_operation = false, bool use_memcopy = true>
+template<typename T, std::size_t N_MIN = 1, std::size_t N_MAX = N_MAX, bool use_bulk_operation = false, bool use_memcopy = true>
 class copy : public fg::node<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>> {
 public:
-    fg::IN<T, N_MIN, N_MAX>  in;
-    fg::OUT<T, N_MIN, N_MAX> out;
+    fg::PortIn<T, fg::RequiredSamples<N_MIN, N_MAX>>  in;
+    fg::PortOut<T, fg::RequiredSamples<N_MIN, N_MAX>> out;
 
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
@@ -336,8 +336,8 @@ simd_size() noexcept {
 
 namespace stdx = vir::stdx;
 
-template<typename From, typename To, std::size_t N_MIN = 0 /* SIMD size */, std::size_t N_MAX = N_MAX>
-class convert : public fg::node<convert<From, To, N_MIN, N_MAX>, fg::IN<From, N_MIN, N_MAX, "in">, fg::OUT<To, N_MIN, N_MAX, "out">> {
+template<typename From, typename To, std::size_t N_MIN = 1 /* SIMD size */, std::size_t N_MAX = N_MAX>
+class convert : public fg::node<convert<From, To, N_MIN, N_MAX>, fg::PortInNamed<From, "in", fg::RequiredSamples<N_MIN, N_MAX>>, fg::PortOutNamed<To, "out", fg::RequiredSamples<N_MIN, N_MAX>>> {
     static_assert(stdx::is_simd_v<From> != stdx::is_simd_v<To>, "either input xor output must be SIMD capable");
     constexpr static std::size_t from_simd_size = detail::simd_size<From>();
     constexpr static std::size_t to_simd_size   = detail::simd_size<To>();
@@ -451,7 +451,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto merged_node = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(test::source<float, 1024, 1024>(N_SAMPLES), copy<float, 0, 128>()), copy<float, 0, 1024>()),
+        auto merged_node = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(test::source<float, 1024, 1024>(N_SAMPLES), copy<float, 1, 128>()), copy<float, 1, 1024>()),
                                                                  copy<float, 32, 128>()),
                                               test::sink<float>());
         "merged src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&merged_node]() { loop_over_process_one(merged_node); };
@@ -521,7 +521,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &src  = flow_graph.make_node<test::source<float>>(N_SAMPLES);
         auto     &sink = flow_graph.make_node<test::sink<float>>();
 
-        using copy     = ::copy<float, 0, N_MAX, true, true>;
+        using copy     = ::copy<float, 1, N_MAX, true, true>;
         std::vector<copy *> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
             cpy[i] = std::addressof(flow_graph.make_node<copy>({ { "name", fmt::format("copy {} at {}", i, fair::graph::this_source_location()) } }));
@@ -542,8 +542,8 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         fg::graph flow_graph;
-        auto     &src  = flow_graph.make_node<test::source<float, 0, 1024>>(N_SAMPLES);
-        auto     &b1   = flow_graph.make_node<copy<float, 0, 128>>();
+        auto     &src  = flow_graph.make_node<test::source<float, 1, 1024>>(N_SAMPLES);
+        auto     &b1   = flow_graph.make_node<copy<float, 1, 128>>();
         auto     &b2   = flow_graph.make_node<copy<float, 1024, 1024>>();
         auto     &b3   = flow_graph.make_node<copy<float, 32, 128>>();
         auto     &sink = flow_graph.make_node<test::sink<float>>();

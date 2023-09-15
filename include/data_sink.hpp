@@ -144,7 +144,7 @@ public:
 
     template<typename T, TriggerMatcher M>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_trigger_poller(const data_sink_query &query, M&& matcher, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::Blocking) {
+    get_trigger_poller(const data_sink_query &query, M &&matcher, std::size_t pre_samples, std::size_t post_samples, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_trigger_poller(std::forward<M>(matcher), pre_samples, post_samples, block) : nullptr;
@@ -152,7 +152,7 @@ public:
 
     template<typename T, TriggerMatcher M>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_multiplexed_poller(const data_sink_query &query, M&& matcher, std::size_t maximum_window_size, blocking_mode block = blocking_mode::Blocking) {
+    get_multiplexed_poller(const data_sink_query &query, M &&matcher, std::size_t maximum_window_size, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_multiplexed_poller(std::forward<M>(matcher), maximum_window_size, block) : nullptr;
@@ -160,7 +160,7 @@ public:
 
     template<typename T, TriggerMatcher M>
     std::shared_ptr<typename data_sink<T>::dataset_poller>
-    get_snapshot_poller(const data_sink_query &query, M&& matcher, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::Blocking) {
+    get_snapshot_poller(const data_sink_query &query, M &&matcher, std::chrono::nanoseconds delay, blocking_mode block = blocking_mode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         return sink ? sink->get_snapshot_poller(std::forward<M>(matcher), delay, block) : nullptr;
@@ -168,7 +168,7 @@ public:
 
     template<typename T, StreamCallback<T> Callback>
     bool
-    register_streaming_callback(const data_sink_query &query, std::size_t max_chunk_size, Callback&& callback) {
+    register_streaming_callback(const data_sink_query &query, std::size_t max_chunk_size, Callback &&callback) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
@@ -181,7 +181,7 @@ public:
 
     template<typename T, DataSetCallback<T> Callback, TriggerMatcher M>
     bool
-    register_trigger_callback(const data_sink_query &query, M&& matcher, std::size_t pre_samples, std::size_t post_samples, Callback&& callback) {
+    register_trigger_callback(const data_sink_query &query, M &&matcher, std::size_t pre_samples, std::size_t post_samples, Callback &&callback) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
@@ -194,7 +194,7 @@ public:
 
     template<typename T, DataSetCallback<T> Callback, TriggerMatcher M>
     bool
-    register_multiplexed_callback(const data_sink_query &query, M&& matcher, std::size_t maximum_window_size, Callback&& callback) {
+    register_multiplexed_callback(const data_sink_query &query, M &&matcher, std::size_t maximum_window_size, Callback &&callback) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
@@ -207,7 +207,7 @@ public:
 
     template<typename T, DataSetCallback<T> Callback, TriggerMatcher M>
     bool
-    register_snapshot_callback(const data_sink_query &query, M&& matcher, std::chrono::nanoseconds delay, Callback&& callback) {
+    register_snapshot_callback(const data_sink_query &query, M &&matcher, std::chrono::nanoseconds delay, Callback &&callback) {
         std::lock_guard lg{ _mutex };
         auto            sink = find_sink<T>(query);
         if (!sink) {
@@ -319,7 +319,7 @@ public:
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
 
-    IN<T, std::dynamic_extent, _listener_buffer_size>                                in;
+    PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>>           in;
 
     struct poller {
         // TODO consider whether reusing port<T> here makes sense
@@ -409,7 +409,7 @@ public:
 
     template<TriggerMatcher M>
     std::shared_ptr<dataset_poller>
-    get_trigger_poller(M&& matcher, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::Blocking) {
+    get_trigger_poller(M &&matcher, std::size_t pre_samples, std::size_t post_samples, blocking_mode block_mode = blocking_mode::Blocking) {
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
@@ -420,7 +420,7 @@ public:
 
     template<TriggerMatcher M>
     std::shared_ptr<dataset_poller>
-    get_multiplexed_poller(M&& matcher, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::Blocking) {
+    get_multiplexed_poller(M &&matcher, std::size_t maximum_window_size, blocking_mode block_mode = blocking_mode::Blocking) {
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
@@ -430,7 +430,7 @@ public:
 
     template<TriggerMatcher M>
     std::shared_ptr<dataset_poller>
-    get_snapshot_poller(M&& matcher, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::Blocking) {
+    get_snapshot_poller(M &&matcher, std::chrono::nanoseconds delay, blocking_mode block_mode = blocking_mode::Blocking) {
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
@@ -440,27 +440,27 @@ public:
 
     template<StreamCallback<T> Callback>
     void
-    register_streaming_callback(std::size_t max_chunk_size, Callback&& callback) {
+    register_streaming_callback(std::size_t max_chunk_size, Callback &&callback) {
         add_listener(std::make_unique<continuous_listener<Callback>>(max_chunk_size, std::forward<Callback>(callback), *this), false);
     }
 
     template<TriggerMatcher M, DataSetCallback<T> Callback>
     void
-    register_trigger_callback(M&& matcher, std::size_t pre_samples, std::size_t post_samples, Callback&& callback) {
+    register_trigger_callback(M &&matcher, std::size_t pre_samples, std::size_t post_samples, Callback &&callback) {
         add_listener(std::make_unique<trigger_listener<Callback, M>>(std::forward<M>(matcher), pre_samples, post_samples, std::forward<Callback>(callback)), false);
         ensure_history_size(pre_samples);
     }
 
     template<TriggerMatcher M, DataSetCallback<T> Callback>
     void
-    register_multiplexed_callback(M&& matcher, std::size_t maximum_window_size, Callback&& callback) {
+    register_multiplexed_callback(M &&matcher, std::size_t maximum_window_size, Callback &&callback) {
         std::lock_guard lg(_listener_mutex);
         add_listener(std::make_unique<multiplexed_listener<Callback, M>>(std::forward<M>(matcher), maximum_window_size, std::forward<Callback>(callback)), false);
     }
 
     template<TriggerMatcher M, DataSetCallback<T> Callback>
     void
-    register_snapshot_callback(M&& matcher, std::chrono::nanoseconds delay, Callback&& callback) {
+    register_snapshot_callback(M &&matcher, std::chrono::nanoseconds delay, Callback &&callback) {
         std::lock_guard lg(_listener_mutex);
         add_listener(std::make_unique<snapshot_listener<Callback, M>>(std::forward<M>(matcher), delay, std::forward<Callback>(callback)), false);
     }
@@ -634,7 +634,7 @@ private:
         Callback              callback;
 
         template<typename CallbackFW>
-        explicit continuous_listener(std::size_t max_chunk_size, CallbackFW&& c, const data_sink<T> &parent) : parent_sink(parent), buffer(max_chunk_size), callback{ std::forward<CallbackFW>(c) } {}
+        explicit continuous_listener(std::size_t max_chunk_size, CallbackFW &&c, const data_sink<T> &parent) : parent_sink(parent), buffer(max_chunk_size), callback{ std::forward<CallbackFW>(c) } {}
 
         explicit continuous_listener(std::shared_ptr<poller> poller, bool do_block, const data_sink<T> &parent) : parent_sink(parent), block(do_block), polling_handler{ std::move(poller) } {}
 
@@ -760,11 +760,12 @@ private:
         Callback                      callback;
 
         template<TriggerMatcher Matcher>
-        explicit trigger_listener(Matcher&& matcher, std::shared_ptr<dataset_poller> handler, std::size_t pre, std::size_t post, bool do_block)
+        explicit trigger_listener(Matcher &&matcher, std::shared_ptr<dataset_poller> handler, std::size_t pre, std::size_t post, bool do_block)
             : block(do_block), pre_samples(pre), post_samples(post), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{ std::move(handler) } {}
 
         template<typename CallbackFW, TriggerMatcher Matcher>
-        explicit trigger_listener(Matcher&& matcher, std::size_t pre, std::size_t post, CallbackFW&& cb) : pre_samples(pre), post_samples(post), trigger_matcher(std::forward<Matcher>(matcher)), callback{ std::forward<CallbackFW>(cb) } {}
+        explicit trigger_listener(Matcher &&matcher, std::size_t pre, std::size_t post, CallbackFW &&cb)
+            : pre_samples(pre), post_samples(post), trigger_matcher(std::forward<Matcher>(matcher)), callback{ std::forward<CallbackFW>(cb) } {}
 
         void
         set_dataset_template(DataSet<T> dst) override {
@@ -850,11 +851,11 @@ private:
         Callback                      callback;
 
         template<typename CallbackFW, TriggerMatcher Matcher>
-        explicit multiplexed_listener(Matcher&& matcher_, std::size_t max_window_size, CallbackFW&& cb)
+        explicit multiplexed_listener(Matcher &&matcher_, std::size_t max_window_size, CallbackFW &&cb)
             : matcher(std::forward<Matcher>(matcher_)), maximum_window_size(max_window_size), callback(std::forward<CallbackFW>(cb)) {}
 
         template<TriggerMatcher Matcher>
-        explicit multiplexed_listener(Matcher&& matcher_, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
+        explicit multiplexed_listener(Matcher &&matcher_, std::size_t max_window_size, std::shared_ptr<dataset_poller> handler, bool do_block)
             : block(do_block), matcher(std::forward<Matcher>(matcher_)), maximum_window_size(max_window_size), polling_handler{ std::move(handler) } {}
 
         void
@@ -949,11 +950,12 @@ private:
         Callback                      callback;
 
         template<TriggerMatcher Matcher>
-        explicit snapshot_listener(Matcher&& matcher, std::chrono::nanoseconds delay, std::shared_ptr<dataset_poller> poller, bool do_block)
+        explicit snapshot_listener(Matcher &&matcher, std::chrono::nanoseconds delay, std::shared_ptr<dataset_poller> poller, bool do_block)
             : block(do_block), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{ std::move(poller) } {}
 
         template<typename CallbackFW, TriggerMatcher Matcher>
-        explicit snapshot_listener(Matcher&& matcher, std::chrono::nanoseconds delay, CallbackFW&& cb) : time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), callback(std::forward<CallbackFW>(cb)) {}
+        explicit snapshot_listener(Matcher &&matcher, std::chrono::nanoseconds delay, CallbackFW &&cb)
+            : time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), callback(std::forward<CallbackFW>(cb)) {}
 
         void
         set_dataset_template(DataSet<T> dst) override {
