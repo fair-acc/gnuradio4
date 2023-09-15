@@ -50,17 +50,16 @@ using property_map = pmtv::map_t;
  */
 struct alignas(hardware_constructive_interference_size) tag_t {
     using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{0};
-    property_map map{};
+    signed_index_type index{ 0 };
+    property_map      map{};
 
     tag_t() = default; // TODO: remove -- needed only for Clang <=15
 
-    tag_t(signed_index_type index_, property_map map_) noexcept: index(index_), map(std::move(
-            map_)) {} // TODO: remove -- needed only for Clang <=15
+    tag_t(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
 
     bool
     operator==(const tag_t &other) const
-    = default;
+            = default;
 
     // TODO: do we need the convenience methods below?
     void
@@ -190,8 +189,10 @@ inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string> TRIGGER_NAME
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
 inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
+inline EM_CONSTEXPR_STATIC default_tag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
+inline EM_CONSTEXPR_STATIC default_tag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 
-inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT };
+inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT, RESET_DEFAULTS, STORE_DEFAULTS };
 } // namespace tag
 
 } // namespace fair::graph
