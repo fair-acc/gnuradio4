@@ -3,6 +3,7 @@
 
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <utils.hpp>
 
 namespace fair::graph {
@@ -93,6 +94,73 @@ static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTy
 static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
 
 /**
+ * @brief Represents limits and optional validation for an Annotated<..> type.
+ *
+ * The `Limits` structure defines lower and upper bounds for a value of type `T`.
+ * Additionally, it allows for an optional custom validation function to be provided.
+ * This function should take a value of type `T` and return a `bool`, indicating
+ * whether the value passes the custom validation or not.
+ *
+ * Example:
+ * ```
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
+ * // or:
+ * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
+ * // or:
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
+ * ```
+ */
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
+    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
+        { f(v) } -> std::same_as<bool>;
+    } || Validator == nullptr)
+struct Limits {
+    using ValueType                                    = decltype(LowerLimit);
+    static constexpr ValueType           MinRange      = LowerLimit;
+    static constexpr ValueType           MaxRange      = UpperLimit;
+    static constexpr decltype(Validator) ValidatorFunc = Validator;
+
+    static constexpr bool
+    validate(const ValueType &value) noexcept {
+        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
+            if constexpr (Validator != nullptr) {
+                try {
+                    return Validator(value);
+                } catch (...) {
+                    return false;
+                }
+            } else {
+                return true; // if no validator and limits are same, return true by default
+            }
+        }
+        if constexpr (Validator != nullptr) {
+            try {
+                return value >= LowerLimit && value <= UpperLimit && Validator(value);
+            } catch (...) {
+                return false;
+            }
+        } else {
+            return value >= LowerLimit && value <= UpperLimit;
+        }
+        return true;
+    }
+};
+
+template<typename T>
+struct is_limits : std::false_type {};
+
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
+struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
+
+template<typename T>
+concept Limit    = is_limits<T>::value;
+
+using EmptyLimit = Limits<0, 0>; // nomen-est-omen
+
+static_assert(Limit<EmptyLimit>);
+
+/**
  * @brief Annotated is a template class that acts as a transparent wrapper around another type.
  * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
  * The meta-information is supplied as template parameters.
@@ -100,6 +168,7 @@ static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, Sup
 template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
 struct Annotated {
     using value_type = T;
+    using LimitType  = typename fair::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
     T value;
 
     Annotated() = default;
@@ -151,6 +220,23 @@ struct Annotated {
     {
         value = std::string(sv); // Convert from std::string_view to std::string and assign
         return *this;
+    }
+
+    template<typename U>
+        requires std::is_same_v<std::remove_cvref_t<U>, T>
+    constexpr bool
+    validate_and_set(U &&value_) {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value = std::forward<U>(value_);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
+                value = std::forward<U>(value_);
+                return true;
+            } else {
+                return false;
+            }
+        }
     }
 
     operator std::string_view() const noexcept

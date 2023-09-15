@@ -12374,6 +12374,7 @@ static_assert(ThreadPool<BasicThreadPool>);
 
 #include <string_view>
 #include <type_traits>
+#include <utility>
 // #include <utils.hpp>
 
 
@@ -12465,6 +12466,73 @@ static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTy
 static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
 
 /**
+ * @brief Represents limits and optional validation for an Annotated<..> type.
+ *
+ * The `Limits` structure defines lower and upper bounds for a value of type `T`.
+ * Additionally, it allows for an optional custom validation function to be provided.
+ * This function should take a value of type `T` and return a `bool`, indicating
+ * whether the value passes the custom validation or not.
+ *
+ * Example:
+ * ```
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
+ * // or:
+ * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
+ * // or:
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
+ * ```
+ */
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
+    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
+        { f(v) } -> std::same_as<bool>;
+    } || Validator == nullptr)
+struct Limits {
+    using ValueType                                    = decltype(LowerLimit);
+    static constexpr ValueType           MinRange      = LowerLimit;
+    static constexpr ValueType           MaxRange      = UpperLimit;
+    static constexpr decltype(Validator) ValidatorFunc = Validator;
+
+    static constexpr bool
+    validate(const ValueType &value) noexcept {
+        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
+            if constexpr (Validator != nullptr) {
+                try {
+                    return Validator(value);
+                } catch (...) {
+                    return false;
+                }
+            } else {
+                return true; // if no validator and limits are same, return true by default
+            }
+        }
+        if constexpr (Validator != nullptr) {
+            try {
+                return value >= LowerLimit && value <= UpperLimit && Validator(value);
+            } catch (...) {
+                return false;
+            }
+        } else {
+            return value >= LowerLimit && value <= UpperLimit;
+        }
+        return true;
+    }
+};
+
+template<typename T>
+struct is_limits : std::false_type {};
+
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
+struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
+
+template<typename T>
+concept Limit    = is_limits<T>::value;
+
+using EmptyLimit = Limits<0, 0>; // nomen-est-omen
+
+static_assert(Limit<EmptyLimit>);
+
+/**
  * @brief Annotated is a template class that acts as a transparent wrapper around another type.
  * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
  * The meta-information is supplied as template parameters.
@@ -12472,6 +12540,7 @@ static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, Sup
 template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
 struct Annotated {
     using value_type = T;
+    using LimitType  = typename fair::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
     T value;
 
     Annotated() = default;
@@ -12523,6 +12592,23 @@ struct Annotated {
     {
         value = std::string(sv); // Convert from std::string_view to std::string and assign
         return *this;
+    }
+
+    template<typename U>
+        requires std::is_same_v<std::remove_cvref_t<U>, T>
+    constexpr bool
+    validate_and_set(U &&value_) {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value = std::forward<U>(value_);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
+                value = std::forward<U>(value_);
+                return true;
+            } else {
+                return false;
+            }
+        }
     }
 
     operator std::string_view() const noexcept
@@ -13100,14 +13186,40 @@ public:
                 const auto &key                  = localKey;
                 const auto &staged_value         = localStaged_value;
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
+                    using RawType = std::remove_cvref_t<decltype(member(*_node))>;
+                    using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (is_writable(member) && is_supported_type<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
-                            member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (HasSettingsChangedCallback<Node>) {
-                                staged.insert_or_assign(key, staged_value);
+                            if constexpr (is_annotated<RawType>()) {
+                                if (member(*_node).validate_and_set(std::get<Type>(staged_value))) {
+                                    if constexpr (HasSettingsChangedCallback<Node>) {
+                                        staged.insert_or_assign(key, staged_value);
+                                    } else {
+                                        std::ignore = staged; // help clang to see why staged is not unused
+                                    }
+                                } else {
+                                    // TODO: replace with pmt error message on msgOut port (to note: clang compiler bug/issue)
+#if !defined(__EMSCRIPTEN__) && !defined(__clang__)
+                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                               _node->unique_name, _node->name, member(*_node), std::get<Type>(staged_value),                                     //
+                                               std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                               RawType::LimitType::MaxRange, //
+                                               RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+#else
+                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                               "_node->unique_name", "_node->name", member(*_node), std::get<Type>(staged_value),                                 //
+                                               std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                               RawType::LimitType::MaxRange, //
+                                               RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+#endif
+                                }
                             } else {
-                                std::ignore = staged; // help clang to see why staged is not unused
+                                member(*_node) = std::get<Type>(staged_value);
+                                if constexpr (HasSettingsChangedCallback<Node>) {
+                                    staged.insert_or_assign(key, staged_value);
+                                } else {
+                                    std::ignore = staged; // help clang to see why staged is not unused
+                                }
                             }
                         }
                         if (_auto_forward.contains(key)) {
@@ -13511,11 +13623,11 @@ struct node : protected std::tuple<Arguments...> {
             "node_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
-    A<std::size_t, "numerator", Doc<"The top number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">>      numerator   = 1_UZ;
-    A<std::size_t, "denominator", Doc<"The bottom number of a fraction = numerator/denominator: decimation (fraction < 1), interpolation (fraction > 1), no effect (fraction = 1)">> denominator = 1_UZ;
-    A<std::size_t, "stride", Doc<"Number of samples between two data processing: overlap (stride < N), skip (stride > N), undefined-default (stride = 0)">>                          stride      = 0_UZ;
-    std::size_t                                                                                                    stride_counter                                                                = 0_UZ;
-    const std::size_t                                                                                              unique_id   = _unique_id_counter++;
+    A<std::size_t, "numerator", Doc<"top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>>      numerator      = 1_UZ;
+    A<std::size_t, "denominator", Doc<"bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>> denominator    = 1_UZ;
+    A<std::size_t, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                                                stride         = 0_UZ;
+    std::size_t                                                                                                                                                        stride_counter = 0_UZ;
+    const std::size_t                                                                                                                                                  unique_id = _unique_id_counter++;
     const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(fair::meta::type_name<Derived>()) };
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
@@ -13800,7 +13912,7 @@ public:
 
     constexpr void
     forward_tags() noexcept {
-        if (!_output_tags_changed && !_input_tags_present) {
+        if (!(_output_tags_changed || _input_tags_present)) {
             return;
         }
         std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
