@@ -13026,7 +13026,9 @@ public:
             std::lock_guard lg(_lock);
 
             property_map    oldSettings;
-            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
+            if constexpr (
+                    requires(const property_map &cmap, property_map &map) { _node->settings_changed(/* old settings */ cmap, /* new settings */ map); } or //
+                    requires(const property_map &cmap, property_map &map) { _node->settings_changed(/* old settings */ cmap, /* new settings */ map, /* new forward settings */ map); }) {
                 // take a copy of the field -> map value of the old settings
                 if constexpr (refl::is_reflectable<Node>()) {
                     auto iterate_over_member = [&, this](auto member) {
@@ -13052,14 +13054,16 @@ public:
                     if constexpr (is_writable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             member(*_node) = std::get<Type>(staged_value);
-                            if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
+                            if constexpr (
+                                    requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); } or //
+                                    requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
                                 staged.insert_or_assign(key, staged_value);
                             } else {
                                 std::ignore = staged; // help clang to see why staged is not unused
                             }
-                            if (_auto_forward.contains(get_display_name(member))) {
-                                forward_parameters.insert_or_assign(key, staged_value);
-                            }
+                        }
+                        if (_auto_forward.contains(key)) {
+                            forward_parameters.insert_or_assign(key, staged_value);
                         }
                     }
                 };
@@ -13080,9 +13084,11 @@ public:
             }
             refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
 
-            if constexpr (requires(Node d, const property_map &map) { d.settings_changed(map, map); }) {
-                if (!staged.empty()) {
+            if (!staged.empty()) {
+                if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
                     _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged);
+                } else if constexpr (requires { _node->settings_changed(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
+                    _node->settings_changed(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
                 }
             }
             _staged.clear();
@@ -13532,7 +13538,15 @@ public:
     init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool_) {
         progress     = std::move(progress_);
         ioThreadPool = std::move(ioThreadPool_);
-        std::ignore  = settings().apply_staged_parameters();
+        if (const auto forward_parameters = settings().apply_staged_parameters(); !forward_parameters.empty()) {
+            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) {
+                for (const auto &[key, value] : forward_parameters) {
+                    tag.map.insert_or_assign(key, value);
+                }
+            });
+            _output_tags_changed = true;
+        }
+
         // TODO: expand on this init function:
         //  * store initial setting -> needed for `reset()` call
         //  * ...
@@ -13697,7 +13711,7 @@ public:
 
     constexpr void
     forward_tags() noexcept {
-        if (!_output_tags_changed) {
+        if (!_output_tags_changed && !_input_tags_present) {
             return;
         }
         std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
@@ -13829,10 +13843,9 @@ protected:
             if constexpr (node_template_parameters::template contains<PerformDecimationInterpolation>) {
                 if (numerator != 1_UZ || denominator != 1_UZ) {
                     // TODO: this ill-defined checks can be done only once after parameters were changed
-                    const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
-                    bool         is_ill_defined = (denominator > ports_status.in_max_samples)
-                            || (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples))
-                            || (static_cast<double>(ports_status.in_max_samples) * ratio < static_cast<double>(ports_status.out_min_samples));
+                    const double ratio  = static_cast<double>(numerator) / static_cast<double>(denominator);
+                    bool is_ill_defined = (denominator > ports_status.in_max_samples) || (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples))
+                                       || (static_cast<double>(ports_status.in_max_samples) * ratio < static_cast<double>(ports_status.out_min_samples));
                     assert(!is_ill_defined);
                     if (is_ill_defined) {
                         return { requested_work, 0_UZ, work_return_status_t::ERROR };
@@ -13866,8 +13879,6 @@ protected:
             }
         }
 
-        _input_tags_present  = false;
-        _output_tags_changed = false;
         if (ports_status.in_samples_to_next_tag == 0) {
             if constexpr (HasProcessOneFunction<Derived>) {
                 ports_status.in_samples  = 1; // N.B. limit to one so that only one process_on(...) invocation receives the tag
@@ -13889,8 +13900,10 @@ protected:
                         if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
                             || tag_stream_pos <= 0) {
                             for (const auto &[index, map] : tags) {
-                                tag_at_present_input.map.insert(map.begin(), map.end());
-                                merged_tag_map.insert(map.begin(), map.end());
+                                for (const auto &[key, value] : map) {
+                                    tag_at_present_input.map.insert_or_assign(key, value);
+                                    merged_tag_map.insert_or_assign(key, value);
+                                }
                             }
                             std::ignore = input_port.tagReader().consume(1_UZ);
                         }
@@ -13908,9 +13921,13 @@ protected:
             }
         }
 
-        if (settings().changed()) {
+        if (settings().changed() || _input_tags_present || _output_tags_changed) {
             if (const auto forward_parameters = settings().apply_staged_parameters(); !forward_parameters.empty()) {
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) { tag.map.insert(forward_parameters.cbegin(), forward_parameters.cend()); });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) {
+                    for (const auto &[key, value] : forward_parameters) {
+                        tag.map.insert_or_assign(key, value);
+                    }
+                });
                 _output_tags_changed = true;
             }
             settings()._changed.store(false);

@@ -55,7 +55,7 @@ format_variant(const auto &value) noexcept {
                 }
             },
             value);
-};
+}
 
 void
 printChanges(const property_map &oldMap, const property_map &newMap) noexcept {
@@ -92,7 +92,7 @@ struct Source : public node<Source<T>> {
     float        sample_rate        = 1000.0f;
 
     void
-    settings_changed(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
+    settings_changed(const property_map & /*old_settings*/, property_map & /*new_settings*/) {
         // optional init function that is called after construction and whenever settings change
         fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t>(n_tag_offset));
     }
@@ -133,7 +133,7 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
     bool                                                          debug        = false;
 
     void
-    settings_changed(const property_map &old_settings, const property_map &new_settings) noexcept {
+    settings_changed(const property_map &old_settings, property_map &new_settings) noexcept {
         // optional function that is called whenever settings change
         update_count++;
 
@@ -153,6 +153,48 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
 static_assert(NodeType<TestBlock<int>>);
 static_assert(NodeType<TestBlock<float>>);
 static_assert(NodeType<TestBlock<double>>);
+
+template<typename T, bool Average = false>
+struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double>, PerformDecimationInterpolation, Doc<R""(
+@brief reduces sample rate by given fraction controlled by denominator
+)"">> {
+    IN<T>                            in{};
+    OUT<T>                           out{};
+    A<float, "sample rate", Visible> sample_rate = 1.f;
+
+    void
+    settings_changed(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
+        if (new_settings.contains(std::string(fair::graph::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
+            const float fwdSampleRate = sample_rate / static_cast<float>(this->denominator);
+            fwd_settings[std::string(fair::graph::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
+        }
+    }
+
+    constexpr work_return_status_t
+    process_bulk(std::span<const T> input, std::span<T> output) noexcept {
+        assert(this->numerator == std::size_t(1) && "block implements only basic decimation");
+        assert(this->denominator != std::size_t(0) && "denominator must be non-zero");
+
+        auto outputIt = output.begin();
+        if constexpr (Average) {
+            for (std::size_t start = 0; start < input.size(); start += this->denominator) {
+                constexpr auto chunk_begin = input.begin() + start;
+                constexpr auto chunk_end   = chunk_begin + std::min(this->denominator, std::distance(chunk_begin, input.end()));
+                *outputIt++                = std::reduce(chunk_begin, chunk_end, T(0)) / static_cast<T>(this->denominator);
+            }
+        } else {
+            for (std::size_t i = 0; i < input.size(); i += this->denominator) {
+                *outputIt++ = input[i];
+            }
+        }
+
+        return work_return_status_t::OK;
+    }
+};
+
+static_assert(NodeType<Decimate<int>>);
+static_assert(NodeType<Decimate<float>>);
+static_assert(NodeType<Decimate<double>>);
 
 template<typename T>
 struct Sink : public node<Sink<T>> {
@@ -189,6 +231,7 @@ struct Sink : public node<Sink<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (fair::graph::setting_test::Decimate<T, Average>), in, out, sample_rate);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
 
 const boost::ut::suite SettingsTests = [] {
@@ -359,6 +402,35 @@ const boost::ut::suite SettingsTests = [] {
         std::ignore                          = wrapped2.settings().set({ { "context", "a string" } });
         (wrapped2.meta_information())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped2.meta_information().at("key")), "value"sv)) << "node_model meta-information";
+    };
+
+    "basic decimation test"_test = []() {
+        graph                  flow_graph;
+        constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
+        auto                  &src       = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
+        auto                  &block1    = flow_graph.make_node<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::size_t(2) } });
+        auto                  &block2    = flow_graph.make_node<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", std::size_t(5) } });
+        auto                  &sink      = flow_graph.make_node<Sink<float>>();
+
+        // check denominator
+        expect(eq(block1.denominator, std::size_t(2)));
+        expect(eq(block2.denominator, std::size_t(5)));
+
+        // src -> block1 -> block2 -> sink
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
+
+        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        sched.run_and_wait();
+
+        expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
+        expect(eq(sink.n_samples_consumed, n_samples / (2 * 5))) << "did not consume enough input samples";
+
+        expect(eq(src.sample_rate, 1000.0f)) << "src matching sample_rate";
+        expect(eq(block1.sample_rate, 1000.0f)) << "block1 matching sample_rate";
+        expect(eq(block2.sample_rate, 500.0f)) << "block2 matching sample_rate";
+        expect(eq(sink.sample_rate, 100.0f)) << "sink matching src sample_rate";
     };
 };
 
