@@ -256,7 +256,7 @@ public:
     computePhaseSpectrum() {
         for (std::size_t i = 0; i < phaseSpectrum.size(); i++) {
             const auto phase{ std::atan2(fftwOut[i][1], fftwOut[i][0]) };
-            phaseSpectrum[i] = outputInDb ? static_cast<U>(20.) * std::log10(std::abs(phase)) : phase;
+            phaseSpectrum[i] = outputInDb ? static_cast<U>(20.) * static_cast<U>(std::log10(std::abs(phase))) : static_cast<U>(phase);
         }
     }
 
