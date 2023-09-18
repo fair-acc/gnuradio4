@@ -99,8 +99,9 @@ const boost::ut::suite fftTests = [] {
             std::ignore = fft1.settings().set({ { "outputInDb", t.outputInDb } });
             std::ignore = fft1.settings().apply_staged_parameters();
             const auto signal{ generateSinSample<T>(t.N, t.sampleRate, t.frequency, t.amplitude) };
-
-            fft1.inputHistory.push_back_bulk(signal.begin(), signal.end());
+            for (const auto s : signal) {
+                fft1.inputHistory.push_back(static_cast<typename fft<T>::InHistoryType>(s));
+            }
             fft1.prepareInput();
             fft1.computeFft();
             fft1.computeMagnitudeSpectrum();
@@ -175,7 +176,6 @@ const boost::ut::suite fftTests = [] {
     "FFT process_one tests"_test = []<typename T>() {
         fft<T>                fft1{};
         constexpr std::size_t N{ 16 };
-        constexpr double      tolerance{ 1.e-6 };
         std::ignore         = fft1.settings().set({ { "fftSize", N } });
         std::ignore         = fft1.settings().apply_staged_parameters();
         using DatasetType   = typename fft<T>::U;
@@ -194,8 +194,14 @@ const boost::ut::suite fftTests = [] {
         for (std::size_t i = 0; i < 4; i++) {
             const auto mm = std::minmax_element(std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N2)),
                                                 std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N2)));
-            expect(approx(*mm.first, ds1.signal_ranges[i][0], tolerance));
-            expect(approx(*mm.second, ds1.signal_ranges[i][1], tolerance));
+            if constexpr (std::is_integral_v<DatasetType>) {
+                expect(eq(*mm.first, ds1.signal_ranges[i][0]));
+                expect(eq(*mm.second, ds1.signal_ranges[i][1]));
+            } else {
+                constexpr DatasetType tolerance{ static_cast<DatasetType>(0.000001) };
+                expect(approx(*mm.first, ds1.signal_ranges[i][0], tolerance));
+                expect(approx(*mm.second, ds1.signal_ranges[i][1], tolerance));
+            }
         }
 
         std::iota(signal.begin(), signal.end(), N + 1);
@@ -257,7 +263,7 @@ const boost::ut::suite fftTests = [] {
         fft<T> fft1{};
         using PrecisionType = typename fft<T>::PrecisionType;
         using InHistoryType = typename fft<T>::InHistoryType;
-        constexpr double            tolerance{ 1.e-5 };
+        constexpr PrecisionType     tolerance{ PrecisionType(0.00001) };
         constexpr std::size_t       N{ 8 };
 
         std::vector<WindowFunction> testCases = { WindowFunction::None,    WindowFunction::Rectangular,    WindowFunction::Hamming,
