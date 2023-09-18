@@ -65,12 +65,13 @@ target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
 
 # FFTW3 is build 2 times for float and double precisions
 SET(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)
+SET(FFTW_CFLAGS "${CFLAGS} -w")
 if (EMSCRIPTEN)
     SET(FFTW_CONFIG cd ${FFTW_PREFIX}/src/ && emconfigure ./configure --quiet --disable-fortran --prefix=${FFTW_PREFIX}/install)
-    SET(FFTW_BUILD emmake make -j && emmake make install && emmake make clean)
+    SET(FFTW_BUILD emmake make -j CFLAGS=${FFTW_CFLAGS} --silent && emmake make install --silent && emmake make clean --silent)
 else ()
     SET(FFTW_CONFIG ${FFTW_PREFIX}/src/configure --quiet --disable-fortran --prefix=${FFTW_PREFIX}/install)
-    SET(FFTW_BUILD make -j && make install && make clean)
+    SET(FFTW_BUILD make -j CFLAGS=${FFTW_CFLAGS} --silent && make install --silent && make clean --silent)
 endif ()
 SET(FFTW_INSTALL_COMMAND
         ${FFTW_CONFIG} && ${FFTW_BUILD} &&
