@@ -135,6 +135,7 @@ struct splitter {
     template<typename... Ts>
     using second = typename B::template second<typename A::template second<Ts...>>;
 };
+
 } // namespace detail
 
 template<unsigned N, typename List>
@@ -263,6 +264,54 @@ template<template<typename> typename Predicate, typename DefaultType, typename H
 struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
     : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
 
+template<std::size_t Index, typename ... Ts>
+struct at_impl;
+
+template<typename T0, typename ...Ts>
+struct at_impl<0, T0, Ts...> {
+    using type = T0;
+};
+
+template<typename T0, typename T1, typename ...Ts>
+struct at_impl<1, T0, T1, Ts...> {
+    using type = T1;
+};
+
+template<typename T0, typename T1, typename T2, typename ...Ts>
+struct at_impl<2, T0, T1, T2, Ts...> {
+    using type = T2;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename ...Ts>
+struct at_impl<3, T0, T1, T2, T3, Ts...> {
+    using type = T3;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename...Ts>
+struct at_impl<4, T0, T1, T2, T3, T4, Ts...> {
+    using type = T4;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename...Ts>
+struct at_impl<5, T0, T1, T2, T3, T4, T5, Ts...> {
+    using type = T5;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename...Ts>
+struct at_impl<6, T0, T1, T2, T3, T4, T5, T6, Ts...> {
+    using type = T6;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...Ts>
+struct at_impl<7, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> {
+    using type = T7;
+};
+
+template<std::size_t Index, typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...Ts>
+    requires (Index >= 8)
+struct at_impl<Index, T0, T1, T2, T3, T4, T5, T6, T7, Ts...>: at_impl<Index - 8, Ts...> {
+};
+
 } // namespace detail
 
 // typelist /////////////////
@@ -292,7 +341,7 @@ struct typelist {
     }
 
     template<std::size_t I>
-    using at = first_type<typename detail::splitter<I>::template second<Ts...>>;
+    using at = detail::at_impl<I, Ts...>::type;
 
     template<typename Head>
     using prepend = typelist<Head, Ts...>;
