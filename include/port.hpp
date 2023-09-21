@@ -39,7 +39,7 @@ enum class port_type_t {
  */
 template<fixed_string PortDomainName>
 struct PortDomain {
-    inline static constexpr fixed_string Name = PortDomainName;
+    static constexpr fixed_string Name = PortDomainName;
 };
 
 template<typename T>
@@ -223,7 +223,7 @@ struct Port {
     using TagIoType                             = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
 
     // public properties
-    constexpr static bool synchronous   = not std::disjunction_v<std::is_same<Async, Arguments>...>;
+    constexpr static bool synchronous   = !std::disjunction_v<std::is_same<Async, Arguments>...>;
     constexpr static bool optional      = std::disjunction_v<std::is_same<Optional, Arguments>...>;
     std::string           name          = static_cast<std::string>(PortName);
     std::int16_t          priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
@@ -237,11 +237,11 @@ private:
     TagIoType _tagIoHandler = new_tag_io_handler();
 
 public:
-    bool
+    [[nodiscard]] constexpr bool
     initBuffer(std::size_t nSamples = 0) noexcept {
         if constexpr (IS_OUTPUT) {
             // write one default value into output -- needed for cyclic graph initialisation
-            return _ioHandler.try_publish([val = default_value](std::span<T> &out) { out[0] = val; }, 1_UZ);
+            return _ioHandler.try_publish([val = default_value](std::span<T> &out) {  std::ranges::fill(out, val); }, nSamples);
         }
         return true;
     }
@@ -306,7 +306,7 @@ public:
     constexpr Port(Port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples) {}
 
     constexpr Port &
-    operator=(Port &&other) {
+    operator=(Port &&other) noexcept {
         Port tmp(std::move(other));
         std::swap(name, tmp._name);
         std::swap(min_samples, tmp._min_samples);
@@ -317,6 +317,9 @@ public:
         std::swap(_ioHandler, tmp._ioHandler);
         std::swap(_tagIoHandler, tmp._tagIoHandler);
         return *this;
+    }
+
+    ~Port() { /* explicitely defined */
     }
 
     [[nodiscard]] constexpr static port_type_t
@@ -853,7 +856,7 @@ samples_to_next_tag(const PortType auto &port) {
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
     const auto &tagData           = port.tagReader().get();
     const auto &readPosition      = port.streamReader().position();
-    const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
+    const auto  future_tags_begin = std::ranges::find_if(tagData, [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
 
     if (future_tags_begin == tagData.begin()) {
         const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
