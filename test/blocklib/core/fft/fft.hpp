@@ -114,8 +114,8 @@ public:
     using OutUniquePtr  = typename fftw<T>::OutUniquePtr;
     using PlanUniquePtr = typename fftw<T>::PlanUniquePtr;
 
-    IN<T>                         in;
-    OUT<DataSet<U>>               out;
+    PortIn<T>                     in;
+    PortOut<DataSet<U>>           out;
 
     std::size_t                   fftSize{ 1024 };
     int                           window{ static_cast<int>(WindowFunction::None) };

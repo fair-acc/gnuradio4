@@ -428,6 +428,9 @@ struct typelist {
     }())>;
 };
 
+template<typename T, typename... Ts>
+constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Ts>...>;
+
 namespace detail {
 template<template<typename...> typename OtherTypelist, typename... Args>
 meta::typelist<Args...>

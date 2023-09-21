@@ -34,7 +34,7 @@ public:
 
 // define some example graph nodes
 template<typename T, std::size_t N>
-class count_source : public fg::node<count_source<T, N>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "out">> {
+class count_source : public fg::node<count_source<T, N>, fg::PortOutNamed<T, "out">> {
     tracer     &_tracer;
     std::size_t _count = 0;
 
@@ -57,7 +57,7 @@ public:
 static_assert(fg::NodeType<count_source<float, 10U>>);
 
 template<typename T, std::int64_t N>
-class expect_sink : public fg::node<expect_sink<T, N>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">> {
+class expect_sink : public fg::node<expect_sink<T, N>, fg::PortInNamed<T, "in">> {
     tracer                                         &_tracer;
     std::int64_t                                    _count = 0;
     std::function<void(std::int64_t, std::int64_t)> _checker;
@@ -84,7 +84,7 @@ public:
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
+class scale : public fg::node<scale<T, Scale, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
     tracer &_tracer;
 
 public:
@@ -99,8 +99,7 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">,
-                              fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
+class adder : public fg::node<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
     tracer &_tracer;
 
 public:

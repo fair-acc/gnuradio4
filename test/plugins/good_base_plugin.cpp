@@ -27,7 +27,7 @@ read_total_count(const fair::graph::property_map &params) {
 }
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
+class cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
 public:
     std::size_t total_count = -1_UZ;
 
@@ -45,7 +45,7 @@ public:
 };
 
 template<typename T>
-class fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {
+class fixed_source : public fg::node<fixed_source<T>, fg::PortOutNamed<T, "out">> {
 public:
     std::size_t event_count = -1_UZ; // infinite count by default
 

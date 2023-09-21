@@ -832,6 +832,9 @@ struct typelist {
     }())>;
 };
 
+template<typename T, typename... Ts>
+constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Ts>...>;
+
 namespace detail {
 template<template<typename...> typename OtherTypelist, typename... Args>
 meta::typelist<Args...>
@@ -3380,6 +3383,44 @@ operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs
     result._data[N1 + N2] = '\0';
     return result;
 }
+
+namespace detail {
+constexpr int
+log10(int n) noexcept {
+    if (n < 10) return 0;
+    return 1 + log10(n / 10);
+}
+
+constexpr int
+pow10(int n) noexcept {
+    if (n == 0) return 1;
+    return 10 * pow10(n - 1);
+}
+
+template<int N, std::size_t... Idx>
+constexpr fixed_string<char, sizeof...(Idx)>
+make_fixed_string_impl(std::index_sequence<Idx...>) {
+    constexpr auto numDigits = sizeof...(Idx);
+    return { { ('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0 } };
+}
+} // namespace detail
+
+template<int N>
+constexpr auto
+make_fixed_string() noexcept {
+    if constexpr (N == 0) {
+        return fixed_string{ "0" };
+    } else {
+        constexpr std::size_t digits = 1U + static_cast<std::size_t>(detail::log10(N));
+        return detail::make_fixed_string_impl<N>(std::make_index_sequence<digits>());
+    }
+}
+
+static_assert(fixed_string("0") == make_fixed_string<0>());
+static_assert(fixed_string("1") == make_fixed_string<1>());
+static_assert(fixed_string("2") == make_fixed_string<2>());
+static_assert(fixed_string("123") == make_fixed_string<123>());
+static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("out123"));
 
 template<typename T>
 [[nodiscard]] std::string
@@ -9850,9 +9891,18 @@ REFL_END
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
-// #include "circular_buffer.hpp"
+#include <complex>
+// #include <dataset.hpp>
+#ifndef GRAPH_PROTOTYPE_DATASET_HPP
+#define GRAPH_PROTOTYPE_DATASET_HPP
 
-// #include "tag.hpp"
+#include <chrono>
+#include <cstdint>
+#include <map>
+#include <pmtv/pmt.hpp>
+// #include <reflection.hpp>
+
+// #include <tag.hpp>
 #ifndef GRAPH_PROTOTYPE_TAG_HPP
 #define GRAPH_PROTOTYPE_TAG_HPP
 
@@ -10056,21 +10106,6 @@ inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UN
 
 #endif // GRAPH_PROTOTYPE_TAG_HPP
 
-// #include "utils.hpp"
-
-#include <complex>
-// #include <dataset.hpp>
-#ifndef GRAPH_PROTOTYPE_DATASET_HPP
-#define GRAPH_PROTOTYPE_DATASET_HPP
-
-#include <chrono>
-#include <cstdint>
-#include <map>
-#include <pmtv/pmt.hpp>
-// #include <reflection.hpp>
-
-// #include <tag.hpp>
-
 #include <variant>
 #include <vector>
 
@@ -10223,35 +10258,413 @@ ENABLE_REFLECTION(fair::graph::DataSet_float, timestamp, axis_names, axis_units,
 #include <span>
 #include <variant>
 
+// #include <annotated.hpp>
+#ifndef GRAPH_PROTOTYPE_ANNOTATED_HPP
+#define GRAPH_PROTOTYPE_ANNOTATED_HPP
+
+#include <string_view>
+#include <type_traits>
+#include <utility>
+// #include <utils.hpp>
+
+
+namespace fair::graph {
+
+/**
+ * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<fair::meta::fixed_string doc_string>
+struct Doc {
+    static constexpr fair::meta::fixed_string value = doc_string;
+};
+
+using EmptyDoc = Doc<"">; // nomen-est-omen
+
+template<typename T>
+struct is_doc : std::false_type {};
+
+template<fair::meta::fixed_string N>
+struct is_doc<Doc<N>> : std::true_type {};
+
+template<typename T>
+concept Documentation = is_doc<T>::value;
+
+/**
+ * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<fair::meta::fixed_string doc_string>
+struct Unit {
+    static constexpr fair::meta::fixed_string value = doc_string;
+};
+
+using EmptyUnit = Unit<"">; // nomen-est-omen
+
+template<typename T>
+struct is_unit : std::false_type {};
+
+template<fair::meta::fixed_string N>
+struct is_unit<Unit<N>> : std::true_type {};
+
+template<typename T>
+concept UnitType = is_unit<T>::value;
+
+static_assert(Documentation<EmptyDoc>);
+static_assert(UnitType<EmptyUnit>);
+static_assert(!UnitType<EmptyDoc>);
+static_assert(!Documentation<EmptyUnit>);
+
+/**
+ * @brief Annotates field etc. that the entity is visible.
+ */
+struct Visible {};
+
+/**
+ * @brief Annotates node, indicating to calling schedulers that it may block due IO.
+ */
+template<bool UseIoThread = true>
+struct BlockingIO {
+    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
+};
+
+/**
+ * @brief Annotates node, indicating to perform decimation/interpolation
+ */
+struct PerformDecimationInterpolation {};
+
+/**
+ * @brief Annotates node, indicating to perform stride
+ */
+struct PerformStride {};
+
+/**
+ * @brief Annotates templated node, indicating which port data types are supported.
+ */
+template<typename... Ts>
+struct SupportedTypes {};
+
+template<typename T>
+struct is_supported_types : std::false_type {};
+
+template<typename... Ts>
+struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
+
+using DefaultSupportedTypes = SupportedTypes<>;
+
+static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
+static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
+
+/**
+ * @brief Represents limits and optional validation for an Annotated<..> type.
+ *
+ * The `Limits` structure defines lower and upper bounds for a value of type `T`.
+ * Additionally, it allows for an optional custom validation function to be provided.
+ * This function should take a value of type `T` and return a `bool`, indicating
+ * whether the value passes the custom validation or not.
+ *
+ * Example:
+ * ```
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
+ * // or:
+ * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
+ * // or:
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
+ * ```
+ */
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
+    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
+        { f(v) } -> std::same_as<bool>;
+    } || Validator == nullptr)
+struct Limits {
+    using ValueType                                    = decltype(LowerLimit);
+    static constexpr ValueType           MinRange      = LowerLimit;
+    static constexpr ValueType           MaxRange      = UpperLimit;
+    static constexpr decltype(Validator) ValidatorFunc = Validator;
+
+    static constexpr bool
+    validate(const ValueType &value) noexcept {
+        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
+            if constexpr (Validator != nullptr) {
+                try {
+                    return Validator(value);
+                } catch (...) {
+                    return false;
+                }
+            } else {
+                return true; // if no validator and limits are same, return true by default
+            }
+        }
+        if constexpr (Validator != nullptr) {
+            try {
+                return value >= LowerLimit && value <= UpperLimit && Validator(value);
+            } catch (...) {
+                return false;
+            }
+        } else {
+            return value >= LowerLimit && value <= UpperLimit;
+        }
+        return true;
+    }
+};
+
+template<typename T>
+struct is_limits : std::false_type {};
+
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
+struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
+
+template<typename T>
+concept Limit    = is_limits<T>::value;
+
+using EmptyLimit = Limits<0, 0>; // nomen-est-omen
+
+static_assert(Limit<EmptyLimit>);
+
+/**
+ * @brief Annotated is a template class that acts as a transparent wrapper around another type.
+ * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
+ * The meta-information is supplied as template parameters.
+ */
+template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
+struct Annotated {
+    using value_type = T;
+    using LimitType  = typename fair::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
+    T value;
+
+    Annotated() = default;
+
+    constexpr Annotated(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) : value(value_) {}
+
+    constexpr Annotated(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) : value(std::move(value_)) {}
+
+    // N.B. intentional implicit assignment and conversion operators to have a transparent wrapper
+    // this does not affect the conversion of the wrapped value type 'T' itself
+    constexpr Annotated &
+    operator=(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) {
+        value = value_;
+        return *this;
+    }
+
+    constexpr Annotated &
+    operator=(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) {
+        value = std::move(value_);
+        return *this;
+    }
+
+    inline explicit(false) constexpr
+    operator T &() noexcept {
+        return value;
+    }
+
+    inline explicit(false) constexpr operator const T &() const noexcept { return value; }
+
+    constexpr bool
+    operator==(const Annotated &other) const noexcept {
+        return value == other.value;
+    }
+
+    template<typename U>
+    constexpr bool
+    operator==(const U &other) const noexcept {
+        if constexpr (requires { other.value; }) {
+            return value == other.value;
+        } else {
+            return value == other;
+        }
+    }
+
+    template<typename U>
+    Annotated &
+    operator=(const U &sv) noexcept
+        requires std::is_same_v<T, std::string> && std::is_same_v<U, std::string_view>
+    {
+        value = std::string(sv); // Convert from std::string_view to std::string and assign
+        return *this;
+    }
+
+    template<typename U>
+        requires std::is_same_v<std::remove_cvref_t<U>, T>
+    constexpr bool
+    validate_and_set(U &&value_) {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value = std::forward<U>(value_);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
+                value = std::forward<U>(value_);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    operator std::string_view() const noexcept
+        requires std::is_same_v<T, std::string>
+    {
+        return std::string_view(value); // Convert from std::string to std::string_view
+    }
+
+    // meta-information
+    static constexpr std::string_view
+    description() noexcept {
+        return std::string_view{ description_ };
+    }
+
+    static constexpr std::string_view
+    documentation() noexcept {
+        using Documentation = typename fair::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
+        return std::string_view{ Documentation::value };
+    }
+
+    static constexpr std::string_view
+    unit() noexcept {
+        using PhysicalUnit = typename fair::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
+        return std::string_view{ PhysicalUnit::value };
+    }
+
+    static constexpr bool
+    visible() noexcept {
+        return fair::meta::typelist<Arguments...>::template contains<Visible>;
+    }
+};
+
+template<typename T>
+struct is_annotated : std::false_type {};
+
+template<typename T, fair::meta::fixed_string str, typename... Args>
+struct is_annotated<fair::graph::Annotated<T, str, Args...>> : std::true_type {};
+
+template<typename T>
+concept AnnotatedType = is_annotated<T>::value;
+
+template<typename T>
+struct unwrap_if_wrapped {
+    using type = T;
+};
+
+template<typename U, fair::meta::fixed_string str, typename... Args>
+struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
+    using type = U;
+};
+
+/**
+ * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
+ * If the given type is not an `Annotated`, it returns the type itself.
+ */
+template<typename T>
+using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
+
+} // namespace fair::graph
+
+template<typename... Ts>
+struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
+
+#ifdef FMT_FORMAT_H_
+
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+
+template<typename T, fair::meta::fixed_string description, typename... Arguments>
+struct fmt::formatter<fair::graph::Annotated<T, description, Arguments...>> {
+    fmt::formatter<T> value_formatter;
+
+    template<typename FormatContext>
+    auto
+    parse(FormatContext &ctx) {
+        return value_formatter.parse(ctx);
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const fair::graph::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return value_formatter.format(annotated.value, ctx);
+    }
+};
+
+namespace gr {
+template<typename T, fair::meta::fixed_string description, typename... Arguments>
+inline std::ostream &
+operator<<(std::ostream &os, const fair::graph::Annotated<T, description, Arguments...> &v) {
+    // TODO: add switch for printing only brief and/or meta-information
+    return os << fmt::format("{}", v.value);
+}
+} // namespace gr
+
+#endif // FMT_FORMAT_H_
+
+#endif // GRAPH_PROTOTYPE_ANNOTATED_HPP
+
+// #include <circular_buffer.hpp>
+
+// #include <tag.hpp>
+
+// #include <utils.hpp>
+
+
 namespace fair::graph {
 
 using fair::meta::fixed_string;
 using namespace fair::literals;
 
-// #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
+#ifndef PMT_SUPPORTED_TYPE // // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
+#define PMT_SUPPORTED_TYPE
 // Only DataSet<double> and DataSet<float> are added => consider to support more Dataset<T>
-using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, DataSet<double>, DataSet<float> /*, ...*/>;
+using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, DataSet<float>, DataSet<double> /*, ...*/>;
+#endif
 
 enum class port_direction_t { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
+
 enum class connection_result_t { SUCCESS, FAILED };
+
 enum class port_type_t {
     STREAM, /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
 };
-enum class port_domain_t { CPU, GPU, NET, FPGA, DSP, MLU };
+
+/**
+ * @brief optional port annotation argument to described whether the port can be handled within the same scheduling domain.
+ *
+ * @tparam PortDomainName the unique name of the domain, name shouldn't clash with other existing definitions (e.g. 'CPU' and 'GPU')
+ */
+template<fixed_string PortDomainName>
+struct PortDomain {
+    static constexpr fixed_string Name = PortDomainName;
+};
+
+template<typename T>
+concept PortDomainType = requires { T::Name; } && std::is_base_of_v<PortDomain<T::Name>, T>;
+
+template<typename T>
+using is_port_domain = std::bool_constant<PortDomainType<T>>;
+
+struct CPU : public PortDomain<"CPU"> {};
+
+struct GPU : public PortDomain<"GPU"> {};
+
+static_assert(is_port_domain<CPU>::value);
+static_assert(is_port_domain<GPU>::value);
+static_assert(!is_port_domain<int>::value);
 
 template<class T>
-concept Port = requires(T t, const std::size_t n_items) { // dynamic definitions
+concept PortType = requires(T t, const std::size_t n_items, const supported_type &newDefault) { // dynamic definitions
     typename T::value_type;
-    { t.pmt_type() } -> std::same_as<supported_type>;
+    { t.defaultValue() } -> std::same_as<supported_type>;
+    { t.setDefaultValue(newDefault) } -> std::same_as<bool>;
     { t.name } -> std::convertible_to<std::string_view>;
     { t.priority } -> std::convertible_to<std::int32_t>;
     { t.min_samples } -> std::convertible_to<std::size_t>;
     { t.max_samples } -> std::convertible_to<std::size_t>;
     { t.type() } -> std::same_as<port_type_t>;
     { t.direction() } -> std::same_as<port_direction_t>;
+    { t.domain() } -> std::same_as<std::string_view>;
     { t.resize_buffer(n_items) } -> std::same_as<connection_result_t>;
     { t.disconnect() } -> std::same_as<connection_result_t>;
+    { t.isSynchronous() } -> std::same_as<bool>;
+    { t.isOptional() } -> std::same_as<bool>;
 };
 
 /**
@@ -10263,6 +10676,95 @@ struct internal_port_buffers {
     void *streamHandler;
     void *tagHandler;
 };
+
+/**
+ * @brief optional port annotation argument to describe the min/max number of samples required from this port before invoking the blocks work function.
+ *
+ * @tparam MIN_SAMPLES (>0) specifies the minimum number of samples the port/block requires for processing in one scheduler iteration
+ * @tparam MAX_SAMPLES specifies the maximum number of samples the port/block can process in one scheduler iteration
+ */
+template<std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
+struct RequiredSamples {
+    static_assert(MIN_SAMPLES > 0, "Port<T, ..., RequiredSamples::MIN_SAMPLES, ...>, ..> must be >= 0");
+    static constexpr std::size_t MinSamples = MIN_SAMPLES;
+    static constexpr std::size_t MaxSamples = MAX_SAMPLES;
+};
+
+template<typename T>
+concept IsRequiredSamples = requires {
+    T::MinSamples;
+    T::MaxSamples;
+} && std::is_base_of_v<RequiredSamples<T::MinSamples, T::MaxSamples>, T>;
+
+template<typename T>
+using is_required_samples = std::bool_constant<IsRequiredSamples<T>>;
+
+static_assert(is_required_samples<RequiredSamples<1, 1024>>::value);
+static_assert(!is_required_samples<int>::value);
+
+/**
+ * @brief optional port annotation argument informing the graph/scheduler that a given port does not require to be connected
+ */
+struct Optional {};
+
+/**
+ * @brief optional port annotation argument to define the buffer implementation to be used for streaming data
+ *
+ * @tparam BufferType user-extendable buffer implementation for the streaming data
+ */
+template<gr::Buffer BufferType>
+struct StreamBufferType {
+    using type = BufferType;
+};
+
+/**
+ * @brief optional port annotation argument to define the buffer implementation to be used for tag data
+ *
+ * @tparam BufferType user-extendable buffer implementation for the tag data
+ */
+template<gr::Buffer BufferType>
+struct TagBufferType {
+    using type = BufferType;
+};
+
+template<typename T>
+concept IsStreamBufferAttribute = requires { typename T::type; } && gr::Buffer<typename T::type> && std::is_base_of_v<StreamBufferType<typename T::type>, T>;
+;
+
+template<typename T>
+concept IsTagBufferAttribute = requires { typename T::type; } && gr::Buffer<typename T::type> && std::is_base_of_v<TagBufferType<typename T::type>, T>;
+
+template<typename T>
+using is_stream_buffer_attribute = std::bool_constant<IsStreamBufferAttribute<T>>;
+
+template<typename T>
+using is_tag_buffer_attribute = std::bool_constant<IsTagBufferAttribute<T>>;
+
+template<typename T>
+struct DefaultStreamBuffer : StreamBufferType<gr::circular_buffer<T>> {};
+
+struct DefaultTagBuffer : TagBufferType<gr::circular_buffer<tag_t>> {};
+
+static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
+static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
+static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
+static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
+
+/**
+ * @brief Annotation for making a port asynchronous in a signal flow-graph block.
+ *
+ * In a standard block, the processing function is invoked based on the least common number of samples
+ * available across all input and output ports. When a port is annotated with `Async`, it is excluded from this
+ * least common number calculation.
+ *
+ * Applying `Async` as an optional template argument of the Port class essentially marks the port as "optional" for the
+ * synchronization mechanism. The block's processing function will be invoked regardless of the number of samples
+ * available at this specific port, relying solely on the state of other ports that are not marked as asynchronous.
+ *
+ * Use this annotation to create ports that do not constrain the block's ability to process data, making it
+ * asynchronous relative to the other ports in the block.
+ */
+struct Async {};
 
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
@@ -10286,38 +10788,41 @@ struct internal_port_buffers {
  * @tparam PortName a string to identify the port, notably to be used in an UI- and hand-written explicit code context.
  * @tparam PortType STREAM  or MESSAGE
  * @tparam PortDirection either input or output
- * @tparam MIN_SAMPLES specifies the minimum number of samples the port/block requires for processing in one scheduler iteration
- * @tparam MAX_SAMPLES specifies the maximum number of samples the port/block can process in one scheduler iteration
- * @tparam BufferType user-extendable buffer implementation for the streaming data
- * @tparam TagBufferType user-extendable buffer implementation for the tag data
+ * @tparam Arguments optional: default to 'DefaultStreamBuffer' and DefaultTagBuffer' based on 'gr::circular_buffer', and CPU domain
  */
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, // TODO: sort default arguments
-         std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, gr::Buffer BufferType = gr::circular_buffer<T>,
-         gr::Buffer TagBufferType = gr::circular_buffer<tag_t>>
-class port {
-public:
+template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, typename... Arguments>
+struct Port {
+    template<fixed_string NewName>
+    using with_name = Port<T, NewName, PortType, PortDirection, Arguments...>;
+
     static_assert(PortDirection != port_direction_t::ANY, "ANY reserved for queries and not port direction declarations");
 
-    using value_type                = T;
+    using value_type                            = T;
+    using ArgumentsTypeList                     = typename fair::meta::typelist<Arguments...>;
+    using Domain                                = ArgumentsTypeList::template find_or_default<is_port_domain, CPU>;
+    using Required                              = ArgumentsTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
+    using BufferType                            = ArgumentsTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
+    using TagBufferType                         = ArgumentsTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
+    static constexpr port_direction_t Direction = PortDirection;
+    static constexpr bool             IS_INPUT  = PortDirection == port_direction_t::INPUT;
+    static constexpr bool             IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
+    static constexpr fixed_string     Name      = PortName;
 
-    static constexpr bool IS_INPUT  = PortDirection == port_direction_t::INPUT;
-    static constexpr bool IS_OUTPUT = PortDirection == port_direction_t::OUTPUT;
-
-    template<fixed_string NewName>
-    using with_name     = port<T, NewName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>;
-
-    using ReaderType    = decltype(std::declval<BufferType>().new_reader());
-    using WriterType    = decltype(std::declval<BufferType>().new_writer());
-    using IoType        = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
-    using TagReaderType = decltype(std::declval<TagBufferType>().new_reader());
-    using TagWriterType = decltype(std::declval<TagBufferType>().new_writer());
-    using TagIoType     = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
+    using ReaderType                            = decltype(std::declval<BufferType>().new_reader());
+    using WriterType                            = decltype(std::declval<BufferType>().new_writer());
+    using IoType                                = std::conditional_t<IS_INPUT, ReaderType, WriterType>;
+    using TagReaderType                         = decltype(std::declval<TagBufferType>().new_reader());
+    using TagWriterType                         = decltype(std::declval<TagBufferType>().new_writer());
+    using TagIoType                             = std::conditional_t<IS_INPUT, TagReaderType, TagWriterType>;
 
     // public properties
-    const std::string name        = static_cast<std::string>(PortName);
-    std::int16_t      priority    = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t       min_samples = (MIN_SAMPLES == std::dynamic_extent ? 1 : MIN_SAMPLES);
-    std::size_t       max_samples = MAX_SAMPLES;
+    constexpr static bool synchronous   = !std::disjunction_v<std::is_same<Async, Arguments>...>;
+    constexpr static bool optional      = std::disjunction_v<std::is_same<Optional, Arguments>...>;
+    std::string           name          = static_cast<std::string>(PortName);
+    std::int16_t          priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t           min_samples   = (Required::MinSamples == std::dynamic_extent ? 1 : Required::MinSamples);
+    std::size_t           max_samples   = Required::MaxSamples;
+    T                     default_value = T{};
 
 private:
     bool      _connected    = false;
@@ -10325,21 +10830,30 @@ private:
     TagIoType _tagIoHandler = new_tag_io_handler();
 
 public:
+    [[nodiscard]] constexpr bool
+    initBuffer(std::size_t nSamples = 0) noexcept {
+        if constexpr (IS_OUTPUT) {
+            // write one default value into output -- needed for cyclic graph initialisation
+            return _ioHandler.try_publish([val = default_value](std::span<T> &out) { std::ranges::fill(out, val); }, nSamples);
+        }
+        return true;
+    }
+
     [[nodiscard]] constexpr auto
-    new_io_handler() const noexcept {
+    new_io_handler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (IS_INPUT) {
-            return BufferType(65536).new_reader();
+            return BufferType(buffer_size).new_reader();
         } else {
-            return BufferType(65536).new_writer();
+            return BufferType(buffer_size).new_writer();
         }
     }
 
     [[nodiscard]] constexpr auto
-    new_tag_io_handler() const noexcept {
+    new_tag_io_handler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (IS_INPUT) {
-            return TagBufferType(65536).new_reader();
+            return TagBufferType(buffer_size).new_reader();
         } else {
-            return TagBufferType(65536).new_writer();
+            return TagBufferType(buffer_size).new_writer();
         }
     }
 
@@ -10370,23 +10884,22 @@ public:
         return true;
     }
 
-public:
-    port()             = default;
-    port(const port &) = delete;
+    constexpr Port()   = default;
+    Port(const Port &) = delete;
     auto
-    operator=(const port &)
+    operator=(const Port &)
             = delete;
 
-    port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0_UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
+    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0_UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
         : name(std::move(port_name)), priority{ priority_ }, min_samples(min_samples_), max_samples(max_samples_) {
         static_assert(PortName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
     }
 
-    constexpr port(port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples) {}
+    constexpr Port(Port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples) {}
 
-    constexpr port &
-    operator=(port &&other) {
-        port tmp(std::move(other));
+    constexpr Port &
+    operator=(Port &&other) noexcept {
+        Port tmp(std::move(other));
         std::swap(name, tmp._name);
         std::swap(min_samples, tmp._min_samples);
         std::swap(max_samples, tmp._max_samples);
@@ -10398,6 +10911,8 @@ public:
         return *this;
     }
 
+    ~Port() = default;
+
     [[nodiscard]] constexpr static port_type_t
     type() noexcept {
         return PortType;
@@ -10406,6 +10921,21 @@ public:
     [[nodiscard]] constexpr static port_direction_t
     direction() noexcept {
         return PortDirection;
+    }
+
+    [[nodiscard]] constexpr static std::string_view
+    domain() noexcept {
+        return std::string_view(Domain::Name);
+    }
+
+    [[nodiscard]] constexpr static bool
+    isSynchronous() noexcept {
+        return synchronous;
+    }
+
+    [[nodiscard]] constexpr static bool
+    isOptional() noexcept {
+        return optional;
     }
 
     [[nodiscard]] constexpr static decltype(PortName)
@@ -10421,8 +10951,17 @@ public:
 #else
     [[nodiscard]] constexpr supported_type
 #endif
-    pmt_type() const noexcept {
-        return T();
+    defaultValue() const noexcept {
+        return default_value;
+    }
+
+    bool
+    setDefaultValue(const supported_type &newDefault) noexcept {
+        if (std::holds_alternative<T>(newDefault)) {
+            default_value = std::get<T>(newDefault);
+            return true;
+        }
+        return false;
     }
 
     [[nodiscard]] constexpr static std::size_t
@@ -10432,35 +10971,36 @@ public:
 
     [[nodiscard]] constexpr std::size_t
     min_buffer_size() const noexcept {
-        if constexpr (MIN_SAMPLES == std::dynamic_extent) {
+        if constexpr (Required::MinSamples == std::dynamic_extent) {
             return min_samples;
         } else {
-            return MIN_SAMPLES;
+            return Required::MinSamples;
         }
     }
 
     [[nodiscard]] constexpr std::size_t
     max_buffer_size() const noexcept {
-        if constexpr (MAX_SAMPLES == std::dynamic_extent) {
+        if constexpr (Required::MaxSamples == std::dynamic_extent) {
             return max_samples;
         } else {
-            return MAX_SAMPLES;
+            return Required::MaxSamples;
         }
     }
 
     [[nodiscard]] constexpr connection_result_t
     resize_buffer(std::size_t min_size) noexcept {
+        using enum fair::graph::connection_result_t;
         if constexpr (IS_INPUT) {
-            return connection_result_t::SUCCESS;
+            return SUCCESS;
         } else {
             try {
                 _ioHandler    = BufferType(min_size).new_writer();
                 _tagIoHandler = TagBufferType(min_size).new_writer();
             } catch (...) {
-                return connection_result_t::FAILED;
+                return FAILED;
             }
         }
-        return connection_result_t::SUCCESS;
+        return SUCCESS;
     }
 
     [[nodiscard]] auto
@@ -10559,39 +11099,52 @@ namespace detail {
 template<typename T, auto>
 using just_t = T;
 
-template<typename T, std::size_t... Is>
-consteval fair::meta::typelist<just_t<T, Is>...>
+template<typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, typename... Arguments, std::size_t... Is>
+consteval fair::meta::typelist<just_t<Port<T, BaseName + meta::make_fixed_string<Is>(), PortType, PortDirection, Arguments...>, Is>...>
 repeated_ports_impl(std::index_sequence<Is...>) {
     return {};
 }
 } // namespace detail
 
-// TODO: Add port index to BaseName
-template<std::size_t Count, typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, std::size_t MIN_SAMPLES = std::dynamic_extent,
-         std::size_t MAX_SAMPLES = std::dynamic_extent>
-using repeated_ports = decltype(detail::repeated_ports_impl<port<T, BaseName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES>>(std::make_index_sequence<Count>()));
+template<std::size_t Count, typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, typename... Arguments>
+using repeated_ports = decltype(detail::repeated_ports_impl<T, BaseName, PortType, PortDirection, Arguments...>(std::make_index_sequence<Count>()));
 
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using IN = port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using OUT = port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using IN_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::INPUT, MIN_SAMPLES, MAX_SAMPLES>;
-template<typename T, std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent, fixed_string PortName = "">
-using OUT_MSG = port<T, PortName, port_type_t::MESSAGE, port_direction_t::OUTPUT, MIN_SAMPLES, MAX_SAMPLES>;
+static_assert(repeated_ports<3, float, "out", port_type_t::STREAM, port_direction_t::OUTPUT, Optional>::at<0>::Name == fixed_string("out0"));
+static_assert(repeated_ports<3, float, "out", port_type_t::STREAM, port_direction_t::OUTPUT, Optional>::at<1>::Name == fixed_string("out1"));
+static_assert(repeated_ports<3, float, "out", port_type_t::STREAM, port_direction_t::OUTPUT, Optional>::at<2>::Name == fixed_string("out2"));
 
-static_assert(Port<IN<float>>);
-static_assert(Port<decltype(IN<float>())>);
-static_assert(Port<OUT<float>>);
-static_assert(Port<IN_MSG<float>>);
-static_assert(Port<OUT_MSG<float>>);
+template<typename T, typename... Arguments>
+using PortIn = Port<T, "", port_type_t::STREAM, port_direction_t::INPUT, Arguments...>;
+template<typename T, typename... Arguments>
+using PortOut = Port<T, "", port_type_t::STREAM, port_direction_t::OUTPUT, Arguments...>;
+template<typename... Arguments>
+using MsgPortIn = Port<property_map, "", port_type_t::MESSAGE, port_direction_t::INPUT, Arguments...>;
+template<typename... Arguments>
+using MsgPortOut = Port<property_map, "", port_type_t::MESSAGE, port_direction_t::OUTPUT, Arguments...>;
 
-static_assert(IN<float, 0, 0, "in">::static_name() == fixed_string("in"));
-static_assert(requires { IN<float>("in").name; });
+template<typename T, fixed_string PortName, typename... Arguments>
+using PortInNamed = Port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, Arguments...>;
+template<typename T, fixed_string PortName, typename... Arguments>
+using PortOutNamed = Port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, Arguments...>;
+template<fixed_string PortName, typename... Arguments>
+using MsgPortInNamed = Port<property_map, PortName, port_type_t::STREAM, port_direction_t::INPUT, Arguments...>;
+template<fixed_string PortName, typename... Arguments>
+using MsgPortOutNamed = Port<property_map, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, Arguments...>;
 
-static_assert(OUT_MSG<float, 0, 0, "out_msg">::static_name() == fixed_string("out_msg"));
-static_assert(!(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
-static_assert(OUT_MSG<float, 0, 0, "out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
+static_assert(PortType<PortIn<float>>);
+static_assert(PortType<decltype(PortIn<float>())>);
+static_assert(PortType<PortOut<float>>);
+static_assert(PortType<MsgPortIn<float>>);
+static_assert(PortType<MsgPortOut<float>>);
+
+static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MinSamples == 1);
+static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MaxSamples == 2);
+static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>>::Domain, CPU>);
+static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>, GPU>::Domain, GPU>);
+
+static_assert(MsgPortOutNamed<"out_msg">::static_name() == fixed_string("out_msg"));
+static_assert(!(MsgPortOutNamed<"out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
+static_assert(MsgPortOutNamed<"out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
@@ -10617,7 +11170,11 @@ private:
         virtual ~model() = default;
 
         [[nodiscard]] virtual supported_type
-        pmt_type() const noexcept
+        defaultValue() const noexcept
+                = 0;
+
+        [[nodiscard]] virtual bool
+        setDefaultValue(const supported_type &val) noexcept
                 = 0;
 
         [[nodiscard]] virtual port_type_t
@@ -10626,6 +11183,18 @@ private:
 
         [[nodiscard]] virtual port_direction_t
         direction() const noexcept
+                = 0;
+
+        [[nodiscard]] virtual std::string_view
+        domain() const noexcept
+                = 0;
+
+        [[nodiscard]] virtual bool
+        isSynchronous() noexcept
+                = 0;
+
+        [[nodiscard]] virtual bool
+        isOptional() noexcept
                 = 0;
 
         [[nodiscard]] virtual connection_result_t
@@ -10648,7 +11217,7 @@ private:
 
     std::unique_ptr<model> _accessor;
 
-    template<Port T, bool owning>
+    template<PortType T, bool owning>
     class wrapper final : public model {
         using PortType = std::decay_t<T>;
         std::conditional_t<owning, PortType, PortType &> _value;
@@ -10702,15 +11271,20 @@ private:
         }
 
         ~wrapper() override = default;
-        
+
         // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
 #if defined(__EMSCRIPTEN__)
         [[nodiscard]] supported_type
 #else
         [[nodiscard]] constexpr supported_type
 #endif
-        pmt_type() const noexcept override {
-            return _value.pmt_type();
+        defaultValue() const noexcept override {
+            return _value.defaultValue();
+        }
+
+        [[nodiscard]] bool
+        setDefaultValue(const supported_type &val) noexcept override {
+            return _value.setDefaultValue(val);
         }
 
         [[nodiscard]] constexpr port_type_t
@@ -10721,6 +11295,21 @@ private:
         [[nodiscard]] constexpr port_direction_t
         direction() const noexcept override {
             return _value.direction();
+        }
+
+        [[nodiscard]] constexpr std::string_view
+        domain() const noexcept override {
+            return _value.domain();
+        }
+
+        [[nodiscard]] bool
+        isSynchronous() noexcept override {
+            return _value.isSynchronous();
+        }
+
+        [[nodiscard]] bool
+        isOptional() noexcept override {
+            return _value.isOptional();
         }
 
         [[nodiscard]] connection_result_t
@@ -10735,12 +11324,13 @@ private:
 
         [[nodiscard]] connection_result_t
         connect(dynamic_port &dst_port) override {
+            using enum fair::graph::connection_result_t;
             if constexpr (T::IS_OUTPUT) {
                 auto src_buffer = _value.writer_handler_internal();
-                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
+                return dst_port.update_reader_internal(src_buffer) ? SUCCESS : FAILED;
             } else {
                 assert(false && "This works only on input ports");
-                return connection_result_t::FAILED;
+                return FAILED;
             }
         }
     };
@@ -10766,17 +11356,22 @@ public:
             = delete;
 
     // TODO: Make owning versus non-owning API more explicit
-    template<Port T>
+    template<PortType T>
     explicit constexpr dynamic_port(T &arg) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
 
-    template<Port T>
+    template<PortType T>
     explicit constexpr dynamic_port(T &&arg) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
 
     [[nodiscard]] supported_type
-    pmt_type() const noexcept {
-        return _accessor->pmt_type();
+    defaultValue() const noexcept {
+        return _accessor->defaultValue();
+    }
+
+    [[nodiscard]] bool
+    setDefaultValue(const supported_type &val) noexcept {
+        return _accessor->setDefaultValue(val);
     }
 
     [[nodiscard]] port_type_t
@@ -10787,6 +11382,21 @@ public:
     [[nodiscard]] port_direction_t
     direction() const noexcept {
         return _accessor->direction();
+    }
+
+    [[nodiscard]] std::string_view
+    domain() const noexcept {
+        return _accessor->domain();
+    }
+
+    [[nodiscard]] bool
+    isSynchronous() noexcept {
+        return _accessor->isSynchronous();
+    }
+
+    [[nodiscard]] bool
+    isOptional() noexcept {
+        return _accessor->isOptional();
     }
 
     [[nodiscard]] connection_result_t
@@ -10808,10 +11418,10 @@ public:
     }
 };
 
-static_assert(Port<dynamic_port>);
+static_assert(PortType<dynamic_port>);
 
 constexpr void
-publish_tag(Port auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
+publish_tag(PortType auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
             [&port, data = std::move(tag_data), &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
@@ -10821,7 +11431,7 @@ publish_tag(Port auto &port, property_map &&tag_data, std::size_t tag_offset = 0
 }
 
 constexpr void
-publish_tag(Port auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
+publish_tag(PortType auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
             [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
@@ -10831,7 +11441,7 @@ publish_tag(Port auto &port, const property_map &tag_data, std::size_t tag_offse
 }
 
 constexpr std::size_t
-samples_to_next_tag(const Port auto &port) {
+samples_to_next_tag(const PortType auto &port) {
     if (port.tagReader().available() == 0) [[likely]] {
         return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
     }
@@ -10839,7 +11449,7 @@ samples_to_next_tag(const Port auto &port) {
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
     const auto &tagData           = port.tagReader().get();
     const auto &readPosition      = port.streamReader().position();
-    const auto  future_tags_begin = std::find_if(tagData.begin(), tagData.end(), [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
+    const auto  future_tags_begin = std::ranges::find_if(tagData, [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
 
     if (future_tags_begin == tagData.begin()) {
         const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
@@ -10867,11 +11477,11 @@ namespace fair::graph::traits::port {
 
 template<typename T>
 concept has_fixed_info_v = requires {
-                                    typename T::value_type;
-                                    { T::static_name() };
-                                    { T::direction() } -> std::same_as<port_direction_t>;
-                                    { T::type() } -> std::same_as<port_type_t>;
-                                };
+    typename T::value_type;
+    { T::static_name() };
+    { T::direction() } -> std::same_as<port_direction_t>;
+    { T::type() } -> std::same_as<port_type_t>;
+};
 
 template<typename T>
 using has_fixed_info = std::integral_constant<bool, has_fixed_info_v<T>>;
@@ -10902,26 +11512,16 @@ using is_output = std::integral_constant<bool, Port::direction() == port_directi
 template<typename Port>
 concept is_output_v = is_output<Port>::value;
 
-template <typename Type>
+template<typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
 template<typename... Ports>
-struct min_samples : std::integral_constant<std::size_t, std::max({ min_samples<Ports>::value... })> {};
-
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
-         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
-struct min_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
-    : std::integral_constant<std::size_t, MIN_SAMPLES> {};
+struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MinSamples... })> {};
 
 template<typename... Ports>
-struct max_samples : std::integral_constant<std::size_t, std::min({ max_samples<Ports>::value... })> {};
+struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
 
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
-         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
-struct max_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
-    : std::integral_constant<std::size_t, MAX_SAMPLES> {};
-
-} // namespace port
+} // namespace fair::graph::traits::port
 
 #endif // include guard
  // localinclude
@@ -12418,344 +13018,6 @@ static_assert(ThreadPool<BasicThreadPool>);
 
 
 // #include <annotated.hpp>
-#ifndef GRAPH_PROTOTYPE_ANNOTATED_HPP
-#define GRAPH_PROTOTYPE_ANNOTATED_HPP
-
-#include <string_view>
-#include <type_traits>
-#include <utility>
-// #include <utils.hpp>
-
-
-namespace fair::graph {
-
-/**
- * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
- * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
- */
-template<fair::meta::fixed_string doc_string>
-struct Doc {
-    static constexpr fair::meta::fixed_string value = doc_string;
-};
-
-using EmptyDoc = Doc<"">; // nomen-est-omen
-
-template<typename T>
-struct is_doc : std::false_type {};
-
-template<fair::meta::fixed_string N>
-struct is_doc<Doc<N>> : std::true_type {};
-
-template<typename T>
-concept Documentation = is_doc<T>::value;
-
-/**
- * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
- * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
- */
-template<fair::meta::fixed_string doc_string>
-struct Unit {
-    static constexpr fair::meta::fixed_string value = doc_string;
-};
-
-using EmptyUnit = Unit<"">; // nomen-est-omen
-
-template<typename T>
-struct is_unit : std::false_type {};
-
-template<fair::meta::fixed_string N>
-struct is_unit<Unit<N>> : std::true_type {};
-
-template<typename T>
-concept UnitType = is_unit<T>::value;
-
-static_assert(Documentation<EmptyDoc>);
-static_assert(UnitType<EmptyUnit>);
-static_assert(!UnitType<EmptyDoc>);
-static_assert(!Documentation<EmptyUnit>);
-
-/**
- * @brief Annotates field etc. that the entity is visible.
- */
-struct Visible {};
-
-/**
- * @brief Annotates node, indicating to calling schedulers that it may block due IO.
- */
-template<bool UseIoThread = true>
-struct BlockingIO {
-    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
-};
-
-/**
- * @brief Annotates node, indicating to perform decimation/interpolation
- */
-struct PerformDecimationInterpolation {};
-
-/**
- * @brief Annotates node, indicating to perform stride
- */
-struct PerformStride {};
-
-/**
- * @brief Annotates templated node, indicating which port data types are supported.
- */
-template<typename... Ts>
-struct SupportedTypes {};
-
-template<typename T>
-struct is_supported_types : std::false_type {};
-
-template<typename... Ts>
-struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
-
-using DefaultSupportedTypes = SupportedTypes<>;
-
-static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
-static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
-
-/**
- * @brief Represents limits and optional validation for an Annotated<..> type.
- *
- * The `Limits` structure defines lower and upper bounds for a value of type `T`.
- * Additionally, it allows for an optional custom validation function to be provided.
- * This function should take a value of type `T` and return a `bool`, indicating
- * whether the value passes the custom validation or not.
- *
- * Example:
- * ```
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
- * // or:
- * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
- * // or:
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
- * ```
- */
-template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
-    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
-        { f(v) } -> std::same_as<bool>;
-    } || Validator == nullptr)
-struct Limits {
-    using ValueType                                    = decltype(LowerLimit);
-    static constexpr ValueType           MinRange      = LowerLimit;
-    static constexpr ValueType           MaxRange      = UpperLimit;
-    static constexpr decltype(Validator) ValidatorFunc = Validator;
-
-    static constexpr bool
-    validate(const ValueType &value) noexcept {
-        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
-            if constexpr (Validator != nullptr) {
-                try {
-                    return Validator(value);
-                } catch (...) {
-                    return false;
-                }
-            } else {
-                return true; // if no validator and limits are same, return true by default
-            }
-        }
-        if constexpr (Validator != nullptr) {
-            try {
-                return value >= LowerLimit && value <= UpperLimit && Validator(value);
-            } catch (...) {
-                return false;
-            }
-        } else {
-            return value >= LowerLimit && value <= UpperLimit;
-        }
-        return true;
-    }
-};
-
-template<typename T>
-struct is_limits : std::false_type {};
-
-template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
-struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
-
-template<typename T>
-concept Limit    = is_limits<T>::value;
-
-using EmptyLimit = Limits<0, 0>; // nomen-est-omen
-
-static_assert(Limit<EmptyLimit>);
-
-/**
- * @brief Annotated is a template class that acts as a transparent wrapper around another type.
- * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
- * The meta-information is supplied as template parameters.
- */
-template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
-struct Annotated {
-    using value_type = T;
-    using LimitType  = typename fair::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
-    T value;
-
-    Annotated() = default;
-
-    constexpr Annotated(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) : value(value_) {}
-
-    constexpr Annotated(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) : value(std::move(value_)) {}
-
-    // N.B. intentional implicit assignment and conversion operators to have a transparent wrapper
-    // this does not affect the conversion of the wrapped value type 'T' itself
-    constexpr Annotated &
-    operator=(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) {
-        value = value_;
-        return *this;
-    }
-
-    constexpr Annotated &
-    operator=(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) {
-        value = std::move(value_);
-        return *this;
-    }
-
-    inline explicit(false) constexpr
-    operator T &() noexcept {
-        return value;
-    }
-
-    inline explicit(false) constexpr operator const T &() const noexcept { return value; }
-
-    constexpr bool
-    operator==(const Annotated &other) const noexcept {
-        return value == other.value;
-    }
-
-    template<typename U>
-    constexpr bool
-    operator==(const U &other) const noexcept {
-        if constexpr (requires { other.value; }) {
-            return value == other.value;
-        } else {
-            return value == other;
-        }
-    }
-
-    template<typename U>
-    Annotated &
-    operator=(const U &sv) noexcept
-        requires std::is_same_v<T, std::string> && std::is_same_v<U, std::string_view>
-    {
-        value = std::string(sv); // Convert from std::string_view to std::string and assign
-        return *this;
-    }
-
-    template<typename U>
-        requires std::is_same_v<std::remove_cvref_t<U>, T>
-    constexpr bool
-    validate_and_set(U &&value_) {
-        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
-            value = std::forward<U>(value_);
-            return true;
-        } else {
-            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
-                value = std::forward<U>(value_);
-                return true;
-            } else {
-                return false;
-            }
-        }
-    }
-
-    operator std::string_view() const noexcept
-        requires std::is_same_v<T, std::string>
-    {
-        return std::string_view(value); // Convert from std::string to std::string_view
-    }
-
-    // meta-information
-    static constexpr std::string_view
-    description() noexcept {
-        return std::string_view{ description_ };
-    }
-
-    static constexpr std::string_view
-    documentation() noexcept {
-        using Documentation = typename fair::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
-        return std::string_view{ Documentation::value };
-    }
-
-    static constexpr std::string_view
-    unit() noexcept {
-        using PhysicalUnit = typename fair::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
-        return std::string_view{ PhysicalUnit::value };
-    }
-
-    static constexpr bool
-    visible() noexcept {
-        return fair::meta::typelist<Arguments...>::template contains<Visible>;
-    }
-};
-
-template<typename T>
-struct is_annotated : std::false_type {};
-
-template<typename T, fair::meta::fixed_string str, typename... Args>
-struct is_annotated<fair::graph::Annotated<T, str, Args...>> : std::true_type {};
-
-template<typename T>
-concept AnnotatedType = is_annotated<T>::value;
-
-template<typename T>
-struct unwrap_if_wrapped {
-    using type = T;
-};
-
-template<typename U, fair::meta::fixed_string str, typename... Args>
-struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
-    using type = U;
-};
-
-/**
- * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
- * If the given type is not an `Annotated`, it returns the type itself.
- */
-template<typename T>
-using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
-
-} // namespace fair::graph
-
-template<typename... Ts>
-struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
-
-#ifdef FMT_FORMAT_H_
-
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-
-template<typename T, fair::meta::fixed_string description, typename... Arguments>
-struct fmt::formatter<fair::graph::Annotated<T, description, Arguments...>> {
-    fmt::formatter<T> value_formatter;
-
-    template<typename FormatContext>
-    auto
-    parse(FormatContext &ctx) {
-        return value_formatter.parse(ctx);
-    }
-
-    template<typename FormatContext>
-    auto
-    format(const fair::graph::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
-        // TODO: add switch for printing only brief and/or meta-information
-        return value_formatter.format(annotated.value, ctx);
-    }
-};
-
-namespace gr {
-template<typename T, fair::meta::fixed_string description, typename... Arguments>
-inline std::ostream &
-operator<<(std::ostream &os, const fair::graph::Annotated<T, description, Arguments...> &v) {
-    // TODO: add switch for printing only brief and/or meta-information
-    return os << fmt::format("{}", v.value);
-}
-} // namespace gr
-
-#endif // FMT_FORMAT_H_
-
-#endif // GRAPH_PROTOTYPE_ANNOTATED_HPP
  // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 // #include <refl.hpp>
 
@@ -13734,7 +13996,7 @@ protected:
     update_ports_status() {
         ports_status = ports_status_t();
         meta::tuple_for_each(
-                [&ps = ports_status](Port auto &port) {
+                [&ps = ports_status](PortType auto &port) {
                     ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
                     ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
                     ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
@@ -13745,7 +14007,7 @@ protected:
                 input_ports(&self()));
 
         meta::tuple_for_each(
-                [&ps = ports_status](Port auto &port) {
+                [&ps = ports_status](PortType auto &port) {
                     ps.out_min_samples = std::max(ps.out_min_samples, port.min_buffer_size());
                     ps.out_max_samples = std::min(ps.out_max_samples, port.max_buffer_size());
                     ps.out_available   = std::min(ps.out_available, port.streamWriter().available());
@@ -14676,8 +14938,12 @@ merge(A &&a, B &&b) {
 }
 
 #if !DISABLE_SIMD
-namespace test {
-struct copy : public node<copy, IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">, OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out">> {
+namespace test { // TODO: move to dedicated tests
+
+struct copy : public node<copy> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
 public:
     template<meta::t_or_simd<float> V>
     [[nodiscard]] constexpr V
@@ -14685,7 +14951,18 @@ public:
         return a;
     }
 };
+} // namespace test
+#endif
+} // namespace fair::graph
 
+#if !DISABLE_SIMD
+ENABLE_REFLECTION(fair::graph::test::copy, in, out);
+#endif
+
+namespace fair::graph {
+
+#if !DISABLE_SIMD
+namespace test {
 static_assert(traits::node::input_port_types<copy>::size() == 1);
 static_assert(std::same_as<traits::node::return_type<copy>, float>);
 static_assert(traits::node::can_process_one_scalar<copy>);
@@ -15512,9 +15789,10 @@ operator<<(std::ostream &os, const port_direction_t &value) {
     return os << static_cast<int>(value);
 }
 
+template<PortDomainType T>
 inline std::ostream &
-operator<<(std::ostream &os, const port_domain_t &value) {
-    return os << static_cast<int>(value);
+operator<<(std::ostream &os, const T &value) {
+    return os << value.Name;
 }
 
 #if HAVE_SOURCE_LOCATION

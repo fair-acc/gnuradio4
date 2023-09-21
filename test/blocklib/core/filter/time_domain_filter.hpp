@@ -17,8 +17,8 @@ struct fir_filter : node<fir_filter<T>, Doc<R""(
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
 )"">> {
-    IN<T>             in;
-    OUT<T>            out;
+    PortIn<T>         in;
+    PortOut<T>        out;
     std::vector<T>    b{}; // feedforward coefficients
     history_buffer<T> inputHistory{ 32 };
 
@@ -51,8 +51,8 @@ struct iir_filter : node<iir_filter<T, form>, Doc<R""(
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and n[-1] the previous sample)
 a are the feedback coefficients
 )"">> {
-    IN<T>             in;
-    OUT<T>            out;
+    PortIn<T>         in;
+    PortOut<T>        out;
     std::vector<T>    b{ 1 }; // feed-forward coefficients
     std::vector<T>    a{ 1 }; // feedback coefficients
     history_buffer<T> inputHistory{ 32 };

@@ -6,7 +6,7 @@
 namespace fg = fair::graph;
 
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public fg::node<scale<T, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
+struct scale : public fg::node<scale<T, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -15,8 +15,7 @@ struct scale : public fg::node<scale<T, R>, fg::IN<T, 0, std::numeric_limits<std
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">,
-                               fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
+struct adder : public fg::node<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -42,7 +41,7 @@ protected:
     std::vector<fg::property_map>      _tags_at_output;
     std::unique_ptr<fg::settings_base> _settings = std::make_unique<fg::basic_settings<hier_node<T>>>(*this);
 
-    using in_port_t                              = fg::IN<T>;
+    using in_port_t                              = fg::PortIn<T>;
 
     fg::scheduler::simple<> _scheduler;
 
@@ -136,17 +135,17 @@ template<typename T>
 std::atomic_size_t hier_node<T>::_unique_id_counter = 0;
 
 template<typename T>
-struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out">> {
-    std::size_t remaining_events_count;
+struct fixed_source : public fg::node<fixed_source<T>> {
+    fg::PortOut<T, fg::RequiredSamples<1, 1024>> out;
+    std::size_t                                  remaining_events_count;
 
-    T           value = 1;
+    T                                            value = 1;
 
     fg::work_return_t
     work(std::size_t requested_work) {
         if (remaining_events_count != 0) {
             using namespace fair::literals;
-            auto &port   = fg::output_port<0>(this);
-            auto &writer = port.streamWriter();
+            auto &writer = out.streamWriter();
             auto  data   = writer.reserve_output_range(1_UZ);
             data[0]      = value;
             data.publish(1_UZ);
@@ -165,11 +164,12 @@ struct fixed_source : public fg::node<fixed_source<T>, fg::OUT<T, 0, 1024, "out"
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fixed_source<T>), remaining_events_count);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fixed_source<T>), out, remaining_events_count);
 
 template<typename T>
-struct cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
-    std::size_t remaining = 0;
+struct cout_sink : public fg::node<cout_sink<T>> {
+    fg::PortIn<T, fg::RequiredSamples<1, 1024>> in;
+    std::size_t                                 remaining = 0;
 
     void
     process_one(T value) {
@@ -180,7 +180,7 @@ struct cout_sink : public fg::node<cout_sink<T>, fg::IN<T, 0, 1024, "in">> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), remaining);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), in, remaining);
 
 fg::graph
 make_graph(std::size_t events_count) {

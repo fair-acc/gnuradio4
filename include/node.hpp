@@ -378,7 +378,7 @@ protected:
     update_ports_status() {
         ports_status = ports_status_t();
         meta::tuple_for_each(
-                [&ps = ports_status](Port auto &port) {
+                [&ps = ports_status](PortType auto &port) {
                     ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
                     ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
                     ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
@@ -389,7 +389,7 @@ protected:
                 input_ports(&self()));
 
         meta::tuple_for_each(
-                [&ps = ports_status](Port auto &port) {
+                [&ps = ports_status](PortType auto &port) {
                     ps.out_min_samples = std::max(ps.out_min_samples, port.min_buffer_size());
                     ps.out_max_samples = std::min(ps.out_max_samples, port.max_buffer_size());
                     ps.out_available   = std::min(ps.out_available, port.streamWriter().available());
@@ -1320,8 +1320,12 @@ merge(A &&a, B &&b) {
 }
 
 #if !DISABLE_SIMD
-namespace test {
-struct copy : public node<copy, IN<float, 0, std::numeric_limits<std::size_t>::max(), "in">, OUT<float, 0, std::numeric_limits<std::size_t>::max(), "out">> {
+namespace test { // TODO: move to dedicated tests
+
+struct copy : public node<copy> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
 public:
     template<meta::t_or_simd<float> V>
     [[nodiscard]] constexpr V
@@ -1329,7 +1333,18 @@ public:
         return a;
     }
 };
+} // namespace test
+#endif
+} // namespace fair::graph
 
+#if !DISABLE_SIMD
+ENABLE_REFLECTION(fair::graph::test::copy, in, out);
+#endif
+
+namespace fair::graph {
+
+#if !DISABLE_SIMD
+namespace test {
 static_assert(traits::node::input_port_types<copy>::size() == 1);
 static_assert(std::same_as<traits::node::return_type<copy>, float>);
 static_assert(traits::node::can_process_one_scalar<copy>);

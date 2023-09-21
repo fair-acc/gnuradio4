@@ -17,8 +17,8 @@ class builtin_multiply : public fair::graph::node<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
-    fair::graph::IN<T>  in;
-    fair::graph::OUT<T> out;
+    fair::graph::PortIn<T>  in;
+    fair::graph::PortOut<T> out;
 
     builtin_multiply() = delete;
 
@@ -40,10 +40,10 @@ ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 template<typename T>
 class builtin_counter : public fair::graph::node<builtin_counter<T>> {
 public:
-    static std::size_t  s_event_count;
+    static std::size_t      s_event_count;
 
-    fair::graph::IN<T>  in;
-    fair::graph::OUT<T> out;
+    fair::graph::PortIn<T>  in;
+    fair::graph::PortOut<T> out;
 
     [[nodiscard]] constexpr auto
     process_one(T a) const noexcept {
@@ -69,11 +69,11 @@ public:
     const std::string unique_name_ = fmt::format("multi_adder#{}", unique_id); // TODO: resolve symbol duplication
 
 protected:
-    using in_port_t = fair::graph::IN<T>;
+    using in_port_t = fair::graph::PortIn<T>;
     // std::list because ports don't like to change in-memory address
     // after connection is established, and vector might reallocate
-    std::list<in_port_t> _input_ports;
-    fair::graph::OUT<T>  _output_port;
+    std::list<in_port_t>    _input_ports;
+    fair::graph::PortOut<T> _output_port;
 
 protected:
     using setting_map                                      = std::map<std::string, int, std::less<>>;
