@@ -241,7 +241,7 @@ public:
     initBuffer(std::size_t nSamples = 0) noexcept {
         if constexpr (IS_OUTPUT) {
             // write one default value into output -- needed for cyclic graph initialisation
-            return _ioHandler.try_publish([val = default_value](std::span<T> &out) {  std::ranges::fill(out, val); }, nSamples);
+            return _ioHandler.try_publish([val = default_value](std::span<T> &out) { std::ranges::fill(out, val); }, nSamples);
         }
         return true;
     }
@@ -291,7 +291,6 @@ public:
         return true;
     }
 
-public:
     constexpr Port()   = default;
     Port(const Port &) = delete;
     auto
@@ -319,8 +318,7 @@ public:
         return *this;
     }
 
-    ~Port() { /* explicitely defined */
-    }
+    ~Port() = default;
 
     [[nodiscard]] constexpr static port_type_t
     type() noexcept {
@@ -398,17 +396,18 @@ public:
 
     [[nodiscard]] constexpr connection_result_t
     resize_buffer(std::size_t min_size) noexcept {
+        using enum fair::graph::connection_result_t;
         if constexpr (IS_INPUT) {
-            return connection_result_t::SUCCESS;
+            return SUCCESS;
         } else {
             try {
                 _ioHandler    = BufferType(min_size).new_writer();
                 _tagIoHandler = TagBufferType(min_size).new_writer();
             } catch (...) {
-                return connection_result_t::FAILED;
+                return FAILED;
             }
         }
-        return connection_result_t::SUCCESS;
+        return SUCCESS;
     }
 
     [[nodiscard]] auto
@@ -530,13 +529,13 @@ using MsgPortIn = Port<property_map, "", port_type_t::MESSAGE, port_direction_t:
 template<typename... Arguments>
 using MsgPortOut = Port<property_map, "", port_type_t::MESSAGE, port_direction_t::OUTPUT, Arguments...>;
 
-template<typename T, fixed_string PortName = "", typename... Arguments>
+template<typename T, fixed_string PortName, typename... Arguments>
 using PortInNamed = Port<T, PortName, port_type_t::STREAM, port_direction_t::INPUT, Arguments...>;
-template<typename T, fixed_string PortName = "", typename... Arguments>
+template<typename T, fixed_string PortName, typename... Arguments>
 using PortOutNamed = Port<T, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, Arguments...>;
-template<fixed_string PortName = "", typename... Arguments>
+template<fixed_string PortName, typename... Arguments>
 using MsgPortInNamed = Port<property_map, PortName, port_type_t::STREAM, port_direction_t::INPUT, Arguments...>;
-template<fixed_string PortName = "", typename... Arguments>
+template<fixed_string PortName, typename... Arguments>
 using MsgPortOutNamed = Port<property_map, PortName, port_type_t::STREAM, port_direction_t::OUTPUT, Arguments...>;
 
 static_assert(PortType<PortIn<float>>);
@@ -732,12 +731,13 @@ private:
 
         [[nodiscard]] connection_result_t
         connect(dynamic_port &dst_port) override {
+            using enum fair::graph::connection_result_t;
             if constexpr (T::IS_OUTPUT) {
                 auto src_buffer = _value.writer_handler_internal();
-                return dst_port.update_reader_internal(src_buffer) ? connection_result_t::SUCCESS : connection_result_t::FAILED;
+                return dst_port.update_reader_internal(src_buffer) ? SUCCESS : FAILED;
             } else {
                 assert(false && "This works only on input ports");
-                return connection_result_t::FAILED;
+                return FAILED;
             }
         }
     };

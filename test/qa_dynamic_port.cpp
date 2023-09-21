@@ -110,7 +110,7 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(PortType<MsgPortOut<float>>);
 
         static_assert(PortType<PortInNamed<float, "in">>);
-        static_assert(PortType<decltype(PortInNamed<float>("in"))>);
+        static_assert(PortType<decltype(PortInNamed<float, "">("in"))>);
         static_assert(PortType<PortOutNamed<float, "out">>);
         static_assert(PortType<MsgPortInNamed<"in_msg">>);
         static_assert(PortType<MsgPortOutNamed<"out_msg">>);
