@@ -8,11 +8,11 @@ namespace fair::graph::traits::port {
 
 template<typename T>
 concept has_fixed_info_v = requires {
-                                    typename T::value_type;
-                                    { T::static_name() };
-                                    { T::direction() } -> std::same_as<port_direction_t>;
-                                    { T::type() } -> std::same_as<port_type_t>;
-                                };
+    typename T::value_type;
+    { T::static_name() };
+    { T::direction() } -> std::same_as<port_direction_t>;
+    { T::type() } -> std::same_as<port_type_t>;
+};
 
 template<typename T>
 using has_fixed_info = std::integral_constant<bool, has_fixed_info_v<T>>;
@@ -43,25 +43,15 @@ using is_output = std::integral_constant<bool, Port::direction() == port_directi
 template<typename Port>
 concept is_output_v = is_output<Port>::value;
 
-template <typename Type>
+template<typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
 template<typename... Ports>
-struct min_samples : std::integral_constant<std::size_t, std::max({ min_samples<Ports>::value... })> {};
-
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
-         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
-struct min_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
-    : std::integral_constant<std::size_t, MIN_SAMPLES> {};
+struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MinSamples... })> {};
 
 template<typename... Ports>
-struct max_samples : std::integral_constant<std::size_t, std::min({ max_samples<Ports>::value... })> {};
+struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
 
-template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection,
-         std::size_t MIN_SAMPLES, std::size_t MAX_SAMPLES, gr::Buffer BufferType>
-struct max_samples<fair::graph::port<T, PortName, PortType, PortDirection, MIN_SAMPLES, MAX_SAMPLES, BufferType>>
-    : std::integral_constant<std::size_t, MAX_SAMPLES> {};
-
-} // namespace port
+} // namespace fair::graph::traits::port
 
 #endif // include guard

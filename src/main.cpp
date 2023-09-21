@@ -8,26 +8,34 @@
 namespace fg = fair::graph;
 
 template<typename T>
-class count_source : public fg::node<count_source<T>, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "random">> {
-public:
+struct count_source : public fg::node<count_source<T>> {
+    fg::PortOut<T> random;
+
     constexpr T
     process_one() {
         return 42;
     }
 };
 
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (count_source<T>), random);
+
 template<typename T>
-class expect_sink : public fg::node<expect_sink<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "sink">> {
-public:
+struct expect_sink : public fg::node<expect_sink<T>> {
+    fg::PortIn<T> sink;
+
     void
     process_one(T value) {
         std::cout << value << std::endl;
     }
 };
 
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (expect_sink<T>), sink);
+
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "original">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "scaled">> {
-public:
+struct scale : public fg::node<scale<T, Scale, R>> {
+    fg::PortIn<T>  original;
+    fg::PortOut<R> scaled;
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -35,9 +43,14 @@ public:
     }
 };
 
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
+
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend0">, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "addend1">, fg::OUT<R, 0, std::numeric_limits<std::size_t>::max(), "sum">> {
-public:
+struct adder : public fg::node<adder<T>> {
+    fg::PortIn<T>  addend0;
+    fg::PortIn<T>  addend1;
+    fg::PortOut<R> sum;
+
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -45,31 +58,35 @@ public:
     }
 };
 
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
+
+using fg::port_type_t::STREAM, fg::port_direction_t::INPUT, fg::port_direction_t::OUTPUT;
+
 template<typename T, std::size_t Count = 2>
-class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>> {
-    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">>, fg::repeated_ports<Count, T, "out", fg::port_type_t::STREAM, fg::port_direction_t::OUTPUT>>;
+class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
+    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
 
 public:
     using return_type = typename fg::traits::node::return_type<base>;
 
     [[nodiscard]] constexpr return_type
     process_one(T a) const noexcept {
-        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::make_tuple(((void) Is, a)...); }
-        (std::make_index_sequence<Count>());
+        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::make_tuple(((void) Is, a)...); }(std::make_index_sequence<Count>());
     }
 };
 
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
-class delay : public fg::node<delay<T, Depth>, fg::IN<T, 0, std::numeric_limits<std::size_t>::max(), "in">, fg::OUT<T, 0, std::numeric_limits<std::size_t>::max(), "out">> {
+struct delay : public fg::node<delay<T, Depth>> {
+    fg::PortIn<T>        in;
+    fg::PortOut<T>       out;
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
-public:
     [[nodiscard]] constexpr T
-    process_one(T in) noexcept {
+    process_one(T val) noexcept {
         T ret       = buffer[pos];
-        buffer[pos] = in;
+        buffer[pos] = val;
         if (pos == Depth - 1) {
             pos = 0;
         } else {
@@ -78,6 +95,8 @@ public:
         return ret;
     }
 };
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t Depth), (delay<T, Depth>), in, out);
 
 int
 main() {

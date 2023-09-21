@@ -63,9 +63,9 @@ struct StrideTestData {
 
 template<typename T>
 struct CountSource : public fg::node<CountSource<T>> {
-    fg::OUT<T> out{};
-    int        count{ 0 };
-    int        n_samples{ 1024 };
+    fg::PortOut<T> out{};
+    int            count{ 0 };
+    int            n_samples{ 1024 };
 
     constexpr std::make_signed_t<std::size_t>
     available_samples(const CountSource & /*d*/) noexcept {
@@ -81,11 +81,11 @@ struct CountSource : public fg::node<CountSource<T>> {
 
 template<typename T>
 struct IntDecBlock : public fg::node<IntDecBlock<T>, fg::PerformDecimationInterpolation, fg::PerformStride> {
-    fg::IN<T>     in{};
-    fg::OUT<T>    out{};
+    fg::PortIn<T>  in{};
+    fg::PortOut<T> out{};
 
-    ProcessStatus status{};
-    bool          write_to_vector{ false };
+    ProcessStatus  status{};
+    bool           write_to_vector{ false };
 
     fg::work_return_status_t
     process_bulk(std::span<const T> input, std::span<T> output) noexcept {

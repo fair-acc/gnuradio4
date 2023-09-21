@@ -104,6 +104,44 @@ operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs
     return result;
 }
 
+namespace detail {
+constexpr int
+log10(int n) noexcept {
+    if (n < 10) return 0;
+    return 1 + log10(n / 10);
+}
+
+constexpr int
+pow10(int n) noexcept {
+    if (n == 0) return 1;
+    return 10 * pow10(n - 1);
+}
+
+template<int N, std::size_t... Idx>
+constexpr fixed_string<char, sizeof...(Idx)>
+make_fixed_string_impl(std::index_sequence<Idx...>) {
+    constexpr auto numDigits = sizeof...(Idx);
+    return { { ('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0 } };
+}
+} // namespace detail
+
+template<int N>
+constexpr auto
+make_fixed_string() noexcept {
+    if constexpr (N == 0) {
+        return fixed_string{ "0" };
+    } else {
+        constexpr std::size_t digits = 1U + static_cast<std::size_t>(detail::log10(N));
+        return detail::make_fixed_string_impl<N>(std::make_index_sequence<digits>());
+    }
+}
+
+static_assert(fixed_string("0") == make_fixed_string<0>());
+static_assert(fixed_string("1") == make_fixed_string<1>());
+static_assert(fixed_string("2") == make_fixed_string<2>());
+static_assert(fixed_string("123") == make_fixed_string<123>());
+static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("out123"));
+
 template<typename T>
 [[nodiscard]] std::string
 type_name() noexcept {
