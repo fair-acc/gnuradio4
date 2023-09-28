@@ -43,7 +43,7 @@ add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
 add_ut_test(qa_traits)
 
-if (NOT EMSCRIPTEN)
+if (NOT (EMSCRIPTEN OR (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")))
     add_subdirectory(plugins)
 
     add_executable(qa_plugins_test qa_plugins_test.cpp)

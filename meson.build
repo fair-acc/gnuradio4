@@ -30,7 +30,7 @@ pmt_dep = libpmtv.get_variable('pmt_dep')
 graph_prototype_options = []
 if meson.is_cross_build()
   if meson.get_external_property('EMSCRIPTEN', false)
-    graph_prototype_options = ['-s','ALLOW_MEMORY_GROWTH=1']
+    graph_prototype_options = ['-s','ALLOW_MEMORY_GROWTH=1','-fwasm-exceptions','-pthread','SHELL:-s PTHREAD_POOL_SIZE=30"']
   endif 
 endif
 
