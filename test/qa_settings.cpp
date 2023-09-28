@@ -565,29 +565,40 @@ const boost::ut::suite TransactionTests = [] {
         expect(eq(std::get<float>(*s.get("scaling_factor", ctx0)), 42.f)); // get value with an older timestamp
     };
 
-    auto matchPred = [](const auto &lhs, const auto &rhs) {
-        return !lhs.empty() && std::all_of(lhs.begin(), lhs.end(), [&](const auto &v) { return rhs.contains(v.first) && rhs.at(v.first) == v.second; });
+    auto matchPred = [](const auto &lhs, const auto &rhs, const auto attempt) -> std::optional<bool> {
+        if (attempt >= 4) {
+            return std::nullopt;
+        }
+
+        constexpr std::array fields = { "BPCID", "SID", "BPID", "GID" };
+        // require increasingly less fields to match for each attempt
+        return std::ranges::all_of(fields | std::ranges::views::take(4 - attempt), [&](const auto &f) { return lhs.contains(f) && rhs.at(f) == lhs.at(f) && lhs.size() == 4 - attempt; });
     };
 
-    "CtxSettings Parsing"_test = [&] {
+    "CtxSettings Matching"_test = [&] {
         graph      flow_graph;
-        auto      &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto      &block = flow_graph.make_node<TestBlock<int>>({ { "scaling_factor", 42 } });
         auto       s     = ctx_settings(block, matchPred);
-        const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 } });
-        std::ignore      = s.set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
-        const auto ctx1  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 2 } });
-        std::ignore      = s.set({ { "name", "TestNameNew" }, { "scaling_factor", 43.f } }, ctx1);
+        const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 101 } }, ctx0);
+        const auto ctx1  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 102 } }, ctx1);
+        const auto ctx2  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 103 } }, ctx2);
+        const auto ctx3  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 104 } }, ctx3);
 
         // exact matches for contexts work
-        expect(eq(std::get<float>(*s.get("scaling_factor", ctx0)), 42.f));
-        expect(eq(std::get<float>(*s.get("scaling_factor", ctx1)), 43.f));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx0)), 101));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx1)), 102));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx2)), 103));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx3)), 104));
 
-        // matching by using the custom predicate
-        auto ctx3 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 2 }, { "BPID", 1 } });
-        expect(eq(std::get<float>(*s.get("scaling_factor", ctx3)), 43.f));
-        auto ctx4   = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 2 }, { "BPID", 3 } });
-        std::ignore = s.set({ { "scaling_factor", 44.f } }, ctx4);
-        expect(eq(std::get<float>(*s.get("scaling_factor", ctx4)), 44.f));
+        // matching by using the custom predicate (no exact matching possible anymore)
+        const auto ctx4 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 2 } });
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx4)), 102)); // no setting for 'gid=2' -> fall back to 'gid=-1'
+        const auto ctx5 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 2 }, { "GID", 2 } });
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx5)), 103)); // no setting for 'pid=2' and 'gid=2' -> fall back to 'pid=gid=-1'
 
         // doesn't exist
         auto ctx6 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 9 }, { "SID", 9 }, { "BPID", 9 }, { "GID", 9 } });

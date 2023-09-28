@@ -24,11 +24,21 @@
 
 namespace fair::graph {
 
-static auto nullMatchPred = [](auto, auto) { return false; };
+static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
 template<typename Node>
 class ctx_settings : public settings_base {
-    using MatchPredicate                                = std::function<bool(const property_map &, const property_map &)>;
+    /**
+     * A predicate for matching two contexts
+     * The third "attempt" parameter indicates the current round of matching being done.
+     * This is useful for hierarchical matching schemes,
+     * e.g. in the first round the predicate could look for almost exact matches only,
+     * then in a a second round (attempt=1) it could be more forgiving, given that there are no exact matches available.
+     *
+     * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
+     * which indicates that no matches were found and there is no chance of matching anything in a further round.
+     */
+    using MatchPredicate                                = std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
 
     Node                                         *_node = nullptr;
     mutable std::mutex                            _lock{};
@@ -249,10 +259,8 @@ public:
             ret                     = exact_match;
         } else {
             // try the match predicate instead
-            auto match = std::find_if(_settings.begin(), _settings.end(), [&](const auto &i) { return _match_pred(i.first.context, ctx.context); });
-            if (match != _settings.end()) {
-                ret = match->second;
-            }
+            const auto &match = bestMatch(ctx.context);
+            ret               = match.value_or(ret);
         }
 
         // return only the needed values
@@ -402,6 +410,20 @@ public:
     }
 
 private:
+    std::optional<property_map>
+    bestMatch(const property_map &context) const {
+        // retry until we either get a match or std::nullopt
+        for (std::size_t attempt = 0;; ++attempt) {
+            for (const auto &i : _settings) {
+                const auto matchres = _match_pred(i.first.context, context, attempt);
+                if (!matchres) {
+                    return std::nullopt;
+                } else if (*matchres) {
+                    return i.second;
+                }
+            }
+        }
+    }
     void
     store_default_settings(property_map &oldSettings) {
         // take a copy of the field -> map value of the old settings
