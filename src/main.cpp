@@ -3,6 +3,8 @@
 
 #include <cassert>
 
+#include <config.h> // contains the project and compiler flags definitions
+
 #include <graph.hpp>
 
 namespace fg = fair::graph;
@@ -102,6 +104,10 @@ int
 main() {
     using fg::merge;
     using fg::merge_by_index;
+
+    fmt::print("Project compiler: '{}' - version '{}'\n", CXX_COMPILER_ID, CXX_COMPILER_VERSION);
+    fmt::print("Project compiler path: '{}' - arg1 '{}'\n", CXX_COMPILER_PATH, CXX_COMPILER_ARG1);
+    fmt::print("Project compiler flags: '{}'\n", CXX_COMPILER_FLAGS);
 
     {
         // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output

@@ -5,12 +5,32 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
+# Initialize a variable to hold all the compiler flags -> exported into global config.h(.in)
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS}")
+elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
+    set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
+endif()
+# Replace ; with space
+string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
+
+
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 add_library(graph-prototype-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(graph-prototype-options)
+
+
+if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
+    message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
+    set(EMSCRIPTEN true)
+endif()
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
@@ -102,6 +122,10 @@ target_link_libraries(fftw INTERFACE fftw3 INTERFACE fftw3f INTERFACE m)
 target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include)
 target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
+
+# configure a header file to pass the CMake settings to the source code
+configure_file("${PROJECT_SOURCE_DIR}/cmake/config.h.in"  "${PROJECT_BINARY_DIR}/config.h" @ONLY)
+include_directories("${PROJECT_BINARY_DIR}")
 
 add_subdirectory(include)
 add_subdirectory(src)

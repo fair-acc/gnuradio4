@@ -80,6 +80,11 @@ function(set_project_warnings project_name)
     message(AUTHOR_WARNING "No compiler warnings set for '${CMAKE_CXX_COMPILER_ID}' compiler.")
   endif()
 
+  # Replace semicolons with spaces in PROJECT_WARNINGS
+  string(REPLACE ";" " " PROJECT_WARNINGS_MOD "${PROJECT_WARNINGS}")
+  set(${output_var} "${PROJECT_WARNINGS}" PARENT_SCOPE)
+  set(ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}${PROJECT_WARNINGS_MOD}" PARENT_SCOPE)
+
   target_compile_options(${project_name} INTERFACE ${PROJECT_WARNINGS})
 
 endfunction()
