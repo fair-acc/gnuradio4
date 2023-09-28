@@ -34,6 +34,30 @@ if meson.is_cross_build()
   endif 
 endif
 
+# Determine compiler flags based on build type
+all_compiler_flags = ''
+if get_option('buildtype') == 'debug'
+    all_compiler_flags = '-g'
+elif get_option('buildtype') == 'release'
+    all_compiler_flags = '-O3'
+elif get_option('buildtype') == 'debugoptimized'
+    all_compiler_flags = '-O2 -g'
+elif get_option('buildtype') == 'minsize'
+    all_compiler_flags = '-Os'
+endif
+
+# Additional compiler flags from the global arguments
+all_compiler_flags += ' ' + ' '.join(gcc_warnings) + ' '.join(graph_prototype_options)
+
+# Configure the header file
+config_h_data = configuration_data()
+config_h_data.set('CMAKE_CXX_COMPILER', compiler.get_id())
+config_h_data.set('CMAKE_CXX_COMPILER_ARG1', '')
+config_h_data.set('CMAKE_CXX_COMPILER_ID', compiler.get_id())
+config_h_data.set('CMAKE_CXX_COMPILER_VERSION', compiler.version())
+config_h_data.set('ALL_COMPILER_FLAGS', all_compiler_flags)
+configure_file(input : 'cmake/config.h.in', output : 'config.h', configuration : config_h_data)
+
 subdir('include')
 subdir('src')
 if (get_option('enable_testing'))
