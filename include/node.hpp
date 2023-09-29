@@ -529,6 +529,12 @@ public:
         return *_settings;
     }
 
+    template<typename T>
+    void
+    setSettings(std::unique_ptr<T> &settings) {
+        _settings = std::move(settings);
+    }
+
     template<std::size_t Index, typename Self>
     friend constexpr auto &
     input_port(Self *self) noexcept;

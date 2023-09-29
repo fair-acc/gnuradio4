@@ -1,3 +1,4 @@
+#include "tag.hpp"
 #include <boost/ut.hpp>
 
 #include <buffer.hpp>
@@ -5,9 +6,14 @@
 #include <node.hpp>
 #include <reflection.hpp>
 #include <scheduler.hpp>
+#include <stdexcept>
+#include <string>
+#include <transactions.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+
+using namespace std::string_literals;
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -521,6 +527,93 @@ const boost::ut::suite AnnotationTests = [] {
         std::ignore = block.settings().apply_staged_parameters(); // should print out a warning -> TODO: replace with pmt error message on msgOut port
 
         // fmt::print("description:\n {}", fair::graph::node_description<TestBlock<float>>());
+    };
+};
+
+const boost::ut::suite SettingsCtxTests = [] {
+    using namespace boost::ut;
+    using namespace fair::graph;
+    using namespace fair::graph::setting_test;
+
+    "SettingsCtx basic"_test = [] {
+        SettingsCtx a;
+        SettingsCtx b;
+        expect(a == b);
+        a.time = std::chrono::system_clock::now();
+        b.time = std::chrono::system_clock::now() + std::chrono::seconds(1);
+        // chronologically sorted
+        expect(a < b);
+    };
+};
+
+const boost::ut::suite TransactionTests = [] {
+    using namespace boost::ut;
+    using namespace fair::graph;
+    using namespace fair::graph::setting_test;
+
+    "CtxSettings"_test = [] {
+        graph flow_graph;
+        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto  s     = ctx_settings(block);
+        auto  ctx0  = SettingsCtx(std::chrono::system_clock::now());
+        std::ignore = s.set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
+        auto ctx1   = SettingsCtx(std::chrono::system_clock::now() + std::chrono::seconds(1));
+        std::ignore = s.set({ { "name", "TestNameNew" }, { "scaling_factor", 43.f } }, ctx1);
+
+        expect(eq(std::get<float>(*s.get("scaling_factor")), 43.f));       // get the latest value
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx1)), 43.f)); // get same value, but over the context
+        expect(eq(std::get<float>(*s.get("scaling_factor", ctx0)), 42.f)); // get value with an older timestamp
+    };
+
+    auto matchPred = [](const auto &lhs, const auto &rhs, const auto attempt) -> std::optional<bool> {
+        if (attempt >= 4) {
+            return std::nullopt;
+        }
+
+        constexpr std::array fields = { "BPCID", "SID", "BPID", "GID" };
+        // require increasingly less fields to match for each attempt
+        return std::ranges::all_of(fields | std::ranges::views::take(4 - attempt), [&](const auto &f) { return lhs.contains(f) && rhs.at(f) == lhs.at(f) && lhs.size() == 4 - attempt; });
+    };
+
+    "CtxSettings Matching"_test = [&] {
+        graph      flow_graph;
+        auto      &block = flow_graph.make_node<TestBlock<int>>({ { "scaling_factor", 42 } });
+        auto       s     = ctx_settings(block, matchPred);
+        const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 101 } }, ctx0);
+        const auto ctx1  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 102 } }, ctx1);
+        const auto ctx2  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 103 } }, ctx2);
+        const auto ctx3  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 } });
+        std::ignore      = s.set({ { "scaling_factor", 104 } }, ctx3);
+
+        // exact matches for contexts work
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx0)), 101));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx1)), 102));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx2)), 103));
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx3)), 104));
+
+        // matching by using the custom predicate (no exact matching possible anymore)
+        const auto ctx4 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 2 } });
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx4)), 102)); // no setting for 'gid=2' -> fall back to 'gid=-1'
+        const auto ctx5 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 2 }, { "GID", 2 } });
+        expect(eq(std::get<int>(*s.get("scaling_factor", ctx5)), 103)); // no setting for 'pid=2' and 'gid=2' -> fall back to 'pid=gid=-1'
+
+        // doesn't exist
+        auto ctx6 = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 9 }, { "SID", 9 }, { "BPID", 9 }, { "GID", 9 } });
+        expect(s.get("scaling_factor", ctx6) == std::nullopt);
+    };
+
+    "CtxSettings Drop-In Settings replacement"_test = [&] {
+        // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
+        graph flow_graph;
+        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto  s     = std::make_unique<ctx_settings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
+        block.setSettings(s);
+        auto ctx0   = SettingsCtx(std::chrono::system_clock::now());
+        std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
+        expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 42.f));
     };
 };
 

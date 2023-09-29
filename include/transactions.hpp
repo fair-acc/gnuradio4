@@ -1,257 +1,57 @@
-#ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
-#define GRAPH_PROTOTYPE_SETTINGS_HPP
+#ifndef GRAPH_PROTOTYPE_TRANSACTIONS_HPP
+#define GRAPH_PROTOTYPE_TRANSACTIONS_HPP
 
-#include "annotated.hpp"
+#include "tag.hpp"
+#include <pmtv/pmt.hpp>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <concepts>
-#include <mutex>
-#include <optional>
-#include <reflection.hpp>
-#include <set>
-#include <tag.hpp>
-#include <variant>
+#include <functional>
+#include <list>
+#include <span>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+#include <settings.hpp>
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#include <fmt/chrono.h>
+#pragma GCC diagnostic pop
+
+#include "utils.hpp"
 
 namespace fair::graph {
 
-namespace detail {
-template<class T>
-inline constexpr void
-hash_combine(std::size_t &seed, const T &v) noexcept {
-    std::hash<T> hasher;
-    seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-} // namespace detail
-
-struct SettingsCtx {
-    // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
-    using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
-    std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
-    property_map             context;             /// user-defined multiplexing context for which the setting is valid
-
-    SettingsCtx() {}
-
-    explicit SettingsCtx(const TimePoint &t, const property_map &ctx = {}) {
-        time    = t;
-        context = ctx;
-    }
-
-    bool
-    operator==(const SettingsCtx &) const
-            = default;
-
-    bool
-    operator<(const SettingsCtx &other) {
-        // order by time
-        return !time || (other.time && *time < *other.time);
-    }
-
-    [[nodiscard]] std::size_t
-    hash() const noexcept {
-        std::size_t seed = 0;
-        if (time) {
-            detail::hash_combine(seed, time.value().time_since_epoch().count());
-        }
-        for (const auto &[key, val] : context) {
-            detail::hash_combine(seed, key);
-            detail::hash_combine(seed, pmtv::to_base64(val));
-        }
-        return seed;
-    }
-};
-
-/**
- * @brief a concept verifying whether a processing block optionally provides a `settings_changed` callback to react to
- * block configuration changes and/or to influence forwarded downstream parameters.
- *
- * Implementers may have:
- * 1. `settings_changed(oldSettings, newSettings)`
- * 2. `settings_changed(oldSettings, newSettings, forwardSettings)`
- *    - where `forwardSettings` is for influencing subsequent blocks. E.g., a decimating block might adjust the `sample_rate` for downstream blocks.
- */
-template<typename BlockType>
-concept HasSettingsChangedCallback = requires(BlockType *node, const property_map &oldSettings, property_map &newSettings) {
-    { node->settings_changed(oldSettings, newSettings) };
-} or requires(BlockType *node, const property_map &oldSettings, property_map &newSettings, property_map &forwardSettings) {
-    { node->settings_changed(oldSettings, newSettings, forwardSettings) };
-};
-
-/**
- * @brief a concept verifying whether a processing block optionally provides a `reset` callback to react to
- * block reset requests (being called after the settings have been reverted(.
- */
-template<typename BlockType>
-concept HasSettingsResetCallback = requires(BlockType *node) {
-    { node->reset() };
-};
-
-template<typename T>
-concept Settings = requires(T t, std::span<const std::string> parameter_keys, const std::string &parameter_key, const property_map &parameters, SettingsCtx ctx) {
-    /**
-     * @brief returns if there are stages settings that haven't been applied yet.
-     */
-    { t.changed() } -> std::same_as<bool>;
-
-    /**
-     * @brief stages new key-value pairs that shall replace the block field-based settings.
-     * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
-     * @return key-value pairs that could not be set
-     */
-    { t.set(parameters, ctx) } -> std::same_as<property_map>;
-    { t.set(parameters) } -> std::same_as<property_map>;
-
-    /**
-     * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
-     * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
-     */
-    { t.auto_update(parameters, ctx) } -> std::same_as<void>;
-    { t.auto_update(parameters) } -> std::same_as<void>;
-
-    /**
-     * @brief return all available node settings as key-value pairs
-     */
-    { t.get() } -> std::same_as<property_map>;
-
-    /**
-     * @brief return key-pmt values map for multiple keys
-     */
-    { t.get(parameter_keys, ctx) } -> std::same_as<property_map>;
-    { t.get(parameter_keys) } -> std::same_as<property_map>;
-
-    /**
-     * @brief return pmt value for a single key
-     */
-    { t.get(parameter_key, ctx) } -> std::same_as<std::optional<pmtv::pmt>>;
-    { t.get(parameter_key) } -> std::same_as<std::optional<pmtv::pmt>>;
-
-    /**
-     * @brief returns the staged/not-yet-applied new parameters
-     */
-    { t.staged_parameters() } -> std::same_as<const property_map>;
-
-    /**
-     * @brief synchronise map-based with actual node field-based settings
-     */
-    { t.apply_staged_parameters() } -> std::same_as<const property_map>;
-
-    /**
-     * @brief synchronises the map-based with the node's field-based parameters
-     * (N.B. usually called after the staged parameters have been synchronised)
-     */
-    { t.update_active_parameters() } -> std::same_as<void>;
-};
-
-struct settings_base {
-    std::atomic_bool _changed{ false };
-
-    virtual ~settings_base() = default;
-
-    void
-    swap(settings_base &other) noexcept {
-        if (this == &other) {
-            return;
-        }
-        bool temp = _changed;
-        // avoid CAS-loop since this called only during initialisation where there is no concurrent access possible.
-        std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        other._changed = temp;
-    }
-
-    /**
-     * @brief returns if there are stages settings that haven't been applied yet.
-     */
-    [[nodiscard]] bool
-    changed() const noexcept {
-        return _changed;
-    }
-
-    /**
-     * @brief stages new key-value pairs that shall replace the block field-based settings.
-     * N.B. settings become only active after executing 'apply_staged_parameters()' (usually done early on in the 'node::work()' function)
-     * @return key-value pairs that could not be set
-     */
-    [[nodiscard]] virtual property_map
-    set(const property_map &parameters, SettingsCtx ctx = {})
-            = 0;
-
-    virtual void
-    store_defaults()
-            = 0;
-    virtual void
-    reset_defaults()
-            = 0;
-
-    /**
-     * @brief updates parameters based on node input tags for those with keys stored in `auto_update_parameters()`
-     * Parameter changes to down-stream nodes is controlled via `auto_forward_parameters()`
-     */
-    virtual void
-    auto_update(const property_map &parameters, SettingsCtx = {})
-            = 0;
-
-    /**
-     * @brief return all (or for selected multiple keys) available node settings as key-value pairs
-     */
-    [[nodiscard]] virtual property_map
-    get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept
-            = 0;
-
-    [[nodiscard]] virtual std::optional<pmtv::pmt>
-    get(const std::string &parameter_key, SettingsCtx = {}) const noexcept = 0;
-
-    /**
-     * @brief returns the staged/not-yet-applied new parameters
-     */
-    [[nodiscard]] virtual const property_map
-    staged_parameters() const
-            = 0;
-
-    [[nodiscard]] virtual std::set<std::string, std::less<>> &
-    auto_update_parameters() noexcept
-            = 0;
-
-    [[nodiscard]] virtual std::set<std::string, std::less<>> &
-    auto_forward_parameters() noexcept
-            = 0;
-
-    /**
-     * @brief synchronise map-based with actual node field-based settings
-     * returns map with key-value tags that should be forwarded
-     * to dependent/child nodes.
-     */
-    [[nodiscard]] virtual const property_map
-    apply_staged_parameters() noexcept
-            = 0;
-
-    /**
-     * @brief synchronises the map-based with the node's field-based parameters
-     * (N.B. usually called after the staged parameters have been synchronised)
-     */
-    virtual void
-    update_active_parameters() noexcept
-            = 0;
-};
-
-namespace detail {
-template<typename T>
-concept HasBaseType = requires { typename std::remove_cvref_t<T>::base_t; };
-};
+static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
 template<typename Node>
-class basic_settings : public settings_base {
-    Node                              *_node = nullptr;
-    mutable std::mutex                 _lock{};
-    property_map                       _active{}; // copy of class field settings as pmt-style map
-    property_map                       _staged{}; // parameters to become active before the next work() call
-    std::set<std::string, std::less<>> _auto_update{};
-    std::set<std::string, std::less<>> _auto_forward{};
-    property_map                       _default_settings{};
+class ctx_settings : public settings_base {
+    /**
+     * A predicate for matching two contexts
+     * The third "attempt" parameter indicates the current round of matching being done.
+     * This is useful for hierarchical matching schemes,
+     * e.g. in the first round the predicate could look for almost exact matches only,
+     * then in a a second round (attempt=1) it could be more forgiving, given that there are no exact matches available.
+     *
+     * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
+     * which indicates that no matches were found and there is no chance of matching anything in a further round.
+     */
+    using MatchPredicate                                = std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
+
+    Node                                         *_node = nullptr;
+    mutable std::mutex                            _lock{};
+    property_map                                  _active{};
+    property_map                                  _staged{};
+    std::set<std::string, std::less<>>            _auto_update{};
+    std::set<std::string, std::less<>>            _auto_forward{};
+    std::unordered_map<SettingsCtx, property_map> _settings{};
+    property_map                                  _default_settings{};
+    MatchPredicate                                _match_pred = nullMatchPred;
 
 public:
-    basic_settings()  = delete;
-    ~basic_settings() = default;
-
-    explicit constexpr basic_settings(Node &node) noexcept : settings_base(), _node(&node) {
+    explicit ctx_settings(Node &node, MatchPredicate matchPred = nullMatchPred) noexcept : settings_base(), _node(&node), _match_pred(matchPred) {
         if constexpr (requires { &Node::settings_changed; }) { // if settings_changed is defined
             static_assert(HasSettingsChangedCallback<Node>, "if provided, settings_changed must have either a `(const property_map& old, property_map& new, property_map& fwd)`"
                                                             "or `(const property_map& old, property_map& new)` paremeter signatures.");
@@ -315,31 +115,31 @@ public:
         }
     }
 
-    constexpr basic_settings(const basic_settings &other) noexcept : settings_base(other) {
-        basic_settings temp(other);
+    constexpr ctx_settings(const ctx_settings &other) noexcept : settings_base(other) {
+        ctx_settings temp(other);
         swap(temp);
     }
 
-    constexpr basic_settings(basic_settings &&other) noexcept : settings_base(std::move(other)) {
-        basic_settings temp(std::move(other));
+    constexpr ctx_settings(ctx_settings &&other) noexcept : settings_base(std::move(other)) {
+        ctx_settings temp(std::move(other));
         swap(temp);
     }
 
-    basic_settings &
-    operator=(const basic_settings &other) noexcept {
+    ctx_settings &
+    operator=(const ctx_settings &other) noexcept {
         swap(other);
         return *this;
     }
 
-    basic_settings &
-    operator=(basic_settings &&other) noexcept {
-        basic_settings temp(std::move(other));
+    ctx_settings &
+    operator=(ctx_settings &&other) noexcept {
+        ctx_settings temp(std::move(other));
         swap(temp);
         return *this;
     }
 
     void
-    swap(basic_settings &other) noexcept {
+    swap(ctx_settings &other) noexcept {
         if (this == &other) {
             return;
         }
@@ -348,12 +148,14 @@ public:
         std::scoped_lock lock(_lock, other._lock);
         std::swap(_active, other._active);
         std::swap(_staged, other._staged);
+        std::swap(_settings, other._settings);
         std::swap(_auto_update, other._auto_update);
         std::swap(_auto_forward, other._auto_forward);
+        std::swap(_match_pred, other._match_pred);
     }
 
     [[nodiscard]] property_map
-    set(const property_map &parameters, SettingsCtx = {}) override {
+    set(const property_map &parameters, SettingsCtx ctx = {}) override {
         property_map ret;
         if constexpr (refl::is_reflectable<Node>()) {
             std::lock_guard lg(_lock);
@@ -368,7 +170,6 @@ public:
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
                             }
-                            _staged.insert_or_assign(key, value);
                             settings_base::_changed.store(true);
                             is_set = true;
                         }
@@ -393,6 +194,9 @@ public:
             update_maps(ret, _node->meta_information);
         }
 
+        _settings[ctx] = parameters;
+        _settings[{}]  = parameters;
+
         return ret; // N.B. returns those <key:value> parameters that could not be set
     }
 
@@ -403,6 +207,7 @@ public:
 
     void
     reset_defaults() override {
+        _settings.clear();
         _staged     = _default_settings;
         std::ignore = apply_staged_parameters();
         if constexpr (HasSettingsResetCallback<Node>) {
@@ -440,32 +245,37 @@ public:
     }
 
     [[nodiscard]] property_map
-    get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept override {
+    get(std::span<const std::string> parameter_keys = {}, SettingsCtx ctx = {}) const noexcept override {
         std::lock_guard lg(_lock);
         property_map    ret;
-        if (parameter_keys.empty()) {
-            ret = _active;
+
+        if (_settings.empty()) {
             return ret;
         }
-        for (const auto &key : parameter_keys) {
-            if (_active.contains(key)) {
-                ret.insert_or_assign(key, _active.at(key));
-            }
+
+        if (_settings.contains(ctx)) {
+            // is there an exact match?
+            const auto &exact_match = _settings.at(ctx);
+            ret                     = exact_match;
+        } else {
+            // try the match predicate instead
+            const auto &match = bestMatch(ctx.context);
+            ret               = match.value_or(ret);
         }
+
+        // return only the needed values
+        std::ignore = std::erase_if(ret, [&](const auto &i) { return std::find(parameter_keys.begin(), parameter_keys.end(), i.first) == parameter_keys.end(); });
         return ret;
     }
 
     [[nodiscard]] std::optional<pmtv::pmt>
-    get(const std::string &parameter_key, SettingsCtx = {}) const noexcept override {
-        if constexpr (refl::is_reflectable<Node>()) {
-            std::lock_guard lg(_lock);
-
-            if (_active.contains(parameter_key)) {
-                return { _active.at(parameter_key) };
-            }
+    get(const std::string &parameter_key, SettingsCtx ctx = {}) const noexcept override {
+        auto res = get(std::array<std::string, 1>({ parameter_key }), ctx);
+        if (res.contains(parameter_key)) {
+            return res.at(parameter_key);
+        } else {
+            return std::nullopt;
         }
-
-        return std::nullopt;
     }
 
     [[nodiscard]] std::set<std::string, std::less<>> &
@@ -478,11 +288,6 @@ public:
         return _auto_forward;
     }
 
-    /**
-     * @brief synchronise map-based with actual node field-based settings
-     * returns map with key-value tags that should be forwarded
-     * to dependent/child nodes.
-     */
     [[nodiscard]] const property_map
     apply_staged_parameters() noexcept override {
         property_map forward_parameters; // parameters that should be forwarded to dependent child nodes
@@ -605,6 +410,20 @@ public:
     }
 
 private:
+    std::optional<property_map>
+    bestMatch(const property_map &context) const {
+        // retry until we either get a match or std::nullopt
+        for (std::size_t attempt = 0;; ++attempt) {
+            for (const auto &i : _settings) {
+                const auto matchres = _match_pred(i.first.context, context, attempt);
+                if (!matchres) {
+                    return std::nullopt;
+                } else if (*matchres) {
+                    return i.second;
+                }
+            }
+        }
+    }
     void
     store_default_settings(property_map &oldSettings) {
         // take a copy of the field -> map value of the old settings
@@ -639,18 +458,8 @@ private:
     }
 };
 
-static_assert(Settings<basic_settings<int>>);
+static_assert(Settings<ctx_settings<int>>);
 
 } // namespace fair::graph
 
-namespace std {
-template<>
-struct hash<fair::graph::SettingsCtx> {
-    [[nodiscard]] size_t
-    operator()(const fair::graph::SettingsCtx &ctx) const noexcept {
-        return ctx.hash();
-    }
-};
-} // namespace std
-
-#endif // GRAPH_PROTOTYPE_SETTINGS_HPP
+#endif // GRAPH_PROTOTYPE_TRANSACTIONS_HPP
