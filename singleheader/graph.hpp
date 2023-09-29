@@ -395,6 +395,7 @@ operator<<(std::ostream &os, const Sequence &v) {
 #include <functional>
 #include <iostream>
 #include <map>
+#include <new>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -3726,6 +3727,12 @@ tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
 static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
+
+#ifdef __cpp_lib_hardware_interference_size
+static inline constexpr const std::size_t kCacheLine = std::hardware_destructive_interference_size;
+#else
+static inline constexpr const std::size_t kCacheLine = 64;
+#endif
 
 } // namespace fair::meta
 
@@ -13043,11 +13050,50 @@ static_assert(ThreadPool<BasicThreadPool>);
 
 namespace fair::graph {
 
+namespace detail {
+template<class T>
+inline constexpr void
+hash_combine(std::size_t &seed, const T &v) noexcept {
+    std::hash<T> hasher;
+    seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+} // namespace detail
+
 struct SettingsCtx {
     // using TimePoint = std::chrono::time_point<std::chrono::utc_clock>; // TODO: change once the C++20 support is ubiquitous
     using TimePoint               = std::chrono::time_point<std::chrono::system_clock>;
     std::optional<TimePoint> time = std::nullopt; /// UTC time-stamp from which the setting is valid
     property_map             context;             /// user-defined multiplexing context for which the setting is valid
+
+    SettingsCtx() {}
+
+    explicit SettingsCtx(const TimePoint &t, const property_map &ctx = {}) {
+        time    = t;
+        context = ctx;
+    }
+
+    bool
+    operator==(const SettingsCtx &) const
+            = default;
+
+    bool
+    operator<(const SettingsCtx &other) {
+        // order by time
+        return !time || (other.time && *time < *other.time);
+    }
+
+    [[nodiscard]] std::size_t
+    hash() const noexcept {
+        std::size_t seed = 0;
+        if (time) {
+            detail::hash_combine(seed, time.value().time_since_epoch().count());
+        }
+        for (const auto &[key, val] : context) {
+            detail::hash_combine(seed, key);
+            detail::hash_combine(seed, pmtv::to_base64(val));
+        }
+        return seed;
+    }
 };
 
 /**
@@ -13632,6 +13678,17 @@ private:
 static_assert(Settings<basic_settings<int>>);
 
 } // namespace fair::graph
+
+namespace std {
+template<>
+struct hash<fair::graph::SettingsCtx> {
+    [[nodiscard]] size_t
+    operator()(const fair::graph::SettingsCtx &ctx) const noexcept {
+        return ctx.hash();
+    }
+};
+} // namespace std
+
 #endif // GRAPH_PROTOTYPE_SETTINGS_HPP
 
 
@@ -14145,6 +14202,12 @@ public:
     [[nodiscard]] constexpr settings_base &
     settings() noexcept {
         return *_settings;
+    }
+
+    template<typename T>
+    void
+    setSettings(std::unique_ptr<T> &settings) {
+        _settings = std::move(settings);
     }
 
     template<std::size_t Index, typename Self>
