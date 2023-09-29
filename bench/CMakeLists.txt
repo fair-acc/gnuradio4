@@ -13,7 +13,7 @@ endfunction()
 function(add_benchmark BM_NAME)
     add_executable(${BM_NAME} ${BM_NAME}.cpp)
     append_compiler_flags(${BM_NAME})
-    target_link_libraries(${BM_NAME} PRIVATE graph-prototype-options graph-prototype refl-cpp fmt ut fftw)
+    target_link_libraries(${BM_NAME} PRIVATE graph-prototype-options graph-prototype refl-cpp fmt ut fftw graph-prototype-algorithm)
 endfunction()
 
 add_benchmark(bm_buffer)

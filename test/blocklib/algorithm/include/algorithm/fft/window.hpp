@@ -1,24 +1,25 @@
 
-#ifndef GRAPH_PROTOTYPE_WINDOW_HPP
-#define GRAPH_PROTOTYPE_WINDOW_HPP
+#ifndef GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
+#define GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <ranges>
 #include <vector>
 
-namespace gr::blocks::fft {
+namespace gr::algorithm {
 
-template<typename T>
-concept FloatOrDoubleType = std::is_same_v<T, float> || std::is_same_v<T, double>;
-
-// Implementation of window function (also known as an apodization function or tapering function).
-// See Wikipedia for more info: https://en.wikipedia.org/wiki/Window_function
+/*
+ * Implementation of window function (also known as an apodization function or tapering function).
+ * See Wikipedia for more info: https://en.wikipedia.org/wiki/Window_function
+ */
 
 enum class WindowFunction : int { None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential };
 
 // Only float or double are allowed because FFT supports only float or double precisions.
-template<FloatOrDoubleType T>
+template<typename T>
+    requires(std::is_floating_point_v<T>)
 std::vector<T>
 createWindowFunction(WindowFunction func, const std::size_t n) {
     constexpr T pi  = std::numbers::pi_v<T>;
@@ -110,6 +111,6 @@ createWindowFunction(WindowFunction func, const std::size_t n) {
     }
     }
 }
-} // namespace gr::blocks::fft
+} // namespace gr::algorithm
 
-#endif // GRAPH_PROTOTYPE_WINDOW_HPP
+#endif // GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
