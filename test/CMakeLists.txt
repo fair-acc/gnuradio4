@@ -10,8 +10,10 @@ function(setup_test_no_asan TARGET_NAME)
 endfunction()
 
 function(setup_test TARGET_NAME)
-    target_compile_options(${TARGET_NAME} PRIVATE "-fsanitize=address")
-    target_link_options(${TARGET_NAME} PRIVATE "-fsanitize=address")
+    if (NOT EMSCRIPTEN)
+        target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=address)
+        target_link_options(${TARGET_NAME} PRIVATE -fsanitize=address)
+    endif ()
     setup_test_no_asan(${TARGET_NAME})
 endfunction()
 
