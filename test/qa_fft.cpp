@@ -39,22 +39,25 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, 
 
 template<typename T>
 std::vector<T>
-generateSinSample(std::size_t N, double sampleRate, double frequency, double amplitude) {
+generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {
     std::vector<T> signal(N);
     for (std::size_t i = 0; i < N; i++) {
-        if constexpr (gr::blocks::fft::ComplexType<T>) {
-            signal[i] = { static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate)), 0. };
+        if constexpr (gr::algorithm::ComplexType<T>) {
+            signal[i] = { static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate)), 0. };
         } else {
-            signal[i] = static_cast<T>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate));
+            signal[i] = static_cast<T>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate));
         }
     }
     return signal;
 }
 
-template<typename T, typename U>
+template<typename T, typename U = T>
 bool
-equalVectors(const std::vector<T> &v1, const std::vector<U> &v2, double tolerance = 1.e-6) {
-    if constexpr (gr::blocks::fft::ComplexType<T>) {
+equalVectors(const std::vector<T> &v1, const std::vector<U> &v2, double tolerance = std::is_same_v<T, double> ? 1.e-5 : 1e-4) {
+    if (v1.size() != v2.size()) {
+        return false;
+    }
+    if constexpr (gr::algorithm::ComplexType<T>) {
         return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto &l, const auto &r) {
             return std::abs(l.real() - r.real()) < static_cast<typename T::value_type>(tolerance) && std::abs(l.imag() - r.imag()) < static_cast<typename T::value_type>(tolerance);
         });
@@ -67,23 +70,24 @@ template<typename T, typename inT, typename outT, typename pT>
 void
 testFFTwTypes() {
     using namespace boost::ut;
-    gr::algorithm::FFTw<T> fft1;
-    expect(std::is_same_v<typename std::remove_pointer_t<decltype(fft1.fftwIn.get())>, inT>) << "";
-    expect(std::is_same_v<typename std::remove_pointer_t<decltype(fft1.fftwOut.get())>, outT>) << "";
-    expect(std::is_same_v<decltype(fft1.fftwPlan.get()), pT>) << "";
+    gr::algorithm::FFTw<T> fftBlock;
+    expect(std::is_same_v<typename std::remove_pointer_t<decltype(fftBlock.fftwIn.get())>, inT>) << "";
+    expect(std::is_same_v<typename std::remove_pointer_t<decltype(fftBlock.fftwOut.get())>, outT>) << "";
+    expect(std::is_same_v<decltype(fftBlock.fftwPlan.get()), pT>) << "";
 }
 
 template<typename T, typename U, typename A>
 void
-equalDataset(const gr::blocks::fft::FFT<T, fg::DataSet<U>, A> &fft1, const fg::DataSet<U> &ds1, float sampleRate) {
+equalDataset(const gr::blocks::fft::FFT<T, fg::DataSet<U>, A> &fftBlock, const fg::DataSet<U> &ds1, float sample_rate) {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
     const U    tolerance = U(0.0001);
 
-    const auto N         = fft1.magnitudeSpectrum.size();
-    auto const freq      = static_cast<U>(sampleRate) / static_cast<U>(fft1.fftSize);
-    if (N == fft1.fftSize) { // complex input
+    const auto N         = fftBlock._magnitudeSpectrum.size();
+    auto const freq      = static_cast<U>(sample_rate) / static_cast<U>(fftBlock.fftSize);
+    expect(ge(ds1.signal_values.size(), N)) << fmt::format("<{}> DataSet signal length {} vs. magnitude size {}", type_name<T>(), ds1.signal_values.size(), N);
+    if (N == fftBlock.fftSize) { // complex input
         expect(approx(ds1.signal_values[0], -(static_cast<U>(N) / U(2.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
         expect(approx(ds1.signal_values[N - 1], (static_cast<U>(N) / U(2.f) - U(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
     } else { // real input
@@ -92,20 +96,20 @@ equalDataset(const gr::blocks::fft::FFT<T, fg::DataSet<U>, A> &fft1, const fg::D
     };
     bool       isEqualFFTOut = true;
     const auto NSize         = static_cast<std::size_t>(N);
-    for (std::size_t i = 0; i < NSize; i++) {
-        if (std::abs(ds1.signal_values[i + NSize] - static_cast<U>(fft1.outData[i].real())) > tolerance
-            || std::abs(ds1.signal_values[i + 2U * NSize] - static_cast<U>(fft1.outData[i].imag())) > tolerance) {
+    for (std::size_t i = 0U; i < NSize; i++) {
+        if (std::abs(ds1.signal_values[i + NSize] - static_cast<U>(fftBlock._outData[i].real())) > tolerance
+            || std::abs(ds1.signal_values[i + 2U * NSize] - static_cast<U>(fftBlock._outData[i].imag())) > tolerance) {
             isEqualFFTOut = false;
             break;
         }
     }
     expect(eq(isEqualFFTOut, true)) << fmt::format("<{}> equal DataSet FFT output", type_name<T>());
-    expect(equalVectors<U, U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(3U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N)), fft1.magnitudeSpectrum))
+    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(3U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N)), fftBlock._magnitudeSpectrum))
             << fmt::format("<{}> equal DataSet magnitude", type_name<T>());
-    expect(equalVectors<U, U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(5U * N)), fft1.phaseSpectrum))
+    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(5U * N)), fftBlock._phaseSpectrum))
             << fmt::format("<{}> equal DataSet phase", type_name<T>());
 
-    for (std::size_t i = 0; i < 5; i++) {
+    for (std::size_t i = 0U; i < 5; i++) {
         const auto mm = std::minmax_element(std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
         expect(approx(*mm.first, ds1.signal_ranges[i][0], tolerance));
         expect(approx(*mm.second, ds1.signal_ranges[i][1], tolerance));
@@ -145,36 +149,35 @@ const boost::ut::suite fftTests = [] {
         using InType   = T::InType;
         using OutType  = T::OutType;
         using AlgoType = T::AlgoType;
-        FFT<InType, OutType, AlgoType> fft1{};
+        FFT<InType, OutType, AlgoType> fftBlock{};
         constexpr double               tolerance{ 1.e-5 };
         struct TestParams {
-            std::size_t N{ 1024 };          // must be power of 2
-            double      sampleRate{ 128. }; // must be power of 2 (only for the unit test for easy comparison with true result)
-            double      frequency{ 1. };
-            double      amplitude{ 1. };
-            bool        outputInDb{ false };
+            std::uint32_t N{ 1024 };           // must be power of 2
+            double        sample_rate{ 128. }; // must be power of 2 (only for the unit test for easy comparison with true result)
+            double        frequency{ 1. };
+            double        amplitude{ 1. };
+            bool          outputInDb{ false };
         };
 
         std::vector<TestParams> testCases = { { 256, 128., 10., 5., false }, { 512, 4., 1., 1., false }, { 512, 32., 1., 0.1, false }, { 256, 128., 10., 5., true } };
         for (const auto &t : testCases) {
             assert(std::has_single_bit(t.N));
-            assert(std::has_single_bit(static_cast<std::size_t>(t.sampleRate)));
+            assert(std::has_single_bit(static_cast<std::size_t>(t.sample_rate)));
 
-            std::ignore = fft1.settings().set({ { "fftSize", t.N } });
-            std::ignore = fft1.settings().set({ { "outputInDb", t.outputInDb } });
-            std::ignore = fft1.settings().set({ { "window", static_cast<int>(gr::algorithm::WindowFunction::None) } });
-            std::ignore = fft1.settings().apply_staged_parameters();
-            const auto signal{ generateSinSample<InType>(t.N, t.sampleRate, t.frequency, t.amplitude) };
-            fft1.prepareInput(signal);
-            fft1.computeFFT();
-            fft1.computeMagnitudeSpectrum();
+            std::ignore = fftBlock.settings().set({ { "fftSize", t.N } });
+            std::ignore = fftBlock.settings().set({ { "outputInDb", t.outputInDb } });
+            std::ignore = fftBlock.settings().set({ { "window", static_cast<int>(gr::algorithm::window::Type::None) } });
+            std::ignore = fftBlock.settings().apply_staged_parameters();
+            const auto           signal{ generateSinSample<InType>(t.N, t.sample_rate, t.frequency, t.amplitude) };
+            std::vector<OutType> resultingDataSets(1);
+            expect(fair::graph::work_return_status_t::OK == fftBlock.process_bulk(signal, resultingDataSets));
 
             const auto peakIndex{
-                static_cast<std::size_t>(std::distance(fft1.magnitudeSpectrum.begin(),
-                                                       std::max_element(fft1.magnitudeSpectrum.begin(), std::next(fft1.magnitudeSpectrum.begin(), static_cast<std::ptrdiff_t>(t.N / 2u)))))
+                static_cast<std::size_t>(std::distance(fftBlock._magnitudeSpectrum.begin(),
+                                                       std::max_element(fftBlock._magnitudeSpectrum.begin(), std::next(fftBlock._magnitudeSpectrum.begin(), static_cast<std::ptrdiff_t>(t.N / 2u)))))
             }; // only positive frequencies from FFT
-            const auto peakAmplitude = fft1.magnitudeSpectrum[peakIndex];
-            const auto peakFrequency{ static_cast<double>(peakIndex) * t.sampleRate / static_cast<double>(t.N) };
+            const auto peakAmplitude = fftBlock._magnitudeSpectrum[peakIndex];
+            const auto peakFrequency{ static_cast<double>(peakIndex) * t.sample_rate / static_cast<double>(t.N) };
 
             const auto expectedAmplitude = t.outputInDb ? 20. * log10(std::abs(t.amplitude)) : t.amplitude;
             expect(approx(static_cast<double>(peakAmplitude), expectedAmplitude, tolerance)) << fmt::format("{} equal amplitude", type_name<T>());
@@ -187,9 +190,9 @@ const boost::ut::suite fftTests = [] {
         using OutType  = T::OutType;
         using AlgoType = T::AlgoType;
         constexpr double               tolerance{ 1.e-5 };
-        constexpr std::size_t          N{ 16 };
-        FFT<InType, OutType, AlgoType> fft1({ { "fftSize", N }, { "window", static_cast<int>(gr::algorithm::WindowFunction::None) } });
-        std::ignore = fft1.settings().apply_staged_parameters();
+        constexpr std::uint32_t        N{ 16 };
+        FFT<InType, OutType, AlgoType> fftBlock({ { "fftSize", N }, { "window", static_cast<int>(gr::algorithm::window::Type::None) } });
+        std::ignore = fftBlock.settings().apply_staged_parameters();
 
         std::vector<InType> signal(N);
 
@@ -220,17 +223,16 @@ const boost::ut::suite fftTests = [] {
                 expectedFft0          = { 8., 0. };
                 expectedPeakAmplitude = 1.;
             }
-            fft1.prepareInput(signal);
-            fft1.computeFFT();
-            fft1.computeMagnitudeSpectrum();
+            std::vector<OutType> resultingDataSets(1);
+            expect(fair::graph::work_return_status_t::OK == fftBlock.process_bulk(signal, resultingDataSets));
 
-            const auto peakIndex{ static_cast<std::size_t>(std::distance(fft1.magnitudeSpectrum.begin(), std::max_element(fft1.magnitudeSpectrum.begin(), fft1.magnitudeSpectrum.end()))) };
-            const auto peakAmplitude{ fft1.magnitudeSpectrum[peakIndex] };
+            const auto peakIndex{ static_cast<std::size_t>(std::distance(fftBlock._magnitudeSpectrum.begin(), std::ranges::max_element(fftBlock._magnitudeSpectrum))) };
+            const auto peakAmplitude{ fftBlock._magnitudeSpectrum[peakIndex] };
 
             expect(eq(peakIndex, expectedPeakIndex)) << fmt::format("<{}> equal peak index", type_name<T>());
             expect(approx(static_cast<double>(peakAmplitude), expectedPeakAmplitude, tolerance)) << fmt::format("<{}> equal amplitude", type_name<T>());
-            expect(approx(static_cast<double>(fft1.outData[0].real()), static_cast<double>(expectedFft0.real()), tolerance)) << fmt::format("<{}> equal fft[0].real()", type_name<T>());
-            expect(approx(static_cast<double>(fft1.outData[0].imag()), static_cast<double>(expectedFft0.imag()), tolerance)) << fmt::format("<{}> equal fft[0].imag()", type_name<T>());
+            expect(approx(static_cast<double>(fftBlock._outData[0].real()), static_cast<double>(expectedFft0.real()), tolerance)) << fmt::format("<{}> equal fft[0].real()", type_name<T>());
+            expect(approx(static_cast<double>(fftBlock._outData[0].imag()), static_cast<double>(expectedFft0.imag()), tolerance)) << fmt::format("<{}> equal fft[0].imag()", type_name<T>());
         }
     } | complexTypesWithAlgoToTest;
 
@@ -239,27 +241,29 @@ const boost::ut::suite fftTests = [] {
         using OutType  = T::OutType;
         using AlgoType = T::AlgoType;
 
-        constexpr std::size_t          N{ 16 };
-        constexpr float                sampleRate{ 1.f };
-        FFT<InType, OutType, AlgoType> fft1({ { "fftSize", N }, { "sampleRate", sampleRate } });
-        std::ignore = fft1.settings().apply_staged_parameters();
+        constexpr std::uint32_t        N{ 16 };
+        constexpr float                sample_rate{ 1.f };
+        FFT<InType, OutType, AlgoType> fftBlock({ { "fftSize", N }, { "sample_rate", sample_rate } });
+        std::ignore = fftBlock.settings().apply_staged_parameters();
+        expect(eq(fftBlock.algorithm, fair::meta::type_name<AlgoType>()));
 
         std::vector<InType> signal(N);
         std::iota(signal.begin(), signal.end(), 1);
         std::vector<OutType> v{ OutType() };
         std::span<OutType>   outSpan(v);
-        std::ignore = fft1.process_bulk(signal, outSpan);
-        equalDataset(fft1, v[0], sampleRate);
+
+        expect(fair::graph::work_return_status_t::OK == fftBlock.process_bulk(signal, outSpan));
+        equalDataset(fftBlock, v[0], sample_rate);
     } | typesWithAlgoToTest;
 
     "FFT types tests"_test = [] {
-        expect(std::is_same_v<FFT<std::complex<float>>::PrecisionType, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<std::complex<double>>::PrecisionType, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<float>::PrecisionType, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<double>::PrecisionType, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<int>::PrecisionType, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<std::complex<float>, fg::DataSet<double>>::PrecisionType, double>) << "output type must be double";
-        expect(std::is_same_v<FFT<float, fg::DataSet<double>>::PrecisionType, double>) << "output type must be double";
+        expect(std::is_same_v<FFT<std::complex<float>>::value_type, float>) << "output type must be float";
+        expect(std::is_same_v<FFT<std::complex<double>>::value_type, float>) << "output type must be float";
+        expect(std::is_same_v<FFT<float>::value_type, float>) << "output type must be float";
+        expect(std::is_same_v<FFT<double>::value_type, float>) << "output type must be float";
+        expect(std::is_same_v<FFT<int>::value_type, float>) << "output type must be float";
+        expect(std::is_same_v<FFT<std::complex<float>, fg::DataSet<double>>::value_type, double>) << "output type must be double";
+        expect(std::is_same_v<FFT<float, fg::DataSet<double>>::value_type, double>) << "output type must be double";
     };
 
     "FFT fftw types tests"_test = [] {
@@ -275,10 +279,10 @@ const boost::ut::suite fftTests = [] {
         using Scheduler      = fair::graph::scheduler::simple<>;
         auto      threadPool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
         fg::graph flow1;
-        auto     &source1 = flow1.make_node<CountSource<double>>();
-        auto     &fft1    = flow1.make_node<FFT<double>>({ { "fftSize", 16 } });
-        std::ignore       = flow1.connect<"out">(source1).to<"in">(fft1);
-        auto sched1       = Scheduler(std::move(flow1), threadPool);
+        auto     &source1  = flow1.make_node<CountSource<double>>();
+        auto     &fftBlock = flow1.make_node<FFT<double>>({ { "fftSize", 16 } });
+        std::ignore        = flow1.connect<"out">(source1).to<"in">(fftBlock);
+        auto sched1        = Scheduler(std::move(flow1), threadPool);
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
@@ -299,25 +303,22 @@ const boost::ut::suite fftTests = [] {
         using OutType  = T::OutType;
         using AlgoType = T::AlgoType;
 
-        FFT<InType, OutType, AlgoType> fft1{};
+        FFT<InType, OutType, AlgoType> fftBlock{};
 
-        using PrecisionType = OutType::value_type;
-        constexpr PrecisionType tolerance{ PrecisionType(0.00001) };
+        using value_type = OutType::value_type;
+        constexpr value_type    tolerance{ value_type(0.00001) };
 
-        constexpr std::size_t   N{ 8 };
-        using gr::algorithm::WindowFunction;
-        std::vector<WindowFunction> testCases = { WindowFunction::None,    WindowFunction::Rectangular,    WindowFunction::Hamming,
-                                                  WindowFunction::Hann,    WindowFunction::HannExp,        WindowFunction::Blackman,
-                                                  WindowFunction::Nuttall, WindowFunction::BlackmanHarris, WindowFunction::BlackmanNuttall,
-                                                  WindowFunction::FlatTop, WindowFunction::Exponential };
+        constexpr std::uint32_t N{ 8 };
+        using enum gr::algorithm::window::Type;
+        std::vector<gr::algorithm::window::Type> testCases = { None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential };
 
         for (const auto &t : testCases) {
-            std::ignore = fft1.settings().set({ { "fftSize", N } });
-            std::ignore = fft1.settings().set({ { "window", static_cast<int>(t) } });
-            std::ignore = fft1.settings().apply_staged_parameters();
+            std::ignore = fftBlock.settings().set({ { "fftSize", N } });
+            std::ignore = fftBlock.settings().set({ { "window", static_cast<int>(t) } });
+            std::ignore = fftBlock.settings().apply_staged_parameters();
 
             std::vector<InType> signal(N);
-            if constexpr (ComplexType<InType>) {
+            if constexpr (gr::algorithm::ComplexType<InType>) {
                 typename InType::value_type i = 0.;
                 std::ranges::generate(signal.begin(), signal.end(), [&i] {
                     i = i + static_cast<typename InType::value_type>(1.);
@@ -326,73 +327,70 @@ const boost::ut::suite fftTests = [] {
             } else {
                 std::iota(signal.begin(), signal.end(), 1.);
             }
-            fft1.prepareInput(signal);
+            std::vector<OutType> resultingDataSets(1);
+            expect(fair::graph::work_return_status_t::OK == fftBlock.process_bulk(signal, resultingDataSets));
 
-            expect(eq(fft1.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
-            expect(eq(fft1.windowVector.size(), (t == WindowFunction::None) ? 0 : N)) << fmt::format("<{}> equal window vector size", type_name<T>());
-            expect(eq(fft1.window, static_cast<int>(t))) << fmt::format("<{}> equal window function", type_name<T>());
+            expect(eq(fftBlock.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
+            expect(eq(fftBlock._window.size(), N)) << fmt::format("<{}> equal window vector size", type_name<T>());
+            expect(eq(fftBlock.window, static_cast<int>(t))) << fmt::format("<{}> equal window function", type_name<T>());
 
-            std::vector<PrecisionType> windowFunc = createWindowFunction<PrecisionType>(t, N);
+            std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(t, N);
             for (std::size_t i = 0; i < N; i++) {
-                if constexpr (ComplexType<InType>) {
-                    const auto expValue = (t == WindowFunction::None) ? static_cast<PrecisionType>(signal[i].real()) : static_cast<PrecisionType>(signal[i].real()) * windowFunc[i];
-                    expect(approx(fft1.inData[i].real(), expValue, tolerance)) << fmt::format("<{}> equal fftwIn complex.real", type_name<T>());
-                    expect(approx(fft1.inData[i].imag(), expValue, tolerance)) << fmt::format("<{}> equal fftwIn complex.imag", type_name<T>());
+                if constexpr (gr::algorithm::ComplexType<InType>) {
+                    const auto expValue = static_cast<value_type>(signal[i].real()) * windowFunc[i];
+                    expect(approx(fftBlock._inData[i].real(), expValue, tolerance)) << fmt::format("<{}> equal fftwIn complex.real", type_name<T>());
+                    expect(approx(fftBlock._inData[i].imag(), expValue, tolerance)) << fmt::format("<{}> equal fftwIn complex.imag", type_name<T>());
                 } else {
-                    const PrecisionType expValue = (t == WindowFunction::None) ? static_cast<PrecisionType>(signal[i])
-                                                                               : static_cast<PrecisionType>(signal[i]) * static_cast<PrecisionType>(windowFunc[i]);
-                    expect(approx(fft1.inData[i], expValue, tolerance)) << fmt::format("<{}> equal fftwIn", type_name<T>());
+                    const value_type expValue = static_cast<value_type>(signal[i]) * static_cast<value_type>(windowFunc[i]);
+                    expect(approx(fftBlock._inData[i], expValue, tolerance)) << fmt::format("<{}> equal fftwIn", type_name<T>());
                 }
             }
         }
     } | typesWithAlgoToTest;
 
     "FFT window tests"_test = []<typename T>() {
-        using gr::algorithm::WindowFunction;
-
         // Expected value for size 8
-        std::vector<double> None8{};
-        std::vector<double> Rectangular8{ 1., 1., 1., 1., 1., 1., 1., 1. };
-        std::vector<double> Hamming8{ 0.07671999999999995, 0.2119312255330421, 0.53836, 0.8647887744669578, 1.0, 0.8647887744669578, 0.5383600000000001, 0.21193122553304222 };
-        std::vector<double> Hann8{ 0., 0.1882550990706332, 0.6112604669781572, 0.9504844339512095, 0.9504844339512095, 0.6112604669781573, 0.1882550990706333, 0. };
-        std::vector<double> Blackman8{ -1.3877787807814457E-17, 0.09045342435412804, 0.45918295754596355, 0.9203636180999081,
-                                       0.9203636180999083,      0.45918295754596383, 0.09045342435412812, -1.3877787807814457E-17 };
-        std::vector<double> BlackmanHarris8{ 6.0000000000001025E-5, 0.03339172347815117, 0.332833504298565,   0.8893697722232837,
-                                             0.8893697722232838,    0.3328335042985652,  0.03339172347815122, 6.0000000000001025E-5 };
-        std::vector<double> BlackmanNuttall8{ 3.628000000000381E-4, 0.03777576895352025, 0.34272761996881945, 0.8918518610776603,
-                                              0.8918518610776603,   0.3427276199688196,  0.0377757689535203,  3.628000000000381E-4 };
-        std::vector<double> Exponential8{ 1., 1.0425469051899914, 1.086904049521229, 1.1331484530668263, 1.1813604128656459, 1.2316236423470497, 1.2840254166877414, 1.338656724353094 };
-        std::vector<double> FlatTop8{ 0.004000000000000087, -0.16964240541774014, 0.04525319347985671,  3.622389211937882,
-                                      3.6223892119378833,   0.04525319347985735,  -0.16964240541774012, 0.004000000000000087 };
-        std::vector<double> HannExp8{ 0., 0.6112604669781572, 0.9504844339512096, 0.18825509907063334, 0.18825509907063315, 0.9504844339512096, 0.6112604669781574, 5.99903913064743E-32 };
-        std::vector<double> Nuttall8{ -2.42861286636753E-17, 0.031142736797915613, 0.3264168059086425,   0.8876284572934416,
-                                      0.8876284572934416,    0.32641680590864275,  0.031142736797915654, -2.42861286636753E-17 };
+        std::vector<T> Rectangular8{ 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f };
+        std::vector<T> Hamming8{ 0.07672f, 0.2119312255f, 0.53836f, 0.8647887745f, 1.0f, 0.8647887745f, 0.53836f, 0.2119312255f };
+        std::vector<T> Hann8{ 0.f, 0.1882550991f, 0.611260467f, 0.950484434f, 0.950484434f, 0.611260467f, 0.1882550991f, 0.f };
+        std::vector<T> Blackman8{ 0.f, 0.09045342435f, 0.4591829575f, 0.9203636181f, 0.9203636181f, 0.4591829575f, 0.09045342435f, 0.f };
+        std::vector<T> BlackmanHarris8{ 0.00006f, 0.03339172348f, 0.3328335043f, 0.8893697722f, 0.8893697722f, 0.3328335043f, 0.03339172348f, 0.00006f };
+        std::vector<T> BlackmanNuttall8{ 0.0003628f, 0.03777576895f, 0.34272762f, 0.8918518611f, 0.8918518611f, 0.34272762f, 0.03777576895f, 0.0003628f };
+        std::vector<T> Exponential8{ 1.f, 1.042546905f, 1.08690405f, 1.133148453f, 1.181360413f, 1.231623642f, 1.284025417f, 1.338656724f };
+        std::vector<T> FlatTop8{ 0.004f, -0.1696424054f, 0.04525319348f, 3.622389212f, 3.622389212f, 0.04525319348f, -0.1696424054f, 0.004f };
+        std::vector<T> HannExp8{ 0.f, 0.611260467f, 0.950484434f, 0.1882550991f, 0.1882550991f, 0.950484434f, 0.611260467f, 0.f };
+        std::vector<T> Nuttall8{ 0.f, 0.0311427368f, 0.3264168059f, 0.8876284573f, 0.8876284573f, 0.3264168059f, 0.0311427368f, 0.f };
+        std::vector<T> Kaiser8{ 0.5714348848f, 0.7650986027f, 0.9113132365f, 0.9899091685f, 0.9899091685f, 0.9113132365f, 0.7650986027f, 0.5714348848f };
 
         // check all windows for unwanted changes
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::None, 8), None8)) << fmt::format("<{}> equal None[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::Rectangular, 8), Rectangular8)) << fmt::format("<{}> equal Rectangular[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::Hamming, 8), Hamming8)) << fmt::format("<{}> equal Hamming[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::Hann, 8), Hann8)) << fmt::format("<{}> equal Hann[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::Blackman, 8), Blackman8)) << fmt::format("<{}> equal Blackman[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::BlackmanHarris, 8), BlackmanHarris8)) << fmt::format("<{}> equal BlackmanHarris[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::BlackmanNuttall, 8), BlackmanNuttall8)) << fmt::format("<{}> equal BlackmanNuttall[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::Exponential, 8), Exponential8)) << fmt::format("<{}> equal Exponential[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::FlatTop, 8), FlatTop8)) << fmt::format("<{}> equal FlatTop[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::HannExp, 8), HannExp8)) << fmt::format("<{}> equal HannExp[8] vectors", type_name<T>());
-        expect(equalVectors<T, double>(createWindowFunction<T>(WindowFunction::Nuttall, 8), Nuttall8)) << fmt::format("<{}> equal Nuttall[8] vectors", type_name<T>());
+        using gr::algorithm::window::create;
+        using enum gr::algorithm::window::Type;
+        expect(equalVectors<T>(create<T>(None, 8), Rectangular8)) << fmt::format("<{}> equal Rectangular8[8] vector {} vs. ref: {}", type_name<T>(), create<T>(None, 8), Rectangular8);
+        expect(equalVectors<T>(create<T>(Rectangular, 8), Rectangular8)) << fmt::format("<{}> equal Rectangular[8]vector {} vs. ref: {}", type_name<T>(), create<T>(Rectangular, 8), Rectangular8);
+        expect(equalVectors<T>(create<T>(Hamming, 8), Hamming8)) << fmt::format("<{}> equal Hamming[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Hamming, 8), Hamming8);
+        expect(equalVectors<T>(create<T>(Hann, 8), Hann8)) << fmt::format("<{}> equal Hann[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Hann, 8), Hann8);
+        expect(equalVectors<T>(create<T>(Blackman, 8), Blackman8)) << fmt::format("<{}> equal Blackman[8] vvector {} vs. ref: {}", type_name<T>(), create<T>(Blackman, 8), Blackman8);
+        expect(equalVectors<T>(create<T>(BlackmanHarris, 8), BlackmanHarris8)) << fmt::format("<{}> equal BlackmanHarris[8] vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanHarris, 8), BlackmanHarris8);
+        expect(equalVectors<T>(create<T>(BlackmanNuttall, 8), BlackmanNuttall8)) << fmt::format("<{}> equal BlackmanNuttall[8] vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanNuttall, 8), BlackmanNuttall8);
+        expect(equalVectors<T>(create<T>(Exponential, 8), Exponential8)) << fmt::format("<{}> equal Exponential[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Exponential, 8), Exponential8);
+        expect(equalVectors<T>(create<T>(FlatTop, 8), FlatTop8)) << fmt::format("<{}> equal FlatTop[8] vector {} vs. ref: {}", type_name<T>(), create<T>(FlatTop, 8), FlatTop8);
+        expect(equalVectors<T>(create<T>(HannExp, 8), HannExp8)) << fmt::format("<{}> equal HannExp[8] vector {} vs. ref: {}", type_name<T>(), create<T>(HannExp, 8), HannExp8);
+        expect(equalVectors<T>(create<T>(Nuttall, 8), Nuttall8)) << fmt::format("<{}> equal Nuttall[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Nuttall, 8), Nuttall8);
+        expect(equalVectors<T>(create<T>(Kaiser, 8), Kaiser8)) << fmt::format("<{}> equal Kaiser[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Kaiser, 8), Kaiser8);
 
         // test zero length
-        expect(eq(createWindowFunction<T>(WindowFunction::None, 0).size(), 0u)) << fmt::format("<{}> zero size None[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::Rectangular, 0).size(), 0u)) << fmt::format("<{}> zero size Rectangular[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::Hamming, 0).size(), 0u)) << fmt::format("<{}> zero size Hamming[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::Hann, 0).size(), 0u)) << fmt::format("<{}> zero size Hann[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::Blackman, 0).size(), 0u)) << fmt::format("<{}> zero size Blackman[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::BlackmanHarris, 0).size(), 0u)) << fmt::format("<{}> zero size BlackmanHarris[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::BlackmanNuttall, 0).size(), 0u)) << fmt::format("<{}> zero size BlackmanNuttall[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::Exponential, 0).size(), 0u)) << fmt::format("<{}> zero size Exponential[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::FlatTop, 0).size(), 0u)) << fmt::format("<{}> zero size FlatTop[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::HannExp, 0).size(), 0u)) << fmt::format("<{}> zero size HannExp[8] vectors", type_name<T>());
-        expect(eq(createWindowFunction<T>(WindowFunction::Nuttall, 0).size(), 0u)) << fmt::format("<{}> zero size Nuttall[8] vectors", type_name<T>());
+        expect(eq(create<T>(None, 0).size(), 0u)) << fmt::format("<{}> zero size None[8] vectors", type_name<T>());
+        expect(eq(create<T>(Rectangular, 0).size(), 0u)) << fmt::format("<{}> zero size Rectangular[8] vectors", type_name<T>());
+        expect(eq(create<T>(Hamming, 0).size(), 0u)) << fmt::format("<{}> zero size Hamming[8] vectors", type_name<T>());
+        expect(eq(create<T>(Hann, 0).size(), 0u)) << fmt::format("<{}> zero size Hann[8] vectors", type_name<T>());
+        expect(eq(create<T>(Blackman, 0).size(), 0u)) << fmt::format("<{}> zero size Blackman[8] vectors", type_name<T>());
+        expect(eq(create<T>(BlackmanHarris, 0).size(), 0u)) << fmt::format("<{}> zero size BlackmanHarris[8] vectors", type_name<T>());
+        expect(eq(create<T>(BlackmanNuttall, 0).size(), 0u)) << fmt::format("<{}> zero size BlackmanNuttall[8] vectors", type_name<T>());
+        expect(eq(create<T>(Exponential, 0).size(), 0u)) << fmt::format("<{}> zero size Exponential[8] vectors", type_name<T>());
+        expect(eq(create<T>(FlatTop, 0).size(), 0u)) << fmt::format("<{}> zero size FlatTop[8] vectors", type_name<T>());
+        expect(eq(create<T>(HannExp, 0).size(), 0u)) << fmt::format("<{}> zero size HannExp[8] vectors", type_name<T>());
+        expect(eq(create<T>(Nuttall, 0).size(), 0u)) << fmt::format("<{}> zero size Nuttall[8] vectors", type_name<T>());
+        expect(eq(create<T>(Kaiser, 0).size(), 0u)) << fmt::format("<{}> zero size Kaiser[8] vectors", type_name<T>());
     } | floatingTypesToTest;
 
     "FFTW wisdom import/export tests"_test = []() {
