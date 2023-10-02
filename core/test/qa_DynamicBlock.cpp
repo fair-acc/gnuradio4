@@ -47,7 +47,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (DebugSink<T>), lastValue, in)
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
     "Change number of ports dynamically"_test = [] {
-        constexpr const std::size_t sources_count = 10;
+        constexpr const int sources_count = 10;
         constexpr const std::size_t events_count  = 5;
 
         gr::Graph                   testGraph;
@@ -60,7 +60,7 @@ const boost::ut::suite DynamicBlocktests = [] {
 
         // Function that adds a new source node to the graph, and connects
         // it to one of adder's ports
-        std::ignore = adder.settings().set({ { "input_port_count", 10 } });
+        std::ignore = adder.settings().set({ { "input_port_count", sources_count } });
         std::ignore = adder.settings().applyStagedParameters();
 
         std::vector<fixed_source<double> *> sources;
@@ -74,13 +74,37 @@ const boost::ut::suite DynamicBlocktests = [] {
 
         for (std::size_t i = 0; i < events_count; ++i) {
             for (auto *source : sources) {
-                source->work(std::numeric_limits<std::size_t>::max());
+                source->work(1UZ);
             }
-            std::ignore     = adder.work(std::numeric_limits<std::size_t>::max());
-            const auto work = sink.work(std::numeric_limits<std::size_t>::max());
+            std::ignore     = adder.work(1UZ);
+            const auto work = sink.work(1UZ);
             expect(eq(work.performed_work, 1UZ));
 
             expect(eq(sink.lastValue, static_cast<double>((i + 1) * sources.size())));
+        }
+
+        // add yet another sources_count number of ports
+        std::ignore = adder.settings().set({ { "input_port_count", 2 * sources_count } });
+        std::ignore = adder.settings().applyStagedParameters();
+
+        // if we add even more ports (and connections), the old connections should still stay connected
+        for (std::size_t i = 0; i < sources_count; ++i) {
+            auto &source = testGraph.emplaceBlock<fixed_source<double>>();
+            sources.push_back(&source);
+            testGraph.connect(source, 0, adder, sources.size() - 1);
+        }
+
+        for (std::size_t i = events_count; i < 2 * events_count; ++i) {
+            for (auto *source : sources) {
+                const auto source_work = source->work(1UZ);
+                expect(eq(source_work.performed_work, 1UZ));
+            }
+            const auto adder_work     = adder.work(1UZ);
+            expect(eq(adder_work.performed_work, 1UZ));
+            const auto sink_work = sink.work(1UZ);
+            expect(eq(sink_work.performed_work, 1UZ));
+
+            expect(eq(sink.lastValue, static_cast<double>((i + 1) * sources_count + (i - events_count + 1) * sources_count)));
         }
     };
 };
