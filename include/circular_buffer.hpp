@@ -391,6 +391,7 @@ class circular_buffer
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
 
         [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
+            // if (n_slots_to_claim == 0) return ReservedOutputRange(this);
             try {
                 const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
                 const std::size_t index = (static_cast<std::size_t>(sequence) + _size - n_slots_to_claim) % _size;

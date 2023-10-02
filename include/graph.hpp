@@ -34,106 +34,13 @@ namespace fair::graph {
 
 using namespace fair::literals;
 
-#define ENABLE_PYTHON_INTEGRATION
-#ifdef ENABLE_PYTHON_INTEGRATION
-
-// TODO: Not yet implemented
-class dynamic_node {
-private:
-    // TODO: replace the following with array<2, vector<dynamic_port>>
-    using dynamic_ports = std::vector<dynamic_port>;
-    dynamic_ports                                         _dynamic_input_ports;
-    dynamic_ports                                         _dynamic_output_ports;
-
-    std::function<void(dynamic_ports &, dynamic_ports &)> _process;
-
-public:
-    void
-    work() {
-        _process(_dynamic_input_ports, _dynamic_output_ports);
-    }
-
-    template<typename T>
-    void
-    add_port(T &&port) {
-        switch (port.direction()) {
-        case port_direction_t::INPUT:
-            if (auto portID = port_index<port_direction_t::INPUT>(port.name()); portID.has_value()) {
-                throw std::invalid_argument(fmt::format("port already has a defined input port named '{}' at ID {}", port.name(), portID.value()));
-            }
-            _dynamic_input_ports.emplace_back(std::forward<T>(port));
-            break;
-
-        case port_direction_t::OUTPUT:
-            if (auto portID = port_index<port_direction_t::OUTPUT>(port.name()); portID.has_value()) {
-                throw std::invalid_argument(fmt::format("port already has a defined output port named '{}' at ID {}", port.name(), portID.value()));
-            }
-            _dynamic_output_ports.emplace_back(std::forward<T>(port));
-            break;
-
-        default: assert(false && "cannot add port with ANY designation");
-        }
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_input_port(std::size_t index) {
-        return index < _dynamic_input_ports.size() ? std::optional{ &_dynamic_input_ports[index] } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<std::size_t>
-    dynamic_input_port_index(std::string_view name) const {
-        auto       portNameMatches = [name](const auto &port) { return port.name == name; };
-        const auto it              = std::find_if(_dynamic_input_ports.cbegin(), _dynamic_input_ports.cend(), portNameMatches);
-        return it != _dynamic_input_ports.cend() ? std::optional{ std::distance(_dynamic_input_ports.cbegin(), it) } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_input_port(std::string_view name) {
-        if (const auto index = dynamic_input_port_index(name); index.has_value()) {
-            return &_dynamic_input_ports[*index];
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_output_port(std::size_t index) {
-        return index < _dynamic_output_ports.size() ? std::optional{ &_dynamic_output_ports[index] } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<std::size_t>
-    dynamic_output_port_index(std::string_view name) const {
-        auto       portNameMatches = [name](const auto &port) { return port.name == name; };
-        const auto it              = std::find_if(_dynamic_output_ports.cbegin(), _dynamic_output_ports.cend(), portNameMatches);
-        return it != _dynamic_output_ports.cend() ? std::optional{ std::distance(_dynamic_output_ports.cbegin(), it) } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_output_port(std::string_view name) {
-        if (const auto index = dynamic_output_port_index(name); index.has_value()) {
-            return &_dynamic_output_ports[*index];
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::span<const dynamic_port>
-    dynamic_input_ports() const noexcept {
-        return _dynamic_input_ports;
-    }
-
-    [[nodiscard]] std::span<const dynamic_port>
-    dynamic_output_ports() const noexcept {
-        return _dynamic_output_ports;
-    }
-};
-
-#endif
-
 class node_model {
 protected:
-    using dynamic_ports                 = std::vector<fair::graph::dynamic_port>;
-    bool          _dynamic_ports_loaded = false;
-    dynamic_ports _dynamic_input_ports;
-    dynamic_ports _dynamic_output_ports;
+    using dynamic_ports                         = std::vector<fair::graph::dynamic_port>;
+    bool                  _dynamic_ports_loaded = false;
+    std::function<void()> _dynamic_ports_loader;
+    dynamic_ports         _dynamic_input_ports;
+    dynamic_ports         _dynamic_output_ports;
 
     node_model() = default;
 
@@ -147,27 +54,32 @@ public:
     operator=(node_model &&other)
             = delete;
 
+    void
+    init_dynamic_ports() const {
+        if (!_dynamic_ports_loaded) _dynamic_ports_loader();
+    }
+
     fair::graph::dynamic_port &
     dynamic_input_port(std::size_t index) {
-        assert(_dynamic_ports_loaded);
-        return _dynamic_input_ports[index];
+        init_dynamic_ports();
+        return _dynamic_input_ports.at(index);
     }
 
     fair::graph::dynamic_port &
     dynamic_output_port(std::size_t index) {
-        assert(_dynamic_ports_loaded);
-        return _dynamic_output_ports[index];
+        init_dynamic_ports();
+        return _dynamic_output_ports.at(index);
     }
 
     [[nodiscard]] auto
     dynamic_input_ports_size() const {
-        assert(_dynamic_ports_loaded);
+        init_dynamic_ports();
         return _dynamic_input_ports.size();
     }
 
     [[nodiscard]] auto
     dynamic_output_ports_size() const {
-        assert(_dynamic_ports_loaded);
+        init_dynamic_ports();
         return _dynamic_output_ports.size();
     }
 
@@ -280,21 +192,40 @@ private:
     }
 
     void
-    init_dynamic_ports() {
-        using Node                             = std::remove_cvref_t<decltype(node_ref())>;
+    create_dynamic_ports_loader() {
+        _dynamic_ports_loader = [this] {
+            if (_dynamic_ports_loaded) return;
 
-        constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-            (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...);
-        }(std::make_index_sequence<input_port_count>());
+            using Node         = std::remove_cvref_t<decltype(node_ref())>;
 
-        constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-            (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...);
-        }(std::make_index_sequence<output_port_count>());
+            auto register_port = []<typename PortOrCollection>(PortOrCollection &port_or_collection, auto &where) {
+                auto process_port = [&where]<typename Port> (Port& port) {
+                    where.push_back(fair::graph::dynamic_port(port, dynamic_port::non_owned_reference_tag{}));
+                };
 
-        static_assert(input_port_count + output_port_count > 0);
-        _dynamic_ports_loaded = true;
+                if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                    process_port(port_or_collection);
+
+                } else {
+                    for (auto &port : port_or_collection) {
+                        process_port(port);
+                    }
+                }
+            };
+
+            constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
+            [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
+                (register_port(fair::graph::input_port<Is>(&node_ref()), this->_dynamic_input_ports), ...);
+            }(std::make_index_sequence<input_port_count>());
+
+            constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
+            [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
+                (register_port(fair::graph::output_port<Is>(&node_ref()), this->_dynamic_output_ports), ...);
+            }(std::make_index_sequence<output_port_count>());
+
+            static_assert(input_port_count + output_port_count > 0);
+            _dynamic_ports_loaded = true;
+        };
     }
 
 public:
@@ -309,23 +240,24 @@ public:
 
     ~node_wrapper() override = default;
 
-    node_wrapper() { init_dynamic_ports(); }
+    node_wrapper() {
+        create_dynamic_ports_loader();
+    }
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
     explicit node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
-        init_dynamic_ports();
+        create_dynamic_ports_loader();
     }
 
     template<typename... Args>
         requires(sizeof...(Args) > 1)
     explicit node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
-        init_dynamic_ports();
+        create_dynamic_ports_loader();
     }
 
     explicit node_wrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _node{ std::move(init_parameter) } {
-        init_dynamic_ports();
-        _node.settings().update_active_parameters();
+        create_dynamic_ports_loader();
     }
 
     void

@@ -94,10 +94,10 @@ protected:
 
         _dynamic_input_ports.clear();
         for (auto &input_port : _input_ports) {
-            _dynamic_input_ports.emplace_back(input_port);
+            _dynamic_input_ports.emplace_back(input_port, fair::graph::dynamic_port::non_owned_reference_tag{});
         }
         if (_dynamic_output_ports.empty()) {
-            _dynamic_output_ports.emplace_back(_output_port);
+            _dynamic_output_ports.emplace_back(_output_port, fair::graph::dynamic_port::non_owned_reference_tag{});
         }
         _dynamic_ports_loaded = true;
     }

@@ -750,6 +750,9 @@ private:
 public:
     using value_type                      = void; // a sterile port
 
+    struct owned_value_tag {};
+    struct non_owned_reference_tag {};
+
     constexpr dynamic_port()              = delete;
 
     dynamic_port(const dynamic_port &arg) = delete;
@@ -762,13 +765,15 @@ public:
     operator=(dynamic_port &&arg)
             = delete;
 
-    // TODO: Make owning versus non-owning API more explicit
+    // TODO: The lifetime of ports is a problem here, if we keep
+    // a reference to the port in dynamic_port, the port object
+    // can not be reallocated
     template<PortType T>
-    explicit constexpr dynamic_port(T &arg) noexcept
+    explicit constexpr dynamic_port(T &arg, non_owned_reference_tag) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
 
     template<PortType T>
-    explicit constexpr dynamic_port(T &&arg) noexcept
+    explicit constexpr dynamic_port(T &&arg, owned_value_tag) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
 
     [[nodiscard]] supported_type
