@@ -269,12 +269,15 @@ struct dummy_output_span : std::span<T> {                  // NOSONAR
 
 struct to_any_vector {
     template <typename Any>
-    operator std::vector<Any>() const { return {}; }
+    operator std::vector<Any>() const { return {}; } // NOSONAR
+
+    template <typename Any>
+    operator std::vector<Any>&() const { return {}; } // NOSONAR
 };
 
 struct to_any_pointer {
     template <typename Any>
-    operator Any*() const { return {}; }
+    operator Any*() const { return {}; } // NOSONAR
 };
 
 template<typename T>

@@ -8,12 +8,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include "blocklib/core/selector.hpp"
+
+
 namespace fg = fair::graph;
 using namespace fair::literals;
 
 template<typename T>
 struct fixed_source : public fg::node<fixed_source<T>> {
-    std::uint32_t    remaining_events_count;
+    std::uint32_t  remaining_events_count;
 
     T              value = 1;
     fg::PortOut<T> out;
@@ -75,163 +78,6 @@ struct adder : public fg::node<adder<T>> {
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (adder<T>), addend0, addend1, sum);
-
-namespace gr::blocks::basic {
-using namespace fair::graph;
-
-// optional shortening
-template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
-using A           = Annotated<T, description, Arguments...>;
-
-using SelectorDoc = Doc<R""(
-@brief basic multiplexing class to route arbitrary inputs to outputs
-)"">;
-
-template<typename T>
-struct Selector : node<Selector<T>, SelectorDoc> {
-    // port definitions
-    PortIn<std::int32_t, Async, Optional> selectOut;
-    PortOut<T, Async, Optional>           monitorOut; // optional monitor output (more for demo/API purposes than actual need)
-    std::vector<PortIn<T, Async>>         inputs;     // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
-    std::vector<PortOut<T, Async>>        outputs;
-
-    // settings
-    A<std::uint32_t, "nInputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>    nInputs  = 0U;
-    A<std::uint32_t, "nOutputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>   nOutputs = 0U;
-    A<std::vector<std::uint32_t>, "mapIn", Visible, Doc<"input port index to route from">>     mapIn; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
-    A<std::vector<std::uint32_t>, "mapOut", Visible, Doc<"output port index to route to">>     mapOut;
-    A<bool, "backPressure", Visible, Doc<"true: do not consume samples from un-routed ports">> backPressure = false;
-    std::vector<std::pair<std::size_t, std::size_t>>                                           _internalMapping;
-    std::int32_t                                                                               _selectedSrc = -1;
-
-    using has_process_bulk                                                                                  = std::true_type;
-
-    constexpr Selector() noexcept : Selector({}) {}
-
-    Selector(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept : node<Selector<T>, SelectorDoc>(init_parameter) {
-        if (empty(init_parameter)) {
-            return;
-        }
-        std::ignore     = this->settings().apply_staged_parameters();
-
-        selectOut.name  = "selectOut";
-        monitorOut.name = "monitorOut";
-    }
-
-    void
-    settings_changed(const fair::graph::property_map &old_settings, const fair::graph::property_map &new_settings) noexcept {
-        if (new_settings.contains("nInputs") || new_settings.contains("nOutputs")) {
-            fmt::print("{}: configuration changed: nInputs {} -> {}, nOutputs {} -> {}\n", static_cast<void *>(this), old_settings.at("nInputs"),
-                       new_settings.contains("nInputs") ? new_settings.at("nInputs") : "same", old_settings.at("nOutputs"), new_settings.contains("nOutputs") ? new_settings.at("nOutputs") : "same");
-            inputs.resize(nInputs);
-            outputs.resize(nOutputs);
-        }
-        if (new_settings.contains("mapIn") || new_settings.contains("mapOut")) {
-            assert(mapIn.value.size() == mapOut.value.size() && "mapIn and mapOut must have the same length");
-            _internalMapping.clear();
-            _internalMapping.reserve(mapIn.value.size());
-            std::unordered_set<std::size_t> setOutput;
-            for (std::size_t i = 0U; i < mapOut.value.size(); ++i) {
-                if (mapIn.value[i] < nInputs && mapOut.value[i] < nOutputs) {
-                    if (setOutput.contains(mapOut.value[i])) {
-                        // communicate duplicate output and skip
-                        fmt::print("{}: selector() - duplicate output index {} in map\n", static_cast<void *>(this), mapOut.value[i]);
-                        continue;
-                    }
-                    _internalMapping.emplace_back(mapIn.value[i], mapOut.value[i]);
-                    setOutput.insert(mapOut.value[i]);
-                } else {
-                    // report error and/or just ignore
-                    fmt::print("{}: selector() - invalid requested input-output pair ({}, {}) not in range ([0, {}],[0, {}])\n", static_cast<void *>(this), mapIn.value[i], mapOut.value[i], nInputs,
-                               nOutputs);
-                }
-            }
-        }
-    }
-
-    fair::graph::work_return_status_t
-    process_bulk(/* fg::ConsumableSpan */ auto  &select, //
-                 /* fg::ConsumableSpan */ auto  &ins,
-                 /* fg::PublishableSpan */ auto &monOut, //
-                 /* fg::PublishableSpan */ auto &outs) {
-        if (_internalMapping.empty()) {
-            if (backPressure) {
-                std::for_each(ins.begin(), ins.end(), [](auto *input) { input->consume(0_UZ); });
-            } else {
-                // make the implicit consume all available behaviour explicit
-                std::for_each(ins.begin(), ins.end(), [](auto *input) { input->consume(input->available()); });
-            }
-            return fg::work_return_status_t::OK;
-        }
-
-        std::unordered_map<std::size_t, std::size_t> used_inputs;
-        for (const auto &[input_index, output_index] : _internalMapping) {
-            auto *input_reader    = ins[input_index];
-            auto *output_writer   = outs[output_index];
-
-            auto  input_available = [&] {
-                auto it = used_inputs.find(input_index);
-                if (it != used_inputs.end()) {
-                    return it->second;
-                }
-
-                const auto available     = input_reader->available();
-                used_inputs[input_index] = available;
-                return available;
-            }();
-
-            auto input_span = input_reader->get(input_available);
-
-            if (input_available > 0) {
-                auto output_span = output_writer->reserve_output_range(input_available);
-
-                for (std::size_t i = 0; i < input_span.size(); ++i) {
-                    output_span[i] = input_span[i];
-                }
-
-                output_span.publish(input_available);
-            }
-        }
-
-        if (const auto select_available = select->available(); select_available > 0) {
-            auto select_span = select->get(select_available);
-            _selectedSrc     = select_span.back();
-
-            if (_selectedSrc >= 0 && _selectedSrc < ins.size()) {
-                // write to optional fixed monitor output
-                // auto monitor_written_count = ins[_selectedSrc]->available();
-                // std::ranges::copy(monOut, ins[_selectedSrc]);
-                // const std::size_t publishedSamples = std::min(monOut.size(), ins[_selectedSrc].size());
-                // monOut.publish(publishedSamples);
-            }
-
-            select->consume(select_available); // consume all samples on the 'select' streaming input port
-        }
-
-        for (auto src_port = 0U; src_port < ins.size(); ++src_port) {
-            if (auto it = used_inputs.find(src_port); it != used_inputs.end()) {
-                // If we read from this input, consume exactly the number of bytes we read
-                ins[src_port]->consume(it->second);
-
-            } else if (backPressure) {
-                ins[src_port]->consume(0_UZ);
-
-            } else {
-                // make the implicit consume all available behaviour explicit
-                ins[src_port]->consume(ins[src_port]->available());
-            }
-        }
-
-        // N.B. some corner case-handling to be added:
-        // * one input mapped to multiple outputs -> check for consistent and produce the same min available() for all mapped outputs
-
-        return fg::work_return_status_t::OK;
-    }
-};
-} // namespace gr::blocks::basic
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::blocks::basic::Selector<T>), selectOut, inputs, monitorOut, outputs, nInputs, nOutputs, mapIn, mapOut, backPressure);
-static_assert(fg::HasProcessBulkFunction<gr::blocks::basic::Selector<double>>);
 
 auto
 make_graph(std::uint32_t events_count, std::uint32_t sources_count, std::uint32_t sinks_count, std::vector<std::pair<std::uint32_t, std::uint32_t>> map) {
@@ -299,9 +145,6 @@ const boost::ut::suite SelectorTest = [] {
         auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
 
         auto [graph, sources, sinks, selector] = make_graph(10, 3, 3, { { 0, 0 }, { 1, 1 }, { 2, 2 } });
-
-        // fg::scheduler::simple scheduler(std::move(graph), thread_pool);
-        // scheduler.run_and_wait();
 
         for (std::size_t iterration = 0; iterration < 100; ++iterration) {
             for (auto *source : sources) {

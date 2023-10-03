@@ -60,7 +60,6 @@ auto type_helper() {
 
 template<typename PortOrCollection>
 using type = std::remove_pointer_t<decltype(type_helper<PortOrCollection>())>;
-// using type = typename Port::value_type;
 
 template<typename... Ports>
 struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MinSamples... })> {};
