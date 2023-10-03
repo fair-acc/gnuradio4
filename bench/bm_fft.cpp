@@ -55,11 +55,12 @@ template<typename T>
 void
 testFFT() {
     using namespace benchmark;
+    using namespace boost::ut;
     using namespace boost::ut::reflection;
     using namespace fair::graph;
     using namespace gr::algorithm;
 
-    constexpr std::size_t N{ 1024 }; // must be power of 2
+    constexpr std::uint32_t N{ 1024U }; // must be power of 2
     constexpr double      sampleRate{ 256. };
     constexpr double      frequency{ 100. };
     constexpr double      amplitude{ 1. };
@@ -75,42 +76,25 @@ testFFT() {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFTw<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
         std::ignore                                                                    = fft1.settings().apply_staged_parameters();
 
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal] {
-            fft1.prepareInput(signal);
-            fft1.computeFFT();
+        std::vector<DataSet<PrecisionType>> resultingDataSets(1);
+        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
+            expect(fair::graph::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
         };
     }
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
         std::ignore                                                                   = fft1.settings().apply_staged_parameters();
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal] {
-            fft1.prepareInput(signal);
-            fft1.computeFFT();
+
+        std::vector<DataSet<PrecisionType>> resultingDataSets(1);
+        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
+            expect(fair::graph::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
         };
     }
 
-    if constexpr (gr::blocks::fft::ComplexType<T>) {
+    if constexpr (gr::algorithm::ComplexType<T>) {
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftCT", type_name<T>())) = [&signal] {
             auto signalCopy = signal;
             computeFFFTCooleyTukey<T>(signalCopy);
-        };
-    }
-
-    {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, gr::algorithm::FFTw<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
-        std::ignore = fft1.settings().apply_staged_parameters();
-        fft1.prepareInput(signal);
-        fft1.computeFFT();
-
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - magnitude", type_name<T>())) = [&fft1] { fft1.computeMagnitudeSpectrum(); };
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - phase", type_name<T>()))     = [&fft1] { fft1.computePhaseSpectrum(); };
-
-        double sum{ 0. };
-        fft1.computeMagnitudeSpectrum();
-        fft1.computePhaseSpectrum();
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - dataset", type_name<T>())) = [&fft1, &sum] {
-            const auto ds1 = fft1.createDataset();
-            sum += static_cast<double>(ds1.signal_values[0]);
         };
     }
 
