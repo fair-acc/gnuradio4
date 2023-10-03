@@ -43,6 +43,9 @@ concept is_output_v = is_output<Port>::value;
 template<typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
+template <typename Type>
+using is_port = std::integral_constant<bool, is_port_v<Type>>;
+
 template <typename Collection>
 concept is_port_collection_v = is_port_v<typename Collection::value_type>;
 

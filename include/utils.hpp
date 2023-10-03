@@ -441,11 +441,18 @@ tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
         return std::make_tuple([&function, &tuple, &tuples...](auto I) {
-            if constexpr (requires { function(I, std::get<I>(tuple), std::get<I>(tuples)...); }) {
-                return function(I, std::get<I>(tuple), std::get<I>(tuples)...);
-            } else {
-                return function(std::get<I>(tuple), std::get<I>(tuples)...);
-            }
+            return function(std::get<I>(tuple), std::get<I>(tuples)...);
+        }(std::integral_constant<std::size_t, Idx>{})...);
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto
+tuple_transform_enumerated(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
+            return function(I, std::get<I>(tuple), std::get<I>(tuples)...);
         }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }

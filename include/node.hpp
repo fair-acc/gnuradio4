@@ -382,8 +382,8 @@ protected:
     update_ports_status() {
         ports_status               = ports_status_t();
 
-        auto adjust_for_input_port = [&ps = ports_status, this](PortType auto &port) {
-            if constexpr (port.isSynchronous()) {
+        auto adjust_for_input_port = [&ps = ports_status, this]<PortType Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::synchronous) {
                 ps.has_sync_input_ports          = true;
                 ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
                 ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
@@ -405,8 +405,8 @@ protected:
                 },
                 input_ports(&self()));
 
-        auto adjust_for_output_port = [&ps = ports_status, this](PortType auto &port) {
-            if constexpr (port.isSynchronous()) {
+        auto adjust_for_output_port = [&ps = ports_status, this]<PortType Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::synchronous) {
                 ps.has_sync_output_ports = true;
                 ps.out_min_samples       = std::max(ps.out_min_samples, port.min_buffer_size());
                 ps.out_max_samples       = std::min(ps.out_max_samples, port.max_buffer_size());
@@ -980,46 +980,46 @@ protected:
             }
         }
 
-        const auto input_spans = meta::tuple_transform(
-                [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename Port>(std::size_t index, Port &input_port) noexcept {
+        const auto input_spans = meta::tuple_transform_enumerated(
+                [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>(std::size_t index, PortOrCollection &input_port_or_collection) noexcept {
                     auto in_samples          = sync_in_samples;
 
-                    auto process_single_port = [index, &in_samples, &self](auto &&port) {
-                        if constexpr (port.isSynchronous()) {
+                    auto process_single_port = [index, &in_samples]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
                             return port.streamReader().get(in_samples);
                         } else {
                             return std::addressof(port.streamReader());
                         }
                     };
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        return process_single_port(input_port);
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        return process_single_port(input_port_or_collection);
                     } else {
-                        // using value_span = decltype(input_port.begin()->streamReader().get(in_samples));
-                        using value_span = decltype(process_single_port(std::declval<typename Port::value_type>()));
+                        // using value_span = decltype(input_port_or_collection.begin()->streamReader().get(in_samples));
+                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
                         std::vector<value_span> result;
-                        std::transform(input_port.begin(), input_port.end(), std::back_inserter(result), process_single_port);
+                        std::transform(input_port_or_collection.begin(), input_port_or_collection.end(), std::back_inserter(result), process_single_port);
                         return result;
                     }
                 },
                 input_ports(&self()));
-        auto writers_tuple = meta::tuple_transform(
-                [&self = self(), sync_out_samples = ports_status.out_samples]<typename Port>(std::size_t index, Port &output_port) noexcept {
+        auto writers_tuple = meta::tuple_transform_enumerated(
+                [&self = self(), sync_out_samples = ports_status.out_samples]<typename PortOrCollection>(std::size_t index, PortOrCollection &output_port_or_collection) noexcept {
                     auto out_samples         = sync_out_samples;
 
-                    auto process_single_port = [index, &out_samples, &self](auto &&port) {
-                        if constexpr (port.isSynchronous()) {
+                    auto process_single_port = [index, &out_samples, &self]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
                             return port.streamWriter().reserve_output_range(out_samples);
                         } else {
                             return std::addressof(port.streamWriter());
                         }
                     };
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        return process_single_port(output_port);
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        return process_single_port(output_port_or_collection);
                     } else {
-                        // using value_span = decltype(output_port.begin()->streamWriter().reserve_output_range(out_samples));
-                        using value_span = decltype(process_single_port(std::declval<typename Port::value_type>()));
+                        // using value_span = decltype(output_port_or_collection.begin()->streamWriter().reserve_output_range(out_samples));
+                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
                         std::vector<value_span> result;
-                        std::transform(output_port.begin(), output_port.end(), std::back_inserter(result), process_single_port);
+                        std::transform(output_port_or_collection.begin(), output_port_or_collection.end(), std::back_inserter(result), process_single_port);
                         return result;
                     }
                 },

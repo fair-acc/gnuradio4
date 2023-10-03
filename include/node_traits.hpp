@@ -215,6 +215,7 @@ concept can_process_one_simd =
 #if DISABLE_SIMD
         false;
 #else
+        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
         traits::node::input_port_types<Node>::size() > 0 and requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
             {
                 detail::can_process_one_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
@@ -227,6 +228,7 @@ concept can_process_one_simd_with_offset =
 #if DISABLE_SIMD
         false;
 #else
+        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
         traits::node::input_port_types<Node>::size() > 0 && requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
             {
                 detail::can_process_one_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
