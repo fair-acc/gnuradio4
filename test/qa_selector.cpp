@@ -122,6 +122,9 @@ struct test_definition {
     std::vector<std::pair<std::uint32_t, std::uint32_t>> mapping;
     std::vector<std::vector<double>>                     input_values;
     std::vector<std::vector<double>>                     output_values;
+    std::uint32_t                                        monitor_source;
+    std::vector<double>                                  monitor_values;
+    bool                                                 back_pressure;
 };
 
 void
@@ -144,7 +147,8 @@ execute_selector_test(test_definition definition) {
     selector = std::addressof(graph.make_node<gr::blocks::basic::Selector<double>>({ { "nInputs", sources_count }, //
                                                                                      { "nOutputs", sinks_count },  //
                                                                                      { "mapIn", mapIn },           //
-                                                                                     { "mapOut", mapOut } }));
+                                                                                     { "mapOut", mapOut },         //
+                                                                                     { "backPressure", definition.back_pressure } }));
 
     for (std::uint32_t source_index = 0; source_index < sources_count; ++source_index) {
         sources.push_back(std::addressof(graph.make_node<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
@@ -161,13 +165,26 @@ execute_selector_test(test_definition definition) {
         expect(fair::graph::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, sink_index + 1 /* there's one port before the outputs */, *sinks[sink_index], 0));
     }
 
+    validator_sink<double> *monitor_sink = std::addressof(graph.make_node<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
+                                                                                                    { "expected_values", definition.monitor_values } }));
+    expect(monitor_sink->settings().apply_staged_parameters().empty());
+    expect(fair::graph::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, 0, *monitor_sink, 0));
+
     for (std::size_t iterration = 0; iterration < definition.value_count * sources_count; ++iterration) {
+        const auto max = std::numeric_limits<std::size_t>::max();
         for (auto *source : sources) {
-            source->work(std::numeric_limits<std::size_t>::max());
+            source->work(max);
         }
-        selector->work(std::numeric_limits<std::size_t>::max());
+        selector->work(max);
         for (auto *sink : sinks) {
-            sink->work(std::numeric_limits<std::size_t>::max());
+            sink->work(max);
+        }
+        monitor_sink->work(max);
+    }
+
+    if (!definition.back_pressure) {
+        for (const auto &input : selector->inputs) {
+            expect(eq(input.streamReader().available(), 0));
         }
     }
 
@@ -209,40 +226,130 @@ const boost::ut::suite SelectorTest = [] {
         expect(block._internalMapping == internal_mapping_t{ { 0U, { outputMap[0] } }, { 1U, { outputMap[1] } } });
     };
 
+    // Tests without the back pressure
+
     "Selector<T> 1 to 1 mapping"_test = [] {
-        execute_selector_test({
-                .value_count   = 5,
-                .mapping       = { { 0, 0 }, { 1, 1 }, { 2, 2 } },
-                .input_values  = { { 1 }, { 2 }, { 3 } },
-                .output_values = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } },
-        });
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
+                                .monitor_source = -1U,                                                         //
+                                .monitor_values = {},                                                          //
+                                .back_pressure  = false });
     };
 
     "Selector<T> only one input used"_test = [] {
-        execute_selector_test({
-                .value_count   = 5,
-                .mapping       = { { 1, 1 } },
-                .input_values  = { { 1 }, { 2 }, { 3 } },
-                .output_values = { {}, { 2, 2, 2, 2, 2 }, {} },
-        });
+        execute_selector_test({ .value_count    = 5,                             //
+                                .mapping        = { { 1, 1 } },                  //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },       //
+                                .output_values  = { {}, { 2, 2, 2, 2, 2 }, {} }, //
+                                .monitor_source = -1U,                           //
+                                .monitor_values = {},                            //
+                                .back_pressure  = false });
     };
 
     "Selector<T> all for one"_test = [] {
-        execute_selector_test({
-                .value_count   = 5,
-                .mapping       = { { 0, 1 }, { 1, 1 }, { 2, 1 } },
-                .input_values  = { { 1 }, { 2 }, { 3 } },
-                .output_values = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} },
-        });
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
+                                .monitor_source = -1U,                                                         //
+                                .monitor_values = {},                                                          //
+                                .back_pressure  = false });
     };
 
     "Selector<T> one for all"_test = [] {
-        execute_selector_test({
-                .value_count   = 5,
-                .mapping       = { { 1, 0 }, { 1, 1 }, { 1, 2 } },
-                .input_values  = { { 1 }, { 2 }, { 3 } },
-                .output_values = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } },
-        });
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
+                                .monitor_source = -1U,                                                         //
+                                .monitor_values = {},                                                          //
+                                .back_pressure  = false });
+    };
+
+    // tests with the back pressure
+
+    "Selector<T> 1 to 1 mapping, with back pressure"_test = [] {
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
+                                .monitor_source = -1U,                                                         //
+                                .monitor_values = {},                                                          //
+                                .back_pressure  = true });
+    };
+
+    "Selector<T> only one input used, with back pressure"_test = [] {
+        execute_selector_test({ .value_count    = 5,                             //
+                                .mapping        = { { 1, 1 } },                  //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },       //
+                                .output_values  = { {}, { 2, 2, 2, 2, 2 }, {} }, //
+                                .monitor_source = -1U,                           //
+                                .monitor_values = {},                            //
+                                .back_pressure  = true });
+    };
+
+    "Selector<T> all for one, with back pressure"_test = [] {
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
+                                .monitor_source = -1U,                                                         //
+                                .monitor_values = {},                                                          //
+                                .back_pressure  = true });
+    };
+
+    "Selector<T> one for all, with back pressure"_test = [] {
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
+                                .monitor_source = -1U,                                                         //
+                                .monitor_values = {},                                                          //
+                                .back_pressure  = true });
+    };
+
+    // Tests with a monitor
+
+    "Selector<T> 1 to 1 mapping, with monitor, monitor source already mapped"_test = [] {
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
+                                .monitor_source = 0U,                                                          //
+                                .monitor_values = { 1, 1, 1, 1, 1 },                                           //
+                                .back_pressure  = false });
+    };
+
+    "Selector<T> only one input used, with monitor, monitor source not mapped"_test = [] {
+        execute_selector_test({ .value_count    = 5,                             //
+                                .mapping        = { { 1, 1 } },                  //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },       //
+                                .output_values  = { {}, { 2, 2, 2, 2, 2 }, {} }, //
+                                .monitor_source = 0U,                            //
+                                .monitor_values = { 1, 1, 1, 1, 1 },             //
+                                .back_pressure  = false });
+    };
+
+    "Selector<T> all for one, with monitor, monitor source already mapped"_test = [] {
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
+                                .monitor_source = 1U,                                                          //
+                                .monitor_values = { 2, 2, 2, 2, 2 },                                           //
+                                .back_pressure  = false });
+    };
+
+    "Selector<T> one for all, with monitor, monitor source already mapped"_test = [] {
+        execute_selector_test({ .value_count    = 5,                                                           //
+                                .mapping        = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
+                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
+                                .output_values  = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
+                                .monitor_source = 1U,                                                          //
+                                .monitor_values = { 2, 2, 2, 2, 2 },                                           //
+                                .back_pressure  = false });
     };
 };
 
