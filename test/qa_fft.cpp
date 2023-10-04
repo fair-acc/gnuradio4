@@ -129,7 +129,7 @@ struct TypePair {
     using AlgoType = A<gr::algorithm::FFTInDataType<T, typename U::value_type>>;
 };
 
-const boost::ut::suite fftTests = [] {
+const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     using namespace boost::ut;
     using namespace gr::blocks::fft;
     using namespace boost::ut::reflection;
@@ -141,9 +141,7 @@ const boost::ut::suite fftTests = [] {
     std::tuple<TypePair<std::complex<float>, DataSet<float>, FFTwAlgo>, TypePair<std::complex<float>, DataSet<float>, FFTAlgo>, TypePair<std::complex<double>, DataSet<double>, FFTwAlgo>,
                TypePair<std::complex<double>, DataSet<float>, FFTAlgo>, TypePair<float, DataSet<float>, FFTwAlgo>, TypePair<float, DataSet<float>, FFTAlgo>, TypePair<double, DataSet<float>, FFTwAlgo>,
                TypePair<double, DataSet<float>, FFTAlgo>>
-                              typesWithAlgoToTest{};
-
-    std::tuple<float, double> floatingTypesToTest{};
+            typesWithAlgoToTest{};
 
     "FFT sin tests"_test = []<typename T>() {
         using InType   = T::InType;
@@ -166,7 +164,7 @@ const boost::ut::suite fftTests = [] {
 
             std::ignore = fftBlock.settings().set({ { "fftSize", t.N } });
             std::ignore = fftBlock.settings().set({ { "outputInDb", t.outputInDb } });
-            std::ignore = fftBlock.settings().set({ { "window", static_cast<int>(gr::algorithm::window::Type::None) } });
+            std::ignore = fftBlock.settings().set({ { "window", "None" } });
             std::ignore = fftBlock.settings().apply_staged_parameters();
             const auto           signal{ generateSinSample<InType>(t.N, t.sample_rate, t.frequency, t.amplitude) };
             std::vector<OutType> resultingDataSets(1);
@@ -191,7 +189,7 @@ const boost::ut::suite fftTests = [] {
         using AlgoType = T::AlgoType;
         constexpr double               tolerance{ 1.e-5 };
         constexpr std::uint32_t        N{ 16 };
-        FFT<InType, OutType, AlgoType> fftBlock({ { "fftSize", N }, { "window", static_cast<int>(gr::algorithm::window::Type::None) } });
+        FFT<InType, OutType, AlgoType> fftBlock({ { "fftSize", N }, { "window", "None" } });
         std::ignore = fftBlock.settings().apply_staged_parameters();
 
         std::vector<InType> signal(N);
@@ -298,7 +296,20 @@ const boost::ut::suite fftTests = [] {
         expect(approx(source1.count, source1.nSamples, 1e-4));
     };
 
-    "FFT window function tests"_test = []<typename T>() {
+    "FFTW wisdom import/export tests"_test = []() {
+        gr::algorithm::FFTw<double> fftw1{};
+
+        std::string                 wisdomString1 = fftw1.exportWisdomToString();
+        fftw1.forgetWisdom();
+        int importOk = fftw1.importWisdomFromString(wisdomString1);
+        expect(eq(importOk, 1)) << "Wisdom import from string.";
+        std::string wisdomString2 = fftw1.exportWisdomToString();
+
+        // lines are not always at the same order thus it is hard to compare
+        // expect(eq(wisdomString1, wisdomString2)) << "Wisdom strings are the same.";
+    };
+
+    "window function tests"_test = []<typename T>() {
         using InType   = T::InType;
         using OutType  = T::OutType;
         using AlgoType = T::AlgoType;
@@ -309,12 +320,9 @@ const boost::ut::suite fftTests = [] {
         constexpr value_type    tolerance{ value_type(0.00001) };
 
         constexpr std::uint32_t N{ 8 };
-        using enum gr::algorithm::window::Type;
-        std::vector<gr::algorithm::window::Type> testCases = { None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential };
-
-        for (const auto &t : testCases) {
+        for (const auto &window : gr::algorithm::window::TypeList) {
             std::ignore = fftBlock.settings().set({ { "fftSize", N } });
-            std::ignore = fftBlock.settings().set({ { "window", static_cast<int>(t) } });
+            std::ignore = fftBlock.settings().set({ { "window", std::string(gr::algorithm::window::to_string(window)) } });
             std::ignore = fftBlock.settings().apply_staged_parameters();
 
             std::vector<InType> signal(N);
@@ -332,9 +340,9 @@ const boost::ut::suite fftTests = [] {
 
             expect(eq(fftBlock.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
             expect(eq(fftBlock._window.size(), N)) << fmt::format("<{}> equal window vector size", type_name<T>());
-            expect(eq(fftBlock.window, static_cast<int>(t))) << fmt::format("<{}> equal window function", type_name<T>());
+            expect(eq(fftBlock.window.value, gr::algorithm::window::to_string(window))) << fmt::format("<{}> equal window function", type_name<T>());
 
-            std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(t, N);
+            std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(window, N);
             for (std::size_t i = 0; i < N; i++) {
                 if constexpr (gr::algorithm::ComplexType<InType>) {
                     const auto expValue = static_cast<value_type>(signal[i].real()) * windowFunc[i];
@@ -347,8 +355,15 @@ const boost::ut::suite fftTests = [] {
             }
         }
     } | typesWithAlgoToTest;
+};
 
-    "FFT window tests"_test = []<typename T>() {
+const boost::ut::suite<"window functions"> windowTests = [] {
+    using namespace boost::ut;
+    using namespace gr::blocks::fft;
+    using namespace boost::ut::reflection;
+    using gr::algorithm::window::create;
+
+    "window pre-computed array tests"_test = []<typename T>() { // this tests regression w.r.t. changed implementations
         // Expected value for size 8
         std::vector<T> Rectangular8{ 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f };
         std::vector<T> Hamming8{ 0.07672f, 0.2119312255f, 0.53836f, 0.8647887745f, 1.0f, 0.8647887745f, 0.53836f, 0.2119312255f };
@@ -363,15 +378,16 @@ const boost::ut::suite fftTests = [] {
         std::vector<T> Kaiser8{ 0.5714348848f, 0.7650986027f, 0.9113132365f, 0.9899091685f, 0.9899091685f, 0.9113132365f, 0.7650986027f, 0.5714348848f };
 
         // check all windows for unwanted changes
-        using gr::algorithm::window::create;
         using enum gr::algorithm::window::Type;
         expect(equalVectors<T>(create<T>(None, 8), Rectangular8)) << fmt::format("<{}> equal Rectangular8[8] vector {} vs. ref: {}", type_name<T>(), create<T>(None, 8), Rectangular8);
         expect(equalVectors<T>(create<T>(Rectangular, 8), Rectangular8)) << fmt::format("<{}> equal Rectangular[8]vector {} vs. ref: {}", type_name<T>(), create<T>(Rectangular, 8), Rectangular8);
         expect(equalVectors<T>(create<T>(Hamming, 8), Hamming8)) << fmt::format("<{}> equal Hamming[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Hamming, 8), Hamming8);
         expect(equalVectors<T>(create<T>(Hann, 8), Hann8)) << fmt::format("<{}> equal Hann[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Hann, 8), Hann8);
         expect(equalVectors<T>(create<T>(Blackman, 8), Blackman8)) << fmt::format("<{}> equal Blackman[8] vvector {} vs. ref: {}", type_name<T>(), create<T>(Blackman, 8), Blackman8);
-        expect(equalVectors<T>(create<T>(BlackmanHarris, 8), BlackmanHarris8)) << fmt::format("<{}> equal BlackmanHarris[8] vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanHarris, 8), BlackmanHarris8);
-        expect(equalVectors<T>(create<T>(BlackmanNuttall, 8), BlackmanNuttall8)) << fmt::format("<{}> equal BlackmanNuttall[8] vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanNuttall, 8), BlackmanNuttall8);
+        expect(equalVectors<T>(create<T>(BlackmanHarris, 8), BlackmanHarris8))
+                << fmt::format("<{}> equal BlackmanHarris[8] vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanHarris, 8), BlackmanHarris8);
+        expect(equalVectors<T>(create<T>(BlackmanNuttall, 8), BlackmanNuttall8))
+                << fmt::format("<{}> equal BlackmanNuttall[8] vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanNuttall, 8), BlackmanNuttall8);
         expect(equalVectors<T>(create<T>(Exponential, 8), Exponential8)) << fmt::format("<{}> equal Exponential[8] vector {} vs. ref: {}", type_name<T>(), create<T>(Exponential, 8), Exponential8);
         expect(equalVectors<T>(create<T>(FlatTop, 8), FlatTop8)) << fmt::format("<{}> equal FlatTop[8] vector {} vs. ref: {}", type_name<T>(), create<T>(FlatTop, 8), FlatTop8);
         expect(equalVectors<T>(create<T>(HannExp, 8), HannExp8)) << fmt::format("<{}> equal HannExp[8] vector {} vs. ref: {}", type_name<T>(), create<T>(HannExp, 8), HannExp8);
@@ -391,20 +407,28 @@ const boost::ut::suite fftTests = [] {
         expect(eq(create<T>(HannExp, 0).size(), 0u)) << fmt::format("<{}> zero size HannExp[8] vectors", type_name<T>());
         expect(eq(create<T>(Nuttall, 0).size(), 0u)) << fmt::format("<{}> zero size Nuttall[8] vectors", type_name<T>());
         expect(eq(create<T>(Kaiser, 0).size(), 0u)) << fmt::format("<{}> zero size Kaiser[8] vectors", type_name<T>());
-    } | floatingTypesToTest;
+    } | std::tuple<float, double>();
 
-    "FFTW wisdom import/export tests"_test = []() {
-        gr::algorithm::FFTw<double> fftw1{};
+    "basic window tests"_test = [](gr::algorithm::window::Type window) {
+        using enum gr::algorithm::window::Type;
+        expect(gr::algorithm::window::parse(gr::algorithm::window::to_string(window)) == window) << fmt::format("window {} parse(to_string) identity\n", gr::algorithm::window::to_string(window));
 
-        std::string                 wisdomString1 = fftw1.exportWisdomToString();
-        fftw1.forgetWisdom();
-        int importOk = fftw1.importWisdomFromString(wisdomString1);
-        expect(eq(importOk, 1)) << "Wisdom import from string.";
-        std::string wisdomString2 = fftw1.exportWisdomToString();
+        const auto w = create(window, 1024U);
+        expect(eq(w.size(), 1024U));
 
-        // lines are not always at the same order thus it is hard to compare
-        // expect(eq(wisdomString1, wisdomString2)) << "Wisdom strings are the same.";
-    };
+        if (window == Exponential || window == FlatTop || window == Blackman || window == Nuttall) {
+            return; // min max out of [0, 1] by design and/or numerical corner cases
+        }
+        const auto [min, max] = std::ranges::minmax_element(w);
+        expect(ge(*min, 0.f)) << fmt::format("window {} min value\n", gr::algorithm::window::to_string(window));
+        expect(le(*max, 1.f)) << fmt::format("window {} max value\n", gr::algorithm::window::to_string(window));
+    } | gr::algorithm::window::TypeList;
+
+    "window corner cases"_test = []<typename T>() {
+        expect(throws<std::invalid_argument>([] { std::ignore = gr::algorithm::window::parse("UnknownWindow"); })) << "invalid window name";
+        expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 1); })) << "invalid Kaiser window size";
+        expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 2, -1.f); })) << "invalid Kaiser window beta";
+    } | std::tuple<float, double>();
 };
 
 int

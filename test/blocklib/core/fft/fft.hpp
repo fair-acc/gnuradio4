@@ -76,21 +76,21 @@ On the choice of window (mathematically aka. apodisation) functions
 @tparam U type of the output data (presently limited to DataSet<float> and DataSet<double>)
 @tparam FourierAlgorithm the specific algorithm used to perform the Fourier Transform (can be DFT, FFT, FFTW).
 )"">> {
-public:
     using value_type  = U::value_type;
     using InDataType  = gr::algorithm::FFTInDataType<T, value_type>;
     using OutDataType = gr::algorithm::FFTOutDataType<value_type>;
 
-    PortIn<T>               in;
-    PortOut<U>              out;
+    PortIn<T>                   in;
+    PortOut<U>                  out;
 
-    FourierAlgorithm        _fftImpl;
-    std::vector<value_type> _window = gr::algorithm::window::create<value_type>(gr::algorithm::window::Type::Hann, 1024U);
+    FourierAlgorithm            _fftImpl;
+    gr::algorithm::window::Type _windowType = gr::algorithm::window::Type::Hann;
+    std::vector<value_type>     _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
 
     // settings
     const std::string                                                                algorithm = fair::meta::type_name<FourierAlgorithm>();
     Annotated<std::uint32_t, "FFT size", Doc<"FFT size">>                            fftSize{ 1024U };
-    Annotated<int, "window function", Doc<"window (apodization) function">>          window{ static_cast<int>(gr::algorithm::window::Type::Hann) };
+    Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(gr::algorithm::window::to_string(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name = std::string("unknown signal");
@@ -116,7 +116,9 @@ public:
         in.min_samples            = newSize;
         this->denominator         = newSize;
         _window.resize(newSize, 0);
-        gr::algorithm::window::create(_window, static_cast<gr::algorithm::window::Type>(window.value));
+
+        _windowType = gr::algorithm::window::parse(window);
+        gr::algorithm::window::create(_window, _windowType);
 
         // N.B. this should become part of the Fourier transform implementation
         _inData.resize(fftSize, 0);
@@ -179,7 +181,7 @@ public:
             std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values),
                                    [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
         } else {
-            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth](const auto i) { return static_cast<T>(i * freqWidth); });
+            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth](const auto i) { return static_cast<T>(i) * freqWidth; });
         }
         std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(N)), [](const auto &c) { return c.real(); });
         std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(2U * N)), [](const auto &c) { return c.imag(); });
