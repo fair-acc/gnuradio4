@@ -3,9 +3,11 @@
 #define GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <ranges>
+#include <string_view>
 #include <utils.hpp>
 #include <vector>
 
@@ -13,12 +15,50 @@
 
 namespace gr::algorithm::window {
 
-/*
+/**
  * Implementation of window function (also known as an apodization function or tapering function).
  * See Wikipedia for more info: https://en.wikipedia.org/wiki/Window_function
  */
-
 enum class Type : int { None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser };
+using enum Type;
+inline static constexpr std::array<Type, 12>     TypeList{ None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser };
+inline static constexpr fair::meta::fixed_string TypeNames = "[None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser]";
+
+constexpr std::string_view
+to_string(Type window) noexcept {
+    switch (window) {
+    case None: return "None";
+    case Rectangular: return "Rectangular";
+    case Hamming: return "Hamming";
+    case Hann: return "Hann";
+    case HannExp: return "HannExp";
+    case Blackman: return "Blackman";
+    case Nuttall: return "Nuttall";
+    case BlackmanHarris: return "BlackmanHarris";
+    case BlackmanNuttall: return "BlackmanNuttall";
+    case FlatTop: return "FlatTop";
+    case Exponential: return "Exponential";
+    case Kaiser: return "Kaiser";
+    default: return "Unknown";
+    }
+}
+
+constexpr Type
+parse(std::string_view name) {
+    constexpr auto toLower = [](std::string_view sv) {
+        std::string lowerStr(sv);
+        std::ranges::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+        return lowerStr;
+    };
+
+    for (const auto &type : TypeList) {
+        if (toLower(to_string(type)) == toLower(name)) {
+            return type;
+        }
+    }
+
+    throw std::invalid_argument(fmt::format("unknown window type '{}'", name));
+}
 
 namespace detail {
 template<typename T>
@@ -162,7 +202,6 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
         });
         return;
     }
-    default: throw std::invalid_argument(fmt::format("Unsupported window type id {}.", static_cast<int>(windowFunction)));
     }
 }
 
@@ -179,7 +218,7 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
  */
 template<typename T = float>
     requires std::is_floating_point_v<T>
-auto
+[[nodiscard]] auto
 create(Type windowFunction, const std::size_t n, const T beta = static_cast<T>(1.6)) {
     std::vector<T> container(n);
     create(container, windowFunction, beta);
