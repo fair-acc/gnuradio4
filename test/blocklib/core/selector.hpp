@@ -27,16 +27,30 @@ corresponding indices from these two vectors define the
 
 For example, for arrays:
 
+    mapIn  = {2, 2, 3, 3}
+    mapOut = {1, 2, 3, 4}
+
+The mapping is as follows:
+
+     +--------------+
+    -|-1   /----> 1-|-
+    -|-2 >------> 2-|-
+    -|-3 >------> 3-|-
+    -|-4   \----> 4-|-
+     +--------------+
+
+And for arrays:
+
     mapIn  = {1, 2, 3, 4}
     mapOut = {2, 2, 3, 3}
 
 The mapping is as follows:
 
      +--------------+
-    -|-1 ------\  1-|-
-    -|-2 -------> 2-|-
-    -|-3 -------> 3-|-
-    -|-4 ------/  4-|-
+    -|-1 >-----\  1-|-
+    -|-2 >------> 2-|-
+    -|-3 >------> 3-|-
+    -|-4 >-----/  4-|-
      +--------------+
 
 It also contains two additional ports -- `selectOut` and `monitorOut`. Port
