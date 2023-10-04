@@ -585,10 +585,21 @@ template<template<typename> class Template, typename... Ts>
 struct transform_types_impl<Template, typelist<Ts...>> {
     using type = typelist<Template<Ts>...>;
 };
+
+template<template<typename> class Template, typename List>
+struct transform_types_nested_impl;
+
+template<template<typename> class Template, typename... Ts>
+struct transform_types_nested_impl<Template, typelist<Ts...>> {
+    using type = typelist<typename Template<Ts>::type...>;
+};
 } // namespace detail
 
 template<template<typename> class Template, typename List>
 using transform_types = typename detail::transform_types_impl<Template, List>::type;
+
+template<template<typename> class Template, typename List>
+using transform_types_nested = typename detail::transform_types_nested_impl<Template, List>::type;
 
 // transform_value_type
 template<typename T>
@@ -3720,7 +3731,20 @@ auto
 tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
+            return function(std::get<I>(tuple), std::get<I>(tuples)...);
+        }(std::integral_constant<std::size_t, Idx>{})...);
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto
+tuple_transform_enumerated(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
+            return function(I, std::get<I>(tuple), std::get<I>(tuples)...);
+        }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
@@ -11350,6 +11374,9 @@ private:
 public:
     using value_type                      = void; // a sterile port
 
+    struct owned_value_tag {};
+    struct non_owned_reference_tag {};
+
     constexpr dynamic_port()              = delete;
 
     dynamic_port(const dynamic_port &arg) = delete;
@@ -11362,13 +11389,15 @@ public:
     operator=(dynamic_port &&arg)
             = delete;
 
-    // TODO: Make owning versus non-owning API more explicit
+    // TODO: The lifetime of ports is a problem here, if we keep
+    // a reference to the port in dynamic_port, the port object
+    // can not be reallocated
     template<PortType T>
-    explicit constexpr dynamic_port(T &arg) noexcept
+    explicit constexpr dynamic_port(T &arg, non_owned_reference_tag) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
 
     template<PortType T>
-    explicit constexpr dynamic_port(T &&arg) noexcept
+    explicit constexpr dynamic_port(T &&arg, owned_value_tag) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
 
     [[nodiscard]] supported_type
@@ -11470,7 +11499,7 @@ samples_to_next_tag(const PortType auto &port) {
 } // namespace fair::graph
 
 #endif // include guard
- // localinclude
+        // localinclude
 // #include <port_traits.hpp>
 #ifndef GNURADIO_NODE_PORT_TRAITS_HPP
 #define GNURADIO_NODE_PORT_TRAITS_HPP
@@ -11505,9 +11534,6 @@ template<typename T>
 struct has_fixed_info_or_is_typelist<T> : std::true_type {};
 
 template<typename Port>
-using type = typename Port::value_type;
-
-template<typename Port>
 using is_input = std::integral_constant<bool, Port::direction() == port_direction_t::INPUT>;
 
 template<typename Port>
@@ -11522,6 +11548,24 @@ concept is_output_v = is_output<Port>::value;
 template<typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
+template <typename Type>
+using is_port = std::integral_constant<bool, is_port_v<Type>>;
+
+template <typename Collection>
+concept is_port_collection_v = is_port_v<typename Collection::value_type>;
+
+template <typename PortOrCollection>
+auto type_helper() {
+    if constexpr (is_port_v<PortOrCollection>) {
+        return static_cast<typename PortOrCollection::value_type*>(nullptr);
+    } else {
+        return static_cast<std::vector<typename PortOrCollection::value_type::value_type>*>(nullptr);
+    }
+}
+
+template<typename PortOrCollection>
+using type = std::remove_pointer_t<decltype(type_helper<PortOrCollection>())>;
+
 template<typename... Ports>
 struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MinSamples... })> {};
 
@@ -11533,7 +11577,7 @@ struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::Requi
 #endif // include guard
  // localinclude
 // #include <utils.hpp>
- // localinclude
+       // localinclude
 
 // #include <vir/simd.h>
 
@@ -11545,49 +11589,82 @@ enum class work_return_status_t;
 namespace fair::graph::traits::node {
 
 namespace detail {
-    template <typename FieldDescriptor>
-    using member_type = typename FieldDescriptor::value_type;
+template<typename FieldDescriptor>
+using member_type = typename FieldDescriptor::value_type;
 
-    template <typename Type>
-    using is_port = std::integral_constant<bool, port::is_port_v<Type>>;
+template<typename Type>
+auto
+unwrap_port_helper() {
+    if constexpr (port::is_port_v<Type>) {
+        return static_cast<Type *>(nullptr);
+    } else if constexpr (port::is_port_collection_v<Type>) {
+        return static_cast<typename Type::value_type *>(nullptr);
+    } else {
+        static_assert(meta::always_false<Type>, "Not a port or a collection of ports");
+    }
+}
 
-    template <typename Port>
-    constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
+template<typename Type>
+using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<Type>())>;
 
-    template <typename Port>
-    using is_port_descriptor = std::integral_constant<bool, is_port_descriptor_v<Port>>;
+template<typename Type>
+using is_port_or_collection = std::integral_constant<bool, port::is_port_v<Type> || port::is_port_collection_v<Type>>;
 
-    template <typename PortDescriptor>
-    using member_to_named_port = typename PortDescriptor::value_type::template with_name<fixed_string(refl::descriptor::get_name(PortDescriptor()).data)>;
+template<typename Type>
+using is_input_port_or_collection = std::integral_constant<bool, is_port_or_collection<Type>() && port::is_input_v<unwrap_port<Type>>>;
 
-    template<typename Node>
-    struct member_ports_detector {
-        static constexpr bool value = false;
-    };
+template<typename Type>
+using is_output_port_or_collection = std::integral_constant<bool, is_port_or_collection<Type>() && port::is_output_v<unwrap_port<Type>>>;
 
-    template<class T, typename ValueType = std::remove_cvref_t<T>>
-    concept Reflectable = refl::is_reflectable<ValueType>();
+template<typename Port>
+constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
 
-    template<Reflectable Node>
-    struct member_ports_detector<Node> {
-        using member_ports =
-                    typename meta::to_typelist<refl::descriptor::member_list<Node>>
-                        ::template filter<is_port_descriptor>
-                        ::template transform<member_to_named_port>;
+template<typename Collection>
+constexpr bool is_port_collection_descriptor_v = port::is_port_collection_v<member_type<Collection>>;
 
-        static constexpr bool value = member_ports::size != 0;
-    };
+template<typename Descriptor>
+using is_port_or_collection_descriptor = std::integral_constant<bool, is_port_descriptor_v<Descriptor> || is_port_collection_descriptor_v<Descriptor>>;
 
-    template<typename Node>
-    using port_name = typename Node::static_name();
+template<typename Descriptor>
+constexpr auto
+member_to_named_port_helper() {
+    // Collections of ports don't get names inside the type as
+    // the ports inside are dynamically created
+    if constexpr (is_port_descriptor_v<Descriptor>) {
+        return static_cast<typename Descriptor::value_type::template with_name<fixed_string(refl::descriptor::get_name(Descriptor()).data)> *>(nullptr);
+    } else if constexpr (is_port_collection_descriptor_v<Descriptor>) {
+        return static_cast<typename Descriptor::value_type *>(nullptr);
+    } else {
+        return static_cast<void *>(nullptr);
+    }
+}
 
-    template<typename RequestedType>
-    struct member_descriptor_has_type {
-        template <typename Descriptor>
-        using matches = std::is_same<RequestedType, member_to_named_port<Descriptor>>;
-    };
+template<typename Descriptor>
+using member_to_named_port = std::remove_pointer_t<decltype(member_to_named_port_helper<Descriptor>())>;
 
+template<typename Node>
+struct member_ports_detector {
+    static constexpr bool value = false;
+};
 
+template<class T, typename ValueType = std::remove_cvref_t<T>>
+concept Reflectable = refl::is_reflectable<ValueType>();
+
+template<Reflectable Node>
+struct member_ports_detector<Node> {
+    using member_ports          = typename meta::to_typelist<refl::descriptor::member_list<Node>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
+
+    static constexpr bool value = member_ports::size != 0;
+};
+
+template<typename Node>
+using port_name = typename Node::static_name();
+
+template<typename RequestedType>
+struct member_descriptor_has_type {
+    template<typename Descriptor>
+    using matches = std::is_same<RequestedType, member_to_named_port<Descriptor>>;
+};
 
 } // namespace detail
 
@@ -11597,8 +11674,8 @@ struct fixed_node_ports_data_helper;
 // This specialization defines node attributes when the node is created
 // with two type lists - one list for input and one for output ports
 template<typename Node, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-    requires InputPorts::template all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info>
-struct fixed_node_ports_data_helper<Node, InputPorts, OutputPorts> {
+    requires InputPorts::template
+all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info> struct fixed_node_ports_data_helper<Node, InputPorts, OutputPorts> {
     using member_ports_detector = std::false_type;
 
     // using member_ports_detector = detail::member_ports_detector<Node>;
@@ -11618,20 +11695,19 @@ template<typename Node, port::has_fixed_info_v... Ports>
 struct fixed_node_ports_data_helper<Node, Ports...> {
     using member_ports_detector = detail::member_ports_detector<Node>;
 
-    using all_ports = std::remove_pointer_t<
-        decltype([] {
-            if constexpr (member_ports_detector::value) {
-                return static_cast<typename member_ports_detector::member_ports*>(nullptr);
-            } else {
-                return static_cast<typename meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>*>(nullptr);
-            }
-        }())>;
+    using all_ports             = std::remove_pointer_t<decltype([] {
+        if constexpr (member_ports_detector::value) {
+            return static_cast<typename member_ports_detector::member_ports *>(nullptr);
+        } else {
+            return static_cast<typename meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...> *>(nullptr);
+        }
+    }())>;
 
-    using input_ports       = typename all_ports ::template filter<port::is_input>;
-    using output_ports      = typename all_ports ::template filter<port::is_output>;
+    using input_ports           = typename all_ports ::template filter<detail::is_input_port_or_collection>;
+    using output_ports          = typename all_ports ::template filter<detail::is_output_port_or_collection>;
 
-    using input_port_types  = typename input_ports ::template transform<port::type>;
-    using output_port_types = typename output_ports ::template transform<port::type>;
+    using input_port_types      = typename input_ports ::template transform<port::type>;
+    using output_port_types     = typename output_ports ::template transform<port::type>;
 };
 
 // clang-format off
@@ -11675,16 +11751,14 @@ template<typename Node>
 constexpr bool node_defines_ports_as_member_variables = fixed_node_ports_data<Node>::member_ports_detector::value;
 
 template<typename Node, typename PortType>
-using get_port_member_descriptor =
-    typename meta::to_typelist<refl::descriptor::member_list<Node>>
-        ::template filter<detail::is_port_descriptor>
-        ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
+using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<Node>>::template filter<detail::is_port_or_collection_descriptor>::template filter<
+        detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
 
+// TODO: Why is this not done with requires?
 namespace detail {
 template<std::size_t... Is>
 auto
-can_process_one_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>)
-        -> decltype(node.process_one(std::get<Is>(input)...));
+can_process_one_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.process_one(std::get<Is>(input)...));
 
 template<typename T>
 struct exact_argument_type {
@@ -11698,7 +11772,7 @@ can_process_one_with_offset_invoke_test(auto &node, const auto &input, std::inde
 
 template<typename Node>
 using simd_return_type_of_can_process_one = meta::simdize<return_type<Node>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<Node>>>>;
-}
+} // namespace detail
 
 /* A node "can process simd" if its `process_one` function takes at least one argument and all
  * arguments can be simdized types of the actual port data types.
@@ -11714,6 +11788,7 @@ concept can_process_one_simd =
 #if DISABLE_SIMD
         false;
 #else
+        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
         traits::node::input_port_types<Node>::size() > 0 and requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
             {
                 detail::can_process_one_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
@@ -11726,6 +11801,7 @@ concept can_process_one_simd_with_offset =
 #if DISABLE_SIMD
         false;
 #else
+        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
         traits::node::input_port_types<Node>::size() > 0 && requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
             {
                 detail::can_process_one_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
@@ -11751,17 +11827,66 @@ concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> o
 
 namespace detail {
 template<typename T>
-struct dummy_input_span : public std::span<const T> {    // NOSONAR
+struct dummy_input_span : std::span<const T> {           // NOSONAR
     dummy_input_span(const dummy_input_span &) = delete; // NOSONAR
     dummy_input_span(dummy_input_span &&) noexcept;      // NOSONAR
     constexpr void consume(std::size_t) noexcept;
 };
 
 template<typename T>
-struct dummy_output_span : public std::span<T> {           // NOSONAR
+struct dummy_output_span : std::span<T> {                  // NOSONAR
     dummy_output_span(const dummy_output_span &) = delete; // NOSONAR
     dummy_output_span(dummy_output_span &&) noexcept;      // NOSONAR
     constexpr void publish(std::size_t) noexcept;
+};
+
+struct to_any_vector {
+    template <typename Any>
+    operator std::vector<Any>() const { return {}; } // NOSONAR
+
+    template <typename Any>
+    operator std::vector<Any>&() const { return {}; } // NOSONAR
+};
+
+struct to_any_pointer {
+    template <typename Any>
+    operator Any*() const { return {}; } // NOSONAR
+};
+
+template<typename T>
+struct dummy_reader {
+    using type = to_any_pointer;
+};
+
+template<typename T>
+struct dummy_writer {
+    using type = to_any_pointer;
+};
+
+template<typename Port>
+constexpr auto *
+port_to_process_bulk_argument_helper() {
+    if constexpr (requires(Port p) { typename Port::value_type; p.cbegin() != p.cend(); }) {
+        return static_cast<to_any_vector*>(nullptr);
+
+    } else if constexpr (Port::synchronous) {
+        if constexpr (Port::IS_INPUT) {
+            return static_cast<dummy_input_span<typename Port::value_type> *>(nullptr);
+        } else if constexpr (Port::IS_OUTPUT) {
+            return static_cast<dummy_output_span<typename Port::value_type> *>(nullptr);
+        }
+    } else {
+        if constexpr (Port::IS_INPUT) {
+            return static_cast<to_any_pointer*>(nullptr);
+        } else if constexpr (Port::IS_OUTPUT) {
+            return static_cast<to_any_pointer*>(nullptr);
+        }
+    }
+}
+
+template<typename Port>
+struct port_to_process_bulk_argument {
+    using type = std::remove_pointer_t<decltype(port_to_process_bulk_argument_helper<Port>())>;
 };
 
 template<typename>
@@ -11778,8 +11903,8 @@ can_process_bulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std:
 } // namespace detail
 
 template<typename Node>
-concept can_process_bulk = requires(Node &n, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Node>>::tuple_type inputs,
-                                    typename meta::transform_types<detail::dummy_output_span, traits::node::output_port_types<Node>>::tuple_type outputs) {
+concept can_process_bulk = requires(Node &n, typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::node::input_ports<Node>>::tuple_type inputs,
+                                    typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::node::output_ports<Node>>::tuple_type outputs) {
     {
         detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
     } -> std::same_as<work_return_status_t>;
@@ -13034,19 +13159,22 @@ static_assert(ThreadPool<BasicThreadPool>);
 #ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
 #define GRAPH_PROTOTYPE_SETTINGS_HPP
 
-// #include "annotated.hpp"
-
 #include <atomic>
 #include <chrono>
 #include <concepts>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <variant>
+
+// #include <annotated.hpp>
+
+// #include <node_traits.hpp>
+
 // #include <reflection.hpp>
 
-#include <set>
 // #include <tag.hpp>
 
-#include <variant>
 
 namespace fair::graph {
 
@@ -13303,7 +13431,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                            if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                                 auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
                                     if (str.starts_with(prefix)) {
                                         str.remove_prefix(prefix.size());
@@ -13399,7 +13527,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -13408,6 +13536,9 @@ public:
                             settings_base::_changed.store(true);
                             is_set = true;
                         }
+                        if (std::string(get_display_name(member)) == key && !std::holds_alternative<Type>(value)) {
+                            throw std::invalid_argument(fmt::format("The {} has a wrong type", key));
+                        }
                     }
                 };
                 if constexpr (detail::HasBaseType<Node>) {
@@ -13415,6 +13546,7 @@ public:
                 }
                 refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                 if (!is_set) {
+                    fmt::print("The property {} was not set\n", key);
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
             }
@@ -13454,7 +13586,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             settings_base::_changed.store(true);
@@ -13545,7 +13677,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (is_writable(member) && is_supported_type<Type>()) {
+                    if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && is_supported_type<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_node).validate_and_set(std::get<Type>(staged_value))) {
@@ -13590,7 +13722,7 @@ public:
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_readable(member) && is_supported_type<Type>()) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             };
@@ -13629,7 +13761,7 @@ public:
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_readable(member) && is_supported_type<Type>()) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_node));
                 }
             };
@@ -13648,7 +13780,7 @@ private:
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_readable(member) && is_supported_type<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             };
@@ -14017,14 +14149,17 @@ struct node : protected std::tuple<Arguments...> {
         bool        in_at_least_one_port_has_data{ false }; // at least one port has data
         bool        in_at_least_one_tag_available{ false }; // at least one port has a tag
 
+        bool        has_sync_input_ports{ false };  // if all ports are async, status is not important
+        bool        has_sync_output_ports{ false }; // if all ports are async, status is not important
+
         constexpr bool
         enough_samples_for_output_ports(std::size_t n) {
-            return n >= out_min_samples;
+            return !has_sync_output_ports || n >= out_min_samples;
         }
 
         constexpr bool
         space_available_on_output_ports(std::size_t n) {
-            return n <= out_available;
+            return !has_sync_output_ports || n <= out_available;
         }
     };
 
@@ -14051,23 +14186,48 @@ protected:
 
     void
     update_ports_status() {
-        ports_status = ports_status_t();
+        ports_status               = ports_status_t();
+
+        auto adjust_for_input_port = [&ps = ports_status]<PortType Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                ps.has_sync_input_ports          = true;
+                ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
+                ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
+                ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
+                ps.in_samples_to_next_tag        = std::min(ps.in_samples_to_next_tag, samples_to_next_tag(port));
+                ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
+                ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
+            }
+        };
         meta::tuple_for_each(
-                [&ps = ports_status](PortType auto &port) {
-                    ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
-                    ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
-                    ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
-                    ps.in_samples_to_next_tag        = std::min(ps.in_samples_to_next_tag, samples_to_next_tag(port));
-                    ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
-                    ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
+                [&adjust_for_input_port]<typename Port>(Port &port_or_collection) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        adjust_for_input_port(port_or_collection);
+                    } else {
+                        for (auto &port : port_or_collection) {
+                            adjust_for_input_port(port);
+                        }
+                    }
                 },
                 input_ports(&self()));
 
+        auto adjust_for_output_port = [&ps = ports_status]<PortType Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                ps.has_sync_output_ports = true;
+                ps.out_min_samples       = std::max(ps.out_min_samples, port.min_buffer_size());
+                ps.out_max_samples       = std::min(ps.out_max_samples, port.max_buffer_size());
+                ps.out_available         = std::min(ps.out_available, port.streamWriter().available());
+            }
+        };
         meta::tuple_for_each(
-                [&ps = ports_status](PortType auto &port) {
-                    ps.out_min_samples = std::max(ps.out_min_samples, port.min_buffer_size());
-                    ps.out_max_samples = std::min(ps.out_max_samples, port.max_buffer_size());
-                    ps.out_available   = std::min(ps.out_available, port.streamWriter().available());
+                [&adjust_for_output_port]<typename Port>(Port &port_or_collection) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        adjust_for_output_port(port_or_collection);
+                    } else {
+                        for (auto &port : port_or_collection) {
+                            adjust_for_output_port(port);
+                        }
+                    }
                 },
                 output_ports(&self()));
 
@@ -14079,21 +14239,33 @@ protected:
         // TODO: adjust `samples_to_proceed` to output limits?
         ports_status.out_samples = ports_status.in_samples;
 
-        if (ports_status.in_min_samples > ports_status.in_max_samples)
+        if (ports_status.has_sync_input_ports && ports_status.in_min_samples > ports_status.in_max_samples)
             throw std::runtime_error(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", ports_status.in_min_samples, ports_status.in_max_samples));
-        if (ports_status.out_min_samples > ports_status.out_max_samples)
+        if (ports_status.has_sync_output_ports && ports_status.out_min_samples > ports_status.out_max_samples)
             throw std::runtime_error(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", ports_status.out_min_samples, ports_status.out_max_samples));
+
+        if (!ports_status.has_sync_input_ports) {
+            ports_status.in_samples   = 0;
+            ports_status.in_available = 0;
+        }
+        if (!ports_status.has_sync_output_ports) {
+            ports_status.out_samples   = 0;
+            ports_status.out_available = 0;
+        }
     }
 
 public:
     node() noexcept : node({}) {}
 
-    node(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept
+    node(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter)
         : _tags_at_input(traits::node::input_port_types<Derived>::size())
         , _tags_at_output(traits::node::output_port_types<Derived>::size())
         , _settings(std::make_unique<basic_settings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
         if (init_parameter.size() != 0) {
-            std::ignore = settings().set(init_parameter);
+            const auto failed = settings().set(init_parameter);
+            if (!failed.empty()) {
+                throw std::invalid_argument("Settings not applied successfully");
+            }
         }
     }
 
@@ -14141,7 +14313,18 @@ public:
         } else {
             static_assert(fair::meta::always_false<Container>, "type not supported");
         }
-        meta::tuple_for_each_enumerate([&data](auto index, auto &input_port) { data[index] = input_port.streamReader().available(); }, input_ports(&self()));
+        meta::tuple_for_each_enumerate(
+                [&data]<typename Port>(auto index, Port &input_port) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        data[index] = input_port.streamReader().available();
+                    } else {
+                        data[index] = 0;
+                        for (auto &port : input_port) {
+                            data[index] += port.streamReader().available();
+                        }
+                    }
+                },
+                input_ports(&self()));
         return traits::node::input_port_types<Derived>::size;
     }
 
@@ -14155,7 +14338,18 @@ public:
         } else {
             static_assert(fair::meta::always_false<Container>, "type not supported");
         }
-        meta::tuple_for_each_enumerate([&data](auto index, auto &output_port) { data[index] = output_port.streamWriter().available(); }, output_ports(&self()));
+        meta::tuple_for_each_enumerate(
+                [&data]<typename Port>(auto index, Port &output_port) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        data[index] = output_port.streamWriter().available();
+                    } else {
+                        data[index] = 0;
+                        for (auto &port : output_port) {
+                            data[index] += port.streamWriter().available();
+                        }
+                    }
+                },
+                output_ports(&self()));
         return traits::node::output_port_types<Derived>::size;
     }
 
@@ -14230,12 +14424,31 @@ public:
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
-                    [available_values_count](auto i, auto &output_range) {
+                    [available_values_count]<typename OutputRange>(auto i, OutputRange &output_range) {
                         if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
-                            output_range.publish(available_values_count);
-                        } else if (not output_range.is_published()) {
-                            fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
-                            std::abort();
+                            auto process_out = [available_values_count]<typename Out>(Out &out) {
+                                // This will be a pointer if the port was async
+                                // TODO: Make this check more specific
+                                if constexpr (not std::is_pointer_v<std::remove_cvref_t<Out>>) {
+                                    out.publish(available_values_count);
+                                }
+                            };
+                            if (available_values_count) {
+                                if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
+                                    for (auto &out : output_range) {
+                                        process_out(out);
+                                    }
+                                } else {
+                                    process_out(output_range);
+                                }
+                            }
+                        } else {
+                            if constexpr (requires { output_range.is_published(); }) {
+                                if (not output_range.is_published()) {
+                                    fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
+                                    std::abort();
+                                }
+                            }
                         }
                     },
                     writers_tuple);
@@ -14249,7 +14462,20 @@ public:
     consume_readers(Self &self, std::size_t available_values_count) {
         bool success = true;
         if constexpr (traits::node::input_ports<Derived>::size > 0) {
-            std::apply([available_values_count, &success](auto &...input_port) { ((success = success && input_port.streamReader().consume(available_values_count)), ...); }, input_ports(&self));
+            std::apply(
+                    [available_values_count, &success](auto &...input_port) {
+                        auto consume_port = [&]<typename Port>(Port &port_or_collection) {
+                            if constexpr (traits::port::is_port_v<Port>) {
+                                success = success && port_or_collection.streamReader().consume(available_values_count);
+                            } else {
+                                for (auto &port : port_or_collection) {
+                                    success = success && port.streamReader().consume(available_values_count);
+                                }
+                            }
+                        };
+                        (consume_port(input_port), ...);
+                    },
+                    input_ports(&self));
         }
         return success;
     }
@@ -14293,17 +14519,22 @@ public:
         // TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
         // meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
         meta::tuple_for_each(
-                [&port_id, this](auto &output_port) noexcept {
-                    if (_tags_at_output[port_id].map.empty()) {
-                        port_id++;
+                [&port_id, this]<typename Port>(Port &output_port) noexcept {
+                    if constexpr (!traits::port::is_port_v<Port>) {
+                        // TODO Add tag support to port collections?
                         return;
+                    } else {
+                        if (_tags_at_output[port_id].map.empty()) {
+                            port_id++;
+                            return;
+                        }
+                        auto data                 = output_port.tagWriter().reserve_output_range(1);
+                        auto stream_writer_offset = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
+                        data[0].index             = stream_writer_offset + _tags_at_output[port_id].index;
+                        data[0].map               = _tags_at_output[port_id].map;
+                        data.publish(1);
+                        port_id++;
                     }
-                    auto data                 = output_port.tagWriter().reserve_output_range(1);
-                    auto stream_writer_offset = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
-                    data[0].index             = stream_writer_offset + _tags_at_output[port_id].index;
-                    data[0].map               = _tags_at_output[port_id].map;
-                    data.publish(1);
-                    port_id++;
                 },
                 output_ports(&self()));
         // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
@@ -14373,6 +14604,7 @@ protected:
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
+
             } else if constexpr (requires(const Derived &d) {
                                      { available_samples(d) } -> std::same_as<std::size_t>;
                                  }) {
@@ -14389,6 +14621,7 @@ protected:
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
+
             } else if constexpr (is_sink_node) {
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
                 // buffer size would be if the node were not merged)
@@ -14397,6 +14630,7 @@ protected:
                                                                                    "friend function `available_samples(const NodeType&)` must be defined.");
                 ports_status.in_samples  = std::min(chunk_size, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
+
             } else {
                 // derive value from output buffer size
                 std::size_t samples_to_process = std::min(ports_status.out_available, ports_status.out_max_samples);
@@ -14407,11 +14641,12 @@ protected:
                 ports_status.out_samples = ports_status.in_samples;
                 // space_available_on_output_ports is true by construction of samples_to_process
             }
+
         } else {
             ports_status.in_samples  = std::min(ports_status.in_samples, requested_work);
             ports_status.out_samples = ports_status.in_samples;
 
-            if (ports_status.in_available == 0) {
+            if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
                 return { requested_work, 0_UZ, ports_status.in_at_least_one_port_has_data ? work_return_status_t::INSUFFICIENT_INPUT_ITEMS : work_return_status_t::DONE };
             }
 
@@ -14463,24 +14698,27 @@ protected:
             _input_tags_present    = true;
             std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
-                    [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
-                        auto &tag_at_present_input = _tags_at_input[port_index++];
-                        tag_at_present_input.reset();
-                        if (!input_port.tagReader().available()) {
-                            return;
-                        }
-                        const auto tags           = input_port.tagReader().get(1_UZ);
-                        const auto readPos        = input_port.streamReader().position();
-                        const auto tag_stream_pos = tags[0].index - 1 - readPos;
-                        if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
-                            || tag_stream_pos <= 0) {
-                            for (const auto &[index, map] : tags) {
-                                for (const auto &[key, value] : map) {
-                                    tag_at_present_input.map.insert_or_assign(key, value);
-                                    merged_tag_map.insert_or_assign(key, value);
-                                }
+                    [&merged_tag_map, &port_index, this]<typename Port>(Port &input_port) noexcept {
+                        // TODO: Do we want to support tags for non-compile-time ports? [ivan][port_group][move_to_policy?]
+                        if constexpr (traits::port::is_port_v<Port>) {
+                            auto &tag_at_present_input = _tags_at_input[port_index++];
+                            tag_at_present_input.reset();
+                            if (!input_port.tagReader().available()) {
+                                return;
                             }
-                            std::ignore = input_port.tagReader().consume(1_UZ);
+                            const auto tags           = input_port.tagReader().get(1_UZ);
+                            const auto readPos        = input_port.streamReader().position();
+                            const auto tag_stream_pos = tags[0].index - 1 - readPos;
+                            if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
+                                || tag_stream_pos <= 0) {
+                                for (const auto &[index, map] : tags) {
+                                    for (const auto &[key, value] : map) {
+                                        tag_at_present_input.map.insert_or_assign(key, value);
+                                        merged_tag_map.insert_or_assign(key, value);
+                                    }
+                                }
+                                std::ignore = input_port.tagReader().consume(1_UZ);
+                            }
                         }
                     },
                     input_ports(&self()));
@@ -14551,9 +14789,48 @@ protected:
             }
         }
 
-        const auto input_spans   = meta::tuple_transform([in_samples = ports_status.in_samples](auto &input_port) noexcept { return input_port.streamReader().get(in_samples); }, input_ports(&self()));
-        auto       writers_tuple = meta::tuple_transform([out_samples = ports_status.out_samples](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(out_samples); },
-                                                   output_ports(&self()));
+        const auto input_spans = meta::tuple_transform(
+                [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>( PortOrCollection &input_port_or_collection) noexcept {
+                    auto in_samples          = sync_in_samples;
+
+                    auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                            return std::forward<Port>(port).streamReader().get(in_samples);
+                        } else {
+                            return std::addressof(std::forward<Port>(port).streamReader());
+                        }
+                    };
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        return process_single_port(input_port_or_collection);
+                    } else {
+                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
+                        std::vector<value_span> result;
+                        std::transform(input_port_or_collection.begin(), input_port_or_collection.end(), std::back_inserter(result), process_single_port);
+                        return result;
+                    }
+                },
+                input_ports(&self()));
+        auto writers_tuple = meta::tuple_transform(
+                [&self = self(), sync_out_samples = ports_status.out_samples]<typename PortOrCollection>( PortOrCollection &output_port_or_collection) noexcept {
+                    auto out_samples         = sync_out_samples;
+
+                    auto process_single_port = [&out_samples]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                            return std::forward<Port>(port).streamWriter().reserve_output_range(out_samples);
+                        } else {
+                            return std::addressof(std::forward<Port>(port).streamWriter());
+                        }
+                    };
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        return process_single_port(output_port_or_collection);
+                    } else {
+                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
+                        std::vector<value_span> result;
+                        std::transform(output_port_or_collection.begin(), output_port_or_collection.end(), std::back_inserter(result), process_single_port);
+                        return result;
+                    }
+                },
+                output_ports(&self()));
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             // cannot use std::apply because it requires tuple_cat(input_spans, writers_tuple). The latter doesn't work because writers_tuple isn't copyable.
@@ -14565,6 +14842,7 @@ protected:
             const bool success = consume_readers(self(), n_samples_to_consume);
             forward_tags();
             return { requested_work, ports_status.in_samples, success ? ret : work_return_status_t::ERROR };
+
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (ports_status.in_samples != ports_status.out_samples)
                 throw std::runtime_error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for process_one() method.", ports_status.in_samples, ports_status.out_samples));
@@ -15148,106 +15426,13 @@ namespace fair::graph {
 
 using namespace fair::literals;
 
-#define ENABLE_PYTHON_INTEGRATION
-#ifdef ENABLE_PYTHON_INTEGRATION
-
-// TODO: Not yet implemented
-class dynamic_node {
-private:
-    // TODO: replace the following with array<2, vector<dynamic_port>>
-    using dynamic_ports = std::vector<dynamic_port>;
-    dynamic_ports                                         _dynamic_input_ports;
-    dynamic_ports                                         _dynamic_output_ports;
-
-    std::function<void(dynamic_ports &, dynamic_ports &)> _process;
-
-public:
-    void
-    work() {
-        _process(_dynamic_input_ports, _dynamic_output_ports);
-    }
-
-    template<typename T>
-    void
-    add_port(T &&port) {
-        switch (port.direction()) {
-        case port_direction_t::INPUT:
-            if (auto portID = port_index<port_direction_t::INPUT>(port.name()); portID.has_value()) {
-                throw std::invalid_argument(fmt::format("port already has a defined input port named '{}' at ID {}", port.name(), portID.value()));
-            }
-            _dynamic_input_ports.emplace_back(std::forward<T>(port));
-            break;
-
-        case port_direction_t::OUTPUT:
-            if (auto portID = port_index<port_direction_t::OUTPUT>(port.name()); portID.has_value()) {
-                throw std::invalid_argument(fmt::format("port already has a defined output port named '{}' at ID {}", port.name(), portID.value()));
-            }
-            _dynamic_output_ports.emplace_back(std::forward<T>(port));
-            break;
-
-        default: assert(false && "cannot add port with ANY designation");
-        }
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_input_port(std::size_t index) {
-        return index < _dynamic_input_ports.size() ? std::optional{ &_dynamic_input_ports[index] } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<std::size_t>
-    dynamic_input_port_index(std::string_view name) const {
-        auto       portNameMatches = [name](const auto &port) { return port.name == name; };
-        const auto it              = std::find_if(_dynamic_input_ports.cbegin(), _dynamic_input_ports.cend(), portNameMatches);
-        return it != _dynamic_input_ports.cend() ? std::optional{ std::distance(_dynamic_input_ports.cbegin(), it) } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_input_port(std::string_view name) {
-        if (const auto index = dynamic_input_port_index(name); index.has_value()) {
-            return &_dynamic_input_ports[*index];
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_output_port(std::size_t index) {
-        return index < _dynamic_output_ports.size() ? std::optional{ &_dynamic_output_ports[index] } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<std::size_t>
-    dynamic_output_port_index(std::string_view name) const {
-        auto       portNameMatches = [name](const auto &port) { return port.name == name; };
-        const auto it              = std::find_if(_dynamic_output_ports.cbegin(), _dynamic_output_ports.cend(), portNameMatches);
-        return it != _dynamic_output_ports.cend() ? std::optional{ std::distance(_dynamic_output_ports.cbegin(), it) } : std::nullopt;
-    }
-
-    [[nodiscard]] std::optional<dynamic_port *>
-    dynamic_output_port(std::string_view name) {
-        if (const auto index = dynamic_output_port_index(name); index.has_value()) {
-            return &_dynamic_output_ports[*index];
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::span<const dynamic_port>
-    dynamic_input_ports() const noexcept {
-        return _dynamic_input_ports;
-    }
-
-    [[nodiscard]] std::span<const dynamic_port>
-    dynamic_output_ports() const noexcept {
-        return _dynamic_output_ports;
-    }
-};
-
-#endif
-
 class node_model {
 protected:
-    using dynamic_ports                 = std::vector<fair::graph::dynamic_port>;
-    bool          _dynamic_ports_loaded = false;
-    dynamic_ports _dynamic_input_ports;
-    dynamic_ports _dynamic_output_ports;
+    using dynamic_ports                         = std::vector<fair::graph::dynamic_port>;
+    bool                  _dynamic_ports_loaded = false;
+    std::function<void()> _dynamic_ports_loader;
+    dynamic_ports         _dynamic_input_ports;
+    dynamic_ports         _dynamic_output_ports;
 
     node_model() = default;
 
@@ -15261,27 +15446,32 @@ public:
     operator=(node_model &&other)
             = delete;
 
+    void
+    init_dynamic_ports() const {
+        if (!_dynamic_ports_loaded) _dynamic_ports_loader();
+    }
+
     fair::graph::dynamic_port &
     dynamic_input_port(std::size_t index) {
-        assert(_dynamic_ports_loaded);
-        return _dynamic_input_ports[index];
+        init_dynamic_ports();
+        return _dynamic_input_ports.at(index);
     }
 
     fair::graph::dynamic_port &
     dynamic_output_port(std::size_t index) {
-        assert(_dynamic_ports_loaded);
-        return _dynamic_output_ports[index];
+        init_dynamic_ports();
+        return _dynamic_output_ports.at(index);
     }
 
     [[nodiscard]] auto
     dynamic_input_ports_size() const {
-        assert(_dynamic_ports_loaded);
+        init_dynamic_ports();
         return _dynamic_input_ports.size();
     }
 
     [[nodiscard]] auto
     dynamic_output_ports_size() const {
-        assert(_dynamic_ports_loaded);
+        init_dynamic_ports();
         return _dynamic_output_ports.size();
     }
 
@@ -15394,21 +15584,40 @@ private:
     }
 
     void
-    init_dynamic_ports() {
-        using Node                             = std::remove_cvref_t<decltype(node_ref())>;
+    create_dynamic_ports_loader() {
+        _dynamic_ports_loader = [this] {
+            if (_dynamic_ports_loaded) return;
 
-        constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-            (this->_dynamic_input_ports.emplace_back(fair::graph::input_port<Is>(&node_ref())), ...);
-        }(std::make_index_sequence<input_port_count>());
+            using Node         = std::remove_cvref_t<decltype(node_ref())>;
 
-        constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
-        [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-            (this->_dynamic_output_ports.push_back(fair::graph::dynamic_port(fair::graph::output_port<Is>(&node_ref()))), ...);
-        }(std::make_index_sequence<output_port_count>());
+            auto register_port = []<typename PortOrCollection>(PortOrCollection &port_or_collection, auto &where) {
+                auto process_port = [&where]<typename Port> (Port& port) {
+                    where.push_back(fair::graph::dynamic_port(port, dynamic_port::non_owned_reference_tag{}));
+                };
 
-        static_assert(input_port_count + output_port_count > 0);
-        _dynamic_ports_loaded = true;
+                if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                    process_port(port_or_collection);
+
+                } else {
+                    for (auto &port : port_or_collection) {
+                        process_port(port);
+                    }
+                }
+            };
+
+            constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
+            [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
+                (register_port(fair::graph::input_port<Is>(&node_ref()), this->_dynamic_input_ports), ...);
+            }(std::make_index_sequence<input_port_count>());
+
+            constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
+            [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
+                (register_port(fair::graph::output_port<Is>(&node_ref()), this->_dynamic_output_ports), ...);
+            }(std::make_index_sequence<output_port_count>());
+
+            static_assert(input_port_count + output_port_count > 0);
+            _dynamic_ports_loaded = true;
+        };
     }
 
 public:
@@ -15423,23 +15632,24 @@ public:
 
     ~node_wrapper() override = default;
 
-    node_wrapper() { init_dynamic_ports(); }
+    node_wrapper() {
+        create_dynamic_ports_loader();
+    }
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
     explicit node_wrapper(Arg &&arg) : _node(std::forward<Arg>(arg)) {
-        init_dynamic_ports();
+        create_dynamic_ports_loader();
     }
 
     template<typename... Args>
         requires(sizeof...(Args) > 1)
     explicit node_wrapper(Args &&...args) : _node{ std::forward<Args>(args)... } {
-        init_dynamic_ports();
+        create_dynamic_ports_loader();
     }
 
     explicit node_wrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _node{ std::move(init_parameter) } {
-        init_dynamic_ports();
-        _node.settings().update_active_parameters();
+        create_dynamic_ports_loader();
     }
 
     void

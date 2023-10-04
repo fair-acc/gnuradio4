@@ -29,9 +29,6 @@ template<typename T>
 struct has_fixed_info_or_is_typelist<T> : std::true_type {};
 
 template<typename Port>
-using type = typename Port::value_type;
-
-template<typename Port>
 using is_input = std::integral_constant<bool, Port::direction() == port_direction_t::INPUT>;
 
 template<typename Port>
@@ -45,6 +42,24 @@ concept is_output_v = is_output<Port>::value;
 
 template<typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
+
+template <typename Type>
+using is_port = std::integral_constant<bool, is_port_v<Type>>;
+
+template <typename Collection>
+concept is_port_collection_v = is_port_v<typename Collection::value_type>;
+
+template <typename PortOrCollection>
+auto type_helper() {
+    if constexpr (is_port_v<PortOrCollection>) {
+        return static_cast<typename PortOrCollection::value_type*>(nullptr);
+    } else {
+        return static_cast<std::vector<typename PortOrCollection::value_type::value_type>*>(nullptr);
+    }
+}
+
+template<typename PortOrCollection>
+using type = std::remove_pointer_t<decltype(type_helper<PortOrCollection>())>;
 
 template<typename... Ports>
 struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MinSamples... })> {};

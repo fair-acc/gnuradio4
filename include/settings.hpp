@@ -1,16 +1,18 @@
 #ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
 #define GRAPH_PROTOTYPE_SETTINGS_HPP
 
-#include "annotated.hpp"
 #include <atomic>
 #include <chrono>
 #include <concepts>
 #include <mutex>
 #include <optional>
-#include <reflection.hpp>
 #include <set>
-#include <tag.hpp>
 #include <variant>
+
+#include <annotated.hpp>
+#include <node_traits.hpp>
+#include <reflection.hpp>
+#include <tag.hpp>
 
 namespace fair::graph {
 
@@ -267,7 +269,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                            if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                                 auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
                                     if (str.starts_with(prefix)) {
                                         str.remove_prefix(prefix.size());
@@ -363,7 +365,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -372,6 +374,9 @@ public:
                             settings_base::_changed.store(true);
                             is_set = true;
                         }
+                        if (std::string(get_display_name(member)) == key && !std::holds_alternative<Type>(value)) {
+                            throw std::invalid_argument(fmt::format("The {} has a wrong type", key));
+                        }
                     }
                 };
                 if constexpr (detail::HasBaseType<Node>) {
@@ -379,6 +384,7 @@ public:
                 }
                 refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                 if (!is_set) {
+                    fmt::print("The property {} was not set\n", key);
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
             }
@@ -418,7 +424,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             settings_base::_changed.store(true);
@@ -509,7 +515,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (is_writable(member) && is_supported_type<Type>()) {
+                    if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_writable(member) && is_supported_type<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_node).validate_and_set(std::get<Type>(staged_value))) {
@@ -554,7 +560,7 @@ public:
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_readable(member) && is_supported_type<Type>()) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             };
@@ -593,7 +599,7 @@ public:
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_readable(member) && is_supported_type<Type>()) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_node));
                 }
             };
@@ -612,7 +618,7 @@ private:
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
 
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr ((!traits::node::detail::is_port_or_collection<Type>()) && is_readable(member) && is_supported_type<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_node)));
                 }
             };
