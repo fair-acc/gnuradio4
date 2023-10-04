@@ -278,7 +278,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         auto      threadPool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
         fg::graph flow1;
         auto     &source1  = flow1.make_node<CountSource<double>>();
-        auto     &fftBlock = flow1.make_node<FFT<double>>({ { "fftSize", 16 } });
+        auto     &fftBlock = flow1.make_node<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
         std::ignore        = flow1.connect<"out">(source1).to<"in">(fftBlock);
         auto sched1        = Scheduler(std::move(flow1), threadPool);
 
@@ -286,7 +286,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         for (int i = 0; i < 2; i++) {
             fg::graph flow2;
             auto     &source2 = flow2.make_node<CountSource<double>>();
-            auto     &fft2    = flow2.make_node<FFT<double>>({ { "fftSize", 16 } });
+            auto     &fft2    = flow2.make_node<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
             std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);
             auto sched2       = Scheduler(std::move(flow2), threadPool);
             sched2.run_and_wait();

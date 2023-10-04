@@ -180,10 +180,21 @@ template<template<typename> class Template, typename... Ts>
 struct transform_types_impl<Template, typelist<Ts...>> {
     using type = typelist<Template<Ts>...>;
 };
+
+template<template<typename> class Template, typename List>
+struct transform_types_nested_impl;
+
+template<template<typename> class Template, typename... Ts>
+struct transform_types_nested_impl<Template, typelist<Ts...>> {
+    using type = typelist<typename Template<Ts>::type...>;
+};
 } // namespace detail
 
 template<template<typename> class Template, typename List>
 using transform_types = typename detail::transform_types_impl<Template, List>::type;
+
+template<template<typename> class Template, typename List>
+using transform_types_nested = typename detail::transform_types_nested_impl<Template, List>::type;
 
 // transform_value_type
 template<typename T>

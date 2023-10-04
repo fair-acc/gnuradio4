@@ -153,8 +153,8 @@ const boost::ut::suite PortApiTests = [] {
         PortIn<float, ExplicitUnlimitedSize>  in;
         std::vector<dynamic_port>             port_list;
 
-        port_list.emplace_back(out);
-        port_list.emplace_back(in);
+        port_list.emplace_back(out, dynamic_port::non_owned_reference_tag{});
+        port_list.emplace_back(in, dynamic_port::non_owned_reference_tag{});
 
         expect(eq(port_list.size(), 2_UZ));
     };

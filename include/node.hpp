@@ -342,14 +342,17 @@ struct node : protected std::tuple<Arguments...> {
         bool        in_at_least_one_port_has_data{ false }; // at least one port has data
         bool        in_at_least_one_tag_available{ false }; // at least one port has a tag
 
+        bool        has_sync_input_ports{ false };  // if all ports are async, status is not important
+        bool        has_sync_output_ports{ false }; // if all ports are async, status is not important
+
         constexpr bool
         enough_samples_for_output_ports(std::size_t n) {
-            return n >= out_min_samples;
+            return !has_sync_output_ports || n >= out_min_samples;
         }
 
         constexpr bool
         space_available_on_output_ports(std::size_t n) {
-            return n <= out_available;
+            return !has_sync_output_ports || n <= out_available;
         }
     };
 
@@ -376,23 +379,48 @@ protected:
 
     void
     update_ports_status() {
-        ports_status = ports_status_t();
+        ports_status               = ports_status_t();
+
+        auto adjust_for_input_port = [&ps = ports_status]<PortType Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                ps.has_sync_input_ports          = true;
+                ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
+                ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
+                ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
+                ps.in_samples_to_next_tag        = std::min(ps.in_samples_to_next_tag, samples_to_next_tag(port));
+                ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
+                ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
+            }
+        };
         meta::tuple_for_each(
-                [&ps = ports_status](PortType auto &port) {
-                    ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
-                    ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
-                    ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
-                    ps.in_samples_to_next_tag        = std::min(ps.in_samples_to_next_tag, samples_to_next_tag(port));
-                    ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
-                    ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
+                [&adjust_for_input_port]<typename Port>(Port &port_or_collection) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        adjust_for_input_port(port_or_collection);
+                    } else {
+                        for (auto &port : port_or_collection) {
+                            adjust_for_input_port(port);
+                        }
+                    }
                 },
                 input_ports(&self()));
 
+        auto adjust_for_output_port = [&ps = ports_status]<PortType Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                ps.has_sync_output_ports = true;
+                ps.out_min_samples       = std::max(ps.out_min_samples, port.min_buffer_size());
+                ps.out_max_samples       = std::min(ps.out_max_samples, port.max_buffer_size());
+                ps.out_available         = std::min(ps.out_available, port.streamWriter().available());
+            }
+        };
         meta::tuple_for_each(
-                [&ps = ports_status](PortType auto &port) {
-                    ps.out_min_samples = std::max(ps.out_min_samples, port.min_buffer_size());
-                    ps.out_max_samples = std::min(ps.out_max_samples, port.max_buffer_size());
-                    ps.out_available   = std::min(ps.out_available, port.streamWriter().available());
+                [&adjust_for_output_port]<typename Port>(Port &port_or_collection) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        adjust_for_output_port(port_or_collection);
+                    } else {
+                        for (auto &port : port_or_collection) {
+                            adjust_for_output_port(port);
+                        }
+                    }
                 },
                 output_ports(&self()));
 
@@ -404,21 +432,33 @@ protected:
         // TODO: adjust `samples_to_proceed` to output limits?
         ports_status.out_samples = ports_status.in_samples;
 
-        if (ports_status.in_min_samples > ports_status.in_max_samples)
+        if (ports_status.has_sync_input_ports && ports_status.in_min_samples > ports_status.in_max_samples)
             throw std::runtime_error(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", ports_status.in_min_samples, ports_status.in_max_samples));
-        if (ports_status.out_min_samples > ports_status.out_max_samples)
+        if (ports_status.has_sync_output_ports && ports_status.out_min_samples > ports_status.out_max_samples)
             throw std::runtime_error(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", ports_status.out_min_samples, ports_status.out_max_samples));
+
+        if (!ports_status.has_sync_input_ports) {
+            ports_status.in_samples   = 0;
+            ports_status.in_available = 0;
+        }
+        if (!ports_status.has_sync_output_ports) {
+            ports_status.out_samples   = 0;
+            ports_status.out_available = 0;
+        }
     }
 
 public:
     node() noexcept : node({}) {}
 
-    node(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept
+    node(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter)
         : _tags_at_input(traits::node::input_port_types<Derived>::size())
         , _tags_at_output(traits::node::output_port_types<Derived>::size())
         , _settings(std::make_unique<basic_settings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
         if (init_parameter.size() != 0) {
-            std::ignore = settings().set(init_parameter);
+            const auto failed = settings().set(init_parameter);
+            if (!failed.empty()) {
+                throw std::invalid_argument("Settings not applied successfully");
+            }
         }
     }
 
@@ -466,7 +506,18 @@ public:
         } else {
             static_assert(fair::meta::always_false<Container>, "type not supported");
         }
-        meta::tuple_for_each_enumerate([&data](auto index, auto &input_port) { data[index] = input_port.streamReader().available(); }, input_ports(&self()));
+        meta::tuple_for_each_enumerate(
+                [&data]<typename Port>(auto index, Port &input_port) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        data[index] = input_port.streamReader().available();
+                    } else {
+                        data[index] = 0;
+                        for (auto &port : input_port) {
+                            data[index] += port.streamReader().available();
+                        }
+                    }
+                },
+                input_ports(&self()));
         return traits::node::input_port_types<Derived>::size;
     }
 
@@ -480,7 +531,18 @@ public:
         } else {
             static_assert(fair::meta::always_false<Container>, "type not supported");
         }
-        meta::tuple_for_each_enumerate([&data](auto index, auto &output_port) { data[index] = output_port.streamWriter().available(); }, output_ports(&self()));
+        meta::tuple_for_each_enumerate(
+                [&data]<typename Port>(auto index, Port &output_port) {
+                    if constexpr (traits::port::is_port_v<Port>) {
+                        data[index] = output_port.streamWriter().available();
+                    } else {
+                        data[index] = 0;
+                        for (auto &port : output_port) {
+                            data[index] += port.streamWriter().available();
+                        }
+                    }
+                },
+                output_ports(&self()));
         return traits::node::output_port_types<Derived>::size;
     }
 
@@ -555,12 +617,31 @@ public:
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::node::output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
-                    [available_values_count](auto i, auto &output_range) {
+                    [available_values_count]<typename OutputRange>(auto i, OutputRange &output_range) {
                         if constexpr (traits::node::can_process_one<Derived> or traits::node::process_bulk_requires_ith_output_as_span<Derived, i>) {
-                            output_range.publish(available_values_count);
-                        } else if (not output_range.is_published()) {
-                            fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
-                            std::abort();
+                            auto process_out = [available_values_count]<typename Out>(Out &out) {
+                                // This will be a pointer if the port was async
+                                // TODO: Make this check more specific
+                                if constexpr (not std::is_pointer_v<std::remove_cvref_t<Out>>) {
+                                    out.publish(available_values_count);
+                                }
+                            };
+                            if (available_values_count) {
+                                if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
+                                    for (auto &out : output_range) {
+                                        process_out(out);
+                                    }
+                                } else {
+                                    process_out(output_range);
+                                }
+                            }
+                        } else {
+                            if constexpr (requires { output_range.is_published(); }) {
+                                if (not output_range.is_published()) {
+                                    fmt::print(stderr, "process_bulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
+                                    std::abort();
+                                }
+                            }
                         }
                     },
                     writers_tuple);
@@ -574,7 +655,20 @@ public:
     consume_readers(Self &self, std::size_t available_values_count) {
         bool success = true;
         if constexpr (traits::node::input_ports<Derived>::size > 0) {
-            std::apply([available_values_count, &success](auto &...input_port) { ((success = success && input_port.streamReader().consume(available_values_count)), ...); }, input_ports(&self));
+            std::apply(
+                    [available_values_count, &success](auto &...input_port) {
+                        auto consume_port = [&]<typename Port>(Port &port_or_collection) {
+                            if constexpr (traits::port::is_port_v<Port>) {
+                                success = success && port_or_collection.streamReader().consume(available_values_count);
+                            } else {
+                                for (auto &port : port_or_collection) {
+                                    success = success && port.streamReader().consume(available_values_count);
+                                }
+                            }
+                        };
+                        (consume_port(input_port), ...);
+                    },
+                    input_ports(&self));
         }
         return success;
     }
@@ -618,17 +712,22 @@ public:
         // TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
         // meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
         meta::tuple_for_each(
-                [&port_id, this](auto &output_port) noexcept {
-                    if (_tags_at_output[port_id].map.empty()) {
-                        port_id++;
+                [&port_id, this]<typename Port>(Port &output_port) noexcept {
+                    if constexpr (!traits::port::is_port_v<Port>) {
+                        // TODO Add tag support to port collections?
                         return;
+                    } else {
+                        if (_tags_at_output[port_id].map.empty()) {
+                            port_id++;
+                            return;
+                        }
+                        auto data                 = output_port.tagWriter().reserve_output_range(1);
+                        auto stream_writer_offset = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
+                        data[0].index             = stream_writer_offset + _tags_at_output[port_id].index;
+                        data[0].map               = _tags_at_output[port_id].map;
+                        data.publish(1);
+                        port_id++;
                     }
-                    auto data                 = output_port.tagWriter().reserve_output_range(1);
-                    auto stream_writer_offset = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
-                    data[0].index             = stream_writer_offset + _tags_at_output[port_id].index;
-                    data[0].map               = _tags_at_output[port_id].map;
-                    data.publish(1);
-                    port_id++;
                 },
                 output_ports(&self()));
         // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
@@ -698,6 +797,7 @@ protected:
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
+
             } else if constexpr (requires(const Derived &d) {
                                      { available_samples(d) } -> std::same_as<std::size_t>;
                                  }) {
@@ -714,6 +814,7 @@ protected:
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
+
             } else if constexpr (is_sink_node) {
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
                 // buffer size would be if the node were not merged)
@@ -722,6 +823,7 @@ protected:
                                                                                    "friend function `available_samples(const NodeType&)` must be defined.");
                 ports_status.in_samples  = std::min(chunk_size, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
+
             } else {
                 // derive value from output buffer size
                 std::size_t samples_to_process = std::min(ports_status.out_available, ports_status.out_max_samples);
@@ -732,11 +834,12 @@ protected:
                 ports_status.out_samples = ports_status.in_samples;
                 // space_available_on_output_ports is true by construction of samples_to_process
             }
+
         } else {
             ports_status.in_samples  = std::min(ports_status.in_samples, requested_work);
             ports_status.out_samples = ports_status.in_samples;
 
-            if (ports_status.in_available == 0) {
+            if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
                 return { requested_work, 0_UZ, ports_status.in_at_least_one_port_has_data ? work_return_status_t::INSUFFICIENT_INPUT_ITEMS : work_return_status_t::DONE };
             }
 
@@ -788,24 +891,27 @@ protected:
             _input_tags_present    = true;
             std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
             meta::tuple_for_each(
-                    [&merged_tag_map, &port_index, this](auto &input_port) noexcept {
-                        auto &tag_at_present_input = _tags_at_input[port_index++];
-                        tag_at_present_input.reset();
-                        if (!input_port.tagReader().available()) {
-                            return;
-                        }
-                        const auto tags           = input_port.tagReader().get(1_UZ);
-                        const auto readPos        = input_port.streamReader().position();
-                        const auto tag_stream_pos = tags[0].index - 1 - readPos;
-                        if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
-                            || tag_stream_pos <= 0) {
-                            for (const auto &[index, map] : tags) {
-                                for (const auto &[key, value] : map) {
-                                    tag_at_present_input.map.insert_or_assign(key, value);
-                                    merged_tag_map.insert_or_assign(key, value);
-                                }
+                    [&merged_tag_map, &port_index, this]<typename Port>(Port &input_port) noexcept {
+                        // TODO: Do we want to support tags for non-compile-time ports? [ivan][port_group][move_to_policy?]
+                        if constexpr (traits::port::is_port_v<Port>) {
+                            auto &tag_at_present_input = _tags_at_input[port_index++];
+                            tag_at_present_input.reset();
+                            if (!input_port.tagReader().available()) {
+                                return;
                             }
-                            std::ignore = input_port.tagReader().consume(1_UZ);
+                            const auto tags           = input_port.tagReader().get(1_UZ);
+                            const auto readPos        = input_port.streamReader().position();
+                            const auto tag_stream_pos = tags[0].index - 1 - readPos;
+                            if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
+                                || tag_stream_pos <= 0) {
+                                for (const auto &[index, map] : tags) {
+                                    for (const auto &[key, value] : map) {
+                                        tag_at_present_input.map.insert_or_assign(key, value);
+                                        merged_tag_map.insert_or_assign(key, value);
+                                    }
+                                }
+                                std::ignore = input_port.tagReader().consume(1_UZ);
+                            }
                         }
                     },
                     input_ports(&self()));
@@ -876,9 +982,48 @@ protected:
             }
         }
 
-        const auto input_spans   = meta::tuple_transform([in_samples = ports_status.in_samples](auto &input_port) noexcept { return input_port.streamReader().get(in_samples); }, input_ports(&self()));
-        auto       writers_tuple = meta::tuple_transform([out_samples = ports_status.out_samples](auto &output_port) noexcept { return output_port.streamWriter().reserve_output_range(out_samples); },
-                                                   output_ports(&self()));
+        const auto input_spans = meta::tuple_transform(
+                [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>( PortOrCollection &input_port_or_collection) noexcept {
+                    auto in_samples          = sync_in_samples;
+
+                    auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                            return std::forward<Port>(port).streamReader().get(in_samples);
+                        } else {
+                            return std::addressof(std::forward<Port>(port).streamReader());
+                        }
+                    };
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        return process_single_port(input_port_or_collection);
+                    } else {
+                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
+                        std::vector<value_span> result;
+                        std::transform(input_port_or_collection.begin(), input_port_or_collection.end(), std::back_inserter(result), process_single_port);
+                        return result;
+                    }
+                },
+                input_ports(&self()));
+        auto writers_tuple = meta::tuple_transform(
+                [&self = self(), sync_out_samples = ports_status.out_samples]<typename PortOrCollection>( PortOrCollection &output_port_or_collection) noexcept {
+                    auto out_samples         = sync_out_samples;
+
+                    auto process_single_port = [&out_samples]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                            return std::forward<Port>(port).streamWriter().reserve_output_range(out_samples);
+                        } else {
+                            return std::addressof(std::forward<Port>(port).streamWriter());
+                        }
+                    };
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        return process_single_port(output_port_or_collection);
+                    } else {
+                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
+                        std::vector<value_span> result;
+                        std::transform(output_port_or_collection.begin(), output_port_or_collection.end(), std::back_inserter(result), process_single_port);
+                        return result;
+                    }
+                },
+                output_ports(&self()));
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             // cannot use std::apply because it requires tuple_cat(input_spans, writers_tuple). The latter doesn't work because writers_tuple isn't copyable.
@@ -890,6 +1035,7 @@ protected:
             const bool success = consume_readers(self(), n_samples_to_consume);
             forward_tags();
             return { requested_work, ports_status.in_samples, success ? ret : work_return_status_t::ERROR };
+
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (ports_status.in_samples != ports_status.out_samples)
                 throw std::runtime_error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for process_one() method.", ports_status.in_samples, ports_status.out_samples));

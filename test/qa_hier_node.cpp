@@ -55,9 +55,9 @@ protected:
         std::ignore                 = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
         std::ignore                 = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
 
-        _dynamic_input_ports.emplace_back(fg::input_port<0>(&left_scale_block));
-        _dynamic_input_ports.emplace_back(fg::input_port<0>(&right_scale_block));
-        _dynamic_output_ports.emplace_back(fg::output_port<0>(&adder_block));
+        _dynamic_input_ports.emplace_back(fg::input_port<0>(&left_scale_block), fg::dynamic_port::non_owned_reference_tag{});
+        _dynamic_input_ports.emplace_back(fg::input_port<0>(&right_scale_block), fg::dynamic_port::non_owned_reference_tag{});
+        _dynamic_output_ports.emplace_back(fg::output_port<0>(&adder_block), fg::dynamic_port::non_owned_reference_tag{});
 
         _dynamic_ports_loaded = true;
         return graph;

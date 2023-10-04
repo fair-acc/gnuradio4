@@ -3,9 +3,9 @@
 
 #include <reflection.hpp>
 
-#include <port.hpp> // localinclude
+#include <port.hpp>        // localinclude
 #include <port_traits.hpp> // localinclude
-#include <utils.hpp> // localinclude
+#include <utils.hpp>       // localinclude
 
 #include <vir/simd.h>
 
@@ -16,49 +16,82 @@ enum class work_return_status_t;
 namespace fair::graph::traits::node {
 
 namespace detail {
-    template <typename FieldDescriptor>
-    using member_type = typename FieldDescriptor::value_type;
+template<typename FieldDescriptor>
+using member_type = typename FieldDescriptor::value_type;
 
-    template <typename Type>
-    using is_port = std::integral_constant<bool, port::is_port_v<Type>>;
+template<typename Type>
+auto
+unwrap_port_helper() {
+    if constexpr (port::is_port_v<Type>) {
+        return static_cast<Type *>(nullptr);
+    } else if constexpr (port::is_port_collection_v<Type>) {
+        return static_cast<typename Type::value_type *>(nullptr);
+    } else {
+        static_assert(meta::always_false<Type>, "Not a port or a collection of ports");
+    }
+}
 
-    template <typename Port>
-    constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
+template<typename Type>
+using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<Type>())>;
 
-    template <typename Port>
-    using is_port_descriptor = std::integral_constant<bool, is_port_descriptor_v<Port>>;
+template<typename Type>
+using is_port_or_collection = std::integral_constant<bool, port::is_port_v<Type> || port::is_port_collection_v<Type>>;
 
-    template <typename PortDescriptor>
-    using member_to_named_port = typename PortDescriptor::value_type::template with_name<fixed_string(refl::descriptor::get_name(PortDescriptor()).data)>;
+template<typename Type>
+using is_input_port_or_collection = std::integral_constant<bool, is_port_or_collection<Type>() && port::is_input_v<unwrap_port<Type>>>;
 
-    template<typename Node>
-    struct member_ports_detector {
-        static constexpr bool value = false;
-    };
+template<typename Type>
+using is_output_port_or_collection = std::integral_constant<bool, is_port_or_collection<Type>() && port::is_output_v<unwrap_port<Type>>>;
 
-    template<class T, typename ValueType = std::remove_cvref_t<T>>
-    concept Reflectable = refl::is_reflectable<ValueType>();
+template<typename Port>
+constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
 
-    template<Reflectable Node>
-    struct member_ports_detector<Node> {
-        using member_ports =
-                    typename meta::to_typelist<refl::descriptor::member_list<Node>>
-                        ::template filter<is_port_descriptor>
-                        ::template transform<member_to_named_port>;
+template<typename Collection>
+constexpr bool is_port_collection_descriptor_v = port::is_port_collection_v<member_type<Collection>>;
 
-        static constexpr bool value = member_ports::size != 0;
-    };
+template<typename Descriptor>
+using is_port_or_collection_descriptor = std::integral_constant<bool, is_port_descriptor_v<Descriptor> || is_port_collection_descriptor_v<Descriptor>>;
 
-    template<typename Node>
-    using port_name = typename Node::static_name();
+template<typename Descriptor>
+constexpr auto
+member_to_named_port_helper() {
+    // Collections of ports don't get names inside the type as
+    // the ports inside are dynamically created
+    if constexpr (is_port_descriptor_v<Descriptor>) {
+        return static_cast<typename Descriptor::value_type::template with_name<fixed_string(refl::descriptor::get_name(Descriptor()).data)> *>(nullptr);
+    } else if constexpr (is_port_collection_descriptor_v<Descriptor>) {
+        return static_cast<typename Descriptor::value_type *>(nullptr);
+    } else {
+        return static_cast<void *>(nullptr);
+    }
+}
 
-    template<typename RequestedType>
-    struct member_descriptor_has_type {
-        template <typename Descriptor>
-        using matches = std::is_same<RequestedType, member_to_named_port<Descriptor>>;
-    };
+template<typename Descriptor>
+using member_to_named_port = std::remove_pointer_t<decltype(member_to_named_port_helper<Descriptor>())>;
 
+template<typename Node>
+struct member_ports_detector {
+    static constexpr bool value = false;
+};
 
+template<class T, typename ValueType = std::remove_cvref_t<T>>
+concept Reflectable = refl::is_reflectable<ValueType>();
+
+template<Reflectable Node>
+struct member_ports_detector<Node> {
+    using member_ports          = typename meta::to_typelist<refl::descriptor::member_list<Node>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
+
+    static constexpr bool value = member_ports::size != 0;
+};
+
+template<typename Node>
+using port_name = typename Node::static_name();
+
+template<typename RequestedType>
+struct member_descriptor_has_type {
+    template<typename Descriptor>
+    using matches = std::is_same<RequestedType, member_to_named_port<Descriptor>>;
+};
 
 } // namespace detail
 
@@ -68,8 +101,8 @@ struct fixed_node_ports_data_helper;
 // This specialization defines node attributes when the node is created
 // with two type lists - one list for input and one for output ports
 template<typename Node, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-    requires InputPorts::template all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info>
-struct fixed_node_ports_data_helper<Node, InputPorts, OutputPorts> {
+    requires InputPorts::template
+all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info> struct fixed_node_ports_data_helper<Node, InputPorts, OutputPorts> {
     using member_ports_detector = std::false_type;
 
     // using member_ports_detector = detail::member_ports_detector<Node>;
@@ -89,20 +122,19 @@ template<typename Node, port::has_fixed_info_v... Ports>
 struct fixed_node_ports_data_helper<Node, Ports...> {
     using member_ports_detector = detail::member_ports_detector<Node>;
 
-    using all_ports = std::remove_pointer_t<
-        decltype([] {
-            if constexpr (member_ports_detector::value) {
-                return static_cast<typename member_ports_detector::member_ports*>(nullptr);
-            } else {
-                return static_cast<typename meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>*>(nullptr);
-            }
-        }())>;
+    using all_ports             = std::remove_pointer_t<decltype([] {
+        if constexpr (member_ports_detector::value) {
+            return static_cast<typename member_ports_detector::member_ports *>(nullptr);
+        } else {
+            return static_cast<typename meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...> *>(nullptr);
+        }
+    }())>;
 
-    using input_ports       = typename all_ports ::template filter<port::is_input>;
-    using output_ports      = typename all_ports ::template filter<port::is_output>;
+    using input_ports           = typename all_ports ::template filter<detail::is_input_port_or_collection>;
+    using output_ports          = typename all_ports ::template filter<detail::is_output_port_or_collection>;
 
-    using input_port_types  = typename input_ports ::template transform<port::type>;
-    using output_port_types = typename output_ports ::template transform<port::type>;
+    using input_port_types      = typename input_ports ::template transform<port::type>;
+    using output_port_types     = typename output_ports ::template transform<port::type>;
 };
 
 // clang-format off
@@ -146,16 +178,14 @@ template<typename Node>
 constexpr bool node_defines_ports_as_member_variables = fixed_node_ports_data<Node>::member_ports_detector::value;
 
 template<typename Node, typename PortType>
-using get_port_member_descriptor =
-    typename meta::to_typelist<refl::descriptor::member_list<Node>>
-        ::template filter<detail::is_port_descriptor>
-        ::template filter<detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
+using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<Node>>::template filter<detail::is_port_or_collection_descriptor>::template filter<
+        detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
 
+// TODO: Why is this not done with requires?
 namespace detail {
 template<std::size_t... Is>
 auto
-can_process_one_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>)
-        -> decltype(node.process_one(std::get<Is>(input)...));
+can_process_one_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.process_one(std::get<Is>(input)...));
 
 template<typename T>
 struct exact_argument_type {
@@ -169,7 +199,7 @@ can_process_one_with_offset_invoke_test(auto &node, const auto &input, std::inde
 
 template<typename Node>
 using simd_return_type_of_can_process_one = meta::simdize<return_type<Node>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<Node>>>>;
-}
+} // namespace detail
 
 /* A node "can process simd" if its `process_one` function takes at least one argument and all
  * arguments can be simdized types of the actual port data types.
@@ -185,6 +215,7 @@ concept can_process_one_simd =
 #if DISABLE_SIMD
         false;
 #else
+        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
         traits::node::input_port_types<Node>::size() > 0 and requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
             {
                 detail::can_process_one_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
@@ -197,6 +228,7 @@ concept can_process_one_simd_with_offset =
 #if DISABLE_SIMD
         false;
 #else
+        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
         traits::node::input_port_types<Node>::size() > 0 && requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
             {
                 detail::can_process_one_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
@@ -222,17 +254,66 @@ concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> o
 
 namespace detail {
 template<typename T>
-struct dummy_input_span : public std::span<const T> {    // NOSONAR
+struct dummy_input_span : std::span<const T> {           // NOSONAR
     dummy_input_span(const dummy_input_span &) = delete; // NOSONAR
     dummy_input_span(dummy_input_span &&) noexcept;      // NOSONAR
     constexpr void consume(std::size_t) noexcept;
 };
 
 template<typename T>
-struct dummy_output_span : public std::span<T> {           // NOSONAR
+struct dummy_output_span : std::span<T> {                  // NOSONAR
     dummy_output_span(const dummy_output_span &) = delete; // NOSONAR
     dummy_output_span(dummy_output_span &&) noexcept;      // NOSONAR
     constexpr void publish(std::size_t) noexcept;
+};
+
+struct to_any_vector {
+    template <typename Any>
+    operator std::vector<Any>() const { return {}; } // NOSONAR
+
+    template <typename Any>
+    operator std::vector<Any>&() const { return {}; } // NOSONAR
+};
+
+struct to_any_pointer {
+    template <typename Any>
+    operator Any*() const { return {}; } // NOSONAR
+};
+
+template<typename T>
+struct dummy_reader {
+    using type = to_any_pointer;
+};
+
+template<typename T>
+struct dummy_writer {
+    using type = to_any_pointer;
+};
+
+template<typename Port>
+constexpr auto *
+port_to_process_bulk_argument_helper() {
+    if constexpr (requires(Port p) { typename Port::value_type; p.cbegin() != p.cend(); }) {
+        return static_cast<to_any_vector*>(nullptr);
+
+    } else if constexpr (Port::synchronous) {
+        if constexpr (Port::IS_INPUT) {
+            return static_cast<dummy_input_span<typename Port::value_type> *>(nullptr);
+        } else if constexpr (Port::IS_OUTPUT) {
+            return static_cast<dummy_output_span<typename Port::value_type> *>(nullptr);
+        }
+    } else {
+        if constexpr (Port::IS_INPUT) {
+            return static_cast<to_any_pointer*>(nullptr);
+        } else if constexpr (Port::IS_OUTPUT) {
+            return static_cast<to_any_pointer*>(nullptr);
+        }
+    }
+}
+
+template<typename Port>
+struct port_to_process_bulk_argument {
+    using type = std::remove_pointer_t<decltype(port_to_process_bulk_argument_helper<Port>())>;
 };
 
 template<typename>
@@ -249,8 +330,8 @@ can_process_bulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std:
 } // namespace detail
 
 template<typename Node>
-concept can_process_bulk = requires(Node &n, typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Node>>::tuple_type inputs,
-                                    typename meta::transform_types<detail::dummy_output_span, traits::node::output_port_types<Node>>::tuple_type outputs) {
+concept can_process_bulk = requires(Node &n, typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::node::input_ports<Node>>::tuple_type inputs,
+                                    typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::node::output_ports<Node>>::tuple_type outputs) {
     {
         detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
     } -> std::same_as<work_return_status_t>;
