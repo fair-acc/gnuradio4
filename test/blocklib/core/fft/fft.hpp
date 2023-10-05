@@ -6,10 +6,10 @@
 #include <algorithm/fft/fft_types.hpp>
 #include <algorithm/fft/fftw.hpp>
 #include <algorithm/fft/window.hpp>
+#include <block.hpp>
 #include <dataset.hpp>
 #include <execution>
 #include <history_buffer.hpp>
-#include <node.hpp>
 
 namespace gr::blocks::fft {
 
@@ -17,7 +17,7 @@ using namespace fair::graph;
 
 template<typename T, typename U = DataSet<float>, typename FourierAlgorithm = gr::algorithm::FFT<gr::algorithm::FFTInDataType<T, typename U::value_type>>>
     requires(gr::algorithm::ComplexType<T> || std::floating_point<T> || std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>)
-struct FFT : public node<FFT<T, U, FourierAlgorithm>, PerformDecimationInterpolation, Doc<R""(
+struct FFT : public block<FFT<T, U, FourierAlgorithm>, PerformDecimationInterpolation, Doc<R""(
 @brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
 The FFT block is capable of performing Fourier Transform computations on real or complex data,

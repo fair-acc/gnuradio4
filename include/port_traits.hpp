@@ -1,5 +1,5 @@
-#ifndef GNURADIO_NODE_PORT_TRAITS_HPP
-#define GNURADIO_NODE_PORT_TRAITS_HPP
+#ifndef GNURADIO_BLOCK_PORT_TRAITS_HPP
+#define GNURADIO_BLOCK_PORT_TRAITS_HPP
 
 #include "port.hpp"
 #include <utils.hpp> // localinclude
@@ -43,18 +43,19 @@ concept is_output_v = is_output<Port>::value;
 template<typename Type>
 concept is_port_v = is_output_v<Type> || is_input_v<Type>;
 
-template <typename Type>
+template<typename Type>
 using is_port = std::integral_constant<bool, is_port_v<Type>>;
 
-template <typename Collection>
+template<typename Collection>
 concept is_port_collection_v = is_port_v<typename Collection::value_type>;
 
-template <typename PortOrCollection>
-auto type_helper() {
+template<typename PortOrCollection>
+auto
+type_helper() {
     if constexpr (is_port_v<PortOrCollection>) {
-        return static_cast<typename PortOrCollection::value_type*>(nullptr);
+        return static_cast<typename PortOrCollection::value_type *>(nullptr);
     } else {
-        return static_cast<std::vector<typename PortOrCollection::value_type::value_type>*>(nullptr);
+        return static_cast<std::vector<typename PortOrCollection::value_type::value_type> *>(nullptr);
     }
 }
 

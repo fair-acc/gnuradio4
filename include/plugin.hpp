@@ -7,8 +7,8 @@
 
 #include <dlfcn.h>
 
+#include <block_registry.hpp>
 #include <graph.hpp>
-#include <node_registry.hpp>
 
 #include <graph-prototype-plugin_export.h>
 
@@ -35,16 +35,16 @@ public:
             = 0;
 
     virtual std::span<const std::string>
-    provided_nodes() const = 0;
-    virtual std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, const fair::graph::property_map &params) = 0;
+    provided_blocks() const = 0;
+    virtual std::unique_ptr<fair::graph::block_model>
+    create_block(std::string_view name, std::string_view type, const fair::graph::property_map &params) = 0;
 };
 
 namespace fair::graph {
 template<std::uint8_t ABI_VERSION = GP_PLUGIN_CURRENT_ABI_VERSION>
 class plugin : public gp_plugin_base {
 private:
-    fair::graph::node_registry registry;
+    fair::graph::block_registry registry;
 
 public:
     plugin() {}
@@ -55,19 +55,19 @@ public:
     }
 
     std::span<const std::string>
-    provided_nodes() const override {
-        return registry.provided_nodes();
+    provided_blocks() const override {
+        return registry.provided_blocks();
     }
 
-    std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, const property_map &params) override {
-        return registry.create_node(name, type, params);
+    std::unique_ptr<fair::graph::block_model>
+    create_block(std::string_view name, std::string_view type, const property_map &params) override {
+        return registry.create_block(name, type, params);
     }
 
-    template<template<typename...> typename NodeTemplate, typename... Args>
+    template<template<typename...> typename BlockTemplate, typename... Args>
     void
-    add_node_type(std::string node_type) {
-        registry.add_node_type<NodeTemplate, Args...>(std::move(node_type));
+    add_block_type(std::string block_type) {
+        registry.add_block_type<BlockTemplate, Args...>(std::move(block_type));
     }
 };
 
@@ -101,6 +101,6 @@ public:
     } \
     }
 
-#define GP_PLUGIN_REGISTER_NODE(...) GP_REGISTER_NODE(gp_plugin_instance(), __VA_ARGS__);
+#define GP_PLUGIN_REGISTER_BLOCK(...) GP_REGISTER_BLOCK(gp_plugin_instance(), __VA_ARGS__);
 
 #endif // include guard

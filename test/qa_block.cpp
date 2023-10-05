@@ -7,9 +7,9 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
+#include <block.hpp>
 #include <fmt/format.h>
 #include <graph.hpp>
-#include <node.hpp>
 #include <scheduler.hpp>
 
 namespace fg = fair::graph;
@@ -62,7 +62,7 @@ struct StrideTestData {
 };
 
 template<typename T>
-struct CountSource : public fg::node<CountSource<T>> {
+struct CountSource : public fg::block<CountSource<T>> {
     fg::PortOut<T> out{};
     int            count{ 0 };
     int            n_samples{ 1024 };
@@ -80,7 +80,7 @@ struct CountSource : public fg::node<CountSource<T>> {
 };
 
 template<typename T>
-struct IntDecBlock : public fg::node<IntDecBlock<T>, fg::PerformDecimationInterpolation, fg::PerformStride> {
+struct IntDecBlock : public fg::block<IntDecBlock<T>, fg::PerformDecimationInterpolation, fg::PerformStride> {
     fg::PortIn<T>  in{};
     fg::PortOut<T> out{};
 
@@ -109,10 +109,10 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<fair::
     using scheduler = fair::graph::scheduler::simple<>;
 
     fg::graph flow;
-    auto     &source          = flow.make_node<CountSource<int>>();
+    auto     &source          = flow.make_block<CountSource<int>>();
     source.n_samples          = static_cast<int>(data.n_samples);
 
-    auto &int_dec_block       = flow.make_node<IntDecBlock<int>>();
+    auto &int_dec_block       = flow.make_block<IntDecBlock<int>>();
     int_dec_block.numerator   = data.numerator;
     int_dec_block.denominator = data.denominator;
     if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
@@ -135,10 +135,10 @@ stride_test(const StrideTestData &data, std::shared_ptr<fair::thread_pool::Basic
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
     fg::graph  flow;
-    auto      &source             = flow.make_node<CountSource<int>>();
+    auto      &source             = flow.make_block<CountSource<int>>();
     source.n_samples              = static_cast<int>(data.n_samples);
 
-    auto &int_dec_block           = flow.make_node<IntDecBlock<int>>();
+    auto &int_dec_block           = flow.make_block<IntDecBlock<int>>();
     int_dec_block.write_to_vector = write_to_vector;
     int_dec_block.numerator       = data.numerator;
     int_dec_block.denominator     = data.denominator;

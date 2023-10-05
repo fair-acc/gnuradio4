@@ -53,7 +53,7 @@
  * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp
  * The are basically needed to do a struct member-field introspections, to support
  *   a) compile-time serialiser generation between std::map<std::string, pmt::pmtv> <-> user-defined settings structs
- *   b) allow for block ports being defined a member fields rather than as NTTPs of the node<T, ...> template
+ *   b) allow for block ports being defined a member fields rather than as NTTPs of the block<T, ...> template
 
  * Their use is limited to the namespace scope where the block is defined (i.e. not across .so boundaries) and will be
  * supplanted once the compile-time reflection language feature is merged with the C++ standard, e.g.
@@ -131,16 +131,16 @@
 #define GP_CONCAT_IMPL(x, y) x##y
 #define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
 
-#define GP_REGISTER_NODE_IMPL(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
-#define GP_REGISTER_NODE(Register, Name, ...) \
+#define GP_REGISTER_BLOCK_IMPL(Register, Name, ...) fair::graph::detail::register_block<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_BLOCK_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_BLOCK(Register, Name, ...) \
     namespace { \
-    using fair::graph::detail::node_parameters; \
-    GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
+    using fair::graph::detail::block_parameters; \
+    GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
     }
-#define GP_REGISTER_NODE_RUNTIME(Register, Name, ...) \
+#define GP_REGISTER_BLOCK_RUNTIME(Register, Name, ...) \
     { \
-        using fair::graph::detail::node_parameters; \
-        GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
+        using fair::graph::detail::block_parameters; \
+        GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
     }
 
 #pragma GCC diagnostic pop

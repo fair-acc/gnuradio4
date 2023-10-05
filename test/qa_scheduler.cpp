@@ -32,9 +32,9 @@ public:
     }
 };
 
-// define some example graph nodes
+// define some example graph blocks
 template<typename T, std::size_t N>
-class count_source : public fg::node<count_source<T, N>, fg::PortOutNamed<T, "out">> {
+class count_source : public fg::block<count_source<T, N>, fg::PortOutNamed<T, "out">> {
     tracer     &_tracer;
     std::size_t _count = 0;
 
@@ -54,10 +54,10 @@ public:
     }
 };
 
-static_assert(fg::NodeType<count_source<float, 10U>>);
+static_assert(fg::BlockType<count_source<float, 10U>>);
 
 template<typename T, std::int64_t N>
-class expect_sink : public fg::node<expect_sink<T, N>, fg::PortInNamed<T, "in">> {
+class expect_sink : public fg::block<expect_sink<T, N>, fg::PortInNamed<T, "in">> {
     tracer                                         &_tracer;
     std::int64_t                                    _count = 0;
     std::function<void(std::int64_t, std::int64_t)> _checker;
@@ -84,7 +84,7 @@ public:
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
+class scale : public fg::block<scale<T, Scale, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
     tracer &_tracer;
 
 public:
@@ -99,7 +99,7 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
+class adder : public fg::block<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
     tracer &_tracer;
 
 public:
@@ -118,13 +118,13 @@ get_graph_linear(tracer &trace) {
     using fg::port_direction_t::INPUT;
     using fg::port_direction_t::OUTPUT;
 
-    // Nodes need to be alive for as long as the flow is
+    // Blocks need to be alive for as long as the flow is
     fg::graph flow;
     // Generators
-    auto &source1      = flow.make_node<count_source<int, 100000>>(trace, "s1");
-    auto &scale_block1 = flow.make_node<scale<int, 2>>(trace, "mult1");
-    auto &scale_block2 = flow.make_node<scale<int, 4>>(trace, "mult2");
-    auto &sink         = flow.make_node<expect_sink<int, 100000>>(trace, "out", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 8 * count); });
+    auto &source1      = flow.make_block<count_source<int, 100000>>(trace, "s1");
+    auto &scale_block1 = flow.make_block<scale<int, 2>>(trace, "mult1");
+    auto &scale_block2 = flow.make_block<scale<int, 4>>(trace, "mult2");
+    auto &sink         = flow.make_block<expect_sink<int, 100000>>(trace, "out", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 8 * count); });
 
     std::ignore        = flow.connect<"scaled">(scale_block2).to<"in">(sink);
     std::ignore        = flow.connect<"scaled">(scale_block1).to<"original">(scale_block2);
@@ -138,16 +138,16 @@ get_graph_parallel(tracer &trace) {
     using fg::port_direction_t::INPUT;
     using fg::port_direction_t::OUTPUT;
 
-    // Nodes need to be alive for as long as the flow is
+    // Blocks need to be alive for as long as the flow is
     fg::graph flow;
     // Generators
-    auto &source1       = flow.make_node<count_source<int, 100000>>(trace, "s1");
-    auto &scale_block1a = flow.make_node<scale<int, 2>>(trace, "mult1a");
-    auto &scale_block2a = flow.make_node<scale<int, 3>>(trace, "mult2a");
-    auto &sink_a        = flow.make_node<expect_sink<int, 100000>>(trace, "outa", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 6 * count); });
-    auto &scale_block1b = flow.make_node<scale<int, 3>>(trace, "mult1b");
-    auto &scale_block2b = flow.make_node<scale<int, 5>>(trace, "mult2b");
-    auto &sink_b        = flow.make_node<expect_sink<int, 100000>>(trace, "outb", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 15 * count); });
+    auto &source1       = flow.make_block<count_source<int, 100000>>(trace, "s1");
+    auto &scale_block1a = flow.make_block<scale<int, 2>>(trace, "mult1a");
+    auto &scale_block2a = flow.make_block<scale<int, 3>>(trace, "mult2a");
+    auto &sink_a        = flow.make_block<expect_sink<int, 100000>>(trace, "outa", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 6 * count); });
+    auto &scale_block1b = flow.make_block<scale<int, 3>>(trace, "mult1b");
+    auto &scale_block2b = flow.make_block<scale<int, 5>>(trace, "mult2b");
+    auto &sink_b        = flow.make_block<expect_sink<int, 100000>>(trace, "outb", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 15 * count); });
 
     std::ignore         = flow.connect<"scaled">(scale_block1a).to<"original">(scale_block2a);
     std::ignore         = flow.connect<"scaled">(scale_block1b).to<"original">(scale_block2b);
@@ -180,15 +180,15 @@ get_graph_scaled_sum(tracer &trace) {
     using fg::port_direction_t::INPUT;
     using fg::port_direction_t::OUTPUT;
 
-    // Nodes need to be alive for as long as the flow is
+    // Blocks need to be alive for as long as the flow is
     fg::graph flow;
 
     // Generators
-    auto &source1     = flow.make_node<count_source<int, 100000>>(trace, "s1");
-    auto &source2     = flow.make_node<count_source<int, 100000>>(trace, "s2");
-    auto &scale_block = flow.make_node<scale<int, 2>>(trace, "mult");
-    auto &add_block   = flow.make_node<adder<int>>(trace, "add");
-    auto &sink        = flow.make_node<expect_sink<int, 100000>>(trace, "out", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == (2 * count) + count); });
+    auto &source1     = flow.make_block<count_source<int, 100000>>(trace, "s1");
+    auto &source2     = flow.make_block<count_source<int, 100000>>(trace, "s2");
+    auto &scale_block = flow.make_block<scale<int, 2>>(trace, "mult");
+    auto &add_block   = flow.make_block<adder<int>>(trace, "add");
+    auto &sink        = flow.make_block<expect_sink<int, 100000>>(trace, "out", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == (2 * count) + count); });
 
     std::ignore       = flow.connect<"out">(source1).to<"original">(scale_block);
     std::ignore       = flow.connect<"scaled">(scale_block).to<"addend0">(add_block);
@@ -198,12 +198,12 @@ get_graph_scaled_sum(tracer &trace) {
     return flow;
 }
 
-template<typename node_type>
+template<typename block_type>
 void
-check_node_names(const std::vector<node_type> &joblist, std::set<std::string> set) {
+check_block_names(const std::vector<block_type> &joblist, std::set<std::string> set) {
     boost::ut::expect(boost::ut::that % joblist.size() == set.size());
-    for (auto &node : joblist) {
-        boost::ut::expect(boost::ut::that % set.contains(std::string(node->name()))) << fmt::format("{} not in {}\n", node->name(), set);
+    for (auto &block : joblist) {
+        boost::ut::expect(boost::ut::that % set.contains(std::string(block->name()))) << fmt::format("{} not in {}\n", block->name(), set);
     }
 }
 
@@ -304,8 +304,8 @@ const boost::ut::suite SchedulerTests = [] {
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
         sched.init();
         expect(sched.getJobLists().size() == 2u);
-        check_node_names(sched.getJobLists()[0], { "s1", "mult2" });
-        check_node_names(sched.getJobLists()[1], { "mult1", "out" });
+        check_block_names(sched.getJobLists()[0], { "s1", "mult2" });
+        check_block_names(sched.getJobLists()[1], { "mult1", "out" });
         sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 8u);
@@ -326,8 +326,8 @@ const boost::ut::suite SchedulerTests = [] {
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
         sched.init();
         expect(sched.getJobLists().size() == 2u);
-        check_node_names(sched.getJobLists()[0], { "s1", "mult1b", "mult2b", "outb" });
-        check_node_names(sched.getJobLists()[1], { "mult1a", "mult2a", "outa" });
+        check_block_names(sched.getJobLists()[0], { "s1", "mult1b", "mult2b", "outb" });
+        check_block_names(sched.getJobLists()[1], { "mult1a", "mult2a", "outa" });
         sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 14u);
@@ -349,8 +349,8 @@ const boost::ut::suite SchedulerTests = [] {
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
         sched.init();
         expect(sched.getJobLists().size() == 2u);
-        check_node_names(sched.getJobLists()[0], { "s1", "mult", "out" });
-        check_node_names(sched.getJobLists()[1], { "s2", "add" });
+        check_block_names(sched.getJobLists()[0], { "s1", "mult", "out" });
+        check_block_names(sched.getJobLists()[1], { "s2", "add" });
         sched.run_and_wait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 10u);

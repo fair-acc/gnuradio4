@@ -1,7 +1,7 @@
 #ifndef GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
 #define GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
 
-#include "node.hpp"
+#include "block.hpp"
 
 namespace gr::algorithm {
 template<typename T>

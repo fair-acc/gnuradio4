@@ -1,8 +1,8 @@
 #ifndef GRAPH_PROTOTYPE_ALGORITHM_FFT_HPP
 #define GRAPH_PROTOTYPE_ALGORITHM_FFT_HPP
 
+#include "block.hpp"
 #include "fft_types.hpp"
-#include "node.hpp"
 #include "window.hpp"
 #include <ranges>
 

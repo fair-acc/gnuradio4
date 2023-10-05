@@ -59,7 +59,7 @@ static_assert(!Documentation<EmptyUnit>);
 struct Visible {};
 
 /**
- * @brief Annotates node, indicating to calling schedulers that it may block due IO.
+ * @brief Annotates block, indicating to calling schedulers that it may block due IO.
  */
 template<bool UseIoThread = true>
 struct BlockingIO {
@@ -67,17 +67,17 @@ struct BlockingIO {
 };
 
 /**
- * @brief Annotates node, indicating to perform decimation/interpolation
+ * @brief Annotates block, indicating to perform decimation/interpolation
  */
 struct PerformDecimationInterpolation {};
 
 /**
- * @brief Annotates node, indicating to perform stride
+ * @brief Annotates block, indicating to perform stride
  */
 struct PerformStride {};
 
 /**
- * @brief Annotates templated node, indicating which port data types are supported.
+ * @brief Annotates templated block, indicating which port data types are supported.
  */
 template<typename... Ts>
 struct SupportedTypes {};

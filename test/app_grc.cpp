@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "blocklib/core/unit-test/common_nodes.hpp"
+#include "blocklib/core/unit-test/common_blocks.hpp"
 #include "build_configure.hpp"
 
 namespace fg = fair::graph;
@@ -16,8 +16,8 @@ namespace fg = fair::graph;
 struct test_context {
     test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
-    fg::node_registry registry;
-    fg::plugin_loader loader;
+    fg::block_registry registry;
+    fg::plugin_loader  loader;
 };
 
 int
@@ -43,7 +43,7 @@ main(int argc, char *argv[]) {
     // Test the basic graph loading and storing
     {
         using namespace fair::graph;
-        register_builtin_nodes(&context.registry);
+        register_builtin_blocks(&context.registry);
 
         auto graph_source          = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
@@ -62,7 +62,7 @@ main(int argc, char *argv[]) {
     // data into another graph
     {
         using namespace fair::graph;
-        register_builtin_nodes(&context.registry);
+        register_builtin_blocks(&context.registry);
 
         auto                  graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
@@ -71,17 +71,17 @@ main(int argc, char *argv[]) {
 
         auto                  graph_2            = fg::load_grc(context.loader, graph_saved_source);
 
-        [[maybe_unused]] auto collect_nodes      = [](fg::graph &graph) {
+        [[maybe_unused]] auto collect_blocks     = [](fg::graph &graph) {
             std::set<std::string> result;
-            graph.for_each_node([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.type_name())); });
+            graph.for_each_block([&](const auto &block) { result.insert(fmt::format("{}-{}", block.name(), block.type_name())); });
             return result;
         };
 
-        assert(collect_nodes(graph_1) == collect_nodes(graph_2));
+        assert(collect_blocks(graph_1) == collect_blocks(graph_2));
 
         [[maybe_unused]] auto collect_edges = [](fg::graph &graph) {
             std::set<std::string> result;
-            graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_node().name(), edge.src_port_index(), edge.dst_node().name(), edge.dst_port_index())); });
+            graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_block().name(), edge.src_port_index(), edge.dst_block().name(), edge.dst_port_index())); });
             return result;
         };
 

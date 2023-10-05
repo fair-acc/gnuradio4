@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 
+#include <block.hpp>
 #include <graph.hpp>
-#include <node.hpp>
 #include <scheduler.hpp>
 #include <tag.hpp>
 
@@ -27,7 +27,7 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint32_t n_samples       = 1900;
         constexpr float         sample_rate     = 2000.f;
         graph                   flow_graph;
-        auto &src = flow_graph.make_node<fair::graph::sources::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
+        auto &src = flow_graph.make_block<fair::graph::sources::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
         src.tags  = {
             { 0, { { "key", "value@0" } } },       //
             { 1, { { "key", "value@1" } } },       //
@@ -38,8 +38,8 @@ const boost::ut::suite TagTests = [] {
             { 1002, { { "key", "value@1002" } } }, //
             { 1023, { { "key", "value@1023" } } }  //
         };
-        auto &sink1 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink1" } });
-        auto &sink2 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink2" } });
+        auto &sink1 = flow_graph.make_block<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink1" } });
+        auto &sink2 = flow_graph.make_block<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink2" } });
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink1)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink2)));
 

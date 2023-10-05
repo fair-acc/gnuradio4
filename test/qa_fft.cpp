@@ -9,16 +9,16 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #include "algorithm/fft/fft.hpp"
 #include "algorithm/fft/fftw.hpp"
 #include "blocklib/core/fft/fft.hpp"
+#include <block.hpp>
 #include <fmt/format.h>
 #include <graph.hpp>
-#include <node.hpp>
 #include <numbers>
 #include <scheduler.hpp>
 
 namespace fg = fair::graph;
 
 template<typename T>
-struct CountSource : public fg::node<CountSource<T>> {
+struct CountSource : public fg::block<CountSource<T>> {
     fg::PortOut<T> out{};
     int            count{ 0 };
     int            nSamples{ 1024 };
@@ -277,16 +277,16 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using Scheduler      = fair::graph::scheduler::simple<>;
         auto      threadPool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
         fg::graph flow1;
-        auto     &source1  = flow1.make_node<CountSource<double>>();
-        auto     &fftBlock = flow1.make_node<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
+        auto     &source1  = flow1.make_block<CountSource<double>>();
+        auto     &fftBlock = flow1.make_block<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
         std::ignore        = flow1.connect<"out">(source1).to<"in">(fftBlock);
         auto sched1        = Scheduler(std::move(flow1), threadPool);
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
             fg::graph flow2;
-            auto     &source2 = flow2.make_node<CountSource<double>>();
-            auto     &fft2    = flow2.make_node<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
+            auto     &source2 = flow2.make_block<CountSource<double>>();
+            auto     &fft2    = flow2.make_block<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
             std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);
             auto sched2       = Scheduler(std::move(flow2), threadPool);
             sched2.run_and_wait();

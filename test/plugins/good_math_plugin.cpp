@@ -37,7 +37,7 @@ public:
 };
 
 template<typename T>
-class multiply : public fg::node<multiply<T>>, public math_base<T> {
+class multiply : public fg::block<multiply<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
@@ -49,7 +49,7 @@ public:
 };
 
 template<typename T>
-class divide : public fg::node<divide<T>>, public math_base<T> {
+class divide : public fg::block<divide<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
@@ -63,7 +63,7 @@ public:
 } // namespace good
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::multiply, in, out);
-GP_PLUGIN_REGISTER_NODE(good::multiply, float, double);
+GP_PLUGIN_REGISTER_BLOCK(good::multiply, float, double);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::divide, in, out);
-GP_PLUGIN_REGISTER_NODE(good::divide, float, double);
+GP_PLUGIN_REGISTER_BLOCK(good::divide, float, double);

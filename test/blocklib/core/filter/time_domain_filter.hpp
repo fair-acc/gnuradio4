@@ -1,8 +1,8 @@
 #ifndef GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
 #define GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
 
+#include <block.hpp>
 #include <history_buffer.hpp>
-#include <node.hpp>
 #include <numeric>
 
 namespace gr::blocks::filter {
@@ -11,7 +11,7 @@ using namespace fair::graph;
 
 template<typename T>
     requires std::floating_point<T>
-struct fir_filter : node<fir_filter<T>, Doc<R""(
+struct fir_filter : block<fir_filter<T>, Doc<R""(
 @brief Finite Impulse Response (FIR) filter class
 
 The transfer function of an FIR filter is given by:
@@ -45,7 +45,7 @@ enum class IIRForm {
 
 template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
     requires std::floating_point<T>
-struct iir_filter : node<iir_filter<T, form>, Doc<R""(
+struct iir_filter : block<iir_filter<T, form>, Doc<R""(
 @brief Infinite Impulse Response (IIR) filter class
 
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and n[-1] the previous sample)

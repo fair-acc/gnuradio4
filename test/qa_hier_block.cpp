@@ -6,7 +6,7 @@
 namespace fg = fair::graph;
 
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public fg::node<scale<T, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
+struct scale : public fg::block<scale<T, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
@@ -15,7 +15,7 @@ struct scale : public fg::node<scale<T, R>, fg::PortInNamed<T, "original">, fg::
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public fg::node<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
+struct adder : public fg::block<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
     template<fair::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
@@ -24,7 +24,7 @@ struct adder : public fg::node<adder<T>, fg::PortInNamed<T, "addend0">, fg::Port
 };
 
 template<typename T>
-class hier_node : public fg::node_model {
+class hier_block : public fg::block_model {
 private:
     static std::atomic_size_t _unique_id_counter;
     const std::size_t         _unique_id   = _unique_id_counter++;
@@ -39,7 +39,7 @@ protected:
     bool                               _output_tags_changed = false;
     std::vector<fg::property_map>      _tags_at_input;
     std::vector<fg::property_map>      _tags_at_output;
-    std::unique_ptr<fg::settings_base> _settings = std::make_unique<fg::basic_settings<hier_node<T>>>(*this);
+    std::unique_ptr<fg::settings_base> _settings = std::make_unique<fg::basic_settings<hier_block<T>>>(*this);
 
     using in_port_t                              = fg::PortIn<T>;
 
@@ -48,9 +48,9 @@ protected:
     fg::graph
     make_graph() {
         fg::graph graph;
-        auto     &adder_block       = graph.make_node<adder<double>>({ { "name", "adder" } });
-        auto     &left_scale_block  = graph.make_node<scale<double>>();
-        auto     &right_scale_block = graph.make_node<scale<double>>();
+        auto     &adder_block       = graph.make_block<adder<double>>({ { "name", "adder" } });
+        auto     &left_scale_block  = graph.make_block<scale<double>>();
+        auto     &right_scale_block = graph.make_block<scale<double>>();
 
         std::ignore                 = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
         std::ignore                 = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
@@ -64,9 +64,9 @@ protected:
     }
 
 public:
-    hier_node() : _scheduler(make_graph()){};
+    hier_block() : _scheduler(make_graph()){};
 
-    ~hier_node() override = default;
+    ~hier_block() override = default;
 
     void
     init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<fair::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
@@ -132,10 +132,10 @@ public:
 };
 
 template<typename T>
-std::atomic_size_t hier_node<T>::_unique_id_counter = 0;
+std::atomic_size_t hier_block<T>::_unique_id_counter = 0;
 
 template<typename T>
-struct fixed_source : public fg::node<fixed_source<T>> {
+struct fixed_source : public fg::block<fixed_source<T>> {
     fg::PortOut<T, fg::RequiredSamples<1, 1024>> out;
     std::size_t                                  remaining_events_count;
 
@@ -167,7 +167,7 @@ struct fixed_source : public fg::node<fixed_source<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fixed_source<T>), out, remaining_events_count);
 
 template<typename T>
-struct cout_sink : public fg::node<cout_sink<T>> {
+struct cout_sink : public fg::block<cout_sink<T>> {
     fg::PortIn<T, fg::RequiredSamples<1, 1024>> in;
     std::size_t                                 remaining = 0;
 
@@ -186,14 +186,14 @@ fg::graph
 make_graph(std::size_t events_count) {
     fg::graph graph;
 
-    auto     &source_left_node  = graph.make_node<fixed_source<double>>({ { "remaining_events_count", events_count } });
-    auto     &source_right_node = graph.make_node<fixed_source<double>>({ { "remaining_events_count", events_count } });
-    auto     &sink              = graph.make_node<cout_sink<double>>({ { "remaining", events_count } });
+    auto     &source_left_block  = graph.make_block<fixed_source<double>>({ { "remaining_events_count", events_count } });
+    auto     &source_right_block = graph.make_block<fixed_source<double>>({ { "remaining_events_count", events_count } });
+    auto     &sink               = graph.make_block<cout_sink<double>>({ { "remaining", events_count } });
 
-    auto     &hier              = graph.add_node(std::make_unique<hier_node<double>>());
+    auto     &hier               = graph.add_block(std::make_unique<hier_block<double>>());
 
-    graph.dynamic_connect(source_left_node, 0, hier, 0);
-    graph.dynamic_connect(source_right_node, 0, hier, 1);
+    graph.dynamic_connect(source_left_block, 0, hier, 0);
+    graph.dynamic_connect(source_right_block, 0, hier, 1);
     graph.dynamic_connect(hier, 0, sink, 0);
 
     return graph;

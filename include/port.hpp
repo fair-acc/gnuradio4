@@ -1,9 +1,9 @@
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
+#include <block.hpp>
 #include <complex>
 #include <dataset.hpp>
-#include <node.hpp>
 #include <span>
 #include <variant>
 
@@ -180,14 +180,14 @@ struct Async {};
  * between domains require explicit data conversion.
  * Each port consists of a synchronous performance-optimised streaming and asynchronous tag communication component:
  *                                                                                      ┌───────────────────────
- *         ───────────────────┐                                       ┌─────────────────┤  <node/block definition>
+ *         ───────────────────┐                                       ┌─────────────────┤  <block/block definition>
  *             output-port    │                                       │    input-port   │  ...
  *          stream-buffer<T>  │>───────┬─────────────────┬───────────>│                 │
  *          tag-buffer<tag_t> │      tag#0             tag#1          │                 │
  *                            │                                       │                 │
  *         ───────────────────┘                                       └─────────────────┤
  *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Node implementations
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  *
@@ -560,10 +560,10 @@ static_assert(MsgPortOutNamed<"out_msg">::with_name<"out_message">::static_name(
  *  a) as an lvalue (i.e. P& -> keep reference), or
  *  b) as an rvalue (P&& -> being moved into dyn_port).
  *
- *  N.B. the intended use is within the node/block interface where there is -- once initialised --
+ *  N.B. the intended use is within the block/block interface where there is -- once initialised --
  *  always a strong-reference between the strongly-typed port and it's dyn_port wrapper. I.e no ports
  *  are added or removed after the initialisation and the port life-time is coupled to that of it's
- *  parent block/node.
+ *  parent block/block.
  */
 class dynamic_port {
 public:
@@ -748,9 +748,10 @@ private:
     }
 
 public:
-    using value_type                      = void; // a sterile port
+    using value_type = void; // a sterile port
 
     struct owned_value_tag {};
+
     struct non_owned_reference_tag {};
 
     constexpr dynamic_port()              = delete;

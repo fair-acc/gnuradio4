@@ -1,10 +1,10 @@
 #ifndef GNURADIO_DATA_SINK_HPP
 #define GNURADIO_DATA_SINK_HPP
 
+#include "block.hpp"
 #include "circular_buffer.hpp"
 #include "dataset.hpp"
 #include "history_buffer.hpp"
-#include "node.hpp"
 #include "tag.hpp"
 
 #include <any>
@@ -303,7 +303,7 @@ get(const property_map &m, const std::string_view &key) {
  * @tparam T input sample type
  */
 template<typename T>
-class data_sink : public node<data_sink<T>> {
+class data_sink : public block<data_sink<T>> {
     struct abstract_listener;
 
     static constexpr std::size_t                   _listener_buffer_size = 65536;

@@ -6,11 +6,11 @@ gp_plugin_metadata plugin_metadata [[maybe_unused]]{ "Bad Plugin", "Unknown", "P
 
 class bad_plugin : public gp_plugin_base {
 private:
-    std::vector<std::string> node_types;
+    std::vector<std::string> block_types;
 
 public:
-    std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view /*name*/, std::string_view /*type*/, const fair::graph::property_map &) override {
+    std::unique_ptr<fair::graph::block_model>
+    create_block(std::string_view /*name*/, std::string_view /*type*/, const fair::graph::property_map &) override {
         return {};
     }
 
@@ -20,8 +20,8 @@ public:
     }
 
     [[nodiscard]] std::span<const std::string>
-    provided_nodes() const override {
-        return node_types;
+    provided_blocks() const override {
+        return block_types;
     }
 };
 

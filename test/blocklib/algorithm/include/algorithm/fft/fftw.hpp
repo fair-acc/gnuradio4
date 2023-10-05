@@ -1,11 +1,11 @@
 #ifndef GRAPH_PROTOTYPE_ALGORITHM_FFTW_HPP
 #define GRAPH_PROTOTYPE_ALGORITHM_FFTW_HPP
 
+#include "block.hpp"
 #include "dataset.hpp"
 #include "fft_types.hpp"
 #include "fftw3.h"
 #include "history_buffer.hpp"
-#include "node.hpp"
 #include "window.hpp"
 
 namespace gr::algorithm {

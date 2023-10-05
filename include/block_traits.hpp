@@ -1,5 +1,5 @@
-#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
-#define GNURADIO_NODE_NODE_TRAITS_HPP
+#ifndef GNURADIO_BLOCK_BLOCK_TRAITS_HPP
+#define GNURADIO_BLOCK_BLOCK_TRAITS_HPP
 
 #include <reflection.hpp>
 
@@ -13,7 +13,7 @@ namespace fair::graph {
 enum class work_return_status_t;
 }
 
-namespace fair::graph::traits::node {
+namespace fair::graph::traits::block {
 
 namespace detail {
 template<typename FieldDescriptor>
@@ -69,7 +69,7 @@ member_to_named_port_helper() {
 template<typename Descriptor>
 using member_to_named_port = std::remove_pointer_t<decltype(member_to_named_port_helper<Descriptor>())>;
 
-template<typename Node>
+template<typename Block>
 struct member_ports_detector {
     static constexpr bool value = false;
 };
@@ -77,15 +77,15 @@ struct member_ports_detector {
 template<class T, typename ValueType = std::remove_cvref_t<T>>
 concept Reflectable = refl::is_reflectable<ValueType>();
 
-template<Reflectable Node>
-struct member_ports_detector<Node> {
-    using member_ports          = typename meta::to_typelist<refl::descriptor::member_list<Node>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
+template<Reflectable Block>
+struct member_ports_detector<Block> {
+    using member_ports          = typename meta::to_typelist<refl::descriptor::member_list<Block>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
 
     static constexpr bool value = member_ports::size != 0;
 };
 
-template<typename Node>
-using port_name = typename Node::static_name();
+template<typename Block>
+using port_name = typename Block::static_name();
 
 template<typename RequestedType>
 struct member_descriptor_has_type {
@@ -96,16 +96,16 @@ struct member_descriptor_has_type {
 } // namespace detail
 
 template<typename...>
-struct fixed_node_ports_data_helper;
+struct fixed_block_ports_data_helper;
 
-// This specialization defines node attributes when the node is created
+// This specialization defines block attributes when the block is created
 // with two type lists - one list for input and one for output ports
-template<typename Node, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
+template<typename Block, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
     requires InputPorts::template
-all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info> struct fixed_node_ports_data_helper<Node, InputPorts, OutputPorts> {
+all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info> struct fixed_block_ports_data_helper<Block, InputPorts, OutputPorts> {
     using member_ports_detector = std::false_type;
 
-    // using member_ports_detector = detail::member_ports_detector<Node>;
+    // using member_ports_detector = detail::member_ports_detector<Block>;
 
     using input_ports       = InputPorts;
     using output_ports      = OutputPorts;
@@ -116,11 +116,11 @@ all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info
     using all_ports         = meta::concat<input_ports, output_ports>;
 };
 
-// This specialization defines node attributes when the node is created
+// This specialization defines block attributes when the block is created
 // with a list of ports as template arguments
-template<typename Node, port::has_fixed_info_v... Ports>
-struct fixed_node_ports_data_helper<Node, Ports...> {
-    using member_ports_detector = detail::member_ports_detector<Node>;
+template<typename Block, port::has_fixed_info_v... Ports>
+struct fixed_block_ports_data_helper<Block, Ports...> {
+    using member_ports_detector = detail::member_ports_detector<Block>;
 
     using all_ports             = std::remove_pointer_t<decltype([] {
         if constexpr (member_ports_detector::value) {
@@ -138,54 +138,54 @@ struct fixed_node_ports_data_helper<Node, Ports...> {
 };
 
 // clang-format off
-template<typename Node,
-         typename Derived = typename Node::derived_t,
-         typename ArgumentList = typename Node::node_template_parameters>
-using fixed_node_ports_data =
+template<typename Block,
+         typename Derived = typename Block::derived_t,
+         typename ArgumentList = typename Block::block_template_parameters>
+using fixed_block_ports_data =
     typename ArgumentList::template filter<port::has_fixed_info_or_is_typelist>
-                         ::template prepend<Node>
-                         ::template apply<fixed_node_ports_data_helper>;
+                         ::template prepend<Block>
+                         ::template apply<fixed_block_ports_data_helper>;
 // clang-format on
 
-template<typename Node>
-using all_ports = typename fixed_node_ports_data<Node>::all_ports;
+template<typename Block>
+using all_ports = typename fixed_block_ports_data<Block>::all_ports;
 
-template<typename Node>
-using input_ports = typename fixed_node_ports_data<Node>::input_ports;
+template<typename Block>
+using input_ports = typename fixed_block_ports_data<Block>::input_ports;
 
-template<typename Node>
-using output_ports = typename fixed_node_ports_data<Node>::output_ports;
+template<typename Block>
+using output_ports = typename fixed_block_ports_data<Block>::output_ports;
 
-template<typename Node>
-using input_port_types = typename fixed_node_ports_data<Node>::input_port_types;
+template<typename Block>
+using input_port_types = typename fixed_block_ports_data<Block>::input_port_types;
 
-template<typename Node>
-using output_port_types = typename fixed_node_ports_data<Node>::output_port_types;
+template<typename Block>
+using output_port_types = typename fixed_block_ports_data<Block>::output_port_types;
 
-template<typename Node>
-using input_port_types_tuple = typename input_port_types<Node>::tuple_type;
+template<typename Block>
+using input_port_types_tuple = typename input_port_types<Block>::tuple_type;
 
-template<typename Node>
-using return_type = typename output_port_types<Node>::tuple_or_type;
+template<typename Block>
+using return_type = typename output_port_types<Block>::tuple_or_type;
 
-template<typename Node>
-using input_port_names = typename input_ports<Node>::template transform<detail::port_name>;
+template<typename Block>
+using input_port_names = typename input_ports<Block>::template transform<detail::port_name>;
 
-template<typename Node>
-using output_port_names = typename output_ports<Node>::template transform<detail::port_name>;
+template<typename Block>
+using output_port_names = typename output_ports<Block>::template transform<detail::port_name>;
 
-template<typename Node>
-constexpr bool node_defines_ports_as_member_variables = fixed_node_ports_data<Node>::member_ports_detector::value;
+template<typename Block>
+constexpr bool block_defines_ports_as_member_variables = fixed_block_ports_data<Block>::member_ports_detector::value;
 
-template<typename Node, typename PortType>
-using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<Node>>::template filter<detail::is_port_or_collection_descriptor>::template filter<
+template<typename Block, typename PortType>
+using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<Block>>::template filter<detail::is_port_or_collection_descriptor>::template filter<
         detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
 
 // TODO: Why is this not done with requires?
 namespace detail {
 template<std::size_t... Is>
 auto
-can_process_one_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.process_one(std::get<Is>(input)...));
+can_process_one_invoke_test(auto &block, const auto &input, std::index_sequence<Is...>) -> decltype(block.process_one(std::get<Is>(input)...));
 
 template<typename T>
 struct exact_argument_type {
@@ -195,62 +195,62 @@ struct exact_argument_type {
 
 template<std::size_t... Is>
 auto
-can_process_one_with_offset_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.process_one(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
+can_process_one_with_offset_invoke_test(auto &block, const auto &input, std::index_sequence<Is...>) -> decltype(block.process_one(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
 
-template<typename Node>
-using simd_return_type_of_can_process_one = meta::simdize<return_type<Node>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<Node>>>>;
+template<typename Block>
+using simd_return_type_of_can_process_one = meta::simdize<return_type<Block>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<Block>>>>;
 } // namespace detail
 
-/* A node "can process simd" if its `process_one` function takes at least one argument and all
+/* A block "can process simd" if its `process_one` function takes at least one argument and all
  * arguments can be simdized types of the actual port data types.
  *
- * The node can be a sink (no output ports).
+ * The block can be a sink (no output ports).
  * The requirement of at least one function argument disallows sources.
  *
- * There is another (unnamed) concept for source nodes: Source nodes can implement
+ * There is another (unnamed) concept for source blocks: Source blocks can implement
  * `process_one_simd(integral_constant)`, which returns SIMD object(s) of width N.
  */
-template<typename Node>
+template<typename Block>
 concept can_process_one_simd =
 #if DISABLE_SIMD
         false;
 #else
-        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::node::input_port_types<Node>::size() > 0 and requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
+        traits::block::input_ports<Block>::template all_of<port::is_port> and // checks we don't have port collections inside
+        traits::block::input_port_types<Block>::size() > 0 and requires(Block &block, const meta::simdize<input_port_types_tuple<Block>> &input_simds) {
             {
-                detail::can_process_one_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
-            } -> std::same_as<detail::simd_return_type_of_can_process_one<Node>>;
+                detail::can_process_one_invoke_test(block, input_simds, std::make_index_sequence<traits::block::input_ports<Block>::size()>())
+            } -> std::same_as<detail::simd_return_type_of_can_process_one<Block>>;
         };
 #endif
 
-template<typename Node>
+template<typename Block>
 concept can_process_one_simd_with_offset =
 #if DISABLE_SIMD
         false;
 #else
-        traits::node::input_ports<Node>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::node::input_port_types<Node>::size() > 0 && requires(Node &node, const meta::simdize<input_port_types_tuple<Node>> &input_simds) {
+        traits::block::input_ports<Block>::template all_of<port::is_port> and // checks we don't have port collections inside
+        traits::block::input_port_types<Block>::size() > 0 && requires(Block &block, const meta::simdize<input_port_types_tuple<Block>> &input_simds) {
             {
-                detail::can_process_one_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::node::input_ports<Node>::size()>())
-            } -> std::same_as<detail::simd_return_type_of_can_process_one<Node>>;
+                detail::can_process_one_with_offset_invoke_test(block, input_simds, std::make_index_sequence<traits::block::input_ports<Block>::size()>())
+            } -> std::same_as<detail::simd_return_type_of_can_process_one<Block>>;
         };
 #endif
 
-template<typename Node>
-concept can_process_one_scalar = requires(Node &node, const input_port_types_tuple<Node> &inputs) {
-    { detail::can_process_one_invoke_test(node, inputs, std::make_index_sequence<traits::node::input_ports<Node>::size()>()) } -> std::same_as<return_type<Node>>;
+template<typename Block>
+concept can_process_one_scalar = requires(Block &block, const input_port_types_tuple<Block> &inputs) {
+    { detail::can_process_one_invoke_test(block, inputs, std::make_index_sequence<traits::block::input_ports<Block>::size()>()) } -> std::same_as<return_type<Block>>;
 };
 
-template<typename Node>
-concept can_process_one_scalar_with_offset = requires(Node &node, const input_port_types_tuple<Node> &inputs) {
-    { detail::can_process_one_with_offset_invoke_test(node, inputs, std::make_index_sequence<traits::node::input_ports<Node>::size()>()) } -> std::same_as<return_type<Node>>;
+template<typename Block>
+concept can_process_one_scalar_with_offset = requires(Block &block, const input_port_types_tuple<Block> &inputs) {
+    { detail::can_process_one_with_offset_invoke_test(block, inputs, std::make_index_sequence<traits::block::input_ports<Block>::size()>()) } -> std::same_as<return_type<Block>>;
 };
 
-template<typename Node>
-concept can_process_one = can_process_one_scalar<Node> or can_process_one_simd<Node> or can_process_one_scalar_with_offset<Node> or can_process_one_simd_with_offset<Node>;
+template<typename Block>
+concept can_process_one = can_process_one_scalar<Block> or can_process_one_simd<Block> or can_process_one_scalar_with_offset<Block> or can_process_one_simd_with_offset<Block>;
 
-template<typename Node>
-concept can_process_one_with_offset = can_process_one_scalar_with_offset<Node> or can_process_one_simd_with_offset<Node>;
+template<typename Block>
+concept can_process_one_with_offset = can_process_one_scalar_with_offset<Block> or can_process_one_simd_with_offset<Block>;
 
 namespace detail {
 template<typename T>
@@ -268,16 +268,22 @@ struct dummy_output_span : std::span<T> {                  // NOSONAR
 };
 
 struct to_any_vector {
-    template <typename Any>
-    operator std::vector<Any>() const { return {}; } // NOSONAR
+    template<typename Any>
+    operator std::vector<Any>() const {
+        return {};
+    } // NOSONAR
 
-    template <typename Any>
-    operator std::vector<Any>&() const { return {}; } // NOSONAR
+    template<typename Any>
+    operator std::vector<Any> &() const {
+        return {};
+    } // NOSONAR
 };
 
 struct to_any_pointer {
-    template <typename Any>
-    operator Any*() const { return {}; } // NOSONAR
+    template<typename Any>
+    operator Any *() const {
+        return {};
+    } // NOSONAR
 };
 
 template<typename T>
@@ -293,8 +299,11 @@ struct dummy_writer {
 template<typename Port>
 constexpr auto *
 port_to_process_bulk_argument_helper() {
-    if constexpr (requires(Port p) { typename Port::value_type; p.cbegin() != p.cend(); }) {
-        return static_cast<to_any_vector*>(nullptr);
+    if constexpr (requires(Port p) {
+                      typename Port::value_type;
+                      p.cbegin() != p.cend();
+                  }) {
+        return static_cast<to_any_vector *>(nullptr);
 
     } else if constexpr (Port::synchronous) {
         if constexpr (Port::IS_INPUT) {
@@ -304,9 +313,9 @@ port_to_process_bulk_argument_helper() {
         }
     } else {
         if constexpr (Port::IS_INPUT) {
-            return static_cast<to_any_pointer*>(nullptr);
+            return static_cast<to_any_pointer *>(nullptr);
         } else if constexpr (Port::IS_OUTPUT) {
-            return static_cast<to_any_pointer*>(nullptr);
+            return static_cast<to_any_pointer *>(nullptr);
         }
     }
 }
@@ -325,15 +334,15 @@ using dynamic_span = std::span<T>;
 
 template<std::size_t... InIdx, std::size_t... OutIdx>
 auto
-can_process_bulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
-        -> decltype(node.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
+can_process_bulk_invoke_test(auto &block, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
+        -> decltype(block.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
-template<typename Node>
-concept can_process_bulk = requires(Node &n, typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::node::input_ports<Node>>::tuple_type inputs,
-                                    typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::node::output_ports<Node>>::tuple_type outputs) {
+template<typename Block>
+concept can_process_bulk = requires(Block &n, typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::block::input_ports<Block>>::tuple_type inputs,
+                                    typename meta::transform_types_nested<detail::port_to_process_bulk_argument, traits::block::output_ports<Block>>::tuple_type outputs) {
     {
-        detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Node>::size>(), std::make_index_sequence<output_port_types<Node>::size>())
+        detail::can_process_bulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<Block>::size>(), std::make_index_sequence<output_port_types<Block>::size>())
     } -> std::same_as<work_return_status_t>;
 };
 
@@ -343,28 +352,28 @@ concept can_process_bulk = requires(Node &n, typename meta::transform_types_nest
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
 template<typename Derived, std::size_t I>
-concept process_bulk_requires_ith_output_as_span = requires(Derived                                                                                                                      &d,
-                                                            typename meta::transform_types<detail::dummy_input_span, traits::node::input_port_types<Derived>>::template apply<std::tuple> inputs,
+concept process_bulk_requires_ith_output_as_span = requires(Derived                                                                                                                       &d,
+                                                            typename meta::transform_types<detail::dummy_input_span, traits::block::input_port_types<Derived>>::template apply<std::tuple> inputs,
                                                             typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
-                                                                                                 traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                                                                                                 traits::block::output_port_types<Derived>>::template apply<std::tuple>
                                                                     outputs,
                                                             typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
-                                                                                                 traits::node::output_port_types<Derived>>::template apply<std::tuple>
+                                                                                                 traits::block::output_port_types<Derived>>::template apply<std::tuple>
                                                                     bad_outputs) {
     {
         []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                         std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
             return {};
-        }(std::make_index_sequence<traits::node::input_port_types<Derived>::size>(), std::make_index_sequence<traits::node::output_port_types<Derived>::size>())
+        }(std::make_index_sequence<traits::block::input_port_types<Derived>::size>(), std::make_index_sequence<traits::block::output_port_types<Derived>::size>())
     } -> std::same_as<work_return_status_t>;
     not requires {
         []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                         std::index_sequence<OutIdx...>) -> decltype(d.process_bulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
             return {};
-        }(std::make_index_sequence<traits::node::input_port_types<Derived>::size>(), std::make_index_sequence<traits::node::output_port_types<Derived>::size>());
+        }(std::make_index_sequence<traits::block::input_port_types<Derived>::size>(), std::make_index_sequence<traits::block::output_port_types<Derived>::size>());
     };
 };
 
-} // namespace fair::graph::traits::node
+} // namespace fair::graph::traits::block
 
 #endif // include guard

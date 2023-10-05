@@ -10,7 +10,7 @@
 namespace fg = fair::graph;
 
 template<typename T>
-struct count_source : public fg::node<count_source<T>> {
+struct count_source : public fg::block<count_source<T>> {
     fg::PortOut<T> random;
 
     constexpr T
@@ -22,7 +22,7 @@ struct count_source : public fg::node<count_source<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (count_source<T>), random);
 
 template<typename T>
-struct expect_sink : public fg::node<expect_sink<T>> {
+struct expect_sink : public fg::block<expect_sink<T>> {
     fg::PortIn<T> sink;
 
     void
@@ -34,7 +34,7 @@ struct expect_sink : public fg::node<expect_sink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (expect_sink<T>), sink);
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public fg::node<scale<T, Scale, R>> {
+struct scale : public fg::block<scale<T, Scale, R>> {
     fg::PortIn<T>  original;
     fg::PortOut<R> scaled;
 
@@ -48,7 +48,7 @@ struct scale : public fg::node<scale<T, Scale, R>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public fg::node<adder<T>> {
+struct adder : public fg::block<adder<T>> {
     fg::PortIn<T>  addend0;
     fg::PortIn<T>  addend1;
     fg::PortOut<R> sum;
@@ -65,11 +65,11 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), add
 using fg::port_type_t::STREAM, fg::port_direction_t::INPUT, fg::port_direction_t::OUTPUT;
 
 template<typename T, std::size_t Count = 2>
-class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
-    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
+class duplicate : public fg::block<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
+    using base = fg::block<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
 
 public:
-    using return_type = typename fg::traits::node::return_type<base>;
+    using return_type = typename fg::traits::block::return_type<base>;
 
     [[nodiscard]] constexpr return_type
     process_one(T a) const noexcept {
@@ -79,7 +79,7 @@ public:
 
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
-struct delay : public fg::node<delay<T, Depth>> {
+struct delay : public fg::block<delay<T, Depth>> {
     fg::PortIn<T>        in;
     fg::PortOut<T>       out;
     std::array<T, Depth> buffer = {};

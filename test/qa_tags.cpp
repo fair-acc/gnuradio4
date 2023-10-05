@@ -1,8 +1,8 @@
 #include <boost/ut.hpp>
 
+#include <block.hpp>
 #include <buffer.hpp>
 #include <graph.hpp>
-#include <node.hpp>
 #include <reflection.hpp>
 #include <scheduler.hpp>
 #include <tag.hpp>
@@ -62,7 +62,7 @@ const boost::ut::suite TagPropagation = [] {
     "tag_source"_test = [] {
         std::int64_t n_samples = 1024;
         graph        flow_graph;
-        auto        &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
+        auto        &src = flow_graph.make_block<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
         src.tags         = {
             // TODO: allow parameter settings to include maps?!?
             { 0, { { "key", "value@0" } } },       //
@@ -74,10 +74,10 @@ const boost::ut::suite TagPropagation = [] {
             { 1002, { { "key", "value@1002" } } }, //
             { 1023, { { "key", "value@1023" } } }  //
         };
-        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
-        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
-        auto &sink1    = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
-        auto &sink2    = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
+        auto &monitor1 = flow_graph.make_block<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
+        auto &monitor2 = flow_graph.make_block<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
+        auto &sink1    = flow_graph.make_block<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
+        auto &sink2    = flow_graph.make_block<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink1)));

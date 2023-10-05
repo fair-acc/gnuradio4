@@ -48,7 +48,7 @@ struct YamlSeq {
     template<typename F>
         requires std::is_invocable_v<F>
     void
-    write_fn(const char */*key*/, F &&fun) {
+    write_fn(const char * /*key*/, F &&fun) {
         fun();
     }
 };
@@ -56,24 +56,24 @@ struct YamlSeq {
 
 inline fair::graph::graph
 load_grc(plugin_loader &loader, const std::string &yaml_source) {
-    graph                               flow_graph;
+    graph                                flow_graph;
 
-    std::map<std::string, node_model *> created_nodes;
+    std::map<std::string, block_model *> created_blocks;
 
-    YAML::Node                          tree   = YAML::Load(yaml_source);
-    auto                                blocks = tree["blocks"];
+    YAML::Node                           tree   = YAML::Load(yaml_source);
+    auto                                 blocks = tree["blocks"];
     for (const auto &grc_block : blocks) {
         auto name = grc_block["name"].as<std::string>();
         auto id   = grc_block["id"].as<std::string>();
 
-        // TODO: Discuss how GRC should store the node types, how we should
-        // in general handle nodes that are parametrised by more than one type
-        auto &current_node = loader.instantiate_in_graph(flow_graph, id, "double");
+        // TODO: Discuss how GRC should store the block types, how we should
+        // in general handle blocks that are parametrised by more than one type
+        auto &current_block = loader.instantiate_in_graph(flow_graph, id, "double");
 
-        current_node.set_name(name);
-        created_nodes[name]                = &current_node;
+        current_block.set_name(name);
+        created_blocks[name]                = &current_block;
 
-        auto         current_node_settings = current_node.settings().get();
+        auto         current_block_settings = current_block.settings().get();
 
         property_map new_properties;
 
@@ -82,11 +82,11 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
             for (const auto &kv : parameters) {
                 const auto &key = kv.first.as<std::string>();
 
-                if (auto it = current_node_settings.find(key); it != current_node_settings.end()) {
+                if (auto it = current_block_settings.find(key); it != current_block_settings.end()) {
                     using variant_type_list = meta::to_typelist<pmtv::pmt>;
                     const auto &grc_value   = kv.second;
 
-                    // This is a known property of this node
+                    // This is a known property of this block
                     auto try_type = [&]<typename T>() {
                         if (it->second.index() != variant_type_list::index_of<T>()) {
                             return false;
@@ -111,33 +111,33 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
                     [&] {
                         // Fallback to string, and non-defined property
                         const auto& value = grc_value.template as<std::string>();
-                        current_node.meta_information()[key] = value;
+                        current_block.meta_information()[key] = value;
                         return true;
                     }();
                     // clang-format on
 
                 } else {
-                    const auto &value                    = kv.second.as<std::string>();
-                    current_node.meta_information()[key] = value;
+                    const auto &value                     = kv.second.as<std::string>();
+                    current_block.meta_information()[key] = value;
                 }
             }
         }
 
-        std::ignore = current_node.settings().set(new_properties);
-        // current_node.init(); TODO: reverse and first initialise block via property_map constructor and then add to flow-graph -> does the init implicitely then, this is a workaround for the
+        std::ignore = current_block.settings().set(new_properties);
+        // current_block.init(); TODO: reverse and first initialise block via property_map constructor and then add to flow-graph -> does the init implicitely then, this is a workaround for the
         // apply_staged_settigns
-        std::ignore = current_node.settings().apply_staged_parameters();
+        std::ignore = current_block.settings().apply_staged_parameters();
     }
 
     for (const auto &connection : tree["connections"]) {
         assert(connection.size() == 4);
 
-        auto parse_node_port = [&](const auto &block_field, const auto &port_field) {
+        auto parse_block_port = [&](const auto &block_field, const auto &port_field) {
             auto block_name = block_field.template as<std::string>();
             auto port_str   = port_field.template as<std::string>();
-            auto node       = created_nodes.find(block_name);
-            if (node == created_nodes.end()) {
-                throw fmt::format("Unknown node");
+            auto block      = created_blocks.find(block_name);
+            if (block == created_blocks.end()) {
+                throw fmt::format("Unknown block");
             }
             std::size_t port{};
             {
@@ -148,15 +148,15 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
             }
 
             struct result {
-                decltype(node) block_it;
-                std::size_t    port;
+                decltype(block) block_it;
+                std::size_t     port;
             };
 
-            return result{ node, port };
+            return result{ block, port };
         };
 
-        auto src = parse_node_port(connection[0], connection[1]);
-        auto dst = parse_node_port(connection[2], connection[3]);
+        auto src = parse_block_port(connection[0], connection[1]);
+        auto dst = parse_block_port(connection[2], connection[3]);
 
         flow_graph.dynamic_connect(*src.block_it->second, src.port, *dst.block_it->second, dst.port);
     }
@@ -171,18 +171,18 @@ save_grc(const fair::graph::graph &flow_graph) {
         detail::YamlMap root(out);
 
         root.write_fn("blocks", [&]() {
-            detail::YamlSeq nodes(out);
+            detail::YamlSeq blocks(out);
 
-            auto            write_node = [&](const auto &node) {
+            auto            write_block = [&](const auto &block) {
                 detail::YamlMap map(out);
-                map.write("name", std::string(node.name()));
+                map.write("name", std::string(block.name()));
 
-                const auto &full_type_name = node.type_name();
+                const auto &full_type_name = block.type_name();
                 std::string type_name(full_type_name.cbegin(), std::find(full_type_name.cbegin(), full_type_name.cend(), '<'));
                 map.write("id", std::move(type_name));
 
-                const auto &settings_map = node.settings().get();
-                if (!node.meta_information().empty() || !settings_map.empty()) {
+                const auto &settings_map = block.settings().get();
+                if (!block.meta_information().empty() || !settings_map.empty()) {
                     map.write_fn("parameters", [&]() {
                         detail::YamlMap parameters(out);
                         auto            write_map = [&](const auto &local_map) {
@@ -202,21 +202,21 @@ save_grc(const fair::graph::graph &flow_graph) {
                         };
 
                         write_map(settings_map);
-                        write_map(node.meta_information());
+                        write_map(block.meta_information());
                     });
                 }
             };
 
-            flow_graph.for_each_node(write_node);
+            flow_graph.for_each_block(write_block);
         });
 
         root.write_fn("connections", [&]() {
-            detail::YamlSeq nodes(out);
+            detail::YamlSeq blocks(out);
             auto            write_edge = [&](const auto &edge) {
                 out << YAML::Flow;
                 detail::YamlSeq seq(out);
-                out << edge.src_node().name().data() << std::to_string(edge.src_port_index());
-                out << edge.dst_node().name().data() << std::to_string(edge.dst_port_index());
+                out << edge.src_block().name().data() << std::to_string(edge.src_port_index());
+                out << edge.dst_block().name().data() << std::to_string(edge.dst_port_index());
             };
 
             flow_graph.for_each_edge(write_edge);

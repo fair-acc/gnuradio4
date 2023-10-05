@@ -1,9 +1,9 @@
 #include <boost/ut.hpp>
 
+#include <block.hpp>
 #include <buffer.hpp>
 #include <data_sink.hpp>
 #include <graph.hpp>
-#include <node.hpp>
 #include <reflection.hpp>
 #include <scheduler.hpp>
 
@@ -36,7 +36,7 @@ struct fmt::formatter<fair::graph::tag_t> {
 namespace fair::graph::data_sink_test {
 
 template<typename T>
-struct Source : public node<Source<T>> {
+struct Source : public block<Source<T>> {
     PortOut<T>         out;
     std::int32_t       n_samples_produced = 0;
     std::int32_t       n_samples_max      = 1024;
@@ -238,8 +238,8 @@ const boost::ut::suite DataSinkTests = [] {
         const auto                    src_tags   = make_test_tags(0, 1000);
 
         graph                         flow_graph;
-        auto                         &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto                         &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto                         &src  = flow_graph.make_block<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                         &sink = flow_graph.make_block<data_sink<float>>({ { "name", "test_sink" } });
         src.tags                           = src_tags;
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
@@ -316,9 +316,9 @@ const boost::ut::suite DataSinkTests = [] {
 
         graph                  flow_graph;
         const auto             tags = make_test_tags(0, 1000);
-        auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &src  = flow_graph.make_block<Source<float>>({ { "n_samples_max", n_samples } });
         src.tags                    = tags;
-        auto &sink                  = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto &sink                  = flow_graph.make_block<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -384,10 +384,10 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples = 200000;
 
         graph                  flow_graph;
-        auto                  &src  = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        auto                  &src  = flow_graph.make_block<Source<int32_t>>({ { "n_samples_max", n_samples } });
         const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
-        auto &sink                  = flow_graph.make_node<data_sink<int32_t>>(
+        auto &sink                  = flow_graph.make_block<data_sink<int32_t>>(
                 { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
@@ -446,7 +446,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples = 200000;
 
         graph                  flow_graph;
-        auto                  &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        auto                  &src = flow_graph.make_block<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags                   = { { 0,
                                          { { std::string(tag::SIGNAL_NAME.key()), "test signal" },
                                            { std::string(tag::SIGNAL_UNIT.key()), "none" },
@@ -455,7 +455,7 @@ const boost::ut::suite DataSinkTests = [] {
                                        { 3000, { { "TYPE", "TRIGGER" } } },
                                        { 8000, { { "TYPE", "NO_TRIGGER" } } },
                                        { 180000, { { "TYPE", "TRIGGER" } } } };
-        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" }, { "sample_rate", 10000.f } });
+        auto &sink                 = flow_graph.make_block<data_sink<int32_t>>({ { "name", "test_sink" }, { "sample_rate", 10000.f } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -516,9 +516,9 @@ const boost::ut::suite DataSinkTests = [] {
 
         const std::int32_t n_samples = static_cast<std::int32_t>(tags.size() * 10000 + 100000);
         graph              flow_graph;
-        auto              &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        auto              &src = flow_graph.make_block<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags               = tags;
-        auto &sink             = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" } });
+        auto &sink             = flow_graph.make_block<data_sink<int32_t>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -598,13 +598,13 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::size_t  n_triggers = 300;
 
         graph                  flow_graph;
-        auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &src = flow_graph.make_block<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
             src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
-        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto &sink = flow_graph.make_block<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -653,13 +653,13 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::size_t  n_triggers = 300;
 
         graph                  flow_graph;
-        auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &src = flow_graph.make_block<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
             src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
-        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto &sink = flow_graph.make_block<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
@@ -692,8 +692,8 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples = 200000;
 
         graph                  flow_graph;
-        auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto                  &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto                  &src  = flow_graph.make_block<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &sink = flow_graph.make_block<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 

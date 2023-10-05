@@ -44,7 +44,7 @@ using property_map = pmtv::map_t;
  * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
  * any point in the signal processing flow, allowing for flexible and customisable data processing.
  *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Node implementations
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
@@ -188,7 +188,7 @@ inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal phys
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string> TRIGGER_NAME;
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
 inline EM_CONSTEXPR_STATIC default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
+inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate block settings/behavioural changes"> CONTEXT;
 inline EM_CONSTEXPR_STATIC default_tag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
 inline EM_CONSTEXPR_STATIC default_tag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 

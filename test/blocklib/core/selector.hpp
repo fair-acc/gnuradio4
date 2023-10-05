@@ -1,7 +1,7 @@
 #ifndef GRAPH_PROTOTYPE_SELECTOR_HPP
 #define GRAPH_PROTOTYPE_SELECTOR_HPP
 
-#include <node.hpp>
+#include <block.hpp>
 #include <utils.hpp>
 
 namespace gr::blocks::basic {
@@ -64,7 +64,7 @@ you can set the `backPressure` property to false.
 )"">;
 
 template<typename T>
-struct Selector : node<Selector<T>, SelectorDoc> {
+struct Selector : block<Selector<T>, SelectorDoc> {
     // port definitions
     PortIn<std::uint32_t, Async, Optional> selectOut;
     PortOut<T, Async, Optional>            monitorOut; // optional monitor output (more for demo/API purposes than actual need)
@@ -180,8 +180,8 @@ struct Selector : node<Selector<T>, SelectorDoc> {
 
         if (!monitor_out_processed && _selectedSrc < ins.size()) {
             auto *input_reader    = ins[_selectedSrc];
-            auto input_available = std::min(input_reader->available(), monOut->available());
-            auto input_span = input_reader->get(input_available);
+            auto  input_available = std::min(input_reader->available(), monOut->available());
+            auto  input_span      = input_reader->get(input_available);
             copy_to_output(input_available, input_span, monOut);
             std::ignore = input_reader->consume(input_available);
         }

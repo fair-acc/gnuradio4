@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 
+#include <block.hpp>
 #include <graph.hpp>
-#include <node.hpp>
 #include <scheduler.hpp>
 #include <utils.hpp>
 
@@ -14,7 +14,7 @@ namespace fg = fair::graph;
 using namespace fair::literals;
 
 template<typename T>
-struct repeated_source : public fg::node<repeated_source<T>> {
+struct repeated_source : public fg::block<repeated_source<T>> {
     std::uint32_t                  identifier = 0;
     std::uint32_t                  remaining_events_count;
     std::vector<T>                 values;
@@ -62,7 +62,7 @@ struct repeated_source : public fg::node<repeated_source<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (repeated_source<T>), identifier, remaining_events_count, values, out);
 
 template<typename T>
-struct validator_sink : public fg::node<validator_sink<T>> {
+struct validator_sink : public fg::block<validator_sink<T>> {
     std::uint32_t                  identifier = 0;
     fg::PortIn<T>                  in;
 
@@ -103,7 +103,7 @@ struct validator_sink : public fg::node<validator_sink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (validator_sink<T>), identifier, expected_values, in);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public fg::node<adder<T>> {
+struct adder : public fg::block<adder<T>> {
     fg::PortIn<T>  addend0;
     fg::PortIn<T>  addend1;
     fg::PortOut<T> sum;
@@ -144,29 +144,29 @@ execute_selector_test(test_definition definition) {
     std::ranges::transform(definition.mapping, mapIn.begin(), [](auto &p) { return p.first; });
     std::ranges::transform(definition.mapping, mapOut.begin(), [](auto &p) { return p.second; });
 
-    selector = std::addressof(graph.make_node<gr::blocks::basic::Selector<double>>({ { "nInputs", sources_count }, //
-                                                                                     { "nOutputs", sinks_count },  //
-                                                                                     { "mapIn", mapIn },           //
-                                                                                     { "mapOut", mapOut },         //
-                                                                                     { "backPressure", definition.back_pressure } }));
+    selector = std::addressof(graph.make_block<gr::blocks::basic::Selector<double>>({ { "nInputs", sources_count }, //
+                                                                                      { "nOutputs", sinks_count },  //
+                                                                                      { "mapIn", mapIn },           //
+                                                                                      { "mapOut", mapOut },         //
+                                                                                      { "backPressure", definition.back_pressure } }));
 
     for (std::uint32_t source_index = 0; source_index < sources_count; ++source_index) {
-        sources.push_back(std::addressof(graph.make_node<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
-                                                                                    { "identifier", source_index },                       //
-                                                                                    { "values", definition.input_values[source_index] } })));
+        sources.push_back(std::addressof(graph.make_block<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
+                                                                                     { "identifier", source_index },                       //
+                                                                                     { "values", definition.input_values[source_index] } })));
         expect(sources[source_index]->settings().apply_staged_parameters().empty());
         expect(fair::graph::connection_result_t::SUCCESS == graph.dynamic_connect(*sources[source_index], 0, *selector, source_index + 1 /* there's one port before the inputs */));
     }
 
     for (std::uint32_t sink_index = 0; sink_index < sinks_count; ++sink_index) {
-        sinks.push_back(std::addressof(graph.make_node<validator_sink<double>>({ { "identifier", sink_index }, //
-                                                                                 { "expected_values", definition.output_values[sink_index] } })));
+        sinks.push_back(std::addressof(graph.make_block<validator_sink<double>>({ { "identifier", sink_index }, //
+                                                                                  { "expected_values", definition.output_values[sink_index] } })));
         expect(sinks[sink_index]->settings().apply_staged_parameters().empty());
         expect(fair::graph::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, sink_index + 1 /* there's one port before the outputs */, *sinks[sink_index], 0));
     }
 
-    validator_sink<double> *monitor_sink = std::addressof(graph.make_node<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
-                                                                                                    { "expected_values", definition.monitor_values } }));
+    validator_sink<double> *monitor_sink = std::addressof(graph.make_block<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
+                                                                                                     { "expected_values", definition.monitor_values } }));
     expect(monitor_sink->settings().apply_staged_parameters().empty());
     expect(fair::graph::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, 0, *monitor_sink, 0));
 

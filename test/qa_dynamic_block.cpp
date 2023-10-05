@@ -4,13 +4,13 @@
 
 namespace fg = fair::graph;
 
-#include "blocklib/core/unit-test/common_nodes.hpp"
+#include "blocklib/core/unit-test/common_blocks.hpp"
 
 template<typename T>
 std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
 
 template<typename T>
-struct fixed_source : public fg::node<fixed_source<T>, fg::PortOutNamed<T, "out">> {
+struct fixed_source : public fg::block<fixed_source<T>, fg::PortOutNamed<T, "out">> {
     T value = 1;
 
     fg::work_return_t
@@ -27,10 +27,10 @@ struct fixed_source : public fg::node<fixed_source<T>, fg::PortOutNamed<T, "out"
     }
 };
 
-static_assert(fair::graph::NodeType<fixed_source<int>>);
+static_assert(fair::graph::BlockType<fixed_source<int>>);
 
 template<typename T>
-struct cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
+struct cout_sink : public fg::block<cout_sink<T>, fg::PortInNamed<T, "in">> {
     std::size_t remaining = 0;
 
     void
@@ -42,7 +42,7 @@ struct cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
     }
 };
 
-static_assert(fair::graph::NodeType<cout_sink<int>>);
+static_assert(fair::graph::BlockType<cout_sink<int>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), remaining);
 
@@ -56,17 +56,17 @@ main() {
     // Adder has sources_count inputs in total, but let's create
     // sources_count / 2 inputs on construction, and change the number
     // via settings
-    auto &adder = flow_graph.add_node(std::make_unique<multi_adder<double>>(sources_count / 2));
-    auto &sink  = flow_graph.make_node<cout_sink<double>>({ { "remaining", events_count } });
+    auto &adder = flow_graph.add_block(std::make_unique<multi_adder<double>>(sources_count / 2));
+    auto &sink  = flow_graph.make_block<cout_sink<double>>({ { "remaining", events_count } });
 
-    // Function that adds a new source node to the graph, and connects
+    // Function that adds a new source block to the graph, and connects
     // it to one of adder's ports
     std::ignore = adder.settings().set({ { "input_port_count", 10 } });
     std::ignore = adder.settings().apply_staged_parameters();
 
     std::vector<fixed_source<double> *> sources;
     for (std::size_t i = 0; i < sources_count; ++i) {
-        auto &source = flow_graph.make_node<fixed_source<double>>();
+        auto &source = flow_graph.make_block<fixed_source<double>>();
         sources.push_back(&source);
         flow_graph.dynamic_connect(source, 0, adder, sources.size() - 1);
     }

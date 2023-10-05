@@ -7,8 +7,8 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 #include "blocklib/core/filter/time_domain_filter.hpp"
+#include <block.hpp>
 #include <fmt/format.h>
-#include <node.hpp>
 
 namespace fg = fair::graph;
 

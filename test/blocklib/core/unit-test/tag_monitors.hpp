@@ -1,7 +1,7 @@
 #ifndef GRAPH_PROTOTYPE_TAG_MONITORS_HPP
 #define GRAPH_PROTOTYPE_TAG_MONITORS_HPP
 
-#include <node.hpp>
+#include <block.hpp>
 #include <reflection.hpp>
 #include <tag.hpp>
 
@@ -80,7 +80,7 @@ equal_tag_lists(const std::vector<tag_t> &tags1, const std::vector<tag_t> &tags2
 }
 
 template<typename T, ProcessFunction UseProcessOne>
-struct TagSource : public node<TagSource<T, UseProcessOne>> {
+struct TagSource : public block<TagSource<T, UseProcessOne>> {
     PortOut<T>         out;
     std::vector<tag_t> tags{};
     std::size_t        next_tag{ 0 };
@@ -138,7 +138,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
 };
 
 template<typename T, ProcessFunction UseProcessOne>
-struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
+struct TagMonitor : public block<TagMonitor<T, UseProcessOne>> {
     PortIn<T>          in;
     PortOut<T>         out;
     std::vector<tag_t> tags{};
@@ -177,7 +177,7 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
 };
 
 template<typename T, ProcessFunction UseProcessOne>
-struct TagSink : public node<TagSink<T, UseProcessOne>> {
+struct TagSink : public block<TagSink<T, UseProcessOne>> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T>                                in;
     std::vector<tag_t>                       tags{};

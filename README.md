@@ -2,7 +2,7 @@
 ![CMake](https://github.com/fair-acc/graph-prototype/workflows/CMake/badge.svg)
 # Graph Prototype
 A small proof-of-concept for evaluating efficient [directed graph](https://en.wikipedia.org/wiki/Directed_graph)-based
-algorithms, notably required node structures, scheduling interfaces, and partial compile-time merging of
+algorithms, notably required block structures, scheduling interfaces, and partial compile-time merging of
 [directed acyclic](https://en.wikipedia.org/wiki/Directed_acyclic_graph) as well as 
 [cyclic graphs](https://en.wikipedia.org/wiki/Feedback_arc_set) (aka. feedback loops).  
 

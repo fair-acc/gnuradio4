@@ -1,19 +1,19 @@
-#ifndef TEST_COMMON_NODES
-#define TEST_COMMON_NODES
+#ifndef TEST_COMMON_BLOCKS
+#define TEST_COMMON_BLOCKS
 
 #include <cstdlib> // std::size_t
 #include <list>
 #include <string>
 #include <string_view>
 
+#include <block.hpp>
 #include <graph.hpp>
-#include <node.hpp>
 #include <reflection.hpp>
 
 using namespace fair::literals;
 
 template<typename T>
-class builtin_multiply : public fair::graph::node<builtin_multiply<T>> {
+class builtin_multiply : public fair::graph::block<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
@@ -38,7 +38,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 
 template<typename T>
-class builtin_counter : public fair::graph::node<builtin_counter<T>> {
+class builtin_counter : public fair::graph::block<builtin_counter<T>> {
 public:
     static std::size_t      s_event_count;
 
@@ -56,11 +56,11 @@ template<typename T>
 std::size_t builtin_counter<T>::s_event_count = 0;
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 
-// TODO: Unify nodes with static and dynamic ports
-//  - Port to fair::graph::node
-//  - use node::set_name instead of returning an empty name
+// TODO: Unify blocks with static and dynamic ports
+//  - Port to fair::graph::block
+//  - use block::set_name instead of returning an empty name
 template<typename T>
-class multi_adder : public fair::graph::node_model {
+class multi_adder : public fair::graph::block_model {
     static std::atomic_size_t _unique_id_counter;
 
 public:
@@ -140,7 +140,7 @@ public:
         return 0_UZ;
     }
 
-    // TODO: integrate with node::work
+    // TODO: integrate with block::work
     fair::graph::work_return_t
     work(std::size_t requested_work) override {
         // TODO: Rewrite with ranges once we can use them
@@ -206,17 +206,17 @@ public:
     }
 };
 
-// static_assert(fair::graph::NodeType<multi_adder<int>>);
+// static_assert(fair::graph::BlockType<multi_adder<int>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(multi_adder, input_port_count);
 
 template<typename Registry>
 void
-                       register_builtin_nodes(Registry *registry) {
+                       register_builtin_blocks(Registry *registry) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    GP_REGISTER_NODE_RUNTIME(registry, builtin_multiply, double, float);
-    GP_REGISTER_NODE_RUNTIME(registry, builtin_counter, double, float);
+    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_multiply, double, float);
+    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_counter, double, float);
 #pragma GCC diagnostic pop
 }
 

@@ -2,10 +2,10 @@
 #define GRAPH_PROTOTYPE_CLOCK_SOURCE_HPP
 
 #include <atomic>
+#include <block.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <iostream>
-#include <node.hpp>
 #include <optional>
 #include <random>
 #include <reflection.hpp>
@@ -25,7 +25,7 @@ template<typename T, fair::meta::fixed_string description = "", typename... Argu
 using A = Annotated<T, description, Arguments...>;
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
-struct ClockSource : public node<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
+struct ClockSource : public block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
 ClockSource Documentation -- add here
 )"">> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();

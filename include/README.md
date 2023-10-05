@@ -12,13 +12,13 @@ continuously improve this document.
 ![graph_core_structure_diagram_light](./assets/graph_core_structure.svg#gh-light-mode-only)
 
 * [(sub-) flow-graph](#Flow-Graph) refers to a collection of interconnected processing elements, often referred to as
-  *blocks*, *nodes* or *vertices*, that perform signal processing operations on data. The graph represents the flow of
+  *blocks*, *blocks* or *vertices*, that perform signal processing operations on data. The graph represents the flow of
   data from one block to another, with blocks performing computations on the data at each step. Each graph may contain
   sub-flow-graphs. For the specific implementation, see [graph.hpp](graph.hpp).
-* [Block/Node/Vertex](#Blocks) is a single processing element that performs a specific signal processing operation
+* [Block/Block/Vertex](#Blocks) is a single processing element that performs a specific signal processing operation
   through a general `work()` function. Blocks are the building blocks of a flow-graph and can be thought of as vertices
   in a graph, and *ports* are their input/output connections to neighboring blocks for data streaming, streaming tags,
-  and asynchronous messages. For the specific implementation, see [node.hpp](node.hpp).
+  and asynchronous messages. For the specific implementation, see [block.hpp](block.hpp).
 * [Port](#Ports) is an interface through which data flows into or out of a block. Each block may have zero, one or
   more input ports, and zero, one or more output ports. Data is passed between blocks by connecting the output Port of
   one block to the input Port of another. For the specific implementation, see [port.hpp](port.hpp).
@@ -45,8 +45,8 @@ at the CppCon'22 conference ([video](https://www.youtube.com/watch?v=jCnBFjkVuN0
 The prototype implementation of the library is available for review [here](https://github.com/stdgraph/graph-v2).
 
 This library implementation goes beyond the graph-vertex-edge functionality provided by `std::graph`, and focuses also
-on the signal-processing related high-performance data-exchange between nodes, scheduling work of each node, and
-highly-efficient signal-processing within each node.
+on the signal-processing related high-performance data-exchange between blocks, scheduling work of each block, and
+highly-efficient signal-processing within each block.
 Nevertheless, while the `std::graph` proposal is still work-in-progess, it is being used to inspire and develop a
 clearer picture w.r.t. the design and relationship between the `graph` and `scheduler` classes to keep in line with
 existing best-practices and -- once P1709 matured and reaches the level as C++ standard -- to retain the option to
@@ -110,14 +110,14 @@ openness to user-defined extensions, makes it a versatile and customizable solut
 
 ### Blocks
 
-*Blocks* interchangeably also referred to as *nodes* or *vertices* implement the specific signal processing operation
-through implementing a generic `work_return_t work() {...}` function. The `node<T>` is the base class for all
-user-defined nodes and implements common convenience functions and some of the default public API through the
+*Blocks* interchangeably also referred to as *blocks* or *vertices* implement the specific signal processing operation
+through implementing a generic `work_return_t work() {...}` function. The `block<T>` is the base class for all
+user-defined blocks and implements common convenience functions and some of the default public API through the
 [Curiously-Recurring-Template-Pattern](https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern) (CRTP).
 For example:
 
 ```cpp
-struct user_defined_block : node<user_defined_block> {
+struct user_defined_block : block<user_defined_block> {
   PortIn<float> in;
   PortOut<float> out;
   // implement either:
@@ -132,7 +132,7 @@ types through templating the input 'T' and return type 'R':
 
 ```cpp
 template<typename T, typename R>
-struct user_defined_block : node<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
+struct user_defined_block : block<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
   // implement either:
   [[nodiscard]] constexpr work_return_t work() noexcept {...}
   // or one of the convenience functions outlined below
@@ -144,14 +144,14 @@ not require virtual functions or inheritance, which can have performance penalti
 contexts).
 *Note: The template parameter `<Derived>` can be dropped once C++23's 'deducing this' is widely supported by compilers.*
 
-The `node<Derived>` implementation provides simple defaults for users who want to focus on generic signal-processing
+The `block<Derived>` implementation provides simple defaults for users who want to focus on generic signal-processing
 algorithms and don't need full flexibility (and complexity) of using the generic `work_return_t work() {...}`.
 The following defaults are defined for one of the two 'user_defined_block' block definitions (WIP):
 
 * **case 1a** - non-decimating N-in->N-out mechanic and automatic handling of streaming tags and settings changes:
   ```cpp
   template<typename T, typename R>
-  struct user_defined_block : node<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
+  struct user_defined_block : block<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
     T _factor = T{1};
     // constuctor setting _factor etc.
 
@@ -165,7 +165,7 @@ The following defaults are defined for one of the two 'user_defined_block' block
   handling of streaming tags and settings changes:
   ```cpp
   template<typename T, typename R>
-  struct user_defined_block : node<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
+  struct user_defined_block : block<user_defined_block, PortIn<T, 0, N_MAX, "in">, PortOut<R, 0, N_MAX, "out">> {
     T _factor = T{1};
     // constuctor setting _factor etc.
 
