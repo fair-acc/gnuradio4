@@ -1,0 +1,11 @@
+add_benchmark(bm_buffer)
+add_benchmark(bm_flowgraph)
+add_benchmark(bm_fft)
+add_benchmark(bm_history_buffer)
+add_benchmark(bm_profiler)
+add_benchmark(bm_scheduler)
+
+add_executable(bm_case1_nosimd bm_node_api.cpp)
+append_compiler_flags(bm_case1_nosimd)
+target_compile_options(bm_case1_nosimd PRIVATE -DDISABLE_SIMD=1)
+target_link_libraries(bm_case1_nosimd PRIVATE gnuradio-options gnuradio-core refl-cpp fmt ut)

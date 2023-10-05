@@ -2,7 +2,6 @@
 #define GRAPH_PROTOTYPE_BENCHMARK_HPP
 
 #include <algorithm>
-#include <boost/ut.hpp>
 #include <charconv>
 #include <chrono>
 #include <iostream>
@@ -13,6 +12,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+
+#include <boost/ut.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
