@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_PLUGIN_H
-#define GRAPH_PROTOTYPE_PLUGIN_H
+#ifndef GNURADIO_PLUGIN_H
+#define GNURADIO_PLUGIN_H
 
 #include <span>
 #include <string>
@@ -10,21 +10,21 @@
 #include "graph.hpp"
 #include "node_registry.hpp"
 
-#include <graph-prototype-plugin_export.h>
+#include <gnuradio-plugin_export.h>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
 #define GP_PLUGIN_CURRENT_ABI_VERSION 1
 
-struct GRAPH_PROTOTYPE_PLUGIN_EXPORT gp_plugin_metadata {
+struct GNURADIO_PLUGIN_EXPORT gp_plugin_metadata {
     std::string_view plugin_name;
     std::string_view plugin_author;
     std::string_view plugin_license;
     std::string_view plugin_version;
 };
 
-class GRAPH_PROTOTYPE_PLUGIN_EXPORT gp_plugin_base {
+class GNURADIO_PLUGIN_EXPORT gp_plugin_base {
 public:
     gp_plugin_metadata *metadata = nullptr;
 
@@ -87,11 +87,11 @@ public:
     } \
     } \
     extern "C" { \
-    void GRAPH_PROTOTYPE_PLUGIN_EXPORT \
+    void GNURADIO_PLUGIN_EXPORT \
     gp_plugin_make(gp_plugin_base **plugin) { \
         *plugin = gp_plugin_instance(); \
     } \
-    void GRAPH_PROTOTYPE_PLUGIN_EXPORT \
+    void GNURADIO_PLUGIN_EXPORT \
     gp_plugin_free(gp_plugin_base *plugin) { \
         if (plugin != gp_plugin_instance()) { \
             assert(false && "Requested to delete something that is not us"); \

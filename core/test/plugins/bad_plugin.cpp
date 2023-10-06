@@ -29,12 +29,12 @@ public:
 } // namespace
 
 extern "C" {
-void GRAPH_PROTOTYPE_PLUGIN_EXPORT
+void GNURADIO_PLUGIN_EXPORT
 gp_plugin_make(gp_plugin_base **plugin) {
     *plugin = nullptr;
 }
 
-void GRAPH_PROTOTYPE_PLUGIN_EXPORT
+void GNURADIO_PLUGIN_EXPORT
 gp_plugin_free(gp_plugin_base *plugin) {
     delete plugin;
 }
