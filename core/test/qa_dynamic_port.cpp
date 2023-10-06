@@ -7,7 +7,8 @@
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
-#include <gnuradio-4.0/utils.hpp>
+
+#include <gnuradio-4.0/meta/utils.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection

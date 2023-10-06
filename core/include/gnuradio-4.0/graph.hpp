@@ -1,12 +1,13 @@
 #ifndef GNURADIO_GRAPH_HPP
 #define GNURADIO_GRAPH_HPP
 
+#include <gnuradio-4.0/meta/typelist.hpp>
+
 #include "buffer.hpp"
 #include "circular_buffer.hpp"
 #include "node.hpp"
 #include "port.hpp"
 #include "sequence.hpp"
-#include "typelist.hpp"
 #include "thread/thread_pool.hpp"
 
 #include <algorithm>

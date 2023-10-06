@@ -2,7 +2,8 @@
 #define GRAPH_PROTOTYPE_SELECTOR_HPP
 
 #include <gnuradio-4.0/node.hpp>
-#include <gnuradio-4.0/utils.hpp>
+
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr::blocks::basic {
 using namespace fair::graph;

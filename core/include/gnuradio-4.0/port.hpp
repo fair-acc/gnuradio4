@@ -5,12 +5,13 @@
 #include <span>
 #include <variant>
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "dataset.hpp"
 #include "node.hpp"
 #include "annotated.hpp"
 #include "circular_buffer.hpp"
 #include "tag.hpp"
-#include "utils.hpp"
 
 namespace fair::graph {
 

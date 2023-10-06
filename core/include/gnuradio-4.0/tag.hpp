@@ -5,8 +5,9 @@
 
 #include <pmtv/pmt.hpp>
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "reflection.hpp"
-#include "utils.hpp"
 
 #ifdef __cpp_lib_hardware_interference_size
 using std::hardware_constructive_interference_size;

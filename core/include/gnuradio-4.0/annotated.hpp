@@ -5,7 +5,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "utils.hpp"
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace fair::graph {
 

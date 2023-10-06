@@ -3,8 +3,6 @@
 
 #include <ranges>
 
-#include <gnuradio-4.0/node.hpp>
-
 #include "fft_types.hpp"
 #include "window.hpp"
 

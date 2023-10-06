@@ -5,6 +5,8 @@
 #include <cmath>
 #include <vector>
 
+#include <fmt/format.h>
+
 #include "fft_types.hpp"
 
 namespace gr::algorithm {

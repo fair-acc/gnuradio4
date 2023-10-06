@@ -10,9 +10,9 @@
 #include <string_view>
 #include <vector>
 
-#include <gnuradio-4.0/utils.hpp>
-
 #include <fmt/format.h>
+
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr::algorithm::window {
 

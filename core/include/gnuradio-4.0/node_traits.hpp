@@ -1,10 +1,11 @@
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "reflection.hpp"
 #include "port.hpp"
 #include "port_traits.hpp"
-#include "utils.hpp"
 
 #include <vir/simd.h>
 

@@ -4,7 +4,7 @@
 #include <atomic>
 #include <cstdint>
 
-#include "utils.hpp"
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace fair::graph {
 

@@ -6,7 +6,8 @@
 
 #include <gnuradio-4.0/node_registry.hpp>
 #include <gnuradio-4.0/plugin_loader.hpp>
-#include <gnuradio-4.0/utils.hpp>
+
+#include <gnuradio-4.0/meta/utils.hpp>
 
 #include <gnuradio-4.0/basic/common_nodes.hpp>
 

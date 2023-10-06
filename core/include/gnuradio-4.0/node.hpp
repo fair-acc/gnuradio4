@@ -4,13 +4,14 @@
 #include <fmt/format.h>
 #include <map>
 
+#include <gnuradio-4.0/meta/typelist.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "node_traits.hpp"
 #include "port.hpp"
 #include "sequence.hpp"
 #include "tag.hpp"
 #include "thread/thread_pool.hpp"
-#include "typelist.hpp"
-#include "utils.hpp"
 
 #include "annotated.hpp" // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include "reflection.hpp"

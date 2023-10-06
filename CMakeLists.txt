@@ -166,4 +166,6 @@ endif ()
 add_subdirectory(bench) # custom ut addon for microbenchmarking
 
 add_subdirectory(core)
+add_subdirectory(meta)
+add_subdirectory(algorithm)
 add_subdirectory(blocks)

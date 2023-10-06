@@ -1,8 +1,9 @@
 #ifndef GNURADIO_NODE_PORT_TRAITS_HPP
 #define GNURADIO_NODE_PORT_TRAITS_HPP
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "port.hpp"
-#include "utils.hpp"
 
 namespace fair::graph::traits::port {
 

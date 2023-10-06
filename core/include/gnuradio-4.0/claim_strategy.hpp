@@ -9,8 +9,9 @@
 #include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "sequence.hpp"
-#include "utils.hpp"
 #include "wait_strategy.hpp"
 
 namespace gr {

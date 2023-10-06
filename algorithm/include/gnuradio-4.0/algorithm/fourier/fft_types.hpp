@@ -1,7 +1,8 @@
 #ifndef GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
 #define GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
 
-#include <gnuradio-4.0/node.hpp>
+#include <type_traits>
+#include <complex>
 
 namespace gr::algorithm {
 template<typename T>

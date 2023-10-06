@@ -3,16 +3,10 @@
 
 #include <fftw3.h>
 
-#include <gnuradio-4.0/dataset.hpp>
-#include <gnuradio-4.0/history_buffer.hpp>
-#include <gnuradio-4.0/node.hpp>
-
 #include "fft_types.hpp"
 #include "window.hpp"
 
 namespace gr::algorithm {
-
-using namespace fair::graph;
 
 template<typename T>
 concept FFTwDoubleType = std::is_same_v<T, std::complex<double>> || std::is_same_v<T, double>;

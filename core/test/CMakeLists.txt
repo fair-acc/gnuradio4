@@ -5,7 +5,7 @@ configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
 
 function(setup_test_no_asan TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
-    target_link_libraries(${TARGET_NAME} PRIVATE gnuradio-options gnuradio-core fmt refl-cpp ut fftw gr-basic gr-demo gr-filter gr-fourier gr-math gr-testing)
+    target_link_libraries(${TARGET_NAME} PRIVATE gnuradio-options gnuradio-core fmt refl-cpp ut fftw gr-basic gr-testing)
     add_test(NAME ${TARGET_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME})
 endfunction()
 
@@ -41,7 +41,6 @@ add_ut_test(qa_settings)
 add_ut_test(qa_tags)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
-add_ut_test(qa_traits)
 
 if (NOT (EMSCRIPTEN OR (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")))
     add_subdirectory(plugins)
@@ -54,5 +53,5 @@ if (NOT (EMSCRIPTEN OR (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")))
     add_app_test(app_plugins_test app_plugins_test.cpp)
 
     add_app_test(app_grc)
-    target_link_libraries(app_grc PRIVATE yaml-cpp::yaml-cpp gr-basic gr-demo gr-filter gr-fourier gr-math gr-testing)
+    target_link_libraries(app_grc PRIVATE yaml-cpp::yaml-cpp gr-basic gr-testing)
 endif ()

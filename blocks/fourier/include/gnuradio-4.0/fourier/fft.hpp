@@ -7,11 +7,11 @@
 #include <gnuradio-4.0/history_buffer.hpp>
 #include <gnuradio-4.0/node.hpp>
 
-#include <gnuradio-4.0/algorithm/fft/fft.hpp>
-#include <gnuradio-4.0/algorithm/fft/fft_common.hpp>
-#include <gnuradio-4.0/algorithm/fft/fft_types.hpp>
-#include <gnuradio-4.0/algorithm/fft/fftw.hpp>
-#include <gnuradio-4.0/algorithm/fft/window.hpp>
+#include <gnuradio-4.0/algorithm/fourier/fft.hpp>
+#include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
+#include <gnuradio-4.0/algorithm/fourier/fft_types.hpp>
+#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
+#include <gnuradio-4.0/algorithm/fourier/window.hpp>
 
 namespace gr::blocks::fft {
 

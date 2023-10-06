@@ -5,8 +5,9 @@
 #include <string>
 #include <string_view>
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "graph.hpp"
-#include "utils.hpp"
 
 namespace fair::graph {
 

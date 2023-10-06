@@ -14,6 +14,8 @@
 
 #include <pmtv/pmt.hpp>
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include "tag.hpp"
 #include "settings.hpp"
 
@@ -21,8 +23,6 @@
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
 #include <fmt/chrono.h>
 #pragma GCC diagnostic pop
-
-#include "utils.hpp"
 
 namespace fair::graph {
 

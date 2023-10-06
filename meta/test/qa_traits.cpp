@@ -1,6 +1,6 @@
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/utils.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace fair::meta {
 
