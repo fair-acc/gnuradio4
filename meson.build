@@ -16,7 +16,6 @@ elif compiler.get_id() == 'clang'
     add_global_arguments(gcc_warnings, language: 'cpp')
 endif
 
-
 fmt_dep = dependency('fmt', version:'8.1.1')
 ut_dep = dependency('boost.ut')
 
@@ -25,7 +24,8 @@ libreflcpp = cmake.subproject('refl-cpp')
 reflcpp_dep = libreflcpp.dependency('refl-cpp')
 libpmtv = subproject('pmt')
 pmt_dep = libpmtv.get_variable('pmt_dep')
-
+libvir = cmake.subproject('vir-simd')
+vir_dep = libvir.dependency('vir-simd')
 
 graph_prototype_options = []
 if meson.is_cross_build()
@@ -58,9 +58,12 @@ config_h_data.set('CMAKE_CXX_COMPILER_VERSION', compiler.version())
 config_h_data.set('ALL_COMPILER_FLAGS', all_compiler_flags)
 configure_file(input : 'cmake/config.h.in', output : 'config.h', configuration : config_h_data)
 
-subdir('include')
-subdir('src')
+subdir('bench')
+subdir('meta')
+subdir('algorithm')
+subdir('core')
+subdir('blocks')
+
 if (get_option('enable_testing'))
-  subdir('test')
-  subdir('bench')
+    subdir('core/test')
 endif
