@@ -10,8 +10,8 @@
 #include "profiler.hpp"
 #include "thread/thread_pool.hpp"
 
-namespace fair::graph::scheduler {
-using fair::thread_pool::BasicThreadPool;
+namespace gr::scheduler {
+using gr::thread_pool::BasicThreadPool;
 
 enum execution_policy { single_threaded, multi_threaded };
 
@@ -21,7 +21,7 @@ template<profiling::Profiler Profiler = profiling::null::profiler>
 class scheduler_base {
 protected:
     SchedulerState                        _state = IDLE;
-    fair::graph::graph                    _graph;
+    gr::graph                             _graph;
     Profiler                              _profiler;
     decltype(_profiler.for_this_thread()) _profiler_handler;
     std::shared_ptr<BasicThreadPool>      _pool;
@@ -30,7 +30,7 @@ protected:
     std::atomic_bool                      _stop_requested;
 
 public:
-    explicit scheduler_base(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+    explicit scheduler_base(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                             const profiling::options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.for_this_thread() }, _pool(std::move(thread_pool)) {}
 
@@ -188,9 +188,9 @@ class simple : public scheduler_base<Profiler> {
     std::vector<std::vector<node_model *>> _job_lists{};
 
 public:
-    explicit simple(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+    explicit simple(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                     const profiling::options &profiling_options = {})
-        : scheduler_base<Profiler>(std::forward<fair::graph::graph>(graph), thread_pool, profiling_options) {}
+        : scheduler_base<Profiler>(std::forward<gr::graph>(graph), thread_pool, profiling_options) {}
 
     void
     init() {
@@ -291,7 +291,7 @@ class breadth_first : public scheduler_base<Profiler> {
     std::vector<std::vector<node_model *>> _job_lists{};
 
 public:
-    explicit breadth_first(fair::graph::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
+    explicit breadth_first(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
                            const profiling::options &profiling_options = {})
         : scheduler_base<Profiler>(std::move(graph), thread_pool, profiling_options) {}
 
@@ -423,6 +423,6 @@ public:
         return _job_lists;
     }
 };
-} // namespace fair::graph::scheduler
+} // namespace gr::scheduler
 
 #endif // GRAPH_PROTOTYPE_SCHEDULER_HPP

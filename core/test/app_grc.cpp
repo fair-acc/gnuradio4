@@ -11,13 +11,13 @@
 #include <gnuradio-4.0/basic/common_nodes.hpp>
 #include <build_configure.hpp>
 
-namespace fg = fair::graph;
+namespace grg = gr;
 
 struct test_context {
     test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
-    fg::node_registry registry;
-    fg::plugin_loader loader;
+    grg::node_registry registry;
+    grg::plugin_loader loader;
 };
 
 int
@@ -42,36 +42,36 @@ main(int argc, char *argv[]) {
 
     // Test the basic graph loading and storing
     {
-        using namespace fair::graph;
+        using namespace gr;
         register_builtin_nodes(&context.registry);
 
         auto graph_source          = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
-        auto graph                 = fg::load_grc(context.loader, graph_source);
-        auto graph_saved_source    = fg::save_grc(graph);
+        auto graph                 = grg::load_grc(context.loader, graph_source);
+        auto graph_saved_source    = grg::save_grc(graph);
 
         auto graph_expected_source = read_file(TESTS_SOURCE_PATH "/grc/test.grc.expected");
         assert(graph_saved_source + "\n"
                == graph_expected_source); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
 
-        fair::graph::scheduler::simple scheduler(std::move(graph));
+        gr::scheduler::simple scheduler(std::move(graph));
         scheduler.run_and_wait();
     }
 
     // Test if we get the same graph when saving it and loading the saved
     // data into another graph
     {
-        using namespace fair::graph;
+        using namespace gr;
         register_builtin_nodes(&context.registry);
 
         auto                  graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
-        auto                  graph_1            = fg::load_grc(context.loader, graph_source);
-        auto                  graph_saved_source = fg::save_grc(graph_1);
+        auto                  graph_1            = grg::load_grc(context.loader, graph_source);
+        auto                  graph_saved_source = grg::save_grc(graph_1);
 
-        auto                  graph_2            = fg::load_grc(context.loader, graph_saved_source);
+        auto                  graph_2            = grg::load_grc(context.loader, graph_saved_source);
 
-        [[maybe_unused]] auto collect_nodes      = [](fg::graph &graph) {
+        [[maybe_unused]] auto collect_nodes      = [](grg::graph &graph) {
             std::set<std::string> result;
             graph.for_each_node([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.type_name())); });
             return result;
@@ -79,7 +79,7 @@ main(int argc, char *argv[]) {
 
         assert(collect_nodes(graph_1) == collect_nodes(graph_2));
 
-        [[maybe_unused]] auto collect_edges = [](fg::graph &graph) {
+        [[maybe_unused]] auto collect_edges = [](grg::graph &graph) {
             std::set<std::string> result;
             graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_node().name(), edge.src_port_index(), edge.dst_node().name(), edge.dst_port_index())); });
             return result;

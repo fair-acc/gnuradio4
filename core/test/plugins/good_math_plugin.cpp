@@ -6,11 +6,11 @@
 GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
-namespace fg = fair::graph;
+namespace grg = gr;
 
 template<typename T>
 auto
-factor(const fair::graph::property_map &params) {
+factor(const gr::property_map &params) {
     T factor = 1;
     if (auto it = params.find("factor"s); it != params.end()) {
         auto &variant = it->second;
@@ -28,20 +28,20 @@ protected:
     T _factor = static_cast<T>(1.0f);
 
 public:
-    fg::PortIn<T, fg::RequiredSamples<1, 1024>>  in;
-    fg::PortOut<T, fg::RequiredSamples<1, 1024>> out;
+    grg::PortIn<T, grg::RequiredSamples<1, 1024>>  in;
+    grg::PortOut<T, grg::RequiredSamples<1, 1024>> out;
 
     math_base() = delete;
 
-    explicit math_base(const fair::graph::property_map &params) : _factor(factor<T>(params)) {}
+    explicit math_base(const gr::property_map &params) : _factor(factor<T>(params)) {}
 };
 
 template<typename T>
-class multiply : public fg::node<multiply<T>>, public math_base<T> {
+class multiply : public grg::node<multiply<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(const V &a) const noexcept {
         return a * math_base<T>::_factor;
@@ -49,11 +49,11 @@ public:
 };
 
 template<typename T>
-class divide : public fg::node<divide<T>>, public math_base<T> {
+class divide : public grg::node<divide<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(const V &a) const noexcept {
         return a / math_base<T>::_factor;

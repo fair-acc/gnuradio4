@@ -190,9 +190,9 @@ The following defaults are defined for one of the two 'user_defined_block' block
     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
     if (n_readable == 0) {
-        return fair::graph::work_return_t::INSUFFICIENT_INPUT_ITEMS;
+        return gr::work_return_t::INSUFFICIENT_INPUT_ITEMS;
     } else if (n_writable == 0) {
-        return fair::graph::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
+        return gr::work_return_t::INSUFFICIENT_OUTPUT_ITEMS;
     }
     const std::size_t n_to_publish = std::min(n_readable, n_writable); // N.B. here enforcing N_input == N_output
 
@@ -204,9 +204,9 @@ The following defaults are defined for one of the two 'user_defined_block' block
     }, n_to_publish);
 
     if (!reader.consume(n_to_publish)) {
-      return fair::graph::work_return_t::ERROR;
+      return gr::work_return_t::ERROR;
     }
-    return fair::graph::work_return_t::OK;
+    return gr::work_return_t::OK;
   }
   ```
 * **case 4**:  Python -> map to cases 1-3 and/or dedicated callback (to-be-implemented)

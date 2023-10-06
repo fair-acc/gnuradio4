@@ -22,12 +22,12 @@
 #include <limits>
 #endif
 
-namespace fair::graph {
+namespace gr {
 
-using namespace fair::literals;
+using namespace gr::literals;
 
 namespace stdx = vir::stdx;
-using fair::meta::fixed_string;
+using gr::meta::fixed_string;
 
 template<typename F>
 constexpr void
@@ -238,8 +238,8 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
  * <ul>
  * <li> <b>case 1a</b> - non-decimating N-in->N-out mechanic and automatic handling of streaming tags and settings changes:
  * @code
- *  fg::IN<T> in;
- *  fg::OUT<R> out;
+ *  gr::IN<T> in;
+ *  gr::OUT<R> out;
  *  T _factor = T{1.0};
  *
  *  [[nodiscard]] constexpr auto process_one(T a) const noexcept {
@@ -267,9 +267,9 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
  *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
  *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
  *     if (n_readable == 0) {
- *         return { 0, fair::graph::work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
+ *         return { 0, gr::work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
  *     } else if (n_writable == 0) {
- *         return { 0, fair::graph::work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
+ *         return { 0, gr::work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS };
  *     }
  *     const std::size_t n_to_publish = std::min(n_readable, n_writable); // N.B. here enforcing N_input == N_output
  *
@@ -281,9 +281,9 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
  *     }, n_to_publish);
  *
  *     if (!reader.consume(n_to_publish)) {
- *         return { n_to_publish, fair::graph::work_return_status_t::ERROR };
+ *         return { n_to_publish, gr::work_return_status_t::ERROR };
  *     }
- *     return { n_to_publish, fair::graph::work_return_status_t::OK };
+ *     return { n_to_publish, gr::work_return_status_t::OK };
  * }
  * @endcode
  * <li> <b>case 4</b>:  Python -> map to cases 1-3 and/or dedicated callback (to-be-implemented)
@@ -297,7 +297,7 @@ static_assert(PublishableSpan<traits::node::detail::dummy_output_span<float>>);
 template<typename Derived, typename... Arguments>
 struct node : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
-    template<typename T, fair::meta::fixed_string description = "", typename... Args>
+    template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A                          = Annotated<T, description, Args...>;
 
     using base_t                     = node<Derived, Arguments...>;
@@ -312,8 +312,8 @@ struct node : protected std::tuple<Arguments...> {
     alignas(hardware_destructive_interference_size) detail::WorkCounter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work_return_status_t> ioLastWorkStatus{ work_return_status_t::OK };
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
-            "node_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
+            "node_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
     A<std::size_t, "numerator", Doc<"top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>>      numerator      = 1_UZ;
@@ -321,8 +321,8 @@ struct node : protected std::tuple<Arguments...> {
     A<std::size_t, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                                                stride         = 0_UZ;
     std::size_t                                                                                                                                                        stride_counter = 0_UZ;
     const std::size_t                                                                                                                                                  unique_id = _unique_id_counter++;
-    const std::string                                                                                              unique_name = fmt::format("{}#{}", fair::meta::type_name<Derived>(), unique_id);
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(fair::meta::type_name<Derived>()) };
+    const std::string                                                                                              unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(gr::meta::type_name<Derived>()) };
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
     constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
 
@@ -470,7 +470,7 @@ public:
     }
 
     void
-    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool_) {
+    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
         progress     = std::move(progress_);
         ioThreadPool = std::move(ioThreadPool_);
         if (const auto forward_parameters = settings().apply_staged_parameters(); !forward_parameters.empty()) {
@@ -496,15 +496,15 @@ public:
         }
     }
 
-    template<fair::meta::array_or_vector_type Container>
+    template<gr::meta::array_or_vector_type Container>
     [[nodiscard]] constexpr std::size_t
     available_input_samples(Container &data) const noexcept {
-        if constexpr (fair::meta::vector_type<Container>) {
+        if constexpr (gr::meta::vector_type<Container>) {
             data.resize(traits::node::input_port_types<Derived>::size);
-        } else if constexpr (fair::meta::array_type<Container>) {
+        } else if constexpr (gr::meta::array_type<Container>) {
             static_assert(std::tuple_size<Container>::value >= traits::node::input_port_types<Derived>::size);
         } else {
-            static_assert(fair::meta::always_false<Container>, "type not supported");
+            static_assert(gr::meta::always_false<Container>, "type not supported");
         }
         meta::tuple_for_each_enumerate(
                 [&data]<typename Port>(auto index, Port &input_port) {
@@ -521,15 +521,15 @@ public:
         return traits::node::input_port_types<Derived>::size;
     }
 
-    template<fair::meta::array_or_vector_type Container>
+    template<gr::meta::array_or_vector_type Container>
     [[nodiscard]] constexpr std::size_t
     available_output_samples(Container &data) const noexcept {
-        if constexpr (fair::meta::vector_type<Container>) {
+        if constexpr (gr::meta::vector_type<Container>) {
             data.resize(traits::node::output_port_types<Derived>::size);
-        } else if constexpr (fair::meta::array_type<Container>) {
+        } else if constexpr (gr::meta::array_type<Container>) {
             static_assert(std::tuple_size<Container>::value >= traits::node::output_port_types<Derived>::size);
         } else {
-            static_assert(fair::meta::always_false<Container>, "type not supported");
+            static_assert(gr::meta::always_false<Container>, "type not supported");
         }
         meta::tuple_for_each_enumerate(
                 [&data]<typename Port>(auto index, Port &output_port) {
@@ -744,7 +744,7 @@ protected:
      */
     work_return_t
     work_internal(std::size_t requested_work) {
-        using fair::graph::work_return_status_t;
+        using gr::work_return_status_t;
         using input_types             = traits::node::input_port_types<Derived>;
         using output_types            = traits::node::output_port_types<Derived>;
 
@@ -1084,7 +1084,7 @@ protected:
             return { requested_work, ports_status.in_samples, success ? work_return_status_t::OK : work_return_status_t::ERROR };
         } // process_one(...) handling
         //        else {
-        //            static_assert(fair::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
+        //            static_assert(gr::meta::always_false<Derived>, "neither process_bulk(...) nor process_one(...) implemented");
         //        }
         return { requested_work, 0_UZ, work_return_status_t::ERROR };
     } // end: work_return_t work_internal() noexcept { ..}
@@ -1169,11 +1169,11 @@ public:
 
 template<typename Derived, typename... Arguments>
 inline std::atomic_size_t node<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
-} // namespace fair::graph
+} // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (fair::graph::node<T, Arguments...>), numerator, denominator, stride, unique_name, name, meta_information);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::node<T, Arguments...>), numerator, denominator, stride, unique_name, name, meta_information);
 
-namespace fair::graph {
+namespace gr {
 
 /**
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
@@ -1189,10 +1189,10 @@ node_description() noexcept {
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
-                                                fair::meta::type_name<DerivedNode>(), Description::value._data,
+                                                gr::meta::type_name<DerivedNode>(), Description::value._data,
                                                 is_blocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
-    fair::meta::typelist<SupportedTypes>::template apply_func([&](std::size_t index, auto &&t) {
-        std::string type_name = fair::meta::type_name<decltype(t)>();
+    gr::meta::typelist<SupportedTypes>::template apply_func([&](std::size_t index, auto &&t) {
+        std::string type_name = gr::meta::type_name<decltype(t)>();
         ret += fmt::format("{}:{} ", index, type_name);
     });
     ret += fmt::format("\n**Parameters:**\n");
@@ -1241,7 +1241,7 @@ class merged_node : public node<merged_node<Left, Right, OutId, InId>, meta::con
 
 public:
     const std::size_t unique_id   = _unique_id_counter++;
-    const std::string unique_name = fmt::format("merged_node<{}:{},{}:{}>#{}", fair::meta::type_name<Left>(), OutId, fair::meta::type_name<Right>(), InId, unique_id);
+    const std::string unique_name = fmt::format("merged_node<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
 private:
     // copy-paste from above, keep in sync
@@ -1426,10 +1426,10 @@ constexpr auto
 merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
     if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
                                   typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-        fair::meta::print_types<fair::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+        gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
                                 typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                                fair::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                                gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
                                 typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
     return { std::forward<A>(a), std::forward<B>(b) };
@@ -1487,13 +1487,13 @@ public:
 };
 } // namespace test
 #endif
-} // namespace fair::graph
+} // namespace gr
 
 #if !DISABLE_SIMD
-ENABLE_REFLECTION(fair::graph::test::copy, in, out);
+ENABLE_REFLECTION(gr::test::copy, in, out);
 #endif
 
-namespace fair::graph {
+namespace gr {
 
 #if !DISABLE_SIMD
 namespace test {
@@ -1536,12 +1536,12 @@ struct register_node {
 };
 } // namespace detail
 
-} // namespace fair::graph
+} // namespace gr
 
 #ifdef FMT_FORMAT_H_
 
 template<>
-struct fmt::formatter<fair::graph::work_return_status_t> {
+struct fmt::formatter<gr::work_return_status_t> {
     static constexpr auto
     parse(const format_parse_context &ctx) {
         const auto it = ctx.begin();
@@ -1551,8 +1551,8 @@ struct fmt::formatter<fair::graph::work_return_status_t> {
 
     template<typename FormatContext>
     auto
-    format(const fair::graph::work_return_status_t &status, FormatContext &ctx) {
-        using enum fair::graph::work_return_status_t;
+    format(const gr::work_return_status_t &status, FormatContext &ctx) {
+        using enum gr::work_return_status_t;
         switch (status) {
         case ERROR: return fmt::format_to(ctx.out(), "ERROR");
         case INSUFFICIENT_OUTPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_OUTPUT_ITEMS");
@@ -1566,7 +1566,7 @@ struct fmt::formatter<fair::graph::work_return_status_t> {
 };
 
 template<>
-struct fmt::formatter<fair::graph::work_return_t> {
+struct fmt::formatter<gr::work_return_t> {
     static constexpr auto
     parse(const format_parse_context &ctx) {
         const auto it = ctx.begin();
@@ -1576,7 +1576,7 @@ struct fmt::formatter<fair::graph::work_return_t> {
 
     template<typename FormatContext>
     auto
-    format(const fair::graph::work_return_t &work_return, FormatContext &ctx) {
+    format(const gr::work_return_t &work_return, FormatContext &ctx) {
         return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
     }
 };

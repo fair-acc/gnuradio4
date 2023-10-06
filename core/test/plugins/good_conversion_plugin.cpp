@@ -6,13 +6,13 @@
 GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
-namespace fg = fair::graph;
+namespace grg = gr;
 
 template<typename From, typename To>
-class convert : public fg::node<convert<From, To>> {
+class convert : public grg::node<convert<From, To>> {
 public:
-    fg::PortIn<From> in;
-    fg::PortOut<To>  out;
+    grg::PortIn<From> in;
+    grg::PortOut<To>  out;
 
     [[nodiscard]] constexpr auto
     process_one(From value) const noexcept {

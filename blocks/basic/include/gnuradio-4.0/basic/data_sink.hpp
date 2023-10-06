@@ -1,18 +1,18 @@
 #ifndef GNURADIO_DATA_SINK_HPP
 #define GNURADIO_DATA_SINK_HPP
 
-#include "circular_buffer.hpp"
-#include "dataset.hpp"
-#include "history_buffer.hpp"
-#include "node.hpp"
-#include "tag.hpp"
+#include <gnuradio-4.0/circular_buffer.hpp>
+#include <gnuradio-4.0/dataset.hpp>
+#include <gnuradio-4.0/history_buffer.hpp>
+#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/tag.hpp>
 
 #include <any>
 #include <chrono>
 #include <deque>
 #include <limits>
 
-namespace fair::graph {
+namespace gr::basic {
 
 enum class blocking_mode { NonBlocking, Blocking };
 
@@ -403,7 +403,7 @@ public:
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<poller>();
-        add_listener(std::make_unique<continuous_listener<fair::meta::null_type>>(handler, block, *this), block);
+        add_listener(std::make_unique<continuous_listener<gr::meta::null_type>>(handler, block, *this), block);
         return handler;
     }
 
@@ -413,7 +413,7 @@ public:
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
-        add_listener(std::make_unique<trigger_listener<fair::meta::null_type, M>>(std::forward<M>(matcher), handler, pre_samples, post_samples, block), block);
+        add_listener(std::make_unique<trigger_listener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, pre_samples, post_samples, block), block);
         ensure_history_size(pre_samples);
         return handler;
     }
@@ -424,7 +424,7 @@ public:
         std::lock_guard lg(_listener_mutex);
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
-        add_listener(std::make_unique<multiplexed_listener<fair::meta::null_type, M>>(std::forward<M>(matcher), maximum_window_size, handler, block), block);
+        add_listener(std::make_unique<multiplexed_listener<gr::meta::null_type, M>>(std::forward<M>(matcher), maximum_window_size, handler, block), block);
         return handler;
     }
 
@@ -434,7 +434,7 @@ public:
         const auto      block   = block_mode == blocking_mode::Blocking;
         auto            handler = std::make_shared<dataset_poller>();
         std::lock_guard lg(_listener_mutex);
-        add_listener(std::make_unique<snapshot_listener<fair::meta::null_type, M>>(std::forward<M>(matcher), delay, handler, block), block);
+        add_listener(std::make_unique<snapshot_listener<gr::meta::null_type, M>>(std::forward<M>(matcher), delay, handler, block), block);
         return handler;
     }
 
@@ -615,7 +615,7 @@ private:
 
     template<typename Callback>
     struct continuous_listener : public abstract_listener {
-        static constexpr auto has_callback        = !std::is_same_v<Callback, fair::meta::null_type>;
+        static constexpr auto has_callback        = !std::is_same_v<Callback, gr::meta::null_type>;
         static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>
                                                  || std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>, const data_sink<T> &>;
 
@@ -651,7 +651,7 @@ private:
 
         void
         process(std::span<const T>, std::span<const T> data, std::optional<property_map> tag_data0) override {
-            using namespace fair::graph::detail;
+            using namespace gr::detail;
 
             if constexpr (has_callback) {
                 // if there's pending data, fill buffer and send out
@@ -774,7 +774,7 @@ private:
 
         inline void
         publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
+            if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -865,7 +865,7 @@ private:
 
         inline void
         publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
+            if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -970,7 +970,7 @@ private:
 
         inline void
         publish_dataset(DataSet<T> &&data) {
-            if constexpr (!std::is_same_v<Callback, fair::meta::null_type>) {
+            if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {
                 auto poller = polling_handler.lock();
@@ -1029,8 +1029,8 @@ private:
     };
 };
 
-} // namespace fair::graph
+} // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink<T>), in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::data_sink<T>), in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
 #endif

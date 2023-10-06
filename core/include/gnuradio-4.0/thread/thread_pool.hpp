@@ -23,7 +23,7 @@
 #include "thread_affinity.hpp"
 #include "../wait_strategy.hpp"
 
-namespace fair::thread_pool {
+namespace gr::thread_pool {
 namespace detail {
 
 // TODO remove all the below and use std when moved to modules // support code from mpunits for basic_fixed_string
@@ -752,6 +752,6 @@ inline std::atomic<uint64_t> BasicThreadPool::_globalPoolId = 0U;
 inline std::atomic<uint64_t> BasicThreadPool::_taskID       = 0U;
 static_assert(ThreadPool<BasicThreadPool>);
 
-} // namespace fair::thread_pool
+} // namespace gr::thread_pool
 
 #endif // THREADPOOL_HPP

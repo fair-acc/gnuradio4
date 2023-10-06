@@ -1,19 +1,17 @@
-#include "benchmark.hpp"
+#include <benchmark.hpp>
 
 #include <barrier>
-#include <boost/ut.hpp>
 #include <chrono>
 #include <iostream>
 #include <thread>
 
 #include <fmt/format.h>
 
-#include <buffer.hpp> // new buffer header interface
-#include <buffer_skeleton.hpp>
-#include <circular_buffer.hpp>
-#include <utils.hpp>
+#include <gnuradio-4.0/buffer.hpp> // new buffer header interface
+#include <gnuradio-4.0/buffer_skeleton.hpp>
+#include <gnuradio-4.0/circular_buffer.hpp>
 
-#include <iostream>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 using namespace gr;
 
@@ -52,8 +50,8 @@ enum class WriteApi { via_lambda, via_split_request_publish_RAII };
 template<WriteApi PublisherAPI = WriteApi::via_lambda, typename T = int>
 void
 testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const std::size_t nProducer, const std::size_t nConsumer, const std::string_view name) {
-    fair::meta::precondition(nProducer > 0);
-    fair::meta::precondition(nConsumer > 0);
+    gr::meta::precondition(nProducer > 0);
+    gr::meta::precondition(nConsumer > 0);
 
     constexpr int n_repeat = 8;
 
@@ -79,7 +77,7 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
 
                         data.publish(vector_length);
                     } else {
-                        static_assert(fair::meta::always_false<T>, "unknown PublisherAPI case");
+                        static_assert(gr::meta::always_false<T>, "unknown PublisherAPI case");
                     }
                     nSamplesProduced += vector_length;
                 }

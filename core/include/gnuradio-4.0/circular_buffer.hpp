@@ -441,7 +441,7 @@ class circular_buffer
                 } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
                     std::invoke(std::forward<Translator>(translator), writable_data, args...);
                 } else {
-                    static_assert(fair::meta::always_false<Translator>, "Translator does not provide a matching signature");
+                    static_assert(gr::meta::always_false<Translator>, "Translator does not provide a matching signature");
                 }
 
                 if (!_is_mmap_allocated) {

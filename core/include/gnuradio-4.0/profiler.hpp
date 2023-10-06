@@ -14,7 +14,7 @@
 
 #include <unistd.h>
 
-namespace fair::graph::profiling {
+namespace gr::profiling {
 
 using arg_value = std::pair<std::string, std::variant<std::string, int, double>>;
 
@@ -453,6 +453,6 @@ public:
     }
 };
 
-} // namespace fair::graph::profiling
+} // namespace gr::profiling
 
 #endif // include guard

@@ -15,7 +15,7 @@
 
 namespace gr::blocks::fft {
 
-using namespace fair::graph;
+using namespace gr;
 
 template<typename T, typename U = DataSet<float>, typename FourierAlgorithm = gr::algorithm::FFT<gr::algorithm::FFTInDataType<T, typename U::value_type>>>
     requires(gr::algorithm::ComplexType<T> || std::floating_point<T> || std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>)
@@ -90,7 +90,7 @@ On the choice of window (mathematically aka. apodisation) functions
     std::vector<value_type>     _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
 
     // settings
-    const std::string                                                                algorithm = fair::meta::type_name<FourierAlgorithm>();
+    const std::string                                                                algorithm = gr::meta::type_name<FourierAlgorithm>();
     Annotated<std::uint32_t, "FFT size", Doc<"FFT size">>                            fftSize{ 1024U };
     Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(gr::algorithm::window::to_string(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
@@ -171,7 +171,7 @@ On the choice of window (mathematically aka. apodisation) functions
         ds.axis_names         = { "Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase" };
         ds.axis_units         = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
         ds.extents            = { dim, static_cast<int32_t>(N) };
-        ds.layout             = fair::graph::layout_right{};
+        ds.layout             = gr::layout_right{};
         ds.signal_names       = { signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name),
                                   fmt::format("Phase({})", signal_name) };
         ds.signal_units       = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };

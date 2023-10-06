@@ -1,17 +1,17 @@
-#include "benchmark.hpp"
+#include <benchmark.hpp>
 
 #include <algorithm>
-#include <boost/ut.hpp>
 #include <functional>
 
-#include "../test/blocklib/core/filter/time_domain_filter.hpp"
-#include "bm_test_helper.hpp"
-#include "scheduler.hpp"
-
-#include <graph.hpp>
-#include <node_traits.hpp>
-
 #include <vir/simd.h>
+
+#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/node_traits.hpp>
+#include <gnuradio-4.0/scheduler.hpp>
+
+#include <gnuradio-4.0/filter/time_domain_filter.hpp>
+#include <gnuradio-4.0/testing/bm_test_helper.hpp>
+
 
 inline constexpr std::size_t N_ITER = 10;
 // inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
@@ -44,10 +44,9 @@ invoke_work(auto &sched) {
 inline const boost::ut::suite _constexpr_bm = [] {
     using namespace boost::ut;
     using namespace benchmark;
-    using fair::graph::merge_by_index;
-    using fair::graph::merge;
+    using gr::merge_by_index;
+    using gr::merge;
     using namespace gr::blocks::filter;
-    namespace fg = fair::graph;
 
     std::vector<float> fir_coeffs(10.f, 0.1f); // box car filter
     std::vector<float> iir_coeffs_b{ 0.55f, 0.f };
@@ -86,55 +85,55 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        fg::graph flow_graph;
+        gr::graph flow_graph;
         auto     &src  = flow_graph.make_node<::test::source<float>>(N_SAMPLES);
         auto     &sink = flow_graph.make_node<::test::sink<float>>();
 
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
-        fg::graph flow_graph;
+        gr::graph flow_graph;
         auto     &src    = flow_graph.make_node<::test::source<float>>(N_SAMPLES);
         auto     &sink   = flow_graph.make_node<::test::sink<float>>();
         auto     &filter = flow_graph.make_node<fir_filter<float>>({ { "b", fir_coeffs } });
 
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->fir_filter->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
-        fg::graph flow_graph;
+        gr::graph flow_graph;
         auto     &src    = flow_graph.make_node<::test::source<float>>(N_SAMPLES);
         auto     &sink   = flow_graph.make_node<::test::sink<float>>();
         auto     &filter = flow_graph.make_node<iir_filter<float, IIRForm::DF_I>>({ { "b", iir_coeffs_b }, { "a", iir_coeffs_a } });
 
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->iir_filter->sink - direct-form I"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
-        fg::graph flow_graph;
+        gr::graph flow_graph;
         auto     &src    = flow_graph.make_node<::test::source<float>>(N_SAMPLES);
         auto     &sink   = flow_graph.make_node<::test::sink<float>>();
         auto     &filter = flow_graph.make_node<iir_filter<float, IIRForm::DF_II>>({ { "b", iir_coeffs_b }, { "a", iir_coeffs_a } });
 
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
-        expect(eq(fg::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect(src, &::test::source<float>::out).to<"in">(filter)));
+        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
 
         "runtime   src->iir_filter->sink - direct-form II"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }

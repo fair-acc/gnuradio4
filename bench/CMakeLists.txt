@@ -1,3 +1,6 @@
+add_library(ut-benchmark INTERFACE benchmark.hpp)
+target_include_directories(ut-benchmark INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
 function(append_compiler_flags TARGET_NAME)
     set(FLAGS_COMMON -Wall)
     if (EMSCRIPTEN)
@@ -13,7 +16,7 @@ endfunction()
 function(add_benchmark BM_NAME)
     add_executable(${BM_NAME} ${BM_NAME}.cpp)
     append_compiler_flags(${BM_NAME})
-    target_link_libraries(${BM_NAME} PRIVATE gnuradio-options gnuradio-core refl-cpp fmt ut fftw)
+    target_link_libraries(${BM_NAME} PRIVATE gnuradio-options fmt ut ut-benchmark)
 endfunction()
 
 add_benchmark(bm_example)

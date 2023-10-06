@@ -16,25 +16,25 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace fg = fair::graph;
+namespace grg = gr;
 
 using namespace std::string_literals;
-using namespace fair::literals;
+using namespace gr::literals;
 
 #ifdef ENABLE_DYNAMIC_PORTS
-class dynamic_node : public fg::node<dynamic_node> {
+class dynamic_node : public grg::node<dynamic_node> {
 public:
-    dynamic_node(std::string name) : fg::node<dynamic_node>(name) {}
+    dynamic_node(std::string name) : grg::node<dynamic_node>(name) {}
 };
 #endif
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>> {
+class scale : public grg::node<scale<T, Scale, R>> {
 public:
-    fg::PortIn<T>  original;
-    fg::PortOut<R> scaled;
+    grg::PortIn<T>  original;
+    grg::PortOut<R> scaled;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
         return a * Scale;
@@ -44,13 +44,13 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>> {
+class adder : public grg::node<adder<T>> {
 public:
-    fg::PortIn<T>  addend0;
-    fg::PortIn<T>  addend1;
-    fg::PortOut<T> sum;
+    grg::PortIn<T>  addend0;
+    grg::PortIn<T>  addend1;
+    grg::PortOut<T> sum;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
         return a + b;
@@ -60,9 +60,9 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>> {
+class cout_sink : public grg::node<cout_sink<T>> {
 public:
-    fg::PortIn<T> sink;
+    grg::PortIn<T> sink;
 
     void
     process_one(T value) {
@@ -70,16 +70,16 @@ public:
     }
 };
 
-static_assert(fair::graph::NodeType<cout_sink<float>>);
+static_assert(gr::NodeType<cout_sink<float>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10_UZ>
-class repeater_source : public fg::node<repeater_source<T, val>> {
+class repeater_source : public grg::node<repeater_source<T, val>> {
 public:
-    fg::PortOut<T> value;
+    grg::PortOut<T> value;
     std::size_t    _counter = 0;
 
-    fair::graph::work_return_t
+    gr::work_return_t
     work(std::size_t requested_work) {
         if (_counter < count) {
             _counter++;
@@ -88,21 +88,21 @@ public:
             data[0]      = val;
             data.publish(1);
 
-            return { requested_work, 1_UZ, fair::graph::work_return_status_t::OK };
+            return { requested_work, 1_UZ, gr::work_return_status_t::OK };
         } else {
-            return { requested_work, 0_UZ, fair::graph::work_return_status_t::DONE };
+            return { requested_work, 0_UZ, gr::work_return_status_t::DONE };
         }
     }
 };
 
-static_assert(fair::graph::NodeType<repeater_source<int, 42>>);
+static_assert(gr::NodeType<repeater_source<int, 42>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
     using namespace boost::ut::literals;
     using boost::ut::expect, boost::ut::eq, boost::ut::ge, boost::ut::nothrow, boost::ut::throws;
     using namespace gr;
-    using namespace fair::graph;
+    using namespace gr;
 
     "PortApi"_test = [] {
         static_assert(PortType<PortIn<float>>);
@@ -166,7 +166,7 @@ const boost::ut::suite PortApiTests = [] {
         using port_direction_t::OUTPUT;
 
         // Nodes need to be alive for as long as the flow is
-        graph flow;
+        grg::graph flow;
 
         // Generators
         auto &answer = flow.make_node<repeater_source<int, 42>>();
@@ -182,7 +182,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        fair::graph::scheduler::simple sched{ std::move(flow) };
+        gr::scheduler::simple sched{ std::move(flow) };
         sched.run_and_wait();
     };
 
@@ -208,7 +208,7 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(sink->dynamic_output_ports().size(), 0U));
         expect(eq(sink->dynamic_input_ports().size(), 3U));
 
-        fg::graph graph;
+        grg::graph graph;
 
         expect(eq(graph.edges_count(), 0U));
 

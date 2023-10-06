@@ -1,10 +1,15 @@
-#include "../test/blocklib/core/fft/fft.hpp"
-#include "benchmark.hpp"
-#include "dataset.hpp"
-#include <algorithm/fft/fft.hpp>
-#include <algorithm/fft/fftw.hpp>
-#include <fmt/format.h>
+#include <benchmark.hpp>
+
 #include <numbers>
+
+#include <fmt/format.h>
+
+#include <gnuradio-4.0/dataset.hpp>
+
+#include <gnuradio-4.0/algorithm/fourier/fft.hpp>
+#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
+
+#include <gnuradio-4.0/fourier/fft.hpp>
 
 /// This custom implementation of FFT is done only for performance comparison with default FFTW implementation.
 /**
@@ -57,7 +62,7 @@ testFFT() {
     using namespace benchmark;
     using namespace boost::ut;
     using namespace boost::ut::reflection;
-    using namespace fair::graph;
+    using namespace gr;
     using namespace gr::algorithm;
 
     constexpr std::uint32_t N{ 1024U }; // must be power of 2
@@ -78,7 +83,7 @@ testFFT() {
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
-            expect(fair::graph::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
+            expect(gr::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
         };
     }
     {
@@ -87,7 +92,7 @@ testFFT() {
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
-            expect(fair::graph::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
+            expect(gr::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
         };
     }
 

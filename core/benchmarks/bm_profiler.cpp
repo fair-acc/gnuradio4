@@ -1,10 +1,8 @@
-#include "benchmark.hpp"
+#include <benchmark.hpp>
 
-#include <profiler.hpp>
+#include <gnuradio-4.0/profiler.hpp>
 
-#include <iostream>
-
-using namespace fair::graph::profiling;
+using namespace gr::profiling;
 
 inline constexpr std::size_t N_ITER    = 7;
 inline constexpr std::size_t N_SAMPLES = 1;

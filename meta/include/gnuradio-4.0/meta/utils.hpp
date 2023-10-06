@@ -25,15 +25,15 @@
 #define DISABLE_SIMD 0
 #endif
 
-namespace fair::literals {
+namespace gr::literals {
 // C++23 has literal suffixes for std::size_t, but we are not
 // in C++23 just yet
 constexpr std::size_t operator"" _UZ(unsigned long long n) { return static_cast<std::size_t>(n); }
-} // namespace fair::literals
+} // namespace gr::literals
 
-namespace fair::meta {
+namespace gr::meta {
 
-using namespace fair::literals;
+using namespace gr::literals;
 
 struct null_type {};
 
@@ -87,7 +87,7 @@ template<typename T>
 struct is_fixed_string : std::false_type {};
 
 template<typename CharT, std::size_t N>
-struct is_fixed_string<fair::meta::fixed_string<CharT, N>> : std::true_type {};
+struct is_fixed_string<gr::meta::fixed_string<CharT, N>> : std::true_type {};
 
 template<typename T>
 concept FixedString = is_fixed_string<T>::value;
@@ -468,6 +468,6 @@ static inline constexpr const std::size_t kCacheLine = std::hardware_destructive
 static inline constexpr const std::size_t kCacheLine = 64;
 #endif
 
-} // namespace fair::meta
+} // namespace gr::meta
 
 #endif // include guard

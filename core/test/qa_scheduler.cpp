@@ -8,7 +8,7 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace fg            = fair::graph;
+namespace grg            = gr;
 
 using trace_vector_type = std::vector<std::string>;
 
@@ -34,7 +34,7 @@ public:
 
 // define some example graph nodes
 template<typename T, std::size_t N>
-class count_source : public fg::node<count_source<T, N>, fg::PortOutNamed<T, "out">> {
+class count_source : public grg::node<count_source<T, N>, grg::PortOutNamed < T, "out">> {
     tracer     &_tracer;
     std::size_t _count = 0;
 
@@ -54,10 +54,10 @@ public:
     }
 };
 
-static_assert(fg::NodeType<count_source<float, 10U>>);
+static_assert(grg::NodeType < count_source < float, 10U >>);
 
 template<typename T, std::int64_t N>
-class expect_sink : public fg::node<expect_sink<T, N>, fg::PortInNamed<T, "in">> {
+class expect_sink : public grg::node<expect_sink<T, N>, grg::PortInNamed < T, "in">> {
     tracer                                         &_tracer;
     std::int64_t                                    _count = 0;
     std::function<void(std::int64_t, std::int64_t)> _checker;
@@ -67,14 +67,14 @@ public:
 
     ~expect_sink() { boost::ut::expect(boost::ut::that % _count == N); }
 
-    [[nodiscard]] fg::work_return_status_t
+    [[nodiscard]] grg::work_return_status_t
     process_bulk(std::span<const T> input) noexcept {
         _tracer.trace(this->name);
         for (auto data : input) {
             _checker(_count, data);
             _count++;
         }
-        return fg::work_return_status_t::OK;
+        return grg::work_return_status_t::OK;
     }
 
     constexpr void
@@ -84,13 +84,13 @@ public:
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public fg::node<scale<T, Scale, R>, fg::PortInNamed<T, "original">, fg::PortOutNamed<R, "scaled">> {
+class scale : public grg::node<scale<T, Scale, R>, grg::PortInNamed < T, "original">, grg::PortOutNamed<R, "scaled">> {
     tracer &_tracer;
 
 public:
     scale(tracer &trace, std::string_view name_) : _tracer{ trace } { this->name = name_; }
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) noexcept {
         _tracer.trace(this->name);
@@ -99,13 +99,13 @@ public:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public fg::node<adder<T>, fg::PortInNamed<T, "addend0">, fg::PortInNamed<T, "addend1">, fg::PortOutNamed<R, "sum">> {
+class adder : public grg::node<adder<T>, grg::PortInNamed < T, "addend0">, grg::PortInNamed<T, "addend1">, grg::PortOutNamed<R, "sum">> {
     tracer &_tracer;
 
 public:
     adder(tracer &trace, std::string_view name_) : _tracer(trace) { this->name = name_; }
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) noexcept {
         _tracer.trace(this->name);
@@ -113,13 +113,13 @@ public:
     }
 };
 
-fair::graph::graph
+gr::graph
 get_graph_linear(tracer &trace) {
-    using fg::port_direction_t::INPUT;
-    using fg::port_direction_t::OUTPUT;
+    using grg::port_direction_t::INPUT;
+    using grg::port_direction_t::OUTPUT;
 
     // Nodes need to be alive for as long as the flow is
-    fg::graph flow;
+    grg::graph flow;
     // Generators
     auto &source1      = flow.make_node<count_source<int, 100000>>(trace, "s1");
     auto &scale_block1 = flow.make_node<scale<int, 2>>(trace, "mult1");
@@ -133,13 +133,13 @@ get_graph_linear(tracer &trace) {
     return flow;
 }
 
-fair::graph::graph
+gr::graph
 get_graph_parallel(tracer &trace) {
-    using fg::port_direction_t::INPUT;
-    using fg::port_direction_t::OUTPUT;
+    using grg::port_direction_t::INPUT;
+    using grg::port_direction_t::OUTPUT;
 
     // Nodes need to be alive for as long as the flow is
-    fg::graph flow;
+    grg::graph flow;
     // Generators
     auto &source1       = flow.make_node<count_source<int, 100000>>(trace, "s1");
     auto &scale_block1a = flow.make_node<scale<int, 2>>(trace, "mult1a");
@@ -175,13 +175,13 @@ get_graph_parallel(tracer &trace) {
  * │           │
  * └───────────┘
  */
-fair::graph::graph
+gr::graph
 get_graph_scaled_sum(tracer &trace) {
-    using fg::port_direction_t::INPUT;
-    using fg::port_direction_t::OUTPUT;
+    using grg::port_direction_t::INPUT;
+    using grg::port_direction_t::OUTPUT;
 
     // Nodes need to be alive for as long as the flow is
-    fg::graph flow;
+    grg::graph flow;
 
     // Generators
     auto &source1     = flow.make_node<count_source<int, 100000>>(trace, "s1");
@@ -209,11 +209,11 @@ check_node_names(const std::vector<node_type> &joblist, std::set<std::string> se
 
 const boost::ut::suite SchedulerTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    auto thread_pool              = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
+    using namespace gr;
+    auto thread_pool              = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     "SimpleScheduler_linear"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::simple<>;
+        using scheduler = gr::scheduler::simple<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
         sched.run_and_wait();
@@ -223,7 +223,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_linear"_test = [&] {
-        using scheduler = fair::graph::scheduler::breadth_first<>;
+        using scheduler = gr::scheduler::breadth_first<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
         sched.run_and_wait();
@@ -233,7 +233,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "SimpleScheduler_parallel"_test = [&] {
-        using scheduler = fair::graph::scheduler::simple<>;
+        using scheduler = gr::scheduler::simple<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
         sched.run_and_wait();
@@ -243,7 +243,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_parallel"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::breadth_first<>;
+        using scheduler = gr::scheduler::breadth_first<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
         sched.run_and_wait();
@@ -269,7 +269,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "SimpleScheduler_scaled_sum"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::simple<>;
+        using scheduler = gr::scheduler::simple<>;
         // construct an example graph and get an adjacency list for it
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
@@ -280,7 +280,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_scaled_sum"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::breadth_first<>;
+        using scheduler = gr::scheduler::breadth_first<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
         sched.run_and_wait();
@@ -290,7 +290,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "SimpleScheduler_linear_multi_threaded"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::simple<fg::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::simple<grg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
         sched.run_and_wait();
@@ -299,7 +299,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_linear_multi_threaded"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::breadth_first<fg::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::breadth_first<grg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
         sched.init();
@@ -312,7 +312,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "SimpleScheduler_parallel_multi_threaded"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::simple<fg::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::simple<grg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
         sched.run_and_wait();
@@ -321,7 +321,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_parallel_multi_threaded"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::breadth_first<fg::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::breadth_first<grg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
         sched.init();
@@ -334,7 +334,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "SimpleScheduler_scaled_sum_multi_threaded"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::simple<fg::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::simple<grg::scheduler::execution_policy::multi_threaded>;
         // construct an example graph and get an adjacency list for it
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
@@ -344,7 +344,7 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_scaled_sum_multi_threaded"_test = [&thread_pool] {
-        using scheduler = fair::graph::scheduler::breadth_first<fg::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::breadth_first<grg::scheduler::execution_policy::multi_threaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
         sched.init();

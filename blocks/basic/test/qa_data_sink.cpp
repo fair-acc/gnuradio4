@@ -11,7 +11,7 @@
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
-#include <gnuradio-4.0/data_sink.hpp>
+#include <gnuradio-4.0/basic/data_sink.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -20,7 +20,7 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 template<>
-struct fmt::formatter<fair::graph::tag_t> {
+struct fmt::formatter<gr::tag_t> {
     template<typename ParseContext>
     constexpr auto
     parse(ParseContext &ctx) {
@@ -29,12 +29,12 @@ struct fmt::formatter<fair::graph::tag_t> {
 
     template<typename FormatContext>
     constexpr auto
-    format(const fair::graph::tag_t &tag, FormatContext &ctx) const {
+    format(const gr::tag_t &tag, FormatContext &ctx) const {
         return fmt::format_to(ctx.out(), "{}", tag.index);
     }
 };
 
-namespace fair::graph::data_sink_test {
+namespace gr::basic::data_sink_test {
 
 template<typename T>
 struct Source : public node<Source<T>> {
@@ -50,7 +50,7 @@ struct Source : public node<Source<T>> {
     void
     settings_changed(const property_map &, const property_map &) {
         // optional init function that is called after construction and whenever settings change
-        fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
+        gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
     }
 
     constexpr std::make_signed_t<std::size_t>
@@ -207,9 +207,9 @@ run_matcher_test(std::span<const tag_t> tags, M o) {
     return to_ascii_art(r);
 }
 
-} // namespace fair::graph::data_sink_test
+} // namespace gr::data_sink_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::data_sink_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::data_sink_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
 
 template<typename T>
 std::string
@@ -228,8 +228,9 @@ indexes_match(const T &lhs, const U &rhs) {
 const boost::ut::suite DataSinkTests = [] {
     using namespace boost::ut;
     using namespace gr;
-    using namespace fair::graph;
-    using namespace fair::graph::data_sink_test;
+    using namespace gr::basic;
+    using namespace gr::basic::data_sink_test;
+    using namespace gr::literals;
     using namespace std::string_literals;
 
     "callback continuous mode"_test = [] {
@@ -238,7 +239,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto                    src_tags   = make_test_tags(0, 1000);
 
-        graph                         flow_graph;
+        gr::graph              flow_graph;
         auto                         &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto                         &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
         src.tags                           = src_tags;
@@ -299,7 +300,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags));
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags_and_sink));
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -315,7 +316,7 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking polling continuous mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        graph                  flow_graph;
+        gr::graph       flow_graph;
         const auto             tags = make_test_tags(0, 1000);
         auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         src.tags                    = tags;
@@ -361,7 +362,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received, received_tags);
         });
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -384,7 +385,7 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking polling trigger mode non-overlapping"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        graph                  flow_graph;
+        gr::graph       flow_graph;
         auto                  &src  = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
         const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
@@ -428,7 +429,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received_data, received_tags);
         });
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -446,7 +447,7 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking snapshot mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        graph                  flow_graph;
+        gr::graph       flow_graph;
         auto                  &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags                   = { { 0,
                                          { { std::string(tag::SIGNAL_NAME.key()), "test signal" },
@@ -501,7 +502,7 @@ const boost::ut::suite DataSinkTests = [] {
             return received_data;
         });
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -516,7 +517,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto         tags      = make_test_tags(0, 10000);
 
         const std::int32_t n_samples = static_cast<std::int32_t>(tags.size() * 10000 + 100000);
-        graph              flow_graph;
+        gr::graph   flow_graph;
         auto              &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags               = tags;
         auto &sink             = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" } });
@@ -583,7 +584,7 @@ const boost::ut::suite DataSinkTests = [] {
             results.push_back(std::move(f));
         }
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -598,7 +599,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples  = 150000;
         constexpr std::size_t  n_triggers = 300;
 
-        graph                  flow_graph;
+        gr::graph       flow_graph;
         auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
@@ -636,7 +637,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received_data, received_tags);
         });
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -653,7 +654,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples  = 150000;
         constexpr std::size_t  n_triggers = 300;
 
-        graph                  flow_graph;
+        gr::graph       flow_graph;
         auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
@@ -678,7 +679,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         data_sink_registry::instance().register_trigger_callback<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, callback);
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -692,7 +693,7 @@ const boost::ut::suite DataSinkTests = [] {
     "non-blocking polling continuous mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        graph                  flow_graph;
+        gr::graph       flow_graph;
         auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         auto                  &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
 
@@ -720,7 +721,7 @@ const boost::ut::suite DataSinkTests = [] {
             return samples_seen;
         });
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this

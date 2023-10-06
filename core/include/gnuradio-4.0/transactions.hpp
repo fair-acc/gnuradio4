@@ -24,7 +24,7 @@
 #include <fmt/chrono.h>
 #pragma GCC diagnostic pop
 
-namespace fair::graph {
+namespace gr {
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
@@ -69,7 +69,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                                 auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
                                     if (str.starts_with(prefix)) {
                                         str.remove_prefix(prefix.size());
@@ -87,7 +87,7 @@ public:
                         }
                         refl::util::for_each(refl::reflect<Node>().members, iterate_over_member);
                     },
-                    fair::graph::tag::DEFAULT_TAGS);
+                    gr::tag::DEFAULT_TAGS);
 
             // handle meta-information for UI and other non-processing-related purposes
             auto iterate_over_member = [&]<typename Member>(Member member) {
@@ -167,7 +167,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -225,7 +225,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>) ) {
+                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             settings_base::_changed.store(true);
@@ -303,7 +303,7 @@ public:
             }
 
             // check if reset of settings should be performed
-            if (_staged.contains(fair::graph::tag::RESET_DEFAULTS)) {
+            if (_staged.contains(gr::tag::RESET_DEFAULTS)) {
                 _staged.clear();
                 reset_defaults();
             }
@@ -376,12 +376,12 @@ public:
                 }
             }
 
-            if (_staged.contains(fair::graph::tag::STORE_DEFAULTS)) {
+            if (_staged.contains(gr::tag::STORE_DEFAULTS)) {
                 store_defaults();
             }
 
             if constexpr (HasSettingsResetCallback<Node>) {
-                if (_staged.contains(fair::graph::tag::RESET_DEFAULTS)) {
+                if (_staged.contains(gr::tag::RESET_DEFAULTS)) {
                     _node->reset();
                 }
             }
@@ -447,7 +447,7 @@ private:
     template<typename Type>
     inline constexpr static bool
     is_supported_type() {
-        return std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || fair::meta::vector_type<Type>;
+        return std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>;
     }
 
     template<typename NodeType, typename Func>
@@ -462,6 +462,6 @@ private:
 
 static_assert(Settings<ctx_settings<int>>);
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // GRAPH_PROTOTYPE_TRANSACTIONS_HPP

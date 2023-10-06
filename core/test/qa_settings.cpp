@@ -37,7 +37,7 @@ struct fmt::formatter<std::complex<T>> {
     }
 };
 
-namespace fair::graph::setting_test {
+namespace gr::setting_test {
 
 namespace utils {
 
@@ -58,7 +58,7 @@ format_variant(const auto &value) noexcept {
                                      || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
                     return fmt::format("[{}]", fmt::join(arg, ", "));
                 } else {
-                    return fmt::format("not-yet-supported type {}", fair::meta::type_name<Type>());
+                    return fmt::format("not-yet-supported type {}", gr::meta::type_name<Type>());
                 }
             },
             value);
@@ -101,7 +101,7 @@ struct Source : public node<Source<T>> {
     void
     settings_changed(const property_map & /*old_settings*/, property_map & /*new_settings*/) {
         // optional init function that is called after construction and whenever settings change
-        fair::graph::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t>(n_tag_offset));
+        gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t>(n_tag_offset));
     }
 
     constexpr std::make_signed_t<std::size_t>
@@ -119,7 +119,7 @@ struct Source : public node<Source<T>> {
 };
 
 // optional shortening
-template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
+template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
 using A            = Annotated<T, description, Arguments...>;
 
 using TestBlockDoc = Doc<R""(
@@ -157,7 +157,7 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
         resetCalled = true;
     }
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
     process_one(const V &a) const noexcept {
         return a * scaling_factor;
@@ -178,9 +178,9 @@ struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double
 
     void
     settings_changed(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
-        if (new_settings.contains(std::string(fair::graph::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
+        if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
             const float fwdSampleRate                                           = sample_rate / static_cast<float>(this->denominator);
-            fwd_settings[std::string(fair::graph::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
+            fwd_settings[std::string(gr::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
         }
     }
 
@@ -218,7 +218,7 @@ struct Sink : public node<Sink<T>> {
     int64_t      last_tag_position  = -1;
     float        sample_rate        = -1.0f;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V) noexcept {
         // alt: optional user-level tag processing
@@ -234,24 +234,24 @@ struct Sink : public node<Sink<T>> {
         }
         */
 
-        if constexpr (fair::meta::any_simd<V>) {
+        if constexpr (gr::meta::any_simd<V>) {
             n_samples_consumed += static_cast<std::int32_t>(V::size());
         } else {
             n_samples_consumed++;
         }
     }
 };
-} // namespace fair::graph::setting_test
+} // namespace gr::setting_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (fair::graph::setting_test::Decimate<T, Average>), in, out, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fair::graph::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
 
 const boost::ut::suite SettingsTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using namespace fair::graph::setting_test;
+    using namespace gr;
+    using namespace gr::setting_test;
     using namespace std::string_view_literals;
 
     "basic node settings tag"_test = [] {
@@ -305,8 +305,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
 
-        auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
-        fair::graph::scheduler::simple sched{ std::move(flow_graph), thread_pool };
+        auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
+        gr::scheduler::simple sched{ std::move(flow_graph), thread_pool };
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
         std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
         sched.run_and_wait();
@@ -396,7 +396,7 @@ const boost::ut::suite SettingsTests = [] {
 
     "run-time type-erased node setter/getter"_test = [] {
         auto progress     = std::make_shared<gr::Sequence>();
-        auto ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>("test_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+        auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
         //
         auto wrapped1 = node_wrapper<TestBlock<float>>();
         wrapped1.init(progress, ioThreadPool);
@@ -435,7 +435,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
 
-        fair::graph::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(flow_graph) };
         sched.run_and_wait();
 
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
@@ -483,14 +483,14 @@ const boost::ut::suite SettingsTests = [] {
 
 const boost::ut::suite AnnotationTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using namespace fair::graph::setting_test;
+    using namespace gr;
+    using namespace gr::setting_test;
     using namespace std::literals;
 
     "basic node annotations"_test = [] {
         graph             flow_graph;
         TestBlock<float> &block = flow_graph.make_node<TestBlock<float>>();
-        expect(fair::graph::node_description<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
+        expect(gr::node_description<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
         expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlockDoc::value))) << "type-erased block description";
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::documentation")), "y = a * x"sv));
@@ -527,14 +527,14 @@ const boost::ut::suite AnnotationTests = [] {
         std::ignore = block.settings().set({ { "sample_rate", -1.0f } });
         std::ignore = block.settings().apply_staged_parameters(); // should print out a warning -> TODO: replace with pmt error message on msgOut port
 
-        // fmt::print("description:\n {}", fair::graph::node_description<TestBlock<float>>());
+        // fmt::print("description:\n {}", gr::node_description<TestBlock<float>>());
     };
 };
 
 const boost::ut::suite SettingsCtxTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using namespace fair::graph::setting_test;
+    using namespace gr;
+    using namespace gr::setting_test;
 
     "SettingsCtx basic"_test = [] {
         SettingsCtx a;
@@ -549,8 +549,8 @@ const boost::ut::suite SettingsCtxTests = [] {
 
 const boost::ut::suite TransactionTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using namespace fair::graph::setting_test;
+    using namespace gr;
+    using namespace gr::setting_test;
 
     "CtxSettings"_test = [] {
         graph flow_graph;

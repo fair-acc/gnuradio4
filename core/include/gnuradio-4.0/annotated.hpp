@@ -7,15 +7,15 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-namespace fair::graph {
+namespace gr {
 
 /**
  * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
  * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
  */
-template<fair::meta::fixed_string doc_string>
+template<gr::meta::fixed_string doc_string>
 struct Doc {
-    static constexpr fair::meta::fixed_string value = doc_string;
+    static constexpr gr::meta::fixed_string value = doc_string;
 };
 
 using EmptyDoc = Doc<"">; // nomen-est-omen
@@ -23,7 +23,7 @@ using EmptyDoc = Doc<"">; // nomen-est-omen
 template<typename T>
 struct is_doc : std::false_type {};
 
-template<fair::meta::fixed_string N>
+template<gr::meta::fixed_string N>
 struct is_doc<Doc<N>> : std::true_type {};
 
 template<typename T>
@@ -33,9 +33,9 @@ concept Documentation = is_doc<T>::value;
  * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
  * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
  */
-template<fair::meta::fixed_string doc_string>
+template<gr::meta::fixed_string doc_string>
 struct Unit {
-    static constexpr fair::meta::fixed_string value = doc_string;
+    static constexpr gr::meta::fixed_string value = doc_string;
 };
 
 using EmptyUnit = Unit<"">; // nomen-est-omen
@@ -43,7 +43,7 @@ using EmptyUnit = Unit<"">; // nomen-est-omen
 template<typename T>
 struct is_unit : std::false_type {};
 
-template<fair::meta::fixed_string N>
+template<gr::meta::fixed_string N>
 struct is_unit<Unit<N>> : std::true_type {};
 
 template<typename T>
@@ -91,8 +91,8 @@ struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
 
 using DefaultSupportedTypes = SupportedTypes<>;
 
-static_assert(fair::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
-static_assert(fair::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
+static_assert(gr::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
+static_assert(gr::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
 
 /**
  * @brief Represents limits and optional validation for an Annotated<..> type.
@@ -166,10 +166,10 @@ static_assert(Limit<EmptyLimit>);
  * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
  * The meta-information is supplied as template parameters.
  */
-template<typename T, fair::meta::fixed_string description_ = "", typename... Arguments>
+template<typename T, gr::meta::fixed_string description_ = "", typename... Arguments>
 struct Annotated {
     using value_type = T;
-    using LimitType  = typename fair::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
+    using LimitType  = typename gr::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
     T value;
 
     Annotated() = default;
@@ -254,27 +254,27 @@ struct Annotated {
 
     static constexpr std::string_view
     documentation() noexcept {
-        using Documentation = typename fair::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
+        using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
         return std::string_view{ Documentation::value };
     }
 
     static constexpr std::string_view
     unit() noexcept {
-        using PhysicalUnit = typename fair::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
+        using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
         return std::string_view{ PhysicalUnit::value };
     }
 
     static constexpr bool
     visible() noexcept {
-        return fair::meta::typelist<Arguments...>::template contains<Visible>;
+        return gr::meta::typelist<Arguments...>::template contains<Visible>;
     }
 };
 
 template<typename T>
 struct is_annotated : std::false_type {};
 
-template<typename T, fair::meta::fixed_string str, typename... Args>
-struct is_annotated<fair::graph::Annotated<T, str, Args...>> : std::true_type {};
+template<typename T, gr::meta::fixed_string str, typename... Args>
+struct is_annotated<gr::Annotated<T, str, Args...>> : std::true_type {};
 
 template<typename T>
 concept AnnotatedType = is_annotated<T>::value;
@@ -284,8 +284,8 @@ struct unwrap_if_wrapped {
     using type = T;
 };
 
-template<typename U, fair::meta::fixed_string str, typename... Args>
-struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
+template<typename U, gr::meta::fixed_string str, typename... Args>
+struct unwrap_if_wrapped<gr::Annotated<U, str, Args...>> {
     using type = U;
 };
 
@@ -296,18 +296,18 @@ struct unwrap_if_wrapped<fair::graph::Annotated<U, str, Args...>> {
 template<typename T>
 using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
 
-} // namespace fair::graph
+} // namespace gr
 
 template<typename... Ts>
-struct fair::meta::typelist<fair::graph::SupportedTypes<Ts...>> : fair::meta::typelist<Ts...> {};
+struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
 
 #ifdef FMT_FORMAT_H_
 
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 
-template<typename T, fair::meta::fixed_string description, typename... Arguments>
-struct fmt::formatter<fair::graph::Annotated<T, description, Arguments...>> {
+template<typename T, gr::meta::fixed_string description, typename... Arguments>
+struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
     fmt::formatter<T> value_formatter;
 
     template<typename FormatContext>
@@ -318,16 +318,16 @@ struct fmt::formatter<fair::graph::Annotated<T, description, Arguments...>> {
 
     template<typename FormatContext>
     auto
-    format(const fair::graph::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+    format(const gr::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
         // TODO: add switch for printing only brief and/or meta-information
         return value_formatter.format(annotated.value, ctx);
     }
 };
 
 namespace gr {
-template<typename T, fair::meta::fixed_string description, typename... Arguments>
+template<typename T, gr::meta::fixed_string description, typename... Arguments>
 inline std::ostream &
-operator<<(std::ostream &os, const fair::graph::Annotated<T, description, Arguments...> &v) {
+operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &v) {
     // TODO: add switch for printing only brief and/or meta-information
     return os << fmt::format("{}", v.value);
 }

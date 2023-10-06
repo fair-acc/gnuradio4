@@ -36,15 +36,15 @@ public:
 
     virtual std::span<const std::string>
     provided_nodes() const = 0;
-    virtual std::unique_ptr<fair::graph::node_model>
-    create_node(std::string_view name, std::string_view type, const fair::graph::property_map &params) = 0;
+    virtual std::unique_ptr<gr::node_model>
+    create_node(std::string_view name, std::string_view type, const gr::property_map &params) = 0;
 };
 
-namespace fair::graph {
+namespace gr {
 template<std::uint8_t ABI_VERSION = GP_PLUGIN_CURRENT_ABI_VERSION>
 class plugin : public gp_plugin_base {
 private:
-    fair::graph::node_registry registry;
+    gr::node_registry registry;
 
 public:
     plugin() {}
@@ -59,7 +59,7 @@ public:
         return registry.provided_nodes();
     }
 
-    std::unique_ptr<fair::graph::node_model>
+    std::unique_ptr<gr::node_model>
     create_node(std::string_view name, std::string_view type, const property_map &params) override {
         return registry.create_node(name, type, params);
     }
@@ -71,14 +71,14 @@ public:
     }
 };
 
-} // namespace fair::graph
+} // namespace gr
 
 #define GP_PLUGIN(Name, Author, License, Version) \
     inline namespace GP_PLUGIN_DEFINITION_NAMESPACE { \
-    fair::graph::plugin<> * \
+    gr::plugin<> * \
     gp_plugin_instance() { \
-        static fair::graph::plugin<> *instance = [] { \
-            auto                     *result = new fair::graph::plugin<>(); \
+        static gr::plugin<> *instance = [] { \
+            auto                     *result = new gr::plugin<>(); \
             static gp_plugin_metadata plugin_metadata{ Name, Author, License, Version }; \
             result->metadata = &plugin_metadata; \
             return result; \

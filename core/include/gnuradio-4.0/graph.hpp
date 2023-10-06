@@ -31,13 +31,13 @@
 #endif
 #endif
 
-namespace fair::graph {
+namespace gr {
 
-using namespace fair::literals;
+using namespace gr::literals;
 
 class node_model {
 protected:
-    using dynamic_ports                         = std::vector<fair::graph::dynamic_port>;
+    using dynamic_ports                         = std::vector<gr::dynamic_port>;
     bool                  _dynamic_ports_loaded = false;
     std::function<void()> _dynamic_ports_loader;
     dynamic_ports         _dynamic_input_ports;
@@ -60,13 +60,13 @@ public:
         if (!_dynamic_ports_loaded) _dynamic_ports_loader();
     }
 
-    fair::graph::dynamic_port &
+    gr::dynamic_port &
     dynamic_input_port(std::size_t index) {
         init_dynamic_ports();
         return _dynamic_input_ports.at(index);
     }
 
-    fair::graph::dynamic_port &
+    gr::dynamic_port &
     dynamic_output_port(std::size_t index) {
         init_dynamic_ports();
         return _dynamic_output_ports.at(index);
@@ -90,7 +90,7 @@ public:
      * @brief to be called by scheduler->graph to initialise block
      */
     virtual void
-    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool)
+    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool)
             = 0;
 
     /**
@@ -172,7 +172,7 @@ class node_wrapper : public node_model {
 private:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
     T           _node;
-    std::string _type_name = fair::meta::type_name<T>();
+    std::string _type_name = gr::meta::type_name<T>();
 
     [[nodiscard]] constexpr const auto &
     node_ref() const noexcept {
@@ -201,7 +201,7 @@ private:
 
             auto register_port = []<typename PortOrCollection>(PortOrCollection &port_or_collection, auto &where) {
                 auto process_port = [&where]<typename Port> (Port& port) {
-                    where.push_back(fair::graph::dynamic_port(port, dynamic_port::non_owned_reference_tag{}));
+                    where.push_back(gr::dynamic_port(port, dynamic_port::non_owned_reference_tag{}));
                 };
 
                 if constexpr (traits::port::is_port_v<PortOrCollection>) {
@@ -214,14 +214,14 @@ private:
                 }
             };
 
-            constexpr std::size_t input_port_count = fair::graph::traits::node::template input_port_types<Node>::size;
+            constexpr std::size_t input_port_count = gr::traits::node::template input_port_types<Node>::size;
             [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
-                (register_port(fair::graph::input_port<Is>(&node_ref()), this->_dynamic_input_ports), ...);
+                (register_port(gr::input_port<Is>(&node_ref()), this->_dynamic_input_ports), ...);
             }(std::make_index_sequence<input_port_count>());
 
-            constexpr std::size_t output_port_count = fair::graph::traits::node::template output_port_types<Node>::size;
+            constexpr std::size_t output_port_count = gr::traits::node::template output_port_types<Node>::size;
             [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
-                (register_port(fair::graph::output_port<Is>(&node_ref()), this->_dynamic_output_ports), ...);
+                (register_port(gr::output_port<Is>(&node_ref()), this->_dynamic_output_ports), ...);
             }(std::make_index_sequence<output_port_count>());
 
             static_assert(input_port_count + output_port_count > 0);
@@ -262,7 +262,7 @@ public:
     }
 
     void
-    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool) override {
+    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
         return node_ref().init(progress, ioThreadPool);
     }
 
@@ -401,8 +401,8 @@ public:
 
 struct graph {
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<fair::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<fair::thread_pool::BasicThreadPool>(
-            "graph_thread_pool", fair::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
+            "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
 private:
     std::vector<std::function<connection_result_t(graph &)>> _connection_definitions;
@@ -689,6 +689,6 @@ this_source_location() {
 }
 #endif // HAVE_SOURCE_LOCATION
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // include guard

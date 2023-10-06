@@ -8,7 +8,7 @@
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
-namespace fair::graph::tag_test {
+namespace gr::testing {
 
 enum class ProcessFunction {
     USE_PROCESS_ONE  = 0, ///
@@ -96,7 +96,7 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
             tag_t::signed_index_type nextTagIn = next_tag < tags.size() ? tags[next_tag].index - n_samples_produced : n_samples_max - n_samples_produced;
             return n_samples_produced < n_samples_max ? std::max(1L, nextTagIn) : -1L; // '-1L' -> DONE, produced enough samples
         } else {
-            static_assert(fair::meta::always_false<T>, "ProcessFunction-type not handled");
+            static_assert(gr::meta::always_false<T>, "ProcessFunction-type not handled");
         }
     }
 
@@ -185,7 +185,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     std::chrono::time_point<ClockSourceType> timeFirstSample = ClockSourceType::now();
     std::chrono::time_point<ClockSourceType> timeLastSample  = ClockSourceType::now();
 
-    // template<fair::meta::t_or_simd<T> V>
+    // template<gr::meta::t_or_simd<T> V>
     constexpr void
     process_one(const T &) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
@@ -203,7 +203,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
         timeLastSample = ClockSourceType::now();
     }
 
-    // template<fair::meta::t_or_simd<T> V>
+    // template<gr::meta::t_or_simd<T> V>
     constexpr work_return_status_t
     process_bulk(std::span<const T> input) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
@@ -230,13 +230,13 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     }
 };
 
-} // namespace fair::graph::tag_test
+} // namespace gr::tag_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagSource<T, b>), out, n_samples_max);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagMonitor<T, b>), in, out);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, fair::graph::tag_test::ProcessFunction b), (fair::graph::tag_test::TagSink<T, b>), in);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in);
 
-namespace fair::graph::tag_test {
+namespace gr::testing {
 // the concepts can only work as expected after ENABLE_REFLECTION_FOR_TEMPLATE_FULL
 static_assert(HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
 static_assert(not HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
@@ -254,6 +254,6 @@ static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PR
 
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>);
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
-} // namespace fair::graph::tag_test
+} // namespace gr::testing
 
 #endif // GRAPH_PROTOTYPE_TAG_MONITORS_HPP
