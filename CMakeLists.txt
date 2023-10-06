@@ -128,14 +128,6 @@ target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include ${PROJE
 target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
 
-# configure a header file to pass the CMake settings to the source code
-configure_file("${PROJECT_SOURCE_DIR}/cmake/config.h.in"  "${PROJECT_BINARY_DIR}/config.h" @ONLY)
-
-add_subdirectory(bench) # custom ut addon for microbenchmarking
-
-add_subdirectory(core)
-add_subdirectory(blocks)
-
 option(ENABLE_EXAMPLES "Enable Example Builds" ON)
 
 option(ENABLE_TESTING "Enable Test Builds" ON)
@@ -161,3 +153,8 @@ if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     endif ()
     message("Building Tests and benchmarks.")
 endif ()
+
+add_subdirectory(bench) # custom ut addon for microbenchmarking
+
+add_subdirectory(core)
+add_subdirectory(blocks)

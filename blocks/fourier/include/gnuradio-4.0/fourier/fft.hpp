@@ -1,15 +1,17 @@
 #ifndef GRAPH_PROTOTYPE_FFT_HPP
 #define GRAPH_PROTOTYPE_FFT_HPP
 
-#include <algorithm/fft/fft.hpp>
-#include <algorithm/fft/fft_common.hpp>
-#include <algorithm/fft/fft_types.hpp>
-#include <algorithm/fft/fftw.hpp>
-#include <algorithm/fft/window.hpp>
-#include <dataset.hpp>
 #include <execution>
-#include <history_buffer.hpp>
-#include <node.hpp>
+
+#include <gnuradio-4.0/dataset.hpp>
+#include <gnuradio-4.0/history_buffer.hpp>
+#include <gnuradio-4.0/node.hpp>
+
+#include <gnuradio-4.0/algorithm/fft/fft.hpp>
+#include <gnuradio-4.0/algorithm/fft/fft_common.hpp>
+#include <gnuradio-4.0/algorithm/fft/fft_types.hpp>
+#include <gnuradio-4.0/algorithm/fft/fftw.hpp>
+#include <gnuradio-4.0/algorithm/fft/window.hpp>
 
 namespace gr::blocks::fft {
 

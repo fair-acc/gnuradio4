@@ -1,0 +1,2 @@
+add_ut_test(qa_selector)
+add_ut_test(qa_sources)

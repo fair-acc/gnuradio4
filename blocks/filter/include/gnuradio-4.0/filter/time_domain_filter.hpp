@@ -1,9 +1,9 @@
 #ifndef GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
 #define GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
-
-#include <history_buffer.hpp>
-#include <node.hpp>
 #include <numeric>
+
+#include <gnuradio-4.0/history_buffer.hpp>
+#include <gnuradio-4.0/node.hpp>
 
 namespace gr::blocks::filter {
 

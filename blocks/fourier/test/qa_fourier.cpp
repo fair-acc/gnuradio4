@@ -1,19 +1,21 @@
+#include <numbers>
+
 #include <boost/ut.hpp>
+
+#include <fmt/format.h>
+
+#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/algorithm/fft/fft.hpp>
+#include <gnuradio-4.0/algorithm/fft/fftw.hpp>
+#include <gnuradio-4.0/fourier/fft.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
 template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
-
-#include "algorithm/fft/fft.hpp"
-#include "algorithm/fft/fftw.hpp"
-#include "blocklib/core/fft/fft.hpp"
-#include <fmt/format.h>
-#include <graph.hpp>
-#include <node.hpp>
-#include <numbers>
-#include <scheduler.hpp>
 
 namespace fg = fair::graph;
 

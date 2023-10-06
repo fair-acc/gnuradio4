@@ -1,14 +1,13 @@
-#include <boost/ut.hpp>
-
-#include <graph.hpp>
-#include <node.hpp>
-#include <scheduler.hpp>
-#include <utils.hpp>
-
 #include <unordered_set>
 #include <vector>
 
-#include "blocklib/core/selector.hpp"
+#include <boost/ut.hpp>
+
+#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/utils.hpp>
+
+#include <gnuradio-4.0/basic/selector.hpp>
 
 namespace fg = fair::graph;
 using namespace fair::literals;

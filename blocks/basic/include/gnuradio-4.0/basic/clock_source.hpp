@@ -5,18 +5,19 @@
 #include <chrono>
 #include <condition_variable>
 #include <iostream>
-#include <node.hpp>
 #include <optional>
 #include <random>
-#include <reflection.hpp>
-#include <tag.hpp>
 #include <thread>
 #include <queue>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include "../unit-test/tag_monitors.hpp"
+#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/tag.hpp>
+
+#include <gnuradio-4.0/testing/tag_monitors.hpp>
 
 namespace fair::graph::sources {
 

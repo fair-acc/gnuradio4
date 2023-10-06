@@ -1,12 +1,12 @@
 #include <boost/ut.hpp>
 
-#include <graph.hpp>
-#include <node.hpp>
-#include <scheduler.hpp>
-#include <tag.hpp>
+#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/tag.hpp>
 
-#include "blocklib/core/sources/clock_source.hpp"
-#include "blocklib/core/unit-test/tag_monitors.hpp"
+#include <gnuradio-4.0/basic/clock_source.hpp>
+#include <gnuradio-4.0/testing/tag_monitors.hpp>
 
 #include <ctime>
 

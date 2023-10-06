@@ -3,9 +3,8 @@
 
 #include <cassert>
 
-#include <config.h> // contains the project and compiler flags definitions
-
-#include <graph.hpp>
+#include <gnuradio-4.0/config.h> // contains the project and compiler flags definitions
+#include <gnuradio-4.0/graph.hpp>
 
 namespace fg = fair::graph;
 
