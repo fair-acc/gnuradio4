@@ -136,6 +136,8 @@ add_subdirectory(bench) # custom ut addon for microbenchmarking
 add_subdirectory(core)
 add_subdirectory(blocks)
 
+option(ENABLE_EXAMPLES "Enable Example Builds" ON)
+
 option(ENABLE_TESTING "Enable Test Builds" ON)
 if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
