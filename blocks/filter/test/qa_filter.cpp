@@ -12,8 +12,6 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace fg = fair::graph;
-
 template<typename T, typename Range>
     requires std::floating_point<T>
 constexpr size_t
@@ -50,7 +48,7 @@ estimate_settling_time(const Range &step_response, std::size_t offset = 0, T ste
 
 const boost::ut::suite SequenceTests = [] {
     using namespace boost::ut;
-    using namespace gr::blocks::filter;
+    using namespace gr::filter;
 
     "FIR and IIR general tests"_test = [] {
         std::vector<double> fir_coeffs(10, 0.1); // box car filter

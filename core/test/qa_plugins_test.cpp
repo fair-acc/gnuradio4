@@ -17,13 +17,13 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 using namespace std::chrono_literals;
-using namespace fair::literals;
+using namespace gr::literals;
 
-namespace fg = fair::graph;
+namespace grg = gr;
 
 struct test_context {
-    fg::node_registry registry;
-    fg::plugin_loader loader;
+    grg::node_registry registry;
+    grg::plugin_loader loader;
 
     test_context() : loader(&registry, std::vector<std::filesystem::path>{ "test/plugins", "plugins" }) {}
 };
@@ -35,12 +35,12 @@ context() {
 }
 
 template<typename T>
-class builtin_multiply : public fg::node<builtin_multiply<T>> {
+class builtin_multiply : public grg::node<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
-    fg::PortIn<T>  in;
-    fg::PortOut<T> out;
+    grg::PortIn<T>  in;
+    grg::PortOut<T> out;
 
     builtin_multiply() = delete;
 
@@ -48,7 +48,7 @@ public:
         requires(not std::is_same_v<Arg, T> and not std::is_same_v<Arg, builtin_multiply<T>>)
     explicit builtin_multiply(Arg &&) {}
 
-    explicit builtin_multiply(T factor, std::string name = fg::this_source_location()) : _factor(factor) { this->set_name(name); }
+    explicit builtin_multiply(T factor, std::string name = grg::this_source_location()) : _factor(factor) { this->set_name(name); }
 
     [[nodiscard]] constexpr auto
     process_one(T a) const noexcept {
@@ -125,26 +125,26 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         auto node_source  = context().loader.instantiate(names::fixed_source, "double");
         auto node_sink    = context().loader.instantiate(names::cout_sink, "double");
         auto connection_1 = node_source->dynamic_output_port(0).connect(node_sink->dynamic_input_port(0));
-        expect(connection_1 == fg::connection_result_t::SUCCESS);
+        expect(connection_1 == grg::connection_result_t::SUCCESS);
     };
 
     "LongerPipeline"_test = [] {
         auto                      node_source = context().loader.instantiate(names::fixed_source, "double");
 
-        fair::graph::property_map node_multiply_params;
+        gr::property_map node_multiply_params;
         node_multiply_params["factor"]          = 2.0;
         auto                      node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
 
         std::size_t               repeats       = 10;
-        fair::graph::property_map node_sink_params;
+        gr::property_map node_sink_params;
         node_sink_params["total_count"] = 100_UZ;
         auto node_sink                  = context().loader.instantiate(names::cout_sink, "double");
 
         auto connection_1               = node_source->dynamic_output_port(0).connect(node_multiply->dynamic_input_port(0));
         auto connection_2               = node_multiply->dynamic_output_port(0).connect(node_sink->dynamic_input_port(0));
 
-        expect(connection_1 == fg::connection_result_t::SUCCESS);
-        expect(connection_2 == fg::connection_result_t::SUCCESS);
+        expect(connection_1 == grg::connection_result_t::SUCCESS);
+        expect(connection_2 == grg::connection_result_t::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = node_source->work(std::numeric_limits<std::size_t>::max());
@@ -154,13 +154,13 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
     };
 
     "Graph"_test = [] {
-        fg::graph flow_graph;
+        grg::graph flow_graph;
 
         // Instantiate the node that is defined in a plugin
         auto &node_source = context().loader.instantiate_in_graph(flow_graph, names::fixed_source, "double");
 
         // Instantiate a built-in node in a static way
-        fair::graph::property_map node_multiply_1_params;
+        gr::property_map node_multiply_1_params;
         node_multiply_1_params["factor"] = 2.0;
         auto &node_multiply_double       = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
 
@@ -172,7 +172,7 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
 
         //
         std::size_t               repeats = 10;
-        fair::graph::property_map node_sink_params;
+        gr::property_map node_sink_params;
         node_sink_params["total_count"] = 100_UZ;
         auto  node_sink_load            = context().loader.instantiate(names::cout_sink, "double", node_sink_params);
         auto &node_sink                 = flow_graph.add_node(std::move(node_sink_load));
@@ -183,11 +183,11 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         auto  connection_4              = flow_graph.dynamic_connect(node_multiply_float, 0, node_convert_to_double, 0);
         auto  connection_5              = flow_graph.dynamic_connect(node_convert_to_double, 0, node_sink, 0);
 
-        expect(connection_1 == fg::connection_result_t::SUCCESS);
-        expect(connection_2 == fg::connection_result_t::SUCCESS);
-        expect(connection_3 == fg::connection_result_t::SUCCESS);
-        expect(connection_4 == fg::connection_result_t::SUCCESS);
-        expect(connection_5 == fg::connection_result_t::SUCCESS);
+        expect(connection_1 == grg::connection_result_t::SUCCESS);
+        expect(connection_2 == grg::connection_result_t::SUCCESS);
+        expect(connection_3 == grg::connection_result_t::SUCCESS);
+        expect(connection_4 == grg::connection_result_t::SUCCESS);
+        expect(connection_5 == grg::connection_result_t::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = node_source.work(std::numeric_limits<std::size_t>::max());

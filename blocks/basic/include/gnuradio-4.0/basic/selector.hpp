@@ -5,11 +5,11 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-namespace gr::blocks::basic {
-using namespace fair::graph;
+namespace gr::basic {
+using namespace gr;
 
 // optional shortening
-template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
+template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
 using A           = Annotated<T, description, Arguments...>;
 
 using SelectorDoc = Doc<R""(
@@ -82,7 +82,7 @@ struct Selector : node<Selector<T>, SelectorDoc> {
     std::uint32_t                                                                              _selectedSrc = -1U;
 
     void
-    settings_changed(const fair::graph::property_map &old_settings, const fair::graph::property_map &new_settings) {
+    settings_changed(const gr::property_map &old_settings, const gr::property_map &new_settings) {
         if (new_settings.contains("nInputs") || new_settings.contains("nOutputs")) {
             fmt::print("{}: configuration changed: nInputs {} -> {}, nOutputs {} -> {}\n", static_cast<void *>(this), old_settings.at("nInputs"),
                        new_settings.contains("nInputs") ? new_settings.at("nInputs") : "same", old_settings.at("nOutputs"), new_settings.contains("nOutputs") ? new_settings.at("nOutputs") : "same");
@@ -108,7 +108,7 @@ struct Selector : node<Selector<T>, SelectorDoc> {
     using input_reader_t   = typename PortIn<T, Async>::ReaderType;
     using output_writer_t  = typename PortOut<T, Async>::WriterType;
 
-    fair::graph::work_return_status_t
+    gr::work_return_status_t
     process_bulk(select_reader_t                      *select, //
                  const std::vector<input_reader_t *>  &ins,
                  monitor_writer_t                     *monOut, //
@@ -202,9 +202,9 @@ struct Selector : node<Selector<T>, SelectorDoc> {
         return work_return_status_t::OK;
     }
 };
-} // namespace gr::blocks::basic
+} // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::basic::Selector, selectOut, inputs, monitorOut, outputs, nInputs, nOutputs, mapIn, mapOut, backPressure);
-static_assert(fair::graph::HasProcessBulkFunction<gr::blocks::basic::Selector<double>>);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, selectOut, inputs, monitorOut, outputs, nInputs, nOutputs, mapIn, mapOut, backPressure);
+static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 
 #endif // include guard

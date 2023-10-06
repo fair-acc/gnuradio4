@@ -2,7 +2,7 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-namespace fair::meta {
+namespace gr::meta {
 
 static_assert(!tuple_like<int>);
 static_assert(!tuple_like<std::tuple<>>);
@@ -23,7 +23,7 @@ static_assert(array_or_vector_type<std::vector<std::size_t>>);
 static_assert(!array_or_vector_type<std::vector<std::size_t>, int>);
 static_assert(array_or_vector_type<std::array<std::size_t, 3>>);
 static_assert(!array_or_vector_type<std::array<std::size_t, 3>, int>);
-} // namespace fair::meta
+} // namespace gr::meta
 
 int
 main() { /* tests are statically executed */

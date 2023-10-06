@@ -12,7 +12,7 @@
 #include "graph.hpp"
 #include "plugin_loader.hpp"
 
-namespace fair::graph {
+namespace gr {
 
 namespace detail {
 struct YamlMap {
@@ -54,7 +54,7 @@ struct YamlSeq {
 };
 } // namespace detail
 
-inline fair::graph::graph
+inline gr::graph
 load_grc(plugin_loader &loader, const std::string &yaml_source) {
     graph                               flow_graph;
 
@@ -165,7 +165,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
 }
 
 inline std::string
-save_grc(const fair::graph::graph &flow_graph) {
+save_grc(const gr::graph &flow_graph) {
     YAML::Emitter out;
     {
         detail::YamlMap root(out);
@@ -226,6 +226,6 @@ save_grc(const fair::graph::graph &flow_graph) {
     return out.c_str();
 }
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // include guard

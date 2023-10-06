@@ -8,7 +8,7 @@
 #include <tuple>
 #include <type_traits>
 
-namespace fair::meta {
+namespace gr::meta {
 
 template<typename... Ts>
 struct typelist;
@@ -416,7 +416,7 @@ struct typelist {
     template<typename Needle>
     static constexpr std::size_t index_of() {
         std::size_t result = static_cast<std::size_t>(-1);
-        fair::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
+        gr::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
             if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
                 result = index;
             }
@@ -451,6 +451,6 @@ to_typelist_helper(OtherTypelist<Args...> *);
 template<typename OtherTypelist>
 using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist *>(nullptr)));
 
-} // namespace fair::meta
+} // namespace gr::meta
 
 #endif // GNURADIO_TYPELIST_HPP

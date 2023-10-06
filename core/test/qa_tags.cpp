@@ -19,11 +19,11 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 
 const boost::ut::suite TagTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
+    using namespace gr;
 
     "TagReflection"_test = [] {
         static_assert(sizeof(tag_t) % 64 == 0, "needs to meet L1 cache size");
-        static_assert(refl::descriptor::type_descriptor<fair::graph::tag_t>::name == "fair::graph::tag_t");
+        static_assert(refl::descriptor::type_descriptor<gr::tag_t>::name == "gr::tag_t");
         static_assert(refl::member_list<tag_t>::size == 2, "index and map being declared");
         static_assert(refl::trait::get_t<0, refl::member_list<tag_t>>::name == "index", "class field index is public API");
         static_assert(refl::trait::get_t<1, refl::member_list<tag_t>>::name == "map", "class field map is public API");
@@ -56,8 +56,8 @@ const boost::ut::suite TagTests = [] {
 
 const boost::ut::suite TagPropagation = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using namespace fair::graph::tag_test;
+    using namespace gr;
+    using namespace gr::testing;
 
     "tag_source"_test = [] {
         std::int64_t n_samples = 1024;

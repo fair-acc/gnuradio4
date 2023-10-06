@@ -18,7 +18,7 @@
 using plugin_create_function_t  = void (*)(gp_plugin_base **);
 using plugin_destroy_function_t = void (*)(gp_plugin_base *);
 
-namespace fair::graph {
+namespace gr {
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -174,7 +174,7 @@ public:
         return result;
     }
 
-    std::unique_ptr<fair::graph::node_model>
+    std::unique_ptr<gr::node_model>
     instantiate(std::string name, std::string_view type, const property_map &params = {}) {
         // Try to create a node from the global registry
         if (auto result = _global_registry->create_node(name, type, params)) {
@@ -190,7 +190,7 @@ public:
     }
 
     template<typename Graph, typename... InstantiateArgs>
-    fair::graph::node_model &
+    gr::node_model &
     instantiate_in_graph(Graph &graph, InstantiateArgs &&...args) {
         auto node_load = instantiate(std::forward<InstantiateArgs>(args)...);
         if (!node_load) {
@@ -201,6 +201,6 @@ public:
 };
 #endif
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // include guard

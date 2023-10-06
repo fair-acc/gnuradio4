@@ -22,7 +22,7 @@ string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 if (NOT DEFINED GR_TOPLEVEL_PROJECT)
     set(GR_TOPLEVEL_PROJECT OFF)
     if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-        set(FMT_TOPLEVEL_PROJECT ON)
+        set(GR_TOPLEVEL_PROJECT ON)
         message(STATUS "CMake version: ${CMAKE_VERSION}")
     endif ()
 endif ()
@@ -152,12 +152,12 @@ if (ENABLE_TESTING AND UNIX AND NOT APPLE)
         setup_target_for_coverage_gcovr_xml(
                 NAME coverage
                 EXECUTABLE ctest
-                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fourier qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
         setup_target_for_coverage_gcovr_html(
                 NAME coverage_html
                 EXECUTABLE ctest
-                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fourier qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
     endif ()
     message("Building Tests and benchmarks.")

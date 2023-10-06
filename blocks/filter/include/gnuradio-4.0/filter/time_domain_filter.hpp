@@ -5,9 +5,9 @@
 #include <gnuradio-4.0/history_buffer.hpp>
 #include <gnuradio-4.0/node.hpp>
 
-namespace gr::blocks::filter {
+namespace gr::filter {
 
-using namespace fair::graph;
+using namespace gr;
 
 template<typename T>
     requires std::floating_point<T>
@@ -102,9 +102,9 @@ a are the feedback coefficients
     }
 };
 
-} // namespace gr::blocks::filter
+} // namespace gr::filter
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::blocks::filter::fir_filter<T>), in, out, b);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::blocks::filter::IIRForm form), (gr::blocks::filter::iir_filter<T, form>), in, out, b, a);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::filter::fir_filter<T>), in, out, b);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::filter::IIRForm form), (gr::filter::iir_filter<T, form>), in, out, b, a);
 
 #endif // GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP

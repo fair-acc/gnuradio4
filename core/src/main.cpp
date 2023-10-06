@@ -6,11 +6,11 @@
 #include <gnuradio-4.0/config.h> // contains the project and compiler flags definitions
 #include <gnuradio-4.0/graph.hpp>
 
-namespace fg = fair::graph;
+namespace grg = gr;
 
 template<typename T>
-struct count_source : public fg::node<count_source<T>> {
-    fg::PortOut<T> random;
+struct count_source : public grg::node<count_source<T>> {
+    grg::PortOut<T> random;
 
     constexpr T
     process_one() {
@@ -21,8 +21,8 @@ struct count_source : public fg::node<count_source<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (count_source<T>), random);
 
 template<typename T>
-struct expect_sink : public fg::node<expect_sink<T>> {
-    fg::PortIn<T> sink;
+struct expect_sink : public grg::node<expect_sink<T>> {
+    grg::PortIn<T> sink;
 
     void
     process_one(T value) {
@@ -33,11 +33,11 @@ struct expect_sink : public fg::node<expect_sink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (expect_sink<T>), sink);
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public fg::node<scale<T, Scale, R>> {
-    fg::PortIn<T>  original;
-    fg::PortOut<R> scaled;
+struct scale : public grg::node<scale<T, Scale, R>> {
+    grg::PortIn<T>  original;
+    grg::PortOut<R> scaled;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a) const noexcept {
         return a * Scale;
@@ -47,12 +47,12 @@ struct scale : public fg::node<scale<T, Scale, R>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public fg::node<adder<T>> {
-    fg::PortIn<T>  addend0;
-    fg::PortIn<T>  addend1;
-    fg::PortOut<R> sum;
+struct adder : public grg::node<adder<T>> {
+    grg::PortIn<T>  addend0;
+    grg::PortIn<T>  addend1;
+    grg::PortOut<R> sum;
 
-    template<fair::meta::t_or_simd<T> V>
+    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     process_one(V a, V b) const noexcept {
         return a + b;
@@ -61,14 +61,14 @@ struct adder : public fg::node<adder<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
-using fg::port_type_t::STREAM, fg::port_direction_t::INPUT, fg::port_direction_t::OUTPUT;
+using grg::port_type_t::STREAM, grg::port_direction_t::INPUT, grg::port_direction_t::OUTPUT;
 
 template<typename T, std::size_t Count = 2>
-class duplicate : public fg::node<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
-    using base = fg::node<duplicate<T, Count>, fair::meta::typelist<fg::PortInNamed<T, "in">>, fg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
+class duplicate : public grg::node<duplicate<T, Count>, gr::meta::typelist < grg::PortInNamed < T, "in">>, grg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
+    using base = grg::node<duplicate<T, Count>, gr::meta::typelist<grg::PortInNamed < T, "in">>, grg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
 
 public:
-    using return_type = typename fg::traits::node::return_type<base>;
+    using return_type = typename grg::traits::node::return_type<base>;
 
     [[nodiscard]] constexpr return_type
     process_one(T a) const noexcept {
@@ -78,9 +78,9 @@ public:
 
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
-struct delay : public fg::node<delay<T, Depth>> {
-    fg::PortIn<T>        in;
-    fg::PortOut<T>       out;
+struct delay : public grg::node<delay<T, Depth>> {
+    grg::PortIn<T>        in;
+    grg::PortOut<T>       out;
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
@@ -101,8 +101,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t Depth), (delay<T, D
 
 int
 main() {
-    using fg::merge;
-    using fg::merge_by_index;
+    using grg::merge;
+    using grg::merge_by_index;
 
     fmt::print("Project compiler: '{}' - version '{}'\n", CXX_COMPILER_ID, CXX_COMPILER_VERSION);
     fmt::print("Project compiler path: '{}' - arg1 '{}'\n", CXX_COMPILER_PATH, CXX_COMPILER_ARG1);

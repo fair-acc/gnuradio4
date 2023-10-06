@@ -12,15 +12,15 @@
 #include <gnuradio-4.0/basic/common_nodes.hpp>
 
 using namespace std::chrono_literals;
-using namespace fair::literals;
+using namespace gr::literals;
 
-namespace fg = fair::graph;
+namespace grg = gr;
 
 struct test_context {
     explicit test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
-    fg::node_registry registry;
-    fg::plugin_loader loader;
+    grg::node_registry registry;
+    grg::plugin_loader loader;
 };
 
 namespace names {
@@ -65,13 +65,13 @@ main(int argc, char *argv[]) {
         assert(std::ranges::find(known, required) != known.end());
     }
 
-    fg::graph flow_graph;
+    grg::graph flow_graph;
 
     // Instantiate the node that is defined in a plugin
     auto &node_source = context.loader.instantiate_in_graph(flow_graph, names::fixed_source, "double");
 
     // Instantiate a built-in node in a static way
-    fair::graph::property_map node_multiply_1_params;
+    gr::property_map node_multiply_1_params;
     node_multiply_1_params["factor"] = 2.0;
     auto &node_multiply_1            = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
 
@@ -81,7 +81,7 @@ main(int argc, char *argv[]) {
 
     //
     const std::size_t         repeats = 100;
-    fair::graph::property_map node_sink_params;
+    gr::property_map node_sink_params;
     node_sink_params["total_count"] = 100_UZ;
     auto node_sink_load             = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
 
@@ -93,10 +93,10 @@ main(int argc, char *argv[]) {
     auto  connection_3 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_2, 0, node_counter, 0);
     auto  connection_4 [[maybe_unused]] = flow_graph.dynamic_connect(node_counter, 0, node_sink, 0);
 
-    assert(connection_1 == fg::connection_result_t::SUCCESS);
-    assert(connection_2 == fg::connection_result_t::SUCCESS);
-    assert(connection_3 == fg::connection_result_t::SUCCESS);
-    assert(connection_4 == fg::connection_result_t::SUCCESS);
+    assert(connection_1 == grg::connection_result_t::SUCCESS);
+    assert(connection_2 == grg::connection_result_t::SUCCESS);
+    assert(connection_3 == grg::connection_result_t::SUCCESS);
+    assert(connection_4 == grg::connection_result_t::SUCCESS);
 
     for (std::size_t i = 0; i < repeats; ++i) {
         std::ignore = node_source.work(std::numeric_limits<std::size_t>::max());

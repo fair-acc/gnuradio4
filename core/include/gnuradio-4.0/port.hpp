@@ -13,10 +13,10 @@
 #include "circular_buffer.hpp"
 #include "tag.hpp"
 
-namespace fair::graph {
+namespace gr {
 
-using fair::meta::fixed_string;
-using namespace fair::literals;
+using gr::meta::fixed_string;
+using namespace gr::literals;
 
 #ifndef PMT_SUPPORTED_TYPE // // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
 #define PMT_SUPPORTED_TYPE
@@ -206,7 +206,7 @@ struct Port {
     static_assert(PortDirection != port_direction_t::ANY, "ANY reserved for queries and not port direction declarations");
 
     using value_type                            = T;
-    using ArgumentsTypeList                     = typename fair::meta::typelist<Arguments...>;
+    using ArgumentsTypeList                     = typename gr::meta::typelist<Arguments...>;
     using Domain                                = ArgumentsTypeList::template find_or_default<is_port_domain, CPU>;
     using Required                              = ArgumentsTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType                            = ArgumentsTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
@@ -397,7 +397,7 @@ public:
 
     [[nodiscard]] constexpr connection_result_t
     resize_buffer(std::size_t min_size) noexcept {
-        using enum fair::graph::connection_result_t;
+        using enum gr::connection_result_t;
         if constexpr (IS_INPUT) {
             return SUCCESS;
         } else {
@@ -508,7 +508,7 @@ template<typename T, auto>
 using just_t = T;
 
 template<typename T, fixed_string BaseName, port_type_t PortType, port_direction_t PortDirection, typename... Arguments, std::size_t... Is>
-consteval fair::meta::typelist<just_t<Port<T, BaseName + meta::make_fixed_string<Is>(), PortType, PortDirection, Arguments...>, Is>...>
+consteval gr::meta::typelist<just_t<Port<T, BaseName + meta::make_fixed_string<Is>(), PortType, PortDirection, Arguments...>, Is>...>
 repeated_ports_impl(std::index_sequence<Is...>) {
     return {};
 }
@@ -732,7 +732,7 @@ private:
 
         [[nodiscard]] connection_result_t
         connect(dynamic_port &dst_port) override {
-            using enum fair::graph::connection_result_t;
+            using enum gr::connection_result_t;
             if constexpr (T::IS_OUTPUT) {
                 auto src_buffer = _value.writer_handler_internal();
                 return dst_port.update_reader_internal(src_buffer) ? SUCCESS : FAILED;
@@ -836,7 +836,7 @@ static_assert(PortType<dynamic_port>);
 constexpr void
 publish_tag(PortType auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
-            [&port, data = std::move(tag_data), &tag_offset](std::span<fair::graph::tag_t> tag_output) {
+            [&port, data = std::move(tag_data), &tag_offset](std::span<gr::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
                 tag_output[0].map   = std::move(data);
             },
@@ -846,7 +846,7 @@ publish_tag(PortType auto &port, property_map &&tag_data, std::size_t tag_offset
 constexpr void
 publish_tag(PortType auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
-            [&port, &tag_data, &tag_offset](std::span<fair::graph::tag_t> tag_output) {
+            [&port, &tag_data, &tag_offset](std::span<gr::tag_t> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
                 tag_output[0].map   = tag_data;
             },
@@ -873,6 +873,6 @@ samples_to_next_tag(const PortType auto &port) {
     }
 }
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // include guard

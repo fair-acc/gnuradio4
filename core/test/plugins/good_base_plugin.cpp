@@ -9,12 +9,12 @@ GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
 
-using namespace fair::literals;
-namespace fg = fair::graph;
+using namespace gr::literals;
+namespace grg = gr;
 
 template<typename T>
 auto
-read_total_count(const fair::graph::property_map &params) {
+read_total_count(const gr::property_map &params) {
     T total_count = 1;
     if (auto it = params.find("total_count"s); it != params.end()) {
         auto &variant = it->second;
@@ -27,13 +27,13 @@ read_total_count(const fair::graph::property_map &params) {
 }
 
 template<typename T>
-class cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
+class cout_sink : public grg::node<cout_sink<T>, grg::PortInNamed<T, "in">> {
 public:
     std::size_t total_count = -1_UZ;
 
     cout_sink() {}
 
-    explicit cout_sink(const fair::graph::property_map &params) : total_count(read_total_count<std::size_t>(params)) {}
+    explicit cout_sink(const gr::property_map &params) : total_count(read_total_count<std::size_t>(params)) {}
 
     void
     process_one(T value) {
@@ -45,7 +45,7 @@ public:
 };
 
 template<typename T>
-class fixed_source : public fg::node<fixed_source<T>, fg::PortOutNamed<T, "out">> {
+class fixed_source : public grg::node<fixed_source<T>, grg::PortOutNamed<T, "out">> {
 public:
     std::size_t event_count = -1_UZ; // infinite count by default
 
@@ -53,14 +53,14 @@ public:
 
     T value = 1;
 
-    fg::work_return_t
+    grg::work_return_t
     work(std::size_t requested_work) {
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
-            return { requested_work, 0_UZ, fg::work_return_status_t::DONE };
+            return { requested_work, 0_UZ, grg::work_return_status_t::DONE };
         }
 
-        auto &port   = fair::graph::output_port<0>(this);
+        auto &port   = gr::output_port<0>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1_UZ);
         data[0]      = value;
@@ -68,11 +68,11 @@ public:
 
         value += 1;
         if (event_count == -1_UZ) {
-            return { requested_work, 1_UZ, fg::work_return_status_t::OK };
+            return { requested_work, 1_UZ, grg::work_return_status_t::OK };
         }
 
         event_count--;
-        return { requested_work, 1_UZ, fg::work_return_status_t::OK };
+        return { requested_work, 1_UZ, grg::work_return_status_t::OK };
     }
 };
 } // namespace good

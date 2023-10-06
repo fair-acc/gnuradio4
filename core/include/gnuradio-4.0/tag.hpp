@@ -26,7 +26,7 @@ inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #define EM_CONSTEXPR_STATIC constexpr
 #endif
 
-namespace fair::graph {
+namespace gr {
 
 enum class tag_propagation_policy_t {
     TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The
@@ -109,11 +109,11 @@ struct alignas(hardware_constructive_interference_size) tag_t {
         map[key] = value;
     }
 };
-} // namespace fair::graph
+} // namespace gr
 
-ENABLE_REFLECTION(fair::graph::tag_t, index, map);
+ENABLE_REFLECTION(gr::tag_t, index, map);
 
-namespace fair::graph {
+namespace gr {
 using meta::fixed_string;
 
 inline void
@@ -198,6 +198,6 @@ inline EM_CONSTEXPR_STATIC default_tag<"store_default", bool, "", "store block s
 inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT, RESET_DEFAULTS, STORE_DEFAULTS };
 } // namespace tag
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // GRAPH_PROTOTYPE_TAG_HPP

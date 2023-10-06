@@ -9,11 +9,11 @@
 
 #include <vir/simd.h>
 
-namespace fair::graph {
+namespace gr {
 enum class work_return_status_t;
 }
 
-namespace fair::graph::traits::node {
+namespace gr::traits::node {
 
 namespace detail {
 template<typename FieldDescriptor>
@@ -126,7 +126,7 @@ struct fixed_node_ports_data_helper<Node, Ports...> {
         if constexpr (member_ports_detector::value) {
             return static_cast<typename member_ports_detector::member_ports *>(nullptr);
         } else {
-            return static_cast<typename meta::concat<std::conditional_t<fair::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...> *>(nullptr);
+            return static_cast<typename meta::concat<std::conditional_t<gr::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...> *>(nullptr);
         }
     }())>;
 
@@ -365,6 +365,6 @@ concept process_bulk_requires_ith_output_as_span = requires(Derived             
     };
 };
 
-} // namespace fair::graph::traits::node
+} // namespace gr::traits::node
 
 #endif // include guard

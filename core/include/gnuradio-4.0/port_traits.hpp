@@ -5,7 +5,7 @@
 
 #include "port.hpp"
 
-namespace fair::graph::traits::port {
+namespace gr::traits::port {
 
 template<typename T>
 concept has_fixed_info_v = requires {
@@ -68,6 +68,6 @@ struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::Requi
 template<typename... Ports>
 struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
 
-} // namespace fair::graph::traits::port
+} // namespace gr::traits::port
 
 #endif // include guard

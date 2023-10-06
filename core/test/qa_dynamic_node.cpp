@@ -2,35 +2,33 @@
 
 #include <gnuradio-4.0/graph.hpp>
 
-namespace fg = fair::graph;
-
 #include <gnuradio-4.0/basic/common_nodes.hpp>
 
 template<typename T>
 std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
 
 template<typename T>
-struct fixed_source : public fg::node<fixed_source<T>, fg::PortOutNamed<T, "out">> {
+struct fixed_source : public gr::node<fixed_source<T>, gr::PortOutNamed < T, "out">> {
     T value = 1;
 
-    fg::work_return_t
+    gr::work_return_t
     work(std::size_t requested_work) {
-        using namespace fair::literals;
-        auto &port   = fg::output_port<0>(this);
+        using namespace gr::literals;
+        auto &port   = gr::output_port<0>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1_UZ);
         data[0]      = value;
         data.publish(1_UZ);
 
         value += 1;
-        return { requested_work, 1_UZ, fg::work_return_status_t::OK };
+        return {requested_work, 1_UZ, gr::work_return_status_t::OK };
     }
 };
 
-static_assert(fair::graph::NodeType<fixed_source<int>>);
+static_assert(gr::NodeType<fixed_source<int>>);
 
 template<typename T>
-struct cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
+struct cout_sink : public gr::node<cout_sink<T>, gr::PortInNamed < T, "in">> {
     std::size_t remaining = 0;
 
     void
@@ -42,7 +40,7 @@ struct cout_sink : public fg::node<cout_sink<T>, fg::PortInNamed<T, "in">> {
     }
 };
 
-static_assert(fair::graph::NodeType<cout_sink<int>>);
+static_assert(gr::NodeType<cout_sink<int>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), remaining);
 
@@ -51,7 +49,7 @@ main() {
     constexpr const std::size_t sources_count = 10;
     constexpr const std::size_t events_count  = 5;
 
-    fg::graph                   flow_graph;
+    gr::graph                   flow_graph;
 
     // Adder has sources_count inputs in total, but let's create
     // sources_count / 2 inputs on construction, and change the number

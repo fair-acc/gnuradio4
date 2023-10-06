@@ -14,7 +14,7 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace fg = fair::graph;
+namespace grg = gr;
 
 struct ProcessStatus {
     std::size_t      n_inputs{ 0 };
@@ -64,8 +64,8 @@ struct StrideTestData {
 };
 
 template<typename T>
-struct CountSource : public fg::node<CountSource<T>> {
-    fg::PortOut<T> out{};
+struct CountSource : public grg::node<CountSource<T>> {
+    grg::PortOut<T> out{};
     int            count{ 0 };
     int            n_samples{ 1024 };
 
@@ -82,14 +82,14 @@ struct CountSource : public fg::node<CountSource<T>> {
 };
 
 template<typename T>
-struct IntDecBlock : public fg::node<IntDecBlock<T>, fg::PerformDecimationInterpolation, fg::PerformStride> {
-    fg::PortIn<T>  in{};
-    fg::PortOut<T> out{};
+struct IntDecBlock : public grg::node<IntDecBlock<T>, grg::PerformDecimationInterpolation, grg::PerformStride> {
+    grg::PortIn<T>  in{};
+    grg::PortOut<T> out{};
 
     ProcessStatus  status{};
     bool           write_to_vector{ false };
 
-    fg::work_return_status_t
+    grg::work_return_status_t
     process_bulk(std::span<const T> input, std::span<T> output) noexcept {
         status.n_inputs  = input.size();
         status.n_outputs = output.size();
@@ -98,7 +98,7 @@ struct IntDecBlock : public fg::node<IntDecBlock<T>, fg::PerformDecimationInterp
         status.total_out += output.size();
         if (write_to_vector) status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
 
-        return fg::work_return_status_t::OK;
+        return grg::work_return_status_t::OK;
     }
 };
 
@@ -106,11 +106,11 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (IntDecBlock<T>), in, out);
 
 void
-interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<fair::thread_pool::BasicThreadPool> thread_pool) {
+interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
-    using scheduler = fair::graph::scheduler::simple<>;
+    using scheduler = gr::scheduler::simple<>;
 
-    fg::graph flow;
+    grg::graph flow;
     auto     &source          = flow.make_node<CountSource<int>>();
     source.n_samples          = static_cast<int>(data.n_samples);
 
@@ -130,13 +130,13 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<fair::
 }
 
 void
-stride_test(const StrideTestData &data, std::shared_ptr<fair::thread_pool::BasicThreadPool> thread_pool) {
+stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
-    using scheduler = fair::graph::scheduler::simple<>;
+    using scheduler = gr::scheduler::simple<>;
 
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
-    fg::graph  flow;
+    grg::graph  flow;
     auto      &source             = flow.make_node<CountSource<int>>();
     source.n_samples              = static_cast<int>(data.n_samples);
 
@@ -166,7 +166,7 @@ const boost::ut::suite _fft_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
-    auto thread_pool = std::make_shared<fair::thread_pool::BasicThreadPool>("custom pool", fair::thread_pool::CPU_BOUND, 2, 2);
+    auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     // clang-format off
     "Interpolation/Decimation tests"_test = [&thread_pool] {

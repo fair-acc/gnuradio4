@@ -8,8 +8,6 @@
 #include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/testing/tag_monitors.hpp>
 
-#include <ctime>
-
 #if defined(__clang__) && __clang_major__ >= 15
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
 template<>
@@ -18,16 +16,16 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 
 const boost::ut::suite TagTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using namespace fair::graph::sources;
-    using namespace fair::graph::tag_test;
+    using namespace gr;
+    using namespace gr::basic;
+    using namespace gr::testing;
 
     "source_test"_test = [] {
         constexpr bool          useIoThreadPool = true; // true: scheduler/graph-provided thread, false: use user-provided call-back or thread
         constexpr std::uint32_t n_samples       = 1900;
         constexpr float         sample_rate     = 2000.f;
         graph                   flow_graph;
-        auto &src = flow_graph.make_node<fair::graph::sources::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
+        auto &src = flow_graph.make_node<gr::basic::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
         src.tags  = {
             { 0, { { "key", "value@0" } } },       //
             { 1, { { "key", "value@1" } } },       //

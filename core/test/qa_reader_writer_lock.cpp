@@ -8,15 +8,15 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace fair::graph::reader_writer_lock_test {
+namespace gr::reader_writer_lock_test {
 
 const boost::ut::suite basicTests = [] {
     using namespace boost::ut;
-    using namespace fair::graph;
-    using fair::graph::ReaderWriterLockType::READ;
-    using fair::graph::ReaderWriterLockType::WRITE;
+    using namespace gr;
+    using gr::ReaderWriterLockType::READ;
+    using gr::ReaderWriterLockType::WRITE;
 
-    fair::graph::ReaderWriterLock rwlock;
+    gr::ReaderWriterLock rwlock;
 
     "basic read/write lock tests"_test = [&] {
         expect(eq(rwlock.lock<READ>(), 1));

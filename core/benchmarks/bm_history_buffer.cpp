@@ -1,15 +1,14 @@
-#include "benchmark.hpp"
+#include <benchmark.hpp>
 
-#include <boost/ut.hpp>
 #include <chrono>
 #include <iostream>
 #include <thread>
 
 #include <fmt/format.h>
 
-#include <circular_buffer.hpp>
-#include <history_buffer.hpp>
-#include <utils.hpp>
+#include <gnuradio-4.0/circular_buffer.hpp>
+#include <gnuradio-4.0/history_buffer.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 inline const boost::ut::suite _buffer_tests = [] {
     constexpr std::size_t n_repetitions = 10;

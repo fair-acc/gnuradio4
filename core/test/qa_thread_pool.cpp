@@ -12,12 +12,12 @@ const boost::ut::suite ThreadPoolTests = [] {
     using namespace boost::ut;
 
     "Basic ThreadPool tests"_test = [] {
-        expect(nothrow([] { fair::thread_pool::BasicThreadPool("test", fair::thread_pool::IO_BOUND, 4UL); }));
-        expect(nothrow([] { fair::thread_pool::BasicThreadPool("test2", fair::thread_pool::CPU_BOUND, 4UL); }));
+        expect(nothrow([] { gr::thread_pool::BasicThreadPool("test", gr::thread_pool::IO_BOUND, 4UL); }));
+        expect(nothrow([] { gr::thread_pool::BasicThreadPool("test2", gr::thread_pool::CPU_BOUND, 4UL); }));
 
         std::atomic<int>                   enqueueCount{ 0 };
         std::atomic<int>                   executeCount{ 0 };
-        fair::thread_pool::BasicThreadPool pool("TestPool", fair::thread_pool::IO_BOUND, 1, 2);
+        gr::thread_pool::BasicThreadPool pool("TestPool", gr::thread_pool::IO_BOUND, 1, 2);
         expect(nothrow([&] { pool.sleepDuration = std::chrono::milliseconds(1); }));
         expect(nothrow([&] { pool.keepAliveDuration = std::chrono::seconds(10); }));
         pool.waitUntilInitialised();
@@ -48,7 +48,7 @@ const boost::ut::suite ThreadPoolTests = [] {
         auto ret = pool.execute([] { return 42; });
         expect(ret.get() == 42_i);
 
-        auto taskName = pool.execute<"taskName", 0, -1>([] { return fair::thread_pool::thread::getThreadName(); });
+        auto taskName = pool.execute<"taskName", 0, -1>([] { return gr::thread_pool::thread::getThreadName(); });
 #ifdef __EMSCRIPTEN__
         expect(taskName.get() == "unknown thread name"_b);
 #else
@@ -60,7 +60,7 @@ const boost::ut::suite ThreadPoolTests = [] {
     };
     "contention tests"_test = [] {
         std::atomic<int>                   counter{ 0 };
-        fair::thread_pool::BasicThreadPool pool("contention", fair::thread_pool::IO_BOUND, 1, 4);
+        gr::thread_pool::BasicThreadPool pool("contention", gr::thread_pool::IO_BOUND, 1, 4);
         pool.waitUntilInitialised();
         expect(that % pool.isInitialised());
         expect(pool.numThreads() == 1_u);
@@ -93,7 +93,7 @@ const boost::ut::suite ThreadPoolTests = [] {
                 std::atomic<int> counter{ 0 };
 
                 // Pool with min and max thread count
-                fair::thread_pool::BasicThreadPool pool("count_test", fair::thread_pool::IO_BOUND, minThreads, maxThreads);
+                gr::thread_pool::BasicThreadPool pool("count_test", gr::thread_pool::IO_BOUND, minThreads, maxThreads);
                 pool.keepAliveDuration = std::chrono::milliseconds(10); // default is 10 seconds, reducing for testing
                 pool.waitUntilInitialised();
 

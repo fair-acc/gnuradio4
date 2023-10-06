@@ -88,15 +88,15 @@
 #define GP_CONCAT_IMPL(x, y) x##y
 #define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
 
-#define GP_REGISTER_NODE_IMPL(Register, Name, ...) fair::graph::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_NODE_IMPL(Register, Name, ...) gr::detail::register_node<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
 #define GP_REGISTER_NODE(Register, Name, ...) \
     namespace { \
-    using fair::graph::detail::node_parameters; \
+    using gr::detail::node_parameters; \
     GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
     }
 #define GP_REGISTER_NODE_RUNTIME(Register, Name, ...) \
     { \
-        using fair::graph::detail::node_parameters; \
+        using gr::detail::node_parameters; \
         GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
     }
 

@@ -19,14 +19,15 @@
 
 #include <gnuradio-4.0/testing/tag_monitors.hpp>
 
-namespace fair::graph::sources {
+namespace gr::basic {
 
 // optional shortening
-template<typename T, fair::meta::fixed_string description = "", typename... Arguments>
-using A = Annotated<T, description, Arguments...>;
+template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
+using A = gr::Annotated<T, description, Arguments...>;
+using namespace gr;
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
-struct ClockSource : public node<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
+struct ClockSource : public gr::node<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
 ClockSource Documentation -- add here
 )"">> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
@@ -111,7 +112,7 @@ ClockSource Documentation -- add here
 
         std::uint32_t       samples_to_produce = n_available;
         while (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced + n_available)) {
-            tag_test::print_tag(tags[next_tag], fmt::format("{}::process_bulk(...)\t publish tag at  {:6}", this->name, n_samples_produced));
+            gr::testing::print_tag(tags[next_tag], fmt::format("{}::process_bulk(...)\t publish tag at  {:6}", this->name, n_samples_produced));
             tag_t &out_tag     = this->output_tags()[0];
             out_tag            = tags[next_tag];
             out_tag.index      = tags[next_tag].index - static_cast<std::make_signed_t<std::size_t>>(n_samples_produced);
@@ -142,13 +143,13 @@ ClockSource Documentation -- add here
     }
 };
 
-} // namespace fair::graph::sources
+} // namespace gr::sources
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (fair::graph::sources::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size,
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size,
                                     sample_rate);
 
-namespace fair::graph::sources {
-static_assert(HasProcessBulkFunction<ClockSource<float>>);
-} // namespace fair::graph::sources
+namespace gr::basic {
+static_assert(gr::HasProcessBulkFunction<ClockSource<float>>);
+} // namespace gr::sources
 
 #endif // GRAPH_PROTOTYPE_CLOCK_SOURCE_HPP

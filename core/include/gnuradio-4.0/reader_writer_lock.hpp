@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-namespace fair::graph {
+namespace gr {
 
 enum class ReaderWriterLockType { READ, WRITE };
 
@@ -21,7 +21,7 @@ enum class ReaderWriterLockType { READ, WRITE };
  * N.B. The lock is unlocked when the counter reaches 0.
  */
 class ReaderWriterLock {
-    alignas(fair::meta::kCacheLine) mutable std::atomic<std::int64_t> _activeReaderCount{ 0 };
+    alignas(gr::meta::kCacheLine) mutable std::atomic<std::int64_t> _activeReaderCount{ 0 };
 
 public:
     ReaderWriterLock() = default;
@@ -107,6 +107,6 @@ public:
     };
 };
 
-} // namespace fair::graph
+} // namespace gr
 
 #endif // READER_WRITER_LOCK_HPP

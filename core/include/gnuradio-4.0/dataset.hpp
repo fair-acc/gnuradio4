@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-namespace fair::graph {
+namespace gr {
 
 struct layout_right {};
 
@@ -146,10 +146,10 @@ static_assert(packet<Packet<std::byte>>, "Packet<std::byte> concept conformity")
 static_assert(packet<Packet<float>>, "Packet<std::byte> concept conformity");
 static_assert(packet<Packet<double>>, "Packet<std::byte> concept conformity");
 
-} // namespace fair::graph
+} // namespace gr
 
-ENABLE_REFLECTION(fair::graph::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
+ENABLE_REFLECTION(gr::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
                   meta_information, timing_events)
-ENABLE_REFLECTION(fair::graph::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
+ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
                   meta_information, timing_events)
 #endif // GRAPH_PROTOTYPE_DATASET_HPP

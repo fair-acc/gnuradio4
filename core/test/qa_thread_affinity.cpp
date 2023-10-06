@@ -14,29 +14,29 @@ const boost::ut::suite ThreadAffinityTests = [] {
     using namespace boost::ut;
 
     "thread_exception"_test = [] {
-        expect(nothrow([]{fair::thread_pool::thread::thread_exception();}));
-        expect(fair::thread_pool::thread::thread_exception().name() == "thread_exception"_b);
-        expect(fair::thread_pool::thread::thread_exception().message(-1) == "unknown threading error code -1"_b);
-        expect(fair::thread_pool::thread::thread_exception().message(-2) == "unknown threading error code -2"_b);
-        expect(!fair::thread_pool::thread::thread_exception().message(fair::thread_pool::thread::THREAD_UNINITIALISED).starts_with("unknown threading error code"));
-        expect(!fair::thread_pool::thread::thread_exception().message(fair::thread_pool::thread::THREAD_ERROR_UNKNOWN).starts_with("unknown threading error code"));
-        expect(!fair::thread_pool::thread::thread_exception().message(fair::thread_pool::thread::THREAD_VALUE_RANGE).starts_with("unknown threading error code"));
-        expect(!fair::thread_pool::thread::thread_exception().message(fair::thread_pool::thread::THREAD_ERANGE).starts_with("unknown threading error code"));
+        expect(nothrow([]{gr::thread_pool::thread::thread_exception();}));
+        expect(gr::thread_pool::thread::thread_exception().name() == "thread_exception"_b);
+        expect(gr::thread_pool::thread::thread_exception().message(-1) == "unknown threading error code -1"_b);
+        expect(gr::thread_pool::thread::thread_exception().message(-2) == "unknown threading error code -2"_b);
+        expect(!gr::thread_pool::thread::thread_exception().message(gr::thread_pool::thread::THREAD_UNINITIALISED).starts_with("unknown threading error code"));
+        expect(!gr::thread_pool::thread::thread_exception().message(gr::thread_pool::thread::THREAD_ERROR_UNKNOWN).starts_with("unknown threading error code"));
+        expect(!gr::thread_pool::thread::thread_exception().message(gr::thread_pool::thread::THREAD_VALUE_RANGE).starts_with("unknown threading error code"));
+        expect(!gr::thread_pool::thread::thread_exception().message(gr::thread_pool::thread::THREAD_ERANGE).starts_with("unknown threading error code"));
     };
 
     "thread_helper"_test = [] {
 #if not defined(__EMSCRIPTEN__)
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(SCHED_FIFO) == fair::thread_pool::thread::Policy::FIFO);
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(SCHED_RR) == fair::thread_pool::thread::Policy::ROUND_ROBIN);
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(SCHED_OTHER) == fair::thread_pool::thread::Policy::OTHER);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_FIFO) == gr::thread_pool::thread::Policy::FIFO);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_RR) == gr::thread_pool::thread::Policy::ROUND_ROBIN);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_OTHER) == gr::thread_pool::thread::Policy::OTHER);
 #endif
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(-1) == fair::thread_pool::thread::Policy::UNKNOWN);
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(-2) == fair::thread_pool::thread::Policy::UNKNOWN);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(-1) == gr::thread_pool::thread::Policy::UNKNOWN);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(-2) == gr::thread_pool::thread::Policy::UNKNOWN);
     };
 
 #if not defined(__EMSCRIPTEN__)
     "basic thread affinity"_test = [] {
-        using namespace fair::thread_pool;
+        using namespace gr::thread_pool;
         std::atomic<bool>    run         = true;
         const auto           dummyAction = [&run]() { while (run) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
         std::thread          testThread(dummyAction);
@@ -72,7 +72,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
     };
 
     "basic process affinity"_test = [] {
-        using namespace fair::thread_pool;
+        using namespace gr::thread_pool;
         constexpr std::array threadMap = { true, false, false, false };
         thread::setProcessAffinity(threadMap);
         auto affinity = thread::getProcessAffinity();
@@ -90,7 +90,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
     };
 
     "ThreadName"_test = [] {
-        using namespace fair::thread_pool;
+        using namespace gr::thread_pool;
         expect(!thread::getThreadName().empty()) << "Thread name shouldn't be empty";
         expect(nothrow([]{ thread::setThreadName("testCoreName"); }));
         expect(thread::getThreadName() == "testCoreName"_b);
@@ -111,7 +111,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
     };
 
     "ProcessName"_test = [] {
-        using namespace fair::thread_pool;
+        using namespace gr::thread_pool;
         expect(!thread::getProcessName().empty()) << "Process name shouldn't be empty";
         expect(that % thread::getProcessName() == thread::getProcessName(thread::detail::getPid()));
 
@@ -120,7 +120,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
     };
 
     "ProcessSchedulingParameter"_test = [] {
-        using namespace fair::thread_pool::thread;
+        using namespace gr::thread_pool::thread;
         struct SchedulingParameter param = getProcessSchedulingParameter();
         expect(that % param.policy == OTHER);
         expect(that % param.priority == 0);
@@ -136,9 +136,9 @@ const boost::ut::suite ThreadAffinityTests = [] {
         expect(throws<std::system_error>([]{ getProcessSchedulingParameter(-1); }));
         expect(throws<std::system_error>([]{ setProcessSchedulingParameter(ROUND_ROBIN, 5, -1); }));
 
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(SCHED_FIFO) == fair::thread_pool::thread::FIFO);
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(SCHED_RR) == fair::thread_pool::thread::ROUND_ROBIN);
-        expect(that % fair::thread_pool::thread::detail::getEnumPolicy(SCHED_OTHER) == fair::thread_pool::thread::OTHER);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_FIFO) == gr::thread_pool::thread::FIFO);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_RR) == gr::thread_pool::thread::ROUND_ROBIN);
+        expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_OTHER) == gr::thread_pool::thread::OTHER);
     };
 
     "ThreadSchedulingParameter"_test = [] {
@@ -147,7 +147,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
         std::thread           testThread(dummyAction);
         std::thread           bogusThread;
 
-        using namespace fair::thread_pool::thread;
+        using namespace gr::thread_pool::thread;
         struct SchedulingParameter param = getThreadSchedulingParameter(testThread);
         expect(that % param.policy == OTHER);
         expect(that % param.priority == 0);

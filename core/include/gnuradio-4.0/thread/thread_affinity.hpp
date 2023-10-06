@@ -22,7 +22,7 @@
 #endif
 #endif
 
-namespace fair::thread_pool::thread {
+namespace gr::thread_pool::thread {
 
 constexpr size_t THREAD_MAX_NAME_LENGTH  = 16;
 constexpr int    THREAD_UNINITIALISED    = 1;
@@ -286,11 +286,11 @@ setProcessAffinity(const T & /*threadMap*/, const int /*pid*/ = -1) {
 }
 #endif
 enum Policy { UNKNOWN = -1, OTHER = 0, FIFO = 1, ROUND_ROBIN = 2 };
-} // namespace fair::thread_pool::thread
+} // namespace gr::thread_pool::thread
 
 template<>
-struct fmt::formatter<fair::thread_pool::thread::Policy> {
-    using Policy = fair::thread_pool::thread::Policy;
+struct fmt::formatter<gr::thread_pool::thread::Policy> {
+    using Policy = gr::thread_pool::thread::Policy;
 
     template<typename ParseContext>
     constexpr auto
@@ -313,7 +313,7 @@ struct fmt::formatter<fair::thread_pool::thread::Policy> {
     }
 };
 
-namespace fair::thread_pool::thread {
+namespace gr::thread_pool::thread {
 
 struct SchedulingParameter {
     Policy policy; // e.g. SCHED_OTHER, SCHED_RR, FSCHED_FIFO
@@ -430,6 +430,6 @@ inline void
 setThreadSchedulingParameter(Policy /*scheduler*/, int /*priority*/, thread_type auto &.../*thread*/) {}
 #endif
 
-} // namespace fair::thread_pool::thread
+} // namespace gr::thread_pool::thread
 
 #endif // THREADAFFINITY_HPP
