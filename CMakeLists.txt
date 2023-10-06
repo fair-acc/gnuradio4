@@ -18,6 +18,15 @@ endif()
 # Replace ; with space
 string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
+# Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
+if (NOT DEFINED GR_TOPLEVEL_PROJECT)
+    set(GR_TOPLEVEL_PROJECT OFF)
+    if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+        set(FMT_TOPLEVEL_PROJECT ON)
+        message(STATUS "CMake version: ${CMAKE_VERSION}")
+    endif ()
+endif ()
+
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
@@ -128,9 +137,9 @@ target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include ${PROJE
 target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
 
-option(ENABLE_EXAMPLES "Enable Example Builds" ON)
+option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 
-option(ENABLE_TESTING "Enable Test Builds" ON)
+option(ENABLE_TESTING "Enable Test Builds"  ${GR_TOPLEVEL_PROJECT})
 if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
     enable_testing()
