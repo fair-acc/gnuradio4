@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_FFT_HPP
-#define GRAPH_PROTOTYPE_FFT_HPP
+#ifndef GNURADIO_FFT_HPP
+#define GNURADIO_FFT_HPP
 
 #include <execution>
 
@@ -218,4 +218,4 @@ On the choice of window (mathematically aka. apodisation) functions
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename U, typename FourierAlgoImpl), (gr::blocks::fft::FFT<T, U, FourierAlgoImpl>), //
                                     in, out, algorithm, fftSize, window, outputInDb, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
-#endif // GRAPH_PROTOTYPE_FFT_HPP
+#endif // GNURADIO_FFT_HPP

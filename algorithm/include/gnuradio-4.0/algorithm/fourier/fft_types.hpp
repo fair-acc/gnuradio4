@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
-#define GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
+#ifndef GNURADIO_ALGORITHM_FFT_TYPES_HPP
+#define GNURADIO_ALGORITHM_FFT_TYPES_HPP
 
 #include <type_traits>
 #include <complex>
@@ -25,4 +25,4 @@ struct FFTAlgoPrecision<T> {
 };
 
 } // namespace gr::algorithm
-#endif // GRAPH_PROTOTYPE_ALGORITHM_FFT_TYPES_HPP
+#endif // GNURADIO_ALGORITHM_FFT_TYPES_HPP

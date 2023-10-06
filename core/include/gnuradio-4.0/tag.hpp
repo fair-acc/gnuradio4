@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_TAG_HPP
-#define GRAPH_PROTOTYPE_TAG_HPP
+#ifndef GNURADIO_TAG_HPP
+#define GNURADIO_TAG_HPP
 
 #include <map>
 
@@ -200,4 +200,4 @@ inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UN
 
 } // namespace gr
 
-#endif // GRAPH_PROTOTYPE_TAG_HPP
+#endif // GNURADIO_TAG_HPP

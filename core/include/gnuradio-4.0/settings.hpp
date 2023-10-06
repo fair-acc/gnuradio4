@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_SETTINGS_HPP
-#define GRAPH_PROTOTYPE_SETTINGS_HPP
+#ifndef GNURADIO_SETTINGS_HPP
+#define GNURADIO_SETTINGS_HPP
 
 #include <atomic>
 #include <chrono>
@@ -659,4 +659,4 @@ struct hash<gr::SettingsCtx> {
 };
 } // namespace std
 
-#endif // GRAPH_PROTOTYPE_SETTINGS_HPP
+#endif // GNURADIO_SETTINGS_HPP

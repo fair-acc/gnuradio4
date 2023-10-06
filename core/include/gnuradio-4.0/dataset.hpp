@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_DATASET_HPP
-#define GRAPH_PROTOTYPE_DATASET_HPP
+#ifndef GNURADIO_DATASET_HPP
+#define GNURADIO_DATASET_HPP
 
 #include <chrono>
 #include <cstdint>
@@ -152,4 +152,4 @@ ENABLE_REFLECTION(gr::DataSet_double, timestamp, axis_names, axis_units, axis_va
                   meta_information, timing_events)
 ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
                   meta_information, timing_events)
-#endif // GRAPH_PROTOTYPE_DATASET_HPP
+#endif // GNURADIO_DATASET_HPP

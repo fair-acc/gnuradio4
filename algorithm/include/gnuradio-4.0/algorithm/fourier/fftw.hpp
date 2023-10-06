@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_ALGORITHM_FFTW_HPP
-#define GRAPH_PROTOTYPE_ALGORITHM_FFTW_HPP
+#ifndef GNURADIO_ALGORITHM_FFTW_HPP
+#define GNURADIO_ALGORITHM_FFTW_HPP
 
 #include <fftw3.h>
 
@@ -211,4 +211,4 @@ private:
 
 } // namespace gr::algorithm
 
-#endif // GRAPH_PROTOTYPE_ALGORITHM_FFTW_HPP
+#endif // GNURADIO_ALGORITHM_FFTW_HPP

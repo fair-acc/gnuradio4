@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_TAG_MONITORS_HPP
-#define GRAPH_PROTOTYPE_TAG_MONITORS_HPP
+#ifndef GNURADIO_TAG_MONITORS_HPP
+#define GNURADIO_TAG_MONITORS_HPP
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -256,4 +256,4 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
 } // namespace gr::testing
 
-#endif // GRAPH_PROTOTYPE_TAG_MONITORS_HPP
+#endif // GNURADIO_TAG_MONITORS_HPP

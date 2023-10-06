@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
-#define GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
+#ifndef GNURADIO_BM_TEST_HELPER_HPP
+#define GNURADIO_BM_TEST_HELPER_HPP
 
 #include <utility>
 #include <variant>
@@ -135,4 +135,4 @@ cascade(
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t min, std::size_t count, bool use_bulk_operation), (test::source<T, min, count, use_bulk_operation>), out);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t N_MIN, std::size_t N_MAX), (test::sink<T, N_MIN, N_MAX>), in);
 
-#endif // GRAPH_PROTOTYPE_BM_TEST_HELPER_HPP
+#endif // GNURADIO_BM_TEST_HELPER_HPP

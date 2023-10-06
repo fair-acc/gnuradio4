@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
-#define GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
+#ifndef GNURADIO_TIME_DOMAIN_FILTER_HPP
+#define GNURADIO_TIME_DOMAIN_FILTER_HPP
 #include <numeric>
 
 #include <gnuradio-4.0/history_buffer.hpp>
@@ -48,7 +48,7 @@ template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II
 struct iir_filter : node<iir_filter<T, form>, Doc<R""(
 @brief Infinite Impulse Response (IIR) filter class
 
-b are the feed-forward coefficients (N.B. b[0] denoting the newest and n[-1] the previous sample)
+b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
 a are the feedback coefficients
 )"">> {
     PortIn<T>         in;
@@ -107,4 +107,4 @@ a are the feedback coefficients
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::filter::fir_filter<T>), in, out, b);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::filter::IIRForm form), (gr::filter::iir_filter<T, form>), in, out, b, a);
 
-#endif // GRAPH_PROTOTYPE_TIME_DOMAIN_FILTER_HPP
+#endif // GNURADIO_TIME_DOMAIN_FILTER_HPP

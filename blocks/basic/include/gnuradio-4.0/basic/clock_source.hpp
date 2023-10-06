@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_CLOCK_SOURCE_HPP
-#define GRAPH_PROTOTYPE_CLOCK_SOURCE_HPP
+#ifndef GNURADIO_CLOCK_SOURCE_HPP
+#define GNURADIO_CLOCK_SOURCE_HPP
 
 #include <atomic>
 #include <chrono>
@@ -152,4 +152,4 @@ namespace gr::basic {
 static_assert(gr::HasProcessBulkFunction<ClockSource<float>>);
 } // namespace gr::sources
 
-#endif // GRAPH_PROTOTYPE_CLOCK_SOURCE_HPP
+#endif // GNURADIO_CLOCK_SOURCE_HPP

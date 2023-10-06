@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_PLUGIN_LOADER_H
-#define GRAPH_PROTOTYPE_PLUGIN_LOADER_H
+#ifndef GNURADIO_PLUGIN_LOADER_H
+#define GNURADIO_PLUGIN_LOADER_H
 
 #include <algorithm>
 #include <filesystem>

@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_HISTORY_BUFFER_HPP
-#define GRAPH_PROTOTYPE_HISTORY_BUFFER_HPP
+#ifndef GNURADIO_HISTORY_BUFFER_HPP
+#define GNURADIO_HISTORY_BUFFER_HPP
 
 #include <algorithm>
 #include <array>
@@ -221,4 +221,4 @@ public:
 
 } // namespace gr
 
-#endif // GRAPH_PROTOTYPE_HISTORY_BUFFER_HPP
+#endif // GNURADIO_HISTORY_BUFFER_HPP

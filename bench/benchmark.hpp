@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_BENCHMARK_HPP
-#define GRAPH_PROTOTYPE_BENCHMARK_HPP
+#ifndef GNURADIO_BENCHMARK_HPP
+#define GNURADIO_BENCHMARK_HPP
 
 #include <algorithm>
 #include <charconv>
@@ -1047,4 +1047,4 @@ inline auto boost::ut::cfg<boost::ut::override> = ut::runner < cfg::reporter<pri
 {
 };
 
-#endif // GRAPH_PROTOTYPE_BENCHMARK_HPP
+#endif // GNURADIO_BENCHMARK_HPP

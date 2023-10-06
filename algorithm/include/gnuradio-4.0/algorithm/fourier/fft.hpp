@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_ALGORITHM_FFT_HPP
-#define GRAPH_PROTOTYPE_ALGORITHM_FFT_HPP
+#ifndef GNURADIO_ALGORITHM_FFT_HPP
+#define GNURADIO_ALGORITHM_FFT_HPP
 
 #include <ranges>
 
@@ -109,4 +109,4 @@ private:
 
 } // namespace gr::algorithm
 
-#endif // GRAPH_PROTOTYPE_ALGORITHM_FFT_HPP
+#endif // GNURADIO_ALGORITHM_FFT_HPP

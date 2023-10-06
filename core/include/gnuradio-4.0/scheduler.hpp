@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_SCHEDULER_HPP
-#define GRAPH_PROTOTYPE_SCHEDULER_HPP
+#ifndef GNURADIO_SCHEDULER_HPP
+#define GNURADIO_SCHEDULER_HPP
 
 #include <barrier>
 #include <set>
@@ -425,4 +425,4 @@ public:
 };
 } // namespace gr::scheduler
 
-#endif // GRAPH_PROTOTYPE_SCHEDULER_HPP
+#endif // GNURADIO_SCHEDULER_HPP

@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_SELECTOR_HPP
-#define GRAPH_PROTOTYPE_SELECTOR_HPP
+#ifndef GNURADIO_SELECTOR_HPP
+#define GNURADIO_SELECTOR_HPP
 
 #include <gnuradio-4.0/node.hpp>
 

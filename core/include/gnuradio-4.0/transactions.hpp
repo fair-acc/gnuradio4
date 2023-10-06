@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_TRANSACTIONS_HPP
-#define GRAPH_PROTOTYPE_TRANSACTIONS_HPP
+#ifndef GNURADIO_TRANSACTIONS_HPP
+#define GNURADIO_TRANSACTIONS_HPP
 
 #include <atomic>
 #include <cassert>
@@ -464,4 +464,4 @@ static_assert(Settings<ctx_settings<int>>);
 
 } // namespace gr
 
-#endif // GRAPH_PROTOTYPE_TRANSACTIONS_HPP
+#endif // GNURADIO_TRANSACTIONS_HPP

@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_REFLECTION_HPP
-#define GRAPH_PROTOTYPE_REFLECTION_HPP
+#ifndef GNURADIO_REFLECTION_HPP
+#define GNURADIO_REFLECTION_HPP
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -101,4 +101,4 @@
     }
 
 #pragma GCC diagnostic pop
-#endif // GRAPH_PROTOTYPE_REFLECTION_HPP
+#endif // GNURADIO_REFLECTION_HPP

@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_NODE_REGISTRY_H
-#define GRAPH_PROTOTYPE_NODE_REGISTRY_H
+#ifndef GNURADIO_NODE_REGISTRY_H
+#define GNURADIO_NODE_REGISTRY_H
 
 #include <memory>
 #include <string>

@@ -1,6 +1,6 @@
 
-#ifndef GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
-#define GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
+#ifndef GNURADIO_ALGORITHM_WINDOW_HPP
+#define GNURADIO_ALGORITHM_WINDOW_HPP
 
 #include <algorithm>
 #include <array>
@@ -234,4 +234,4 @@ create<std::vector<double>>(std::vector<double> &container, Type windowFunction,
 
 } // namespace gr::algorithm::window
 
-#endif // GRAPH_PROTOTYPE_ALGORITHM_WINDOW_HPP
+#endif // GNURADIO_ALGORITHM_WINDOW_HPP

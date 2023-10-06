@@ -1,5 +1,5 @@
-#ifndef GRAPH_PROTOTYPE_ANNOTATED_HPP
-#define GRAPH_PROTOTYPE_ANNOTATED_HPP
+#ifndef GNURADIO_ANNOTATED_HPP
+#define GNURADIO_ANNOTATED_HPP
 
 #include <string_view>
 #include <type_traits>
@@ -335,4 +335,4 @@ operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &
 
 #endif // FMT_FORMAT_H_
 
-#endif // GRAPH_PROTOTYPE_ANNOTATED_HPP
+#endif // GNURADIO_ANNOTATED_HPP
