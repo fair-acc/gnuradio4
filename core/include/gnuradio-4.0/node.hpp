@@ -306,6 +306,7 @@ struct node : protected std::tuple<Arguments...> {
     using node_template_parameters   = meta::typelist<Arguments...>;
     using Description                = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1_UZ, 1_UZ, true>>;
+    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0_UZ, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
@@ -318,16 +319,18 @@ struct node : protected std::tuple<Arguments...> {
             "node_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
-    using RatioValue                                     = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>>      numerator      = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>> denominator    = Resampling::kNumerator;
-    A<std::size_t, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                           stride         = 0_UZ;
-    std::size_t                                                                                                                                   stride_counter = 0_UZ;
-    const std::size_t                                                                                                                             unique_id      = _unique_id_counter++;
-    const std::string                                                                                              unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name        = gr::meta::type_name<Derived>();
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
-    constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
+    //
+    using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
+    using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::size_t, std::size_t>;
+    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride         = StrideControl::kStride;
+    std::size_t                                                                                                         stride_counter = 0_UZ;
+    const std::size_t                                                                                                   unique_id      = _unique_id_counter++;
+    const std::string                                                                                                   unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                                 name        = gr::meta::type_name<Derived>();
+    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">>      meta_information;
+    constexpr static std::string_view                                                                                   description = static_cast<std::string_view>(Description::value);
 
     struct ports_status_t {
         std::size_t in_min_samples{ std::numeric_limits<std::size_t>::min() };         // max of `port.min_buffer_size()` of all input ports
@@ -756,22 +759,21 @@ protected:
 
         // TODO: these checks can be moved to setting changed
         if constexpr (Resampling::kEnabled) {
-            static_assert(!is_sink_node, "Decimation/interpolation is not available for sink blocks. Remove 'PerformDecimationInterpolation' from the block definition.");
-            static_assert(!is_source_node, "Decimation/interpolation is not available for source blocks. Remove 'PerformDecimationInterpolation' from the block definition.");
+            static_assert(!is_sink_node, "Decimation/interpolation is not available for sink blocks. Remove 'ResamplingRatio<>' from the block definition.");
+            static_assert(!is_source_node, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
             static_assert(HasProcessBulkFunction<Derived>,
-                          "Blocks which allow decimation/interpolation must implement process_bulk(...) method. Remove 'PerformDecimationInterpolation' from the block definition.");
+                          "Blocks which allow decimation/interpolation must implement process_bulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
             if (numerator != 1_UZ || denominator != 1_UZ) {
-                throw std::runtime_error(
-                        fmt::format("Block is not defined as `PerformDecimationInterpolation`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+                throw std::runtime_error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
         }
 
-        if constexpr (node_template_parameters::template contains<PerformStride>) {
-            static_assert(!is_source_node, "Stride is not available for source blocks. Remove 'PerformStride' from the block definition.");
+        if constexpr (StrideControl::kEnabled) {
+            static_assert(!is_source_node, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
             if (stride != 0_UZ) {
-                throw std::runtime_error(fmt::format("Block is not defined as `PerformStride`, but stride = {}, it must equal to 0.", stride));
+                throw std::runtime_error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
             }
         }
 
@@ -954,7 +956,7 @@ protected:
         // case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
 
         std::size_t n_samples_to_consume = ports_status.in_samples; // default stride == 0
-        if constexpr (node_template_parameters::template contains<PerformStride>) {
+        if constexpr (StrideControl::kEnabled) {
             if (stride != 0_UZ) {
                 const bool first_time_stride = stride_counter == 0;
                 if (first_time_stride) {

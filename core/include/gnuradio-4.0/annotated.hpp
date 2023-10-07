@@ -103,9 +103,37 @@ static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
 static_assert(!is_resampling_ratio<int>::value);
 
 /**
- * @brief Annotates block, indicating to perform stride
+ * @brief Annotates block, indicating the stride control for data processing.
+ *
+ * Stride determines the number of samples between consecutive data processing events:
+ * - If stride is less than N, it indicates overlap.
+ * - If stride is greater than N, it indicates skipped samples.
+ * - If stride is equal to 0, it indicates back-to-back processing without skipping.
+ *
+ * @tparam stride The number of samples between data processing events.
+ * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
  */
-struct PerformStride {};
+template<std::size_t stride = 0LU, bool isConst = false>
+struct Stride {
+    static_assert(stride >= 0, "Stride must be >= 0");
+
+    static constexpr std::size_t kStride  = stride;
+    static constexpr bool        kIsConst = isConst;
+    static constexpr bool        kEnabled = !isConst || (stride > 0);
+};
+
+template<typename T>
+concept IsStride = requires {
+    T::kStride;
+    T::kIsConst;
+    T::kEnabled;
+} && std::is_base_of_v<Stride<T::kStride, T::kIsConst>, T>;
+
+template<typename T>
+using is_stride = std::bool_constant<IsStride<T>>;
+
+static_assert(is_stride<Stride<10, true>>::value);
+static_assert(!is_stride<int>::value);
 
 /**
  * @brief Annotates templated block, indicating which port data types are supported.
