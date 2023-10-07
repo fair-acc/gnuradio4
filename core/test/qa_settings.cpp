@@ -261,17 +261,17 @@ const boost::ut::suite SettingsTests = [] {
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
-        expect(eq(src.settings().auto_update_parameters().size(), 5UL));
+        expect(eq(src.settings().auto_update_parameters().size(), 4UL));
         expect(eq(src.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
         auto &block1 = flow_graph.make_node<TestBlock<float>>({ { "name", "TestBlock#1" } });
         auto &block2 = flow_graph.make_node<TestBlock<float>>({ { "name", "TestBlock#2" } });
         auto &sink   = flow_graph.make_node<Sink<float>>();
-        expect(eq(sink.settings().auto_update_parameters().size(), 6UL));
+        expect(eq(sink.settings().auto_update_parameters().size(), 5UL));
         expect(eq(sink.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
 
         block1.context = "Test Context";
         block1.settings().update_active_parameters();
-        expect(eq(block1.settings().auto_update_parameters().size(), 8UL));
+        expect(eq(block1.settings().auto_update_parameters().size(), 6UL));
         expect(eq(block1.settings().auto_forward_parameters().size(), 2UL));
 
         expect(block1.settings().get("context").has_value());

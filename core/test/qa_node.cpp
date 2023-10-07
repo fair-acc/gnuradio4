@@ -80,7 +80,7 @@ struct CountSource : public gr::node<CountSource<T>> {
 };
 
 template<typename T>
-struct IntDecBlock : public gr::node<IntDecBlock<T>, gr::ResamplingRatio<>, gr::PerformStride> {
+struct IntDecBlock : public gr::node<IntDecBlock<T>, gr::ResamplingRatio<>, gr::Stride<>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
@@ -160,14 +160,97 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     }
 }
 
-const boost::ut::suite _fft_tests = [] {
+const boost::ut::suite _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
-    auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+    auto thread_pool       = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+
+    "ResamplingRatio"_test = [] {
+        static_assert(gr::ResamplingRatio<>::kNumerator == 1LU);
+        static_assert(gr::ResamplingRatio<>::kDenominator == 1LU);
+        static_assert(gr::ResamplingRatio<>::kIsConst == false);
+        static_assert(gr::ResamplingRatio<>::kEnabled == true);
+
+        static_assert(gr::ResamplingRatio<2LU>::kNumerator == 2LU);
+        static_assert(gr::ResamplingRatio<2LU>::kDenominator == 1LU);
+        static_assert(gr::ResamplingRatio<2LU>::kIsConst == false);
+        static_assert(gr::ResamplingRatio<2LU>::kEnabled == true);
+
+        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kNumerator == 1LU);
+        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kDenominator == 1LU);
+        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kIsConst == true);
+        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kEnabled == false);
+
+        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kNumerator == 2LU);
+        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kDenominator == 1LU);
+        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kIsConst == true);
+        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kEnabled == true);
+
+        struct TestBlock0 : gr::node<TestBlock0> {
+        } testBlock0;
+        static_assert(std::is_const_v<decltype(testBlock0.numerator.value)>);
+        static_assert(std::is_const_v<decltype(testBlock0.denominator.value)>);
+
+        struct TestBlock1 : gr::node<TestBlock1, gr::ResamplingRatio<>> {
+        } testBlock1;
+        static_assert(!std::is_const_v<decltype(testBlock1.numerator.value)>);
+        static_assert(!std::is_const_v<decltype(testBlock1.denominator.value)>);
+
+        struct TestBlock2 : gr::node<TestBlock2, gr::ResamplingRatio<2LU, 1LU, true>> {
+        } testBlock2;
+        static_assert(std::is_const_v<decltype(testBlock2.numerator.value)>);
+        static_assert(std::is_const_v<decltype(testBlock2.denominator.value)>);
+        expect(eq(testBlock2.numerator, 2LU));
+        expect(eq(testBlock2.denominator, 1LU));
+    };
+
+    "Stride"_test = [] {
+        static_assert(gr::Stride<>::kStride == 0LU);
+        static_assert(gr::Stride<>::kIsConst == false);
+        static_assert(gr::Stride<>::kEnabled == true);
+
+        static_assert(gr::Stride<2LU>::kStride == 2LU);
+        static_assert(gr::Stride<2LU>::kIsConst == false);
+        static_assert(gr::Stride<2LU>::kEnabled == true);
+
+        static_assert(gr::Stride<0LU, true>::kStride == 0LU);
+        static_assert(gr::Stride<0LU, true>::kIsConst == true);
+        static_assert(gr::Stride<0LU, true>::kEnabled == false);
+
+        static_assert(gr::Stride<1LU, true>::kStride == 1LU);
+        static_assert(gr::Stride<1LU, true>::kIsConst == true);
+        static_assert(gr::Stride<1LU, true>::kEnabled == true);
+
+        struct TestBlock0 : gr::node<TestBlock0> {
+        } testBlock0;
+        static_assert(std::is_const_v<decltype(testBlock0.stride.value)>);
+
+        struct TestBlock1 : gr::node<TestBlock1, gr::Stride<>> {
+        } testBlock1;
+        static_assert(!std::is_const_v<decltype(testBlock1.stride.value)>);
+
+        struct TestBlock2 : gr::node<TestBlock2, gr::Stride<2LU, true>> {
+        } testBlock2;
+        static_assert(std::is_const_v<decltype(testBlock2.stride.value)>);
+        expect(eq(testBlock2.stride, 2LU));
+    };
+
+    "User ResamplingRatio & Stride"_test = [] {
+        using namespace gr;
+
+        struct TestBlock : gr::node<TestBlock, gr::ResamplingRatio<2LU, 1LU, true>, gr::Stride<2LU, false>> {
+        } testBlock;
+        static_assert(std::is_const_v<decltype(testBlock.numerator.value)>);
+        static_assert(std::is_const_v<decltype(testBlock.denominator.value)>);
+        static_assert(!std::is_const_v<decltype(testBlock.stride.value)>);
+        expect(eq(testBlock.numerator, 2LU));
+        expect(eq(testBlock.denominator, 1LU));
+        expect(eq(testBlock.stride, 2LU));
+    };
 
     // clang-format off
-    "Interpolation/Decimation tests"_test = [&thread_pool] {
+    "Interpolation/Decimation"_test = [&thread_pool] {
         interpolation_decimation_test({ .n_samples = 1024, .numerator =   1, .denominator =   1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1 }, thread_pool);
         interpolation_decimation_test({ .n_samples = 1024, .numerator =   1, .denominator =   2, .exp_in = 1024, .exp_out =  512, .exp_counter = 1 }, thread_pool);
         interpolation_decimation_test({ .n_samples = 1024, .numerator =   2, .denominator =   1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1 }, thread_pool);
