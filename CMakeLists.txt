@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(graph-prototype CXX)
+project(gnuradio CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
@@ -18,14 +18,21 @@ endif()
 # Replace ; with space
 string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
+# Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
+if (NOT DEFINED GR_TOPLEVEL_PROJECT)
+    set(GR_TOPLEVEL_PROJECT OFF)
+    if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+        set(GR_TOPLEVEL_PROJECT ON)
+        message(STATUS "CMake version: ${CMAKE_VERSION}")
+    endif ()
+endif ()
 
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-add_library(graph-prototype-options INTERFACE)
+add_library(gnuradio-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
-set_project_warnings(graph-prototype-options)
-
+set_project_warnings(gnuradio-options)
 
 if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
     message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
@@ -34,18 +41,17 @@ endif()
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
-    target_compile_options(graph-prototype-options INTERFACE
+    target_compile_options(gnuradio-options INTERFACE
             -fwasm-exceptions
             -pthread
     )
-    target_link_options(graph-prototype-options INTERFACE
+    target_link_options(gnuradio-options INTERFACE
             "SHELL:-s ALLOW_MEMORY_GROWTH=1"
             -fwasm-exceptions
             -pthread
             "SHELL:-s PTHREAD_POOL_SIZE=30"
     )
 endif ()
-
 
 include(FetchContent)
 FetchContent_Declare(
@@ -78,10 +84,19 @@ FetchContent_Declare(
         GIT_TAG yaml-cpp-0.7.0
 )
 
-FetchContent_MakeAvailable(fmt refl-cpp pmt ut yaml-cpp)
+FetchContent_Declare(
+        vir-simd
+        GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
+        GIT_TAG v0.2.0
+)
+
+FetchContent_MakeAvailable(fmt refl-cpp pmt ut yaml-cpp vir-simd)
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
+
+add_library(vir INTERFACE)
+target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
 
 # FFTW3 is build 2 times for float and double precisions
 SET(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)
@@ -116,44 +131,41 @@ ExternalProject_Add(fftw_ext
         LOG_DOWNLOAD ON
 )
 
-include_directories(${FFTW_PREFIX}/install/include)
-
 add_library(fftw INTERFACE)
 target_link_libraries(fftw INTERFACE fftw3 INTERFACE fftw3f INTERFACE m)
-target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include)
+target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include ${PROJECT_BINARY_DIR})
 target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
 
-# configure a header file to pass the CMake settings to the source code
-configure_file("${PROJECT_SOURCE_DIR}/cmake/config.h.in"  "${PROJECT_BINARY_DIR}/config.h" @ONLY)
-include_directories("${PROJECT_BINARY_DIR}")
+option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 
-add_subdirectory(include)
-add_subdirectory(src)
-
-option(ENABLE_TESTING "Enable Test Builds" ON)
+option(ENABLE_TESTING "Enable Test Builds"  ${GR_TOPLEVEL_PROJECT})
 if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
     enable_testing()
     if (ENABLE_COVERAGE)
         message("Coverage reporting enabled")
         include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake # (License: BSL-1.0)
-        target_compile_options(graph-prototype-options INTERFACE --coverage -O0 -g -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0) # fortify_source is not possible without optimization
-        target_link_libraries(graph-prototype-options INTERFACE --coverage)
+        target_compile_options(gnuradio-options INTERFACE --coverage -O0 -g -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0) # fortify_source is not possible without optimization
+        target_link_libraries(gnuradio-options INTERFACE --coverage)
         append_coverage_compiler_flags()
         setup_target_for_coverage_gcovr_xml(
                 NAME coverage
                 EXECUTABLE ctest
-                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
         setup_target_for_coverage_gcovr_html(
                 NAME coverage_html
                 EXECUTABLE ctest
-                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
     endif ()
-    message("Building Tests.")
-    add_subdirectory(test)
-    message("Building Benchmarks.")
-    add_subdirectory(bench)
+    message("Building Tests and benchmarks.")
 endif ()
+
+add_subdirectory(bench) # custom ut addon for microbenchmarking
+
+add_subdirectory(core)
+add_subdirectory(meta)
+add_subdirectory(algorithm)
+add_subdirectory(blocks)

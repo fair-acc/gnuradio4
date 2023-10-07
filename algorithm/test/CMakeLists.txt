@@ -1,0 +1,2 @@
+add_ut_test(qa_algorithm_fourier)
+target_link_libraries(qa_algorithm_fourier PRIVATE gnuradio-algorithm)
