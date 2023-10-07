@@ -55,12 +55,12 @@ static_assert(!UnitType<EmptyDoc>);
 static_assert(!Documentation<EmptyUnit>);
 
 /**
- * @brief Annotates field etc. that the entity is visible.
+ * @brief Annotates field etc. that the entity is visible from a UI perspective.
  */
 struct Visible {};
 
 /**
- * @brief Annotates node, indicating to calling schedulers that it may block due IO.
+ * @brief Annotates block, indicating to calling schedulers that it may block due IO.
  */
 template<bool UseIoThread = true>
 struct BlockingIO {
@@ -68,17 +68,17 @@ struct BlockingIO {
 };
 
 /**
- * @brief Annotates node, indicating to perform decimation/interpolation
+ * @brief Annotates block, indicating to perform decimation/interpolation
  */
 struct PerformDecimationInterpolation {};
 
 /**
- * @brief Annotates node, indicating to perform stride
+ * @brief Annotates block, indicating to perform stride
  */
 struct PerformStride {};
 
 /**
- * @brief Annotates templated node, indicating which port data types are supported.
+ * @brief Annotates templated block, indicating which port data types are supported.
  */
 template<typename... Ts>
 struct SupportedTypes {};
@@ -174,21 +174,15 @@ struct Annotated {
 
     Annotated() = default;
 
-    constexpr Annotated(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) : value(value_) {}
+    template<typename U>
+        requires std::constructible_from<T, U>
+    Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
 
-    constexpr Annotated(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) : value(std::move(value_)) {}
-
-    // N.B. intentional implicit assignment and conversion operators to have a transparent wrapper
-    // this does not affect the conversion of the wrapped value type 'T' itself
-    constexpr Annotated &
-    operator=(const T &value_) noexcept(std::is_nothrow_copy_constructible_v<T>) {
-        value = value_;
-        return *this;
-    }
-
-    constexpr Annotated &
-    operator=(T &&value_) noexcept(std::is_nothrow_move_constructible_v<T>) {
-        value = std::move(value_);
+    template<typename U>
+        requires std::assignable_from<T &, U>
+    Annotated &
+    operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
+        value = std::forward<U>(input);
         return *this;
     }
 
@@ -197,7 +191,10 @@ struct Annotated {
         return value;
     }
 
-    inline explicit(false) constexpr operator const T &() const noexcept { return value; }
+    inline explicit(false) constexpr
+    operator const T &() const noexcept {
+        return value;
+    }
 
     constexpr bool
     operator==(const Annotated &other) const noexcept {
@@ -215,17 +212,8 @@ struct Annotated {
     }
 
     template<typename U>
-    Annotated &
-    operator=(const U &sv) noexcept
-        requires std::is_same_v<T, std::string> && std::is_same_v<U, std::string_view>
-    {
-        value = std::string(sv); // Convert from std::string_view to std::string and assign
-        return *this;
-    }
-
-    template<typename U>
         requires std::is_same_v<std::remove_cvref_t<U>, T>
-    constexpr bool
+    [[nodiscard]] constexpr bool
     validate_and_set(U &&value_) {
         if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
             value = std::forward<U>(value_);
@@ -247,24 +235,24 @@ struct Annotated {
     }
 
     // meta-information
-    static constexpr std::string_view
+    inline static constexpr std::string_view
     description() noexcept {
         return std::string_view{ description_ };
     }
 
-    static constexpr std::string_view
+    inline static constexpr std::string_view
     documentation() noexcept {
         using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
         return std::string_view{ Documentation::value };
     }
 
-    static constexpr std::string_view
+    inline static constexpr std::string_view
     unit() noexcept {
         using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
         return std::string_view{ PhysicalUnit::value };
     }
 
-    static constexpr bool
+    inline static constexpr bool
     visible() noexcept {
         return gr::meta::typelist<Arguments...>::template contains<Visible>;
     }

@@ -95,8 +95,8 @@ On the choice of window (mathematically aka. apodisation) functions
     Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(gr::algorithm::window::to_string(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name = std::string("unknown signal");
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = std::string("a.u.");
+    Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
+    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
 
