@@ -117,8 +117,20 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(PortType<MsgPortInNamed<"in_msg">>);
         static_assert(PortType<MsgPortOutNamed<"out_msg">>);
 
-        static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MinSamples == 1);
-        static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MaxSamples == 2);
+        static_assert(PortIn<float, RequiredSamples<>>::Required::kMinSamples == 1LU);
+        static_assert(PortIn<float, RequiredSamples<>>::Required::kMaxSamples == std::numeric_limits<std::size_t>::max());
+        static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1LU);
+        static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2LU);
+        expect(eq(PortIn<float, RequiredSamples<1, 2, false>>().min_samples, 1LU));
+        expect(eq(PortIn<float, RequiredSamples<1, 2, false>>().max_samples, 2LU));
+        expect(eq(PortIn<float, RequiredSamples<1, 2, true>>().min_samples, 1LU));
+        expect(eq(PortIn<float, RequiredSamples<1, 2, true>>().max_samples, 2LU));
+        static_assert(!RequiredSamples<1LU, 2LU, false>::kIsConst);
+        static_assert(!std::is_const_v<decltype(PortIn<float, RequiredSamples<1LU, 2LU, false>>().min_samples)>);
+        static_assert(!std::is_const_v<decltype(PortIn<float, RequiredSamples<1LU, 2LU, false>>().max_samples)>);
+        static_assert(RequiredSamples<1LU, 2LU, true>::kIsConst);
+        static_assert(std::is_const_v<decltype(PortIn<float, RequiredSamples<1LU, 2LU, true>>().min_samples)>);
+        static_assert(std::is_const_v<decltype(PortIn<float, RequiredSamples<1LU, 2LU, true>>().max_samples)>);
         static_assert(PortIn<float>::direction() == port_direction_t::INPUT);
         static_assert(PortOut<float>::direction() == port_direction_t::OUTPUT);
     };

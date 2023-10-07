@@ -7,10 +7,10 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "dataset.hpp"
-#include "node.hpp"
 #include "annotated.hpp"
 #include "circular_buffer.hpp"
+#include "dataset.hpp"
+#include "node.hpp"
 #include "tag.hpp"
 
 namespace gr {
@@ -88,21 +88,24 @@ struct internal_port_buffers {
 /**
  * @brief optional port annotation argument to describe the min/max number of samples required from this port before invoking the blocks work function.
  *
- * @tparam MIN_SAMPLES (>0) specifies the minimum number of samples the port/block requires for processing in one scheduler iteration
- * @tparam MAX_SAMPLES specifies the maximum number of samples the port/block can process in one scheduler iteration
+ * @tparam minSamples (>0) specifies the minimum number of samples the port/block requires for processing in one scheduler iteration
+ * @tparam maxSamples specifies the maximum number of samples the port/block can process in one scheduler iteration
+ * @tparam isConst specifies if the range is constant or can be modified during run-time.
  */
-template<std::size_t MIN_SAMPLES = std::dynamic_extent, std::size_t MAX_SAMPLES = std::dynamic_extent>
+template<std::size_t minSamples = std::dynamic_extent, std::size_t maxSamples = std::dynamic_extent, bool isConst = false>
 struct RequiredSamples {
-    static_assert(MIN_SAMPLES > 0, "Port<T, ..., RequiredSamples::MIN_SAMPLES, ...>, ..> must be >= 0");
-    static constexpr std::size_t MinSamples = MIN_SAMPLES;
-    static constexpr std::size_t MaxSamples = MAX_SAMPLES;
+    static_assert(minSamples > 0, "Port<T, ..., RequiredSamples::MIN_SAMPLES, ...>, ..> must be >= 0");
+    static constexpr std::size_t kMinSamples = minSamples == std::dynamic_extent ? 1LU : minSamples;
+    static constexpr std::size_t kMaxSamples = maxSamples == std::dynamic_extent ? std::numeric_limits<std::size_t>::max() : maxSamples;
+    static constexpr bool        kIsConst    = isConst;
 };
 
 template<typename T>
 concept IsRequiredSamples = requires {
-    T::MinSamples;
-    T::MaxSamples;
-} && std::is_base_of_v<RequiredSamples<T::MinSamples, T::MaxSamples>, T>;
+    T::kMinSamples;
+    T::kMaxSamples;
+    T::kIsConst;
+} && std::is_base_of_v<RequiredSamples<T::kMinSamples, T::kMaxSamples, T::kIsConst>, T>;
 
 template<typename T>
 using is_required_samples = std::bool_constant<IsRequiredSamples<T>>;
@@ -228,9 +231,11 @@ struct Port {
     constexpr static bool optional      = std::disjunction_v<std::is_same<Optional, Arguments>...>;
     std::string           name          = static_cast<std::string>(PortName);
     std::int16_t          priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t           min_samples   = (Required::MinSamples == std::dynamic_extent ? 1 : Required::MinSamples);
-    std::size_t           max_samples   = Required::MaxSamples;
     T                     default_value = T{};
+
+    //
+    std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> min_samples = Required::kMinSamples;
+    std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> max_samples = Required::kMaxSamples;
 
 private:
     bool      _connected    = false;
@@ -379,19 +384,19 @@ public:
 
     [[nodiscard]] constexpr std::size_t
     min_buffer_size() const noexcept {
-        if constexpr (Required::MinSamples == std::dynamic_extent) {
-            return min_samples;
+        if constexpr (Required::kIsConst) {
+            return Required::kMinSamples;
         } else {
-            return Required::MinSamples;
+            return min_samples;
         }
     }
 
     [[nodiscard]] constexpr std::size_t
     max_buffer_size() const noexcept {
-        if constexpr (Required::MaxSamples == std::dynamic_extent) {
-            return max_samples;
+        if constexpr (Required::kIsConst) {
+            return Required::kMaxSamples;
         } else {
-            return Required::MaxSamples;
+            return max_samples;
         }
     }
 
@@ -545,8 +550,8 @@ static_assert(PortType<PortOut<float>>);
 static_assert(PortType<MsgPortIn<float>>);
 static_assert(PortType<MsgPortOut<float>>);
 
-static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MinSamples == 1);
-static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::MaxSamples == 2);
+static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
+static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);
 static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>>::Domain, CPU>);
 static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>, GPU>::Domain, GPU>);
 
@@ -749,9 +754,10 @@ private:
     }
 
 public:
-    using value_type                      = void; // a sterile port
+    using value_type = void; // a sterile port
 
     struct owned_value_tag {};
+
     struct non_owned_reference_tag {};
 
     constexpr dynamic_port()              = delete;
