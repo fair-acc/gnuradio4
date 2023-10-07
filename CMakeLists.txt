@@ -152,12 +152,12 @@ if (ENABLE_TESTING AND UNIX AND NOT APPLE)
         setup_target_for_coverage_gcovr_xml(
                 NAME coverage
                 EXECUTABLE ctest
-                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
         setup_target_for_coverage_gcovr_html(
                 NAME coverage_html
                 EXECUTABLE ctest
-                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_fft qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_data_sink qa_dynamic_port qa_dynamic_node qa_hier_node qa_filter qa_settings qa_tags qa_scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*" "concepts/.*" ".*/test/.*")
     endif ()
     message("Building Tests and benchmarks.")
