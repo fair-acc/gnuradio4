@@ -302,8 +302,10 @@ struct node : protected std::tuple<Arguments...> {
 
     using base_t                     = node<Derived, Arguments...>;
     using derived_t                  = Derived;
+    using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
     using node_template_parameters   = meta::typelist<Arguments...>;
     using Description                = typename node_template_parameters::template find_or_default<is_doc, EmptyDoc>;
+    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1_UZ, 1_UZ, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
@@ -316,11 +318,12 @@ struct node : protected std::tuple<Arguments...> {
             "node_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
-    A<std::size_t, "numerator", Doc<"top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>>      numerator      = 1_UZ;
-    A<std::size_t, "denominator", Doc<"bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect">, Limits<1_UZ, std::size_t(-1)>> denominator    = 1_UZ;
-    A<std::size_t, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                                                stride         = 0_UZ;
-    std::size_t                                                                                                                                                        stride_counter = 0_UZ;
-    const std::size_t                                                                                                                                                  unique_id = _unique_id_counter++;
+    using RatioValue                                     = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>>      numerator      = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>> denominator    = Resampling::kNumerator;
+    A<std::size_t, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                           stride         = 0_UZ;
+    std::size_t                                                                                                                                   stride_counter = 0_UZ;
+    const std::size_t                                                                                                                             unique_id      = _unique_id_counter++;
     const std::string                                                                                              unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name        = gr::meta::type_name<Derived>();
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
@@ -752,7 +755,7 @@ protected:
         constexpr bool is_sink_node   = output_types::size == 0;
 
         // TODO: these checks can be moved to setting changed
-        if constexpr (node_template_parameters::template contains<PerformDecimationInterpolation>) {
+        if constexpr (Resampling::kEnabled) {
             static_assert(!is_sink_node, "Decimation/interpolation is not available for sink blocks. Remove 'PerformDecimationInterpolation' from the block definition.");
             static_assert(!is_source_node, "Decimation/interpolation is not available for source blocks. Remove 'PerformDecimationInterpolation' from the block definition.");
             static_assert(HasProcessBulkFunction<Derived>,
@@ -843,7 +846,7 @@ protected:
                 return { requested_work, 0_UZ, ports_status.in_at_least_one_port_has_data ? work_return_status_t::INSUFFICIENT_INPUT_ITEMS : work_return_status_t::DONE };
             }
 
-            if constexpr (node_template_parameters::template contains<PerformDecimationInterpolation>) {
+            if constexpr (Resampling::kEnabled) {
                 if (numerator != 1_UZ || denominator != 1_UZ) {
                     // TODO: this ill-defined checks can be done only once after parameters were changed
                     const double ratio  = static_cast<double>(numerator) / static_cast<double>(denominator);

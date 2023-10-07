@@ -14,8 +14,6 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace grg = gr;
-
 struct ProcessStatus {
     std::size_t      n_inputs{ 0 };
     std::size_t      n_outputs{ 0 };
@@ -64,8 +62,8 @@ struct StrideTestData {
 };
 
 template<typename T>
-struct CountSource : public grg::node<CountSource<T>> {
-    grg::PortOut<T> out{};
+struct CountSource : public gr::node<CountSource<T>> {
+    gr::PortOut<T> out{};
     int            count{ 0 };
     int            n_samples{ 1024 };
 
@@ -82,14 +80,14 @@ struct CountSource : public grg::node<CountSource<T>> {
 };
 
 template<typename T>
-struct IntDecBlock : public grg::node<IntDecBlock<T>, grg::PerformDecimationInterpolation, grg::PerformStride> {
-    grg::PortIn<T>  in{};
-    grg::PortOut<T> out{};
+struct IntDecBlock : public gr::node<IntDecBlock<T>, gr::ResamplingRatio<>, gr::PerformStride> {
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
 
     ProcessStatus  status{};
     bool           write_to_vector{ false };
 
-    grg::work_return_status_t
+    gr::work_return_status_t
     process_bulk(std::span<const T> input, std::span<T> output) noexcept {
         status.n_inputs  = input.size();
         status.n_outputs = output.size();
@@ -98,7 +96,7 @@ struct IntDecBlock : public grg::node<IntDecBlock<T>, grg::PerformDecimationInte
         status.total_out += output.size();
         if (write_to_vector) status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
 
-        return grg::work_return_status_t::OK;
+        return gr::work_return_status_t::OK;
     }
 };
 
@@ -110,7 +108,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     using namespace boost::ut;
     using scheduler = gr::scheduler::simple<>;
 
-    grg::graph flow;
+    gr::graph flow;
     auto     &source          = flow.make_node<CountSource<int>>();
     source.n_samples          = static_cast<int>(data.n_samples);
 
@@ -136,7 +134,7 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
 
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
-    grg::graph  flow;
+    gr::graph  flow;
     auto      &source             = flow.make_node<CountSource<int>>();
     source.n_samples              = static_cast<int>(data.n_samples);
 

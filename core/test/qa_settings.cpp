@@ -6,12 +6,12 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <gnuradio-4.0/tag.hpp>
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/graph.hpp>
 #include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/tag.hpp>
 #include <gnuradio-4.0/transactions.hpp>
 
 using namespace std::string_literals;
@@ -170,7 +170,7 @@ static_assert(NodeType<TestBlock<float>>);
 static_assert(NodeType<TestBlock<double>>);
 
 template<typename T, bool Average = false>
-struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double>, PerformDecimationInterpolation, Doc<R""(
+struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double>, ResamplingRatio<>, Doc<R""(
 @brief reduces sample rate by given fraction controlled by denominator
 )"">> {
     PortIn<T>                        in{};
@@ -180,7 +180,7 @@ struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double
     void
     settings_changed(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
         if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
-            const float fwdSampleRate                                           = sample_rate / static_cast<float>(this->denominator);
+            const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->denominator);
             fwd_settings[std::string(gr::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
         }
     }
@@ -261,17 +261,17 @@ const boost::ut::suite SettingsTests = [] {
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
-        expect(eq(src.settings().auto_update_parameters().size(), 7UL));
+        expect(eq(src.settings().auto_update_parameters().size(), 5UL));
         expect(eq(src.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
         auto &block1 = flow_graph.make_node<TestBlock<float>>({ { "name", "TestBlock#1" } });
         auto &block2 = flow_graph.make_node<TestBlock<float>>({ { "name", "TestBlock#2" } });
         auto &sink   = flow_graph.make_node<Sink<float>>();
-        expect(eq(sink.settings().auto_update_parameters().size(), 8UL));
+        expect(eq(sink.settings().auto_update_parameters().size(), 6UL));
         expect(eq(sink.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
 
         block1.context = "Test Context";
         block1.settings().update_active_parameters();
-        expect(eq(block1.settings().auto_update_parameters().size(), 9UL));
+        expect(eq(block1.settings().auto_update_parameters().size(), 8UL));
         expect(eq(block1.settings().auto_forward_parameters().size(), 2UL));
 
         expect(block1.settings().get("context").has_value());

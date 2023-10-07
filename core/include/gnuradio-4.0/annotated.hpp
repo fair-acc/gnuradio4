@@ -68,9 +68,39 @@ struct BlockingIO {
 };
 
 /**
- * @brief Annotates block, indicating to perform decimation/interpolation
+ * @brief Annotates block, indicating to perform resampling based on the provided ratio.
+ *
+ * The ratio between numerator and denominator defines the number of samples to be interpolated or decimated.
+ * - If the ratio is greater than 1, interpolation occurs.
+ * - If the ratio is less than 1, decimation occurs.
+ * - If the ratio is 1, no effect on the sampling rate.
+ *
+ * @tparam numerator Top number in the input-to-output sample ratio.
+ * @tparam denominator Bottom number in the input-to-output sample ratio.
+ * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
  */
-struct PerformDecimationInterpolation {};
+template<std::size_t numerator = 1LU, std::size_t denominator = 1LU, bool isConst = false>
+struct ResamplingRatio {
+    static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
+    static constexpr std::size_t kNumerator   = numerator;
+    static constexpr std::size_t kDenominator = denominator;
+    static constexpr bool        kIsConst     = isConst;
+    static constexpr bool        kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
+};
+
+template<typename T>
+concept IsResamplingRatio = requires {
+    T::kNumerator;
+    T::kDenominator;
+    T::kIsConst;
+    T::kEnabled;
+} && std::is_base_of_v<ResamplingRatio<T::kNumerator, T::kDenominator, T::kIsConst>, T>;
+
+template<typename T>
+using is_resampling_ratio = std::bool_constant<IsResamplingRatio<T>>;
+
+static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
+static_assert(!is_resampling_ratio<int>::value);
 
 /**
  * @brief Annotates block, indicating to perform stride
@@ -296,7 +326,8 @@ struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...>
 
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
 struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
-    fmt::formatter<T> value_formatter;
+    using Type = std::remove_const_t<T>;
+    fmt::formatter<Type> value_formatter;
 
     template<typename FormatContext>
     auto

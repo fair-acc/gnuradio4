@@ -69,7 +69,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
+                            if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                                 auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
                                     if (str.starts_with(prefix)) {
                                         str.remove_prefix(prefix.size());
@@ -167,7 +167,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
+                    if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -225,7 +225,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_node))>>;
-                    if constexpr (is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
+                    if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             settings_base::_changed.store(true);
@@ -316,7 +316,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_node))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (is_writable(member) && is_supported_type<Type>()) {
+                    if constexpr (!std::is_const_v<Type> && is_writable(member) && is_supported_type<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_node).validate_and_set(std::get<Type>(staged_value))) {
