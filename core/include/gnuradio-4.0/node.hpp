@@ -311,7 +311,7 @@ struct node : protected std::tuple<Arguments...> {
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) detail::WorkCounter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work_return_status_t> ioLastWorkStatus{ work_return_status_t::OK };
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                           = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "node_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
@@ -322,7 +322,7 @@ struct node : protected std::tuple<Arguments...> {
     std::size_t                                                                                                                                                        stride_counter = 0_UZ;
     const std::size_t                                                                                                                                                  unique_id = _unique_id_counter++;
     const std::string                                                                                              unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name{ std::string(gr::meta::type_name<Derived>()) };
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name        = gr::meta::type_name<Derived>();
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
     constexpr static std::string_view                                                                              description = static_cast<std::string_view>(Description::value);
 
@@ -983,7 +983,7 @@ protected:
         }
 
         const auto input_spans = meta::tuple_transform(
-                [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>( PortOrCollection &input_port_or_collection) noexcept {
+                [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>(PortOrCollection &input_port_or_collection) noexcept {
                     auto in_samples          = sync_in_samples;
 
                     auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
@@ -1004,7 +1004,7 @@ protected:
                 },
                 input_ports(&self()));
         auto writers_tuple = meta::tuple_transform(
-                [&self = self(), sync_out_samples = ports_status.out_samples]<typename PortOrCollection>( PortOrCollection &output_port_or_collection) noexcept {
+                [&self = self(), sync_out_samples = ports_status.out_samples]<typename PortOrCollection>(PortOrCollection &output_port_or_collection) noexcept {
                     auto out_samples         = sync_out_samples;
 
                     auto process_single_port = [&out_samples]<typename Port>(Port &&port) {
@@ -1427,10 +1427,10 @@ merge_by_index(A &&a, B &&b) -> merged_node<std::remove_cvref_t<A>, std::remove_
     if constexpr (!std::is_same_v<typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
                                   typename traits::node::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
         gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::node::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
-                                typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+                              typename traits::node::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                                gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
-                                typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+                              gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::node::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                              typename traits::node::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
     return { std::forward<A>(a), std::forward<B>(b) };
 }

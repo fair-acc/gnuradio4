@@ -314,8 +314,8 @@ class data_sink : public node<data_sink<T>> {
 
 public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name = std::string("unknown signal");
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = std::string("a.u.");
+    Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
+    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
 
@@ -1029,7 +1029,7 @@ private:
     };
 };
 
-} // namespace gr
+} // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::data_sink<T>), in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
