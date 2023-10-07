@@ -19,7 +19,7 @@ using namespace gr;
 
 template<typename T, typename U = DataSet<float>, typename FourierAlgorithm = gr::algorithm::FFT<gr::algorithm::FFTInDataType<T, typename U::value_type>>>
     requires(gr::algorithm::ComplexType<T> || std::floating_point<T> || std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>)
-struct FFT : public node<FFT<T, U, FourierAlgorithm>, PerformDecimationInterpolation, Doc<R""(
+struct FFT : public node<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>, Doc<R""(
 @brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
 The FFT block is capable of performing Fourier Transform computations on real or complex data,

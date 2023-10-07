@@ -9,7 +9,7 @@ blocks:
       stride: 0
       unique_name: good::fixed_source<double>#0
       denominator::description: denominator
-      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -22,7 +22,7 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
@@ -39,7 +39,7 @@ blocks:
       stride: 0
       unique_name: good::multiply<double>#0
       denominator::description: denominator
-      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -52,7 +52,7 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
@@ -68,7 +68,7 @@ blocks:
       stride: 0
       unique_name: builtin_counter<double>#0
       denominator::description: denominator
-      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -81,7 +81,7 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
@@ -98,7 +98,7 @@ blocks:
       total_count: 100
       unique_name: good::cout_sink<double>#0
       denominator::description: denominator
-      denominator::documentation: "bottom number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       denominator::unit: ""
       denominator::visible: 0
       description: ""
@@ -111,7 +111,7 @@ blocks:
       name::unit: ""
       name::visible: 0
       numerator::description: numerator
-      numerator::documentation: "top number of input-to-output sample ratio: < 1 decimation, >1 interpolation, 1_ no effect"
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
       numerator::unit: ""
       numerator::visible: 0
       stride::description: stride
