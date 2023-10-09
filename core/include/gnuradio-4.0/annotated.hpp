@@ -233,7 +233,8 @@ struct Annotated {
     Annotated() = default;
 
     template<typename U>
-        requires std::constructible_from<T, U>
+        requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
+    explicit(false)
     Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
 
     template<typename U>
