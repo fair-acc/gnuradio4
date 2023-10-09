@@ -7,6 +7,9 @@ on:
   release:
     types: [ created ]
 
+env:
+  REFERENCE_CONFIG: 'Ubuntu gcc13' # configuration used for coverage etc
+
 jobs:
   build:
     name: "${{ matrix.configurations.name }} | ${{ matrix.cmake-build-type }}"
@@ -16,15 +19,9 @@ jobs:
       fail-fast: false
       matrix:
         configurations:
-          - name: Ubuntu gcc12
-            os: ubuntu-22.04
-            compiler: gcc12
           - name: Ubuntu gcc13
             os: ubuntu-22.04
             compiler: gcc13
-          - name: Ubuntu Latest clang16
-            os: ubuntu-22.04
-            compiler: clang16
           - name: Ubuntu Latest clang17
             os: ubuntu-22.04
             compiler: clang17
@@ -48,28 +45,18 @@ jobs:
           path: ${{runner.workspace}}/build/_deps
           key: ${{ runner.os }}-${{ matrix.configurations.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
 
-      - name: Install gcc-12
-        if: matrix.configurations.compiler == 'gcc12'
+      - name: Install gcovr
+        shell: bash
+        if: matrix.configurations.name == env.REFERENCE_CONFIG && matrix.cmake-build-type == 'Debug'
         run: |
-          sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa # provides newer gcc 12.2.0 instead of 12.1.0
-          sudo apt-get install -y gcc-12 g++-12 gcovr
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 110 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+          python3 -m pip install gcovr --user --no-warn-script-location
+          gcovr --version
 
       - name: Install gcc-13
         if: matrix.configurations.compiler == 'gcc13'
         run: |
           sudo apt-get install -y gcc-13 g++-13 gcovr
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 110 --slave /usr/bin/g++ g++ /usr/bin/g++-13 --slave /usr/bin/gcov gcov /usr/bin/gcov-13
-
-      - name: Install clang-16
-        if: matrix.configurations.compiler == 'clang16'
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-          sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-16 main'
-          sudo apt update
-          sudo apt upgrade -y # update clang14 to fix packaging conflicts
-          sudo apt install -y clang-16 libc++-16-dev libc++abi-16-dev
-          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 110
 
       - name: Install clang-17
         if: matrix.configurations.compiler == 'clang17'
@@ -94,14 +81,14 @@ jobs:
           ./emsdk activate 3.1.43
 
       - name: Install sonar-scanner and build-wrapper
-        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
         uses: SonarSource/sonarcloud-github-c-cpp@v1
 
       - name: Configure CMake
         if: matrix.configurations.compiler != 'emscripten'
         shell: bash
         run: |
-          cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.configurations.compiler == 'gcc12' &&  matrix.cmake-build-type == 'Debug'}}
+          cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.configurations.compiler == 'gcc13' &&  matrix.cmake-build-type == 'Debug'}}
 
       - name: Configure CMake Emscripten
         if: matrix.configurations.compiler == 'emscripten'
@@ -112,25 +99,25 @@ jobs:
           emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}
 
       - name: Build
-        if: matrix.configurations.compiler != 'gcc12' || matrix.cmake-build-type != 'Debug'
+        if: matrix.configurations.compiler != 'gcc13' || matrix.cmake-build-type != 'Debug'
         shell: bash
         run: |
           test -f ~/emsdk/emsdk_env.sh && source ~/emsdk/emsdk_env.sh
           cmake --build ../build
 
       - name: Build with Coverage and SonarCube
-        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
         shell: bash
         run: build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build ../build
 
       - name: execute tests
-        if: matrix.configurations.compiler != 'gcc12' || matrix.cmake-build-type != 'Debug'
+        if: matrix.configurations.compiler != 'gcc13' || matrix.cmake-build-type != 'Debug'
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: ctest --output-on-failure
 
       - name: execute tests with coverage
-        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: cmake --build . --target coverage
@@ -149,7 +136,7 @@ jobs:
           node --experimental-wasm-threads ./core/src/main.js
 
       - name: Run sonar-scanner
-        if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
+        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
