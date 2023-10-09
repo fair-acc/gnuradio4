@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
   release:
     types: [ created ]
 
@@ -26,6 +25,9 @@ jobs:
           - name: Ubuntu Latest clang16
             os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
             compiler: clang16
+          - name: Ubuntu Latest clang17
+            os: ubuntu-22.04
+            compiler: clang17
           - name: Ubuntu Latest emscripten
             os: ubuntu-22.04 # pre-release, ubuntu-latest still points to ubuntu-2004
             compiler: emscripten
@@ -75,6 +77,16 @@ jobs:
           sudo apt upgrade -y # update clang14 to fix packaging conflicts
           sudo apt install -y clang-16 libc++-16-dev libc++abi-16-dev
           sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-16 110
+
+      - name: Install clang-17
+        if: matrix.configurations.compiler == 'clang17'
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+          sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main'
+          sudo apt update
+          sudo apt upgrade -y # update clang14 to fix packaging conflicts
+          sudo apt install -y clang-17 libc++-17-dev libc++abi-17-dev
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-17 110
 
       - name: Install emscripten
         if: matrix.configurations.compiler == 'emscripten'
