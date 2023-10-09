@@ -88,10 +88,10 @@ jobs:
           cd
           git clone --depth=1 https://github.com/emscripten-core/emsdk.git
           cd emsdk
-          # Download and install the latest SDK tools.
-          ./emsdk install releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
-          # Make the "latest" SDK "active" for the current user. (writes .emscripten file)
-          ./emsdk activate releases-bf3c159888633d232c0507f4c76cc156a43c32dc-64bit
+          # Download and install emscripten.
+          ./emsdk install 3.1.43 # 07/2023 (latest = 3.1.46 -> 09/2023)
+          # Make "active" for the current user. (writes .emscripten file)
+          ./emsdk activate 3.1.43
 
       - name: Install sonar-scanner and build-wrapper
         if: matrix.configurations.compiler == 'gcc12' && matrix.cmake-build-type == 'Debug'
@@ -107,8 +107,9 @@ jobs:
         if: matrix.configurations.compiler == 'emscripten'
         shell: bash
         run: |
+          export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk for threading support
           source ~/emsdk/emsdk_env.sh
-          emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF
+          emcmake cmake -S . -B ../build -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}
 
       - name: Build
         if: matrix.configurations.compiler != 'gcc12' || matrix.cmake-build-type != 'Debug'
