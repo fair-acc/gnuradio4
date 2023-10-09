@@ -52,10 +52,10 @@ format_variant(const auto &value) noexcept {
                     return fmt::format("monostate");
                 } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
                     return fmt::format("[{}]", fmt::join(arg, ", "));
-                } else if constexpr (std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>> || std::is_same_v<Type, std::vector<unsigned short>>
-                                     || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>> || std::is_same_v<Type, std::vector<signed char>>
-                                     || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>> || std::is_same_v<Type, std::vector<long>>
-                                     || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
+                } else if constexpr (std::is_same_v<Type, std::vector<std::string>> || std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>>
+                                     || std::is_same_v<Type, std::vector<unsigned short>> || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>>
+                                     || std::is_same_v<Type, std::vector<signed char>> || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>>
+                                     || std::is_same_v<Type, std::vector<long>> || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
                     return fmt::format("[{}]", fmt::join(arg, ", "));
                 } else {
                     return fmt::format("not-yet-supported type {}", gr::meta::type_name<Type>());
@@ -136,9 +136,10 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
     std::int32_t                                                                     n_samples_max = -1;
     A<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1000.0f;
     std::vector<T>                                                                   vector_setting{ T(3), T(2), T(1) };
-    int                                                                              update_count = 0;
-    bool                                                                             debug        = false;
-    bool                                                                             resetCalled  = false;
+    A<std::vector<std::string>, "string vector">                                     string_vector_setting = {};
+    int                                                                              update_count          = 0;
+    bool                                                                             debug                 = false;
+    bool                                                                             resetCalled           = false;
 
     void
     settings_changed(const property_map &old_settings, property_map &new_settings) noexcept {
@@ -244,7 +245,7 @@ struct Sink : public node<Sink<T>> {
 } // namespace gr::setting_test
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
 
@@ -270,7 +271,7 @@ const boost::ut::suite SettingsTests = [] {
 
         block1.context = "Test Context";
         block1.settings().update_active_parameters();
-        expect(eq(block1.settings().auto_update_parameters().size(), 8UL));
+        expect(eq(block1.settings().auto_update_parameters().size(), 9UL));
         expect(eq(block1.settings().auto_forward_parameters().size(), 2UL));
 
         expect(block1.settings().get("context").has_value());
@@ -283,7 +284,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().get(keys1).empty());
         expect(block1.settings().get(keys2).empty());
         expect(block1.settings().get(keys3).empty());
-        expect(eq(block1.settings().get().size(), 10UL));
+        expect(eq(block1.settings().get().size(), 11UL));
 
         // set non-existent setting
         expect(not block1.settings().changed()) << "settings not changed";
@@ -333,7 +334,7 @@ const boost::ut::suite SettingsTests = [] {
         "empty"_test = [] {
             auto block = TestBlock<float>();
             block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
-            expect(eq(block.settings().get().size(), 10UL));
+            expect(eq(block.settings().get().size(), 11UL));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
@@ -344,7 +345,7 @@ const boost::ut::suite SettingsTests = [] {
             block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().staged_parameters().size(), 0u));
             block.settings().update_active_parameters();
-            expect(eq(block.settings().get().size(), 10UL));
+            expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -353,7 +354,7 @@ const boost::ut::suite SettingsTests = [] {
         "empty via graph"_test = [] {
             graph flow_graph;
             auto &block = flow_graph.make_node<TestBlock<float>>();
-            expect(eq(block.settings().get().size(), 10UL));
+            expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
@@ -361,7 +362,7 @@ const boost::ut::suite SettingsTests = [] {
         "with init parameter via graph"_test = [] {
             graph flow_graph;
             auto &block = flow_graph.make_node<TestBlock<float>>({ { "scaling_factor", 2.f } });
-            expect(eq(block.settings().get().size(), 10UL));
+            expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -371,13 +372,14 @@ const boost::ut::suite SettingsTests = [] {
         graph flow_graph;
         auto &block = flow_graph.make_node<TestBlock<float>>();
         block.settings().update_active_parameters();
-        expect(eq(block.settings().get().size(), 10UL));
+        expect(eq(block.settings().get().size(), 11UL));
 
         block.debug    = true;
-        const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } } });
+        const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } }, { "string_vector_setting", std::vector<std::string>{ "A", "B", "C" } } });
         expect(val.empty()) << "unable to stage settings";
         block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
         expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
+        expect(eq(block.string_vector_setting.value, std::vector<std::string>{ "A", "B", "C" }));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
     };
 
