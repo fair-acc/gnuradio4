@@ -6,14 +6,14 @@
 #include <string>
 #include <string_view>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 
 using namespace gr::literals;
 
 template<typename T>
-class builtin_multiply : public gr::node<builtin_multiply<T>> {
+class builtin_multiply : public gr::Block<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
@@ -30,7 +30,7 @@ public:
     }
 
     [[nodiscard]] constexpr auto
-    process_one(T a) const noexcept {
+    processOne(T a) const noexcept {
         return a * _factor;
     }
 };
@@ -38,7 +38,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 
 template<typename T>
-class builtin_counter : public gr::node<builtin_counter<T>> {
+class builtin_counter : public gr::Block<builtin_counter<T>> {
 public:
     static std::size_t      s_event_count;
 
@@ -46,7 +46,7 @@ public:
     gr::PortOut<T> out;
 
     [[nodiscard]] constexpr auto
-    process_one(T a) const noexcept {
+    processOne(T a) const noexcept {
         s_event_count++;
         return a;
     }
@@ -56,11 +56,11 @@ template<typename T>
 std::size_t builtin_counter<T>::s_event_count = 0;
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 
-// TODO: Unify nodes with static and dynamic ports
-//  - Port to gr::node
-//  - use node::set_name instead of returning an empty name
+// TODO: Unify blocks with static and dynamic ports
+//  - Port to gr::block
+//  - use Block::set_name instead of returning an empty name
 template<typename T>
-class multi_adder : public gr::node_model {
+class multi_adder : public gr::BlockModel {
     static std::atomic_size_t _unique_id_counter;
 
 public:
@@ -140,8 +140,8 @@ public:
         return 0_UZ;
     }
 
-    // TODO: integrate with node::work
-    gr::work_return_t
+    // TODO: integrate with Block::work
+    gr::WorkReturn
     work(std::size_t requested_work) override {
         // TODO: Rewrite with ranges once we can use them
         std::size_t available_samples = -1_UZ;
@@ -153,7 +153,7 @@ public:
         }
 
         if (available_samples == 0) {
-            return { requested_work, 0_UZ, gr::work_return_status_t::OK };
+            return { requested_work, 0_UZ, gr::WorkReturnStatus::OK };
         }
 
         std::vector<std::span<const double>> readers;
@@ -174,7 +174,7 @@ public:
         for (auto &input_port [[maybe_unused]] : _input_ports) {
             assert(available_samples == input_port.streamReader().consume(available_samples));
         }
-        return { requested_work, available_samples, gr::work_return_status_t::OK };
+        return { requested_work, available_samples, gr::WorkReturnStatus::OK };
     }
 
     void *
@@ -206,13 +206,13 @@ public:
     }
 };
 
-// static_assert(gr::NodeType<multi_adder<int>>);
+// static_assert(gr::BlockLike<multi_adder<int>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(multi_adder, input_port_count);
 
 template<typename Registry>
 void
-                       register_builtin_nodes(Registry *registry) {
+                       registerBuiltinBlocks(Registry *registry) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
     GP_REGISTER_NODE_RUNTIME(registry, builtin_multiply, double, float);

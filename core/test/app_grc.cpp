@@ -8,15 +8,15 @@
 #include <gnuradio-4.0/graph_yaml_importer.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
-#include <gnuradio-4.0/basic/common_nodes.hpp>
 #include <build_configure.hpp>
+#include <gnuradio-4.0/basic/common_blocks.hpp>
 
 namespace grg = gr;
 
 struct test_context {
     test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
-    grg::node_registry registry;
+    grg::BlockRegistry registry;
     grg::plugin_loader loader;
 };
 
@@ -43,7 +43,7 @@ main(int argc, char *argv[]) {
     // Test the basic graph loading and storing
     {
         using namespace gr;
-        register_builtin_nodes(&context.registry);
+        registerBuiltinBlocks(&context.registry);
 
         auto graph_source          = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
@@ -62,7 +62,7 @@ main(int argc, char *argv[]) {
     // data into another graph
     {
         using namespace gr;
-        register_builtin_nodes(&context.registry);
+        registerBuiltinBlocks(&context.registry);
 
         auto                  graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
@@ -71,17 +71,17 @@ main(int argc, char *argv[]) {
 
         auto                  graph_2            = grg::load_grc(context.loader, graph_saved_source);
 
-        [[maybe_unused]] auto collect_nodes      = [](grg::graph &graph) {
+        [[maybe_unused]] auto collectBlocks      = [](grg::graph &graph) {
             std::set<std::string> result;
-            graph.for_each_node([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.type_name())); });
+            graph.for_each_block([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.type_name())); });
             return result;
         };
 
-        assert(collect_nodes(graph_1) == collect_nodes(graph_2));
+        assert(collectBlocks(graph_1) == collectBlocks(graph_2));
 
         [[maybe_unused]] auto collect_edges = [](grg::graph &graph) {
             std::set<std::string> result;
-            graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_node().name(), edge.src_port_index(), edge.dst_node().name(), edge.dst_port_index())); });
+            graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_block().name(), edge.src_port_index(), edge.dst_block().name(), edge.dst_port_index())); });
             return result;
         };
 

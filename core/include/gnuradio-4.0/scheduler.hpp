@@ -129,7 +129,7 @@ public:
     }
 
     void
-    run_on_pool(const std::vector<std::vector<node_model *>> &jobs, const std::function<work_return_t(const std::span<node_model *const> &)> work_function) {
+    run_on_pool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<WorkReturn(const std::span<BlockModel *const> &)> work_function) {
         [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.run_on_pool");
         _progress                      = 0;
         _running_threads               = jobs.size();
@@ -139,14 +139,14 @@ public:
     }
 
     void
-    pool_worker(const std::function<work_return_t()> &work, std::size_t n_batches) {
+    pool_worker(const std::function<WorkReturn()> &work, std::size_t n_batches) {
         auto    &profiler_handler = _profiler.for_this_thread();
 
         uint32_t done             = 0;
         uint32_t progress_count   = 0;
         while (done < n_batches && !_stop_requested) {
             auto pe                 = profiler_handler.start_complete_event("scheduler_base.work");
-            bool something_happened = work().status == work_return_status_t::OK;
+            bool something_happened = work().status == WorkReturnStatus::OK;
             pe.finish();
             uint64_t progress_local, progress_new;
             if (something_happened) { // something happened in this thread => increase progress and reset done count
@@ -181,11 +181,11 @@ public:
 };
 
 /**
- * Trivial loop based scheduler, which iterates over all nodes in definition order in the graph until no node did any processing
+ * Trivial loop based scheduler, which iterates over all blocks in definition order in the graph until no node did any processing
  */
 template<execution_policy executionPolicy = single_threaded, profiling::Profiler Profiler = profiling::null::profiler>
 class simple : public scheduler_base<Profiler> {
-    std::vector<std::vector<node_model *>> _job_lists{};
+    std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
     explicit simple(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
@@ -211,29 +211,29 @@ public:
         }
     }
 
-    template<typename node_type>
-    work_return_t
-    work_once(const std::span<node_type> &nodes) {
+    template<typename block_type>
+    WorkReturn
+    work_once(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
         std::size_t           performed_work     = 0_UZ;
-        for (auto &currentNode : nodes) {
-            auto result = currentNode->work(requested_work);
+        for (auto &currentBlock : blocks) {
+            auto result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
-            if (result.status == work_return_status_t::ERROR) {
-                return { requested_work, performed_work, work_return_status_t::ERROR };
-            } else if (result.status == work_return_status_t::INSUFFICIENT_INPUT_ITEMS || result.status == work_return_status_t::DONE) {
+            if (result.status == WorkReturnStatus::ERROR) {
+                return { requested_work, performed_work, WorkReturnStatus::ERROR };
+            } else if (result.status == WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS || result.status == WorkReturnStatus::DONE) {
                 // nothing
-            } else if (result.status == work_return_status_t::OK || result.status == work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status == WorkReturnStatus::OK || result.status == WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
-            if (currentNode->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
+            if (currentBlock->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
                 std::vector<std::size_t> available_input_samples(20);
-                std::ignore = currentNode->available_input_samples(available_input_samples);
+                std::ignore = currentBlock->available_input_samples(available_input_samples);
                 something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
             }
         }
-        return { requested_work, performed_work, something_happened ? work_return_status_t::OK : work_return_status_t::DONE };
+        return { requested_work, performed_work, something_happened ? WorkReturnStatus::OK : WorkReturnStatus::DONE };
     }
 
     // todo: could be moved to base class, but would make `start()` virtual or require CRTP
@@ -263,12 +263,12 @@ public:
         }
         if constexpr (executionPolicy == single_threaded) {
             this->_state = RUNNING;
-            work_return_t result;
-            auto          nodelist = std::span{ this->_graph.blocks() };
+            WorkReturn result;
+            auto       blocklist = std::span{ this->_graph.blocks() };
             do {
-                result = work_once(nodelist);
-            } while (result.status == work_return_status_t::OK);
-            if (result.status == work_return_status_t::ERROR) {
+                result = work_once(blocklist);
+            } while (result.status == WorkReturnStatus::OK);
+            if (result.status == WorkReturnStatus::ERROR) {
                 this->_state = ERROR;
             } else {
                 this->_state = STOPPED;
@@ -282,13 +282,13 @@ public:
 };
 
 /**
- * Breadth first traversal scheduler which traverses the graph starting from the source nodes in a breath first fashion
- * detecting cycles and nodes which can be reached from several source nodes.
+ * Breadth first traversal scheduler which traverses the graph starting from the source blocks in a breath first fashion
+ * detecting cycles and blocks which can be reached from several source blocks.
  */
 template<execution_policy executionPolicy = single_threaded, profiling::Profiler Profiler = profiling::null::profiler>
 class breadth_first : public scheduler_base<Profiler> {
-    std::vector<node_model *>              _nodelist;
-    std::vector<std::vector<node_model *>> _job_lists{};
+    std::vector<BlockModel *>              _blocklist;
+    std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
     explicit breadth_first(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
@@ -298,36 +298,36 @@ public:
     void
     init() {
         [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("breadth_first.init");
-        using node_t                   = node_model *;
+        using block_t                  = BlockModel *;
         scheduler_base<Profiler>::init();
         // calculate adjacency list
-        std::map<node_t, std::vector<node_t>> _adjacency_list{};
-        std::vector<node_t>                   _source_nodes{};
+        std::map<block_t, std::vector<block_t>> _adjacency_list{};
+        std::vector<block_t>                    _source_blocks{};
         // compute the adjacency list
-        std::set<node_t> node_reached;
+        std::set<block_t> block_reached;
         for (auto &e : this->_graph.edges()) {
-            _adjacency_list[e._src_node].push_back(e._dst_node);
-            _source_nodes.push_back(e._src_node);
-            node_reached.insert(e._dst_node);
+            _adjacency_list[e._src_block].push_back(e._dst_block);
+            _source_blocks.push_back(e._src_block);
+            block_reached.insert(e._dst_block);
         }
-        _source_nodes.erase(std::remove_if(_source_nodes.begin(), _source_nodes.end(), [&node_reached](auto current_node) { return node_reached.contains(current_node); }), _source_nodes.end());
+        _source_blocks.erase(std::remove_if(_source_blocks.begin(), _source_blocks.end(), [&block_reached](auto currentBlock) { return block_reached.contains(currentBlock); }), _source_blocks.end());
         // traverse graph
-        std::queue<node_t> queue{};
-        std::set<node_t>   reached;
-        // add all source nodes to queue
-        for (node_t source_node : _source_nodes) {
-            if (!reached.contains(source_node)) {
-                queue.push(source_node);
+        std::queue<block_t> queue{};
+        std::set<block_t>   reached;
+        // add all source blocks to queue
+        for (block_t sourceBlock : _source_blocks) {
+            if (!reached.contains(sourceBlock)) {
+                queue.push(sourceBlock);
             }
-            reached.insert(source_node);
+            reached.insert(sourceBlock);
         }
-        // process all nodes, adding all unvisited child nodes to the queue
+        // process all blocks, adding all unvisited child blocks to the queue
         while (!queue.empty()) {
-            node_t current_node = queue.front();
+            block_t currentBlock = queue.front();
             queue.pop();
-            _nodelist.push_back(current_node);
-            if (_adjacency_list.contains(current_node)) { // node has outgoing edges
-                for (auto &dst : _adjacency_list.at(current_node)) {
+            _blocklist.push_back(currentBlock);
+            if (_adjacency_list.contains(currentBlock)) { // node has outgoing edges
+                for (auto &dst : _adjacency_list.at(currentBlock)) {
                     if (!reached.contains(dst)) { // detect cycles. this could be removed if we guarantee cycle free graphs earlier
                         queue.push(dst);
                         reached.insert(dst);
@@ -337,45 +337,45 @@ public:
         }
         // generate job list
         if constexpr (executionPolicy == multi_threaded) {
-            const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _nodelist.size());
+            const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _blocklist.size());
             this->_job_lists.reserve(n_batches);
             for (std::size_t i = 0; i < n_batches; i++) {
                 // create job-set for thread
                 auto &job = this->_job_lists.emplace_back();
-                job.reserve(_nodelist.size() / n_batches + 1);
-                for (std::size_t j = i; j < _nodelist.size(); j += n_batches) {
-                    job.push_back(_nodelist[j]);
+                job.reserve(_blocklist.size() / n_batches + 1);
+                for (std::size_t j = i; j < _blocklist.size(); j += n_batches) {
+                    job.push_back(_blocklist[j]);
                 }
             }
         }
     }
 
-    template<typename node_type>
-    work_return_t
-    work_once(const std::span<node_type> &nodes) {
+    template<typename block_type>
+    WorkReturn
+    work_once(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
         std::size_t           performed_work     = 0_UZ;
 
-        for (auto &currentNode : nodes) {
-            auto result = currentNode->work(requested_work);
+        for (auto &currentBlock : blocks) {
+            auto result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
-            if (result.status == work_return_status_t::ERROR) {
-                return { requested_work, performed_work, work_return_status_t::ERROR };
-            } else if (result.status == work_return_status_t::INSUFFICIENT_INPUT_ITEMS || result.status == work_return_status_t::DONE) {
+            if (result.status == WorkReturnStatus::ERROR) {
+                return { requested_work, performed_work, WorkReturnStatus::ERROR };
+            } else if (result.status == WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS || result.status == WorkReturnStatus::DONE) {
                 // nothing
-            } else if (result.status == work_return_status_t::OK || result.status == work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status == WorkReturnStatus::OK || result.status == WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
 
-            if (currentNode->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
+            if (currentBlock->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
                 std::vector<std::size_t> available_input_samples(20);
-                std::ignore = currentNode->available_input_samples(available_input_samples);
+                std::ignore = currentBlock->available_input_samples(available_input_samples);
                 something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
             }
         }
 
-        return { requested_work, performed_work, something_happened ? work_return_status_t::OK : work_return_status_t::DONE };
+        return { requested_work, performed_work, something_happened ? WorkReturnStatus::OK : WorkReturnStatus::DONE };
     }
 
     void
@@ -402,10 +402,10 @@ public:
         }
         if constexpr (executionPolicy == single_threaded) {
             this->_state = RUNNING;
-            work_return_t result;
-            auto          nodelist = std::span{ this->_nodelist };
-            while ((result = work_once(nodelist)).status == work_return_status_t::OK) {
-                if (result.status == work_return_status_t::ERROR) {
+            WorkReturn result;
+            auto       blocklist = std::span{ this->_blocklist };
+            while ((result = work_once(blocklist)).status == WorkReturnStatus::OK) {
+                if (result.status == WorkReturnStatus::ERROR) {
                     this->_state = ERROR;
                     return;
                 }
@@ -418,7 +418,7 @@ public:
         }
     }
 
-    [[nodiscard]] const std::vector<std::vector<node_model *>> &
+    [[nodiscard]] const std::vector<std::vector<BlockModel *>> &
     getJobLists() const {
         return _job_lists;
     }

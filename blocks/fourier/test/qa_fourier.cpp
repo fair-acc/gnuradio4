@@ -4,8 +4,8 @@
 
 #include <fmt/format.h>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
@@ -20,7 +20,7 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 template<typename T>
-struct CountSource : public gr::node<CountSource<T>> {
+struct CountSource : public gr::Block<CountSource<T>> {
     gr::PortOut<T> out{};
     int            count{ 0 };
     int            nSamples{ 1024 };
@@ -32,7 +32,7 @@ struct CountSource : public gr::node<CountSource<T>> {
     }
 
     constexpr T
-    process_one() {
+    processOne() {
         return static_cast<T>(count++);
     }
 };
@@ -170,7 +170,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             std::ignore = fftBlock.settings().apply_staged_parameters();
             const auto           signal{ generateSinSample<InType>(t.N, t.sample_rate, t.frequency, t.amplitude) };
             std::vector<OutType> resultingDataSets(1);
-            expect(gr::work_return_status_t::OK == fftBlock.process_bulk(signal, resultingDataSets));
+            expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, resultingDataSets));
 
             const auto peakIndex{
                 static_cast<std::size_t>(std::distance(fftBlock._magnitudeSpectrum.begin(),
@@ -224,7 +224,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
                 expectedPeakAmplitude = 1.;
             }
             std::vector<OutType> resultingDataSets(1);
-            expect(gr::work_return_status_t::OK == fftBlock.process_bulk(signal, resultingDataSets));
+            expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, resultingDataSets));
 
             const auto peakIndex{ static_cast<std::size_t>(std::distance(fftBlock._magnitudeSpectrum.begin(), std::ranges::max_element(fftBlock._magnitudeSpectrum))) };
             const auto peakAmplitude{ fftBlock._magnitudeSpectrum[peakIndex] };
@@ -236,7 +236,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         }
     } | complexTypesWithAlgoToTest;
 
-    "FFT process_bulk tests"_test = []<typename T>() {
+    "FFT processBulk tests"_test = []<typename T>() {
         using InType   = T::InType;
         using OutType  = T::OutType;
         using AlgoType = T::AlgoType;
@@ -252,7 +252,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         std::vector<OutType> v{ OutType() };
         std::span<OutType>   outSpan(v);
 
-        expect(gr::work_return_status_t::OK == fftBlock.process_bulk(signal, outSpan));
+        expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, outSpan));
         equalDataset(fftBlock, v[0], sample_rate);
     } | typesWithAlgoToTest;
 
@@ -262,8 +262,8 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         expect(std::is_same_v<FFT<float>::value_type, float>) << "output type must be float";
         expect(std::is_same_v<FFT<double>::value_type, float>) << "output type must be float";
         expect(std::is_same_v<FFT<int>::value_type, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<std::complex<float>, gr::DataSet < double>>::value_type, double >) << "output type must be double";
-        expect(std::is_same_v<FFT<float, gr::DataSet < double>>::value_type, double >) << "output type must be double";
+        expect(std::is_same_v<FFT<std::complex<float>, gr::DataSet<double>>::value_type, double>) << "output type must be double";
+        expect(std::is_same_v<FFT<float, gr::DataSet<double>>::value_type, double>) << "output type must be double";
     };
 
     "FFT fftw types tests"_test = [] {
@@ -279,16 +279,16 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using Scheduler      = gr::scheduler::simple<>;
         auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         gr::graph flow1;
-        auto     &source1  = flow1.make_node<CountSource<double>>();
-        auto     &fftBlock = flow1.make_node<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
+        auto     &source1  = flow1.emplaceBlock<CountSource<double>>();
+        auto     &fftBlock = flow1.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
         std::ignore        = flow1.connect<"out">(source1).to<"in">(fftBlock);
         auto sched1        = Scheduler(std::move(flow1), threadPool);
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
             gr::graph flow2;
-            auto     &source2 = flow2.make_node<CountSource<double>>();
-            auto     &fft2    = flow2.make_node<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
+            auto     &source2 = flow2.emplaceBlock<CountSource<double>>();
+            auto     &fft2    = flow2.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
             std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);
             auto sched2       = Scheduler(std::move(flow2), threadPool);
             sched2.run_and_wait();
@@ -338,7 +338,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
                 std::iota(signal.begin(), signal.end(), 1.);
             }
             std::vector<OutType> resultingDataSets(1);
-            expect(gr::work_return_status_t::OK == fftBlock.process_bulk(signal, resultingDataSets));
+            expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, resultingDataSets));
 
             expect(eq(fftBlock.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
             expect(eq(fftBlock._window.size(), N)) << fmt::format("<{}> equal window vector size", type_name<T>());

@@ -4,7 +4,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
@@ -80,7 +80,7 @@ equal_tag_lists(const std::vector<tag_t> &tags1, const std::vector<tag_t> &tags2
 }
 
 template<typename T, ProcessFunction UseProcessOne>
-struct TagSource : public node<TagSource<T, UseProcessOne>> {
+struct TagSource : public Block<TagSource<T, UseProcessOne>> {
     PortOut<T>         out;
     std::vector<tag_t> tags{};
     std::size_t        next_tag{ 0 };
@@ -101,11 +101,11 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
     }
 
     T
-    process_one(std::size_t offset) noexcept
+    processOne(std::size_t offset) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
-            print_tag(tags[next_tag], fmt::format("{}::process_one(...)\t publish tag at  {:6}", this->name.value, n_samples_produced));
+            print_tag(tags[next_tag], fmt::format("{}::processOne(...)\t publish tag at  {:6}", this->name.value, n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
             out_tag.index  = offset;
@@ -119,12 +119,12 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         return static_cast<T>(0);
     }
 
-    work_return_status_t
-    process_bulk(std::span<T> output) noexcept
+    WorkReturnStatus
+    processBulk(std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
         if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
-            print_tag(tags[next_tag], fmt::format("{}::process_bulk(...{})\t publish tag at  {:6}", this->name, output.size(), n_samples_produced));
+            print_tag(tags[next_tag], fmt::format("{}::processBulk(...{})\t publish tag at  {:6}", this->name, output.size(), n_samples_produced));
             tag_t &out_tag = this->output_tags()[0];
             out_tag        = tags[next_tag];
             out_tag.index  = 0; // indices > 0 write tags in the future ... handle with care
@@ -133,24 +133,24 @@ struct TagSource : public node<TagSource<T, UseProcessOne>> {
         }
 
         n_samples_produced += static_cast<std::int64_t>(output.size());
-        return n_samples_produced < n_samples_max ? work_return_status_t::OK : work_return_status_t::DONE;
+        return n_samples_produced < n_samples_max ? WorkReturnStatus::OK : WorkReturnStatus::DONE;
     }
 };
 
 template<typename T, ProcessFunction UseProcessOne>
-struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
+struct TagMonitor : public Block<TagMonitor<T, UseProcessOne>> {
     PortIn<T>          in;
     PortOut<T>         out;
     std::vector<tag_t> tags{};
     std::int64_t       n_samples_produced{ 0 };
 
     constexpr T
-    process_one(const T &input) noexcept
+    processOne(const T &input) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_one(...)\t received tag at {:6}", this->name, n_samples_produced));
+            print_tag(tag, fmt::format("{}::processOne(...)\t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
@@ -158,13 +158,13 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
         return input;
     }
 
-    constexpr work_return_status_t
-    process_bulk(std::span<const T> input, std::span<T> output) noexcept
+    constexpr WorkReturnStatus
+    processBulk(std::span<const T> input, std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_bulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), n_samples_produced));
+            print_tag(tag, fmt::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
@@ -172,12 +172,12 @@ struct TagMonitor : public node<TagMonitor<T, UseProcessOne>> {
         n_samples_produced += static_cast<std::int64_t>(input.size());
         std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
 
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 };
 
 template<typename T, ProcessFunction UseProcessOne>
-struct TagSink : public node<TagSink<T, UseProcessOne>> {
+struct TagSink : public Block<TagSink<T, UseProcessOne>> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T>                                in;
     std::vector<tag_t>                       tags{};
@@ -187,7 +187,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
 
     // template<gr::meta::t_or_simd<T> V>
     constexpr void
-    process_one(const T &) noexcept
+    processOne(const T &) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (n_samples_produced == 0) {
@@ -195,7 +195,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
         }
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_one(...1)    \t received tag at {:6}", this->name, n_samples_produced));
+            print_tag(tag, fmt::format("{}::processOne(...1)    \t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
@@ -204,8 +204,8 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     }
 
     // template<gr::meta::t_or_simd<T> V>
-    constexpr work_return_status_t
-    process_bulk(std::span<const T> input) noexcept
+    constexpr WorkReturnStatus
+    processBulk(std::span<const T> input) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
         if (n_samples_produced == 0) {
@@ -213,14 +213,14 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
         }
         if (this->input_tags_present()) {
             const tag_t &tag = this->input_tags()[0];
-            print_tag(tag, fmt::format("{}::process_bulk(...{})\t received tag at {:6}", this->name, input.size(), n_samples_produced));
+            print_tag(tag, fmt::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
         }
 
         n_samples_produced += static_cast<std::int64_t>(input.size());
         timeLastSample = ClockSourceType::now();
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 
     float
@@ -230,7 +230,7 @@ struct TagSink : public node<TagSink<T, UseProcessOne>> {
     }
 };
 
-} // namespace gr::tag_test
+} // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out);

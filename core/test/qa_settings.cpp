@@ -6,9 +6,9 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
@@ -91,7 +91,7 @@ printChanges(const property_map &oldMap, const property_map &newMap) noexcept {
 } // namespace utils
 
 template<typename T>
-struct Source : public node<Source<T>> {
+struct Source : public Block<Source<T>> {
     PortOut<T>   out;
     std::int32_t n_samples_produced = 0;
     std::int32_t n_samples_max      = 1024;
@@ -111,7 +111,7 @@ struct Source : public node<Source<T>> {
     }
 
     [[nodiscard]] constexpr T
-    process_one() noexcept {
+    processOne() noexcept {
         n_samples_produced++;
         T x{};
         return x;
@@ -127,7 +127,7 @@ some test doc documentation
 )"">;
 
 template<typename T>
-struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, SupportedTypes<float, double>> {
+struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, TestBlockDoc, SupportedTypes<float, double>> {
     PortIn<T>  in{};
     PortOut<T> out{};
     // parameters
@@ -160,17 +160,17 @@ struct TestBlock : public node<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Sup
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
-    process_one(const V &a) const noexcept {
+    processOne(const V &a) const noexcept {
         return a * scaling_factor;
     }
 };
 
-static_assert(NodeType<TestBlock<int>>);
-static_assert(NodeType<TestBlock<float>>);
-static_assert(NodeType<TestBlock<double>>);
+static_assert(BlockLike<TestBlock<int>>);
+static_assert(BlockLike<TestBlock<float>>);
+static_assert(BlockLike<TestBlock<double>>);
 
 template<typename T, bool Average = false>
-struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double>, ResamplingRatio<>, Doc<R""(
+struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, double>, ResamplingRatio<>, Doc<R""(
 @brief reduces sample rate by given fraction controlled by denominator
 )"">> {
     PortIn<T>                        in{};
@@ -185,8 +185,8 @@ struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double
         }
     }
 
-    constexpr work_return_status_t
-    process_bulk(std::span<const T> input, std::span<T> output) noexcept {
+    constexpr WorkReturnStatus
+    processBulk(std::span<const T> input, std::span<T> output) noexcept {
         assert(this->numerator == std::size_t(1) && "block implements only basic decimation");
         assert(this->denominator != std::size_t(0) && "denominator must be non-zero");
 
@@ -203,16 +203,16 @@ struct Decimate : public node<Decimate<T, Average>, SupportedTypes<float, double
             }
         }
 
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 };
 
-static_assert(NodeType<Decimate<int>>);
-static_assert(NodeType<Decimate<float>>);
-static_assert(NodeType<Decimate<double>>);
+static_assert(BlockLike<Decimate<int>>);
+static_assert(BlockLike<Decimate<float>>);
+static_assert(BlockLike<Decimate<double>>);
 
 template<typename T>
-struct Sink : public node<Sink<T>> {
+struct Sink : public Block<Sink<T>> {
     PortIn<T>    in;
     std::int32_t n_samples_consumed = 0;
     std::int32_t n_samples_max      = -1;
@@ -221,7 +221,7 @@ struct Sink : public node<Sink<T>> {
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(V) noexcept {
+    processOne(V) noexcept {
         // alt: optional user-level tag processing
         /*
         if (this->input_tags_present()) {
@@ -256,16 +256,16 @@ const boost::ut::suite SettingsTests = [] {
     using namespace std::string_view_literals;
 
     "basic node settings tag"_test = [] {
-        graph                  flow_graph;
+        graph                  testGraph;
         constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->TestBlock->Sink flow graph
-        auto &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        auto &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
         expect(eq(src.settings().auto_update_parameters().size(), 4UL));
         expect(eq(src.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
-        auto &block1 = flow_graph.make_node<TestBlock<float>>({ { "name", "TestBlock#1" } });
-        auto &block2 = flow_graph.make_node<TestBlock<float>>({ { "name", "TestBlock#2" } });
-        auto &sink   = flow_graph.make_node<Sink<float>>();
+        auto &block1 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#1" } });
+        auto &block2 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#2" } });
+        auto &sink   = testGraph.emplaceBlock<Sink<float>>();
         expect(eq(sink.settings().auto_update_parameters().size(), 5UL));
         expect(eq(sink.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
 
@@ -302,12 +302,12 @@ const boost::ut::suite SettingsTests = [] {
         block1.settings().update_active_parameters();
 
         // src -> block1 -> block2 -> sink
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(block1)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
-        gr::scheduler::simple sched{ std::move(flow_graph), thread_pool };
+        gr::scheduler::simple sched{ std::move(testGraph), thread_pool };
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
         std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
         sched.run_and_wait();
@@ -352,16 +352,16 @@ const boost::ut::suite SettingsTests = [] {
 #endif
 
         "empty via graph"_test = [] {
-            graph flow_graph;
-            auto &block = flow_graph.make_node<TestBlock<float>>();
+            graph testGraph;
+            auto &block = testGraph.emplaceBlock<TestBlock<float>>();
             expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
         "with init parameter via graph"_test = [] {
-            graph flow_graph;
-            auto &block = flow_graph.make_node<TestBlock<float>>({ { "scaling_factor", 2.f } });
+            graph testGraph;
+            auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "scaling_factor", 2.f } });
             expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
@@ -369,8 +369,8 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "vector-type support"_test = [] {
-        graph flow_graph;
-        auto &block = flow_graph.make_node<TestBlock<float>>();
+        graph testGraph;
+        auto &block = testGraph.emplaceBlock<TestBlock<float>>();
         block.settings().update_active_parameters();
         expect(eq(block.settings().get().size(), 11UL));
 
@@ -384,9 +384,9 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "unique ID"_test = [] {
-        graph       flow_graph;
-        const auto &block1 = flow_graph.make_node<TestBlock<float>>();
-        const auto &block2 = flow_graph.make_node<TestBlock<float>>();
+        graph       testGraph;
+        const auto &block1 = testGraph.emplaceBlock<TestBlock<float>>();
+        const auto &block2 = testGraph.emplaceBlock<TestBlock<float>>();
         expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
         expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
 
@@ -400,44 +400,44 @@ const boost::ut::suite SettingsTests = [] {
         auto progress     = std::make_shared<gr::Sequence>();
         auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
         //
-        auto wrapped1 = node_wrapper<TestBlock<float>>();
+        auto wrapped1 = BlockWrapper<TestBlock<float>>();
         wrapped1.init(progress, ioThreadPool);
         wrapped1.set_name("test_name");
-        expect(eq(wrapped1.name(), "test_name"sv)) << "node_model wrapper name";
+        expect(eq(wrapped1.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped1.unique_name().empty()) << "unique name";
         std::ignore                          = wrapped1.settings().set({ { "context", "a string" } });
         (wrapped1.meta_information())["key"] = "value";
-        expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "node_model meta-information";
+        expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
-        auto wrapped2 = node_wrapper<TestBlock<float>>({ { "name", "test_name" } });
+        auto wrapped2 = BlockWrapper<TestBlock<float>>({ { "name", "test_name" } });
         std::ignore   = wrapped2.settings().set({ { "context", "a string" } });
         wrapped2.init(progress, ioThreadPool);
-        expect(eq(wrapped2.name(), "test_name"sv)) << "node_model wrapper name";
+        expect(eq(wrapped2.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped2.unique_name().empty()) << "unique name";
         std::ignore                          = wrapped2.settings().set({ { "context", "a string" } });
         (wrapped2.meta_information())["key"] = "value";
-        expect(eq(std::get<std::string>(wrapped2.meta_information().at("key")), "value"sv)) << "node_model meta-information";
+        expect(eq(std::get<std::string>(wrapped2.meta_information().at("key")), "value"sv)) << "BlockModel meta-information";
     };
 
     "basic decimation test"_test = []() {
-        graph                  flow_graph;
+        graph                  testGraph;
         constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
-        auto                  &src       = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
-        auto                  &block1    = flow_graph.make_node<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::size_t(2) } });
-        auto                  &block2    = flow_graph.make_node<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", std::size_t(5) } });
-        auto                  &sink      = flow_graph.make_node<Sink<float>>();
+        auto                  &src       = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
+        auto                  &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::size_t(2) } });
+        auto                  &block2    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", std::size_t(5) } });
+        auto                  &sink      = testGraph.emplaceBlock<Sink<float>>();
 
         // check denominator
         expect(eq(block1.denominator, std::size_t(2)));
         expect(eq(block2.denominator, std::size_t(5)));
 
         // src -> block1 -> block2 -> sink
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(block1)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block1).to<"in">(block2)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(block2).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
@@ -450,8 +450,8 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "basic store/reset settings"_test = []() {
-        graph flow_graph;
-        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        graph testGraph;
+        auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
 
@@ -490,9 +490,9 @@ const boost::ut::suite AnnotationTests = [] {
     using namespace std::literals;
 
     "basic node annotations"_test = [] {
-        graph             flow_graph;
-        TestBlock<float> &block = flow_graph.make_node<TestBlock<float>>();
-        expect(gr::node_description<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
+        graph             testGraph;
+        TestBlock<float> &block = testGraph.emplaceBlock<TestBlock<float>>();
+        expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
         expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlockDoc::value))) << "type-erased block description";
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::documentation")), "y = a * x"sv));
@@ -555,8 +555,8 @@ const boost::ut::suite TransactionTests = [] {
     using namespace gr::setting_test;
 
     "CtxSettings"_test = [] {
-        graph flow_graph;
-        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        graph testGraph;
+        auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
         auto  s     = ctx_settings(block);
         auto  ctx0  = SettingsCtx(std::chrono::system_clock::now());
         std::ignore = s.set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
@@ -579,8 +579,8 @@ const boost::ut::suite TransactionTests = [] {
     };
 
     "CtxSettings Matching"_test = [&] {
-        graph      flow_graph;
-        auto      &block = flow_graph.make_node<TestBlock<int>>({ { "scaling_factor", 42 } });
+        graph      testGraph;
+        auto      &block = testGraph.emplaceBlock<TestBlock<int>>({ { "scaling_factor", 42 } });
         auto       s     = ctx_settings(block, matchPred);
         const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 1 } });
         std::ignore      = s.set({ { "scaling_factor", 101 } }, ctx0);
@@ -610,8 +610,8 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings Drop-In Settings replacement"_test = [&] {
         // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
-        graph flow_graph;
-        auto &block = flow_graph.make_node<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        graph testGraph;
+        auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
         auto  s     = std::make_unique<ctx_settings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
         block.setSettings(s);
         auto ctx0   = SettingsCtx(std::chrono::system_clock::now());

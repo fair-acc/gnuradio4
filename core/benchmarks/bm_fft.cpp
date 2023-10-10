@@ -66,10 +66,10 @@ testFFT() {
     using namespace gr::algorithm;
 
     constexpr std::uint32_t N{ 1024U }; // must be power of 2
-    constexpr double      sampleRate{ 256. };
-    constexpr double      frequency{ 100. };
-    constexpr double      amplitude{ 1. };
-    constexpr int         nRepetitions{ 100 };
+    constexpr double        sampleRate{ 256. };
+    constexpr double        frequency{ 100. };
+    constexpr double        amplitude{ 1. };
+    constexpr int           nRepetitions{ 100 };
 
     using PrecisionType = FFTAlgoPrecision<T>::type;
 
@@ -79,20 +79,20 @@ testFFT() {
 
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFTw<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
-        std::ignore                                                                    = fft1.settings().apply_staged_parameters();
+        std::ignore = fft1.settings().apply_staged_parameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
-            expect(gr::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
+            expect(gr::WorkReturnStatus::OK == fft1.processBulk(signal, resultingDataSets));
         };
     }
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
-        std::ignore                                                                   = fft1.settings().apply_staged_parameters();
+        std::ignore = fft1.settings().apply_staged_parameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
-            expect(gr::work_return_status_t::OK == fft1.process_bulk(signal, resultingDataSets));
+            expect(gr::WorkReturnStatus::OK == fft1.processBulk(signal, resultingDataSets));
         };
     }
 

@@ -27,7 +27,7 @@ read_total_count(const gr::property_map &params) {
 }
 
 template<typename T>
-class cout_sink : public grg::node<cout_sink<T>, grg::PortInNamed<T, "in">> {
+class cout_sink : public grg::Block<cout_sink<T>, grg::PortInNamed<T, "in">> {
 public:
     std::size_t total_count = -1_UZ;
 
@@ -36,7 +36,7 @@ public:
     explicit cout_sink(const gr::property_map &params) : total_count(read_total_count<std::size_t>(params)) {}
 
     void
-    process_one(T value) {
+    processOne(T value) {
         total_count--;
         if (total_count == 0) {
             std::cerr << "last value was: " << value << "\n";
@@ -45,7 +45,7 @@ public:
 };
 
 template<typename T>
-class fixed_source : public grg::node<fixed_source<T>, grg::PortOutNamed<T, "out">> {
+class fixed_source : public grg::Block<fixed_source<T>, grg::PortOutNamed<T, "out">> {
 public:
     std::size_t event_count = -1_UZ; // infinite count by default
 
@@ -53,14 +53,14 @@ public:
 
     T value = 1;
 
-    grg::work_return_t
+    grg::WorkReturn
     work(std::size_t requested_work) {
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
-            return { requested_work, 0_UZ, grg::work_return_status_t::DONE };
+            return { requested_work, 0_UZ, grg::WorkReturnStatus::DONE };
         }
 
-        auto &port   = gr::output_port<0>(this);
+        auto &port   = gr::outputPort<0>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1_UZ);
         data[0]      = value;
@@ -68,11 +68,11 @@ public:
 
         value += 1;
         if (event_count == -1_UZ) {
-            return { requested_work, 1_UZ, grg::work_return_status_t::OK };
+            return { requested_work, 1_UZ, grg::WorkReturnStatus::OK };
         }
 
         event_count--;
-        return { requested_work, 1_UZ, grg::work_return_status_t::OK };
+        return { requested_work, 1_UZ, grg::WorkReturnStatus::OK };
     }
 };
 } // namespace good

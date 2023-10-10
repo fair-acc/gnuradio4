@@ -4,8 +4,8 @@
 
 #include <fmt/format.h>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
@@ -62,7 +62,7 @@ struct StrideTestData {
 };
 
 template<typename T>
-struct CountSource : public gr::node<CountSource<T>> {
+struct CountSource : public gr::Block<CountSource<T>> {
     gr::PortOut<T> out{};
     int            count{ 0 };
     int            n_samples{ 1024 };
@@ -74,21 +74,21 @@ struct CountSource : public gr::node<CountSource<T>> {
     }
 
     constexpr T
-    process_one() {
+    processOne() {
         return static_cast<T>(count++);
     }
 };
 
 template<typename T>
-struct IntDecBlock : public gr::node<IntDecBlock<T>, gr::ResamplingRatio<>, gr::Stride<>> {
+struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr::Stride<>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
     ProcessStatus  status{};
     bool           write_to_vector{ false };
 
-    gr::work_return_status_t
-    process_bulk(std::span<const T> input, std::span<T> output) noexcept {
+    gr::WorkReturnStatus
+    processBulk(std::span<const T> input, std::span<T> output) noexcept {
         status.n_inputs  = input.size();
         status.n_outputs = output.size();
         status.process_counter++;
@@ -96,7 +96,7 @@ struct IntDecBlock : public gr::node<IntDecBlock<T>, gr::ResamplingRatio<>, gr::
         status.total_out += output.size();
         if (write_to_vector) status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
 
-        return gr::work_return_status_t::OK;
+        return gr::WorkReturnStatus::OK;
     }
 };
 
@@ -109,10 +109,10 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     using scheduler = gr::scheduler::simple<>;
 
     gr::graph flow;
-    auto     &source          = flow.make_node<CountSource<int>>();
+    auto     &source          = flow.emplaceBlock<CountSource<int>>();
     source.n_samples          = static_cast<int>(data.n_samples);
 
-    auto &int_dec_block       = flow.make_node<IntDecBlock<int>>();
+    auto &int_dec_block       = flow.emplaceBlock<IntDecBlock<int>>();
     int_dec_block.numerator   = data.numerator;
     int_dec_block.denominator = data.denominator;
     if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
@@ -122,7 +122,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     auto sched  = scheduler(std::move(flow), thread_pool);
     sched.run_and_wait();
 
-    expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "process_bulk invokes counter, parameters = " << data.to_string();
+    expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_inputs, data.exp_in)) << "last number of input samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
 }
@@ -135,10 +135,10 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
     gr::graph  flow;
-    auto      &source             = flow.make_node<CountSource<int>>();
+    auto      &source             = flow.emplaceBlock<CountSource<int>>();
     source.n_samples              = static_cast<int>(data.n_samples);
 
-    auto &int_dec_block           = flow.make_node<IntDecBlock<int>>();
+    auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>();
     int_dec_block.write_to_vector = write_to_vector;
     int_dec_block.numerator       = data.numerator;
     int_dec_block.denominator     = data.denominator;
@@ -150,7 +150,7 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     auto sched  = scheduler(std::move(flow), thread_pool);
     sched.run_and_wait();
 
-    expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "process_bulk invokes counter, parameters = " << data.to_string();
+    expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_inputs, data.exp_in)) << "last number of input samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.total_in, data.exp_total_in)) << "total number of input samples, parameters = " << data.to_string();
@@ -187,17 +187,17 @@ const boost::ut::suite _stride_tests = [] {
         static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kIsConst == true);
         static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kEnabled == true);
 
-        struct TestBlock0 : gr::node<TestBlock0> {
+        struct TestBlock0 : gr::Block<TestBlock0> {
         } testBlock0;
         static_assert(std::is_const_v<decltype(testBlock0.numerator.value)>);
         static_assert(std::is_const_v<decltype(testBlock0.denominator.value)>);
 
-        struct TestBlock1 : gr::node<TestBlock1, gr::ResamplingRatio<>> {
+        struct TestBlock1 : gr::Block<TestBlock1, gr::ResamplingRatio<>> {
         } testBlock1;
         static_assert(!std::is_const_v<decltype(testBlock1.numerator.value)>);
         static_assert(!std::is_const_v<decltype(testBlock1.denominator.value)>);
 
-        struct TestBlock2 : gr::node<TestBlock2, gr::ResamplingRatio<2LU, 1LU, true>> {
+        struct TestBlock2 : gr::Block<TestBlock2, gr::ResamplingRatio<2LU, 1LU, true>> {
         } testBlock2;
         static_assert(std::is_const_v<decltype(testBlock2.numerator.value)>);
         static_assert(std::is_const_v<decltype(testBlock2.denominator.value)>);
@@ -222,15 +222,15 @@ const boost::ut::suite _stride_tests = [] {
         static_assert(gr::Stride<1LU, true>::kIsConst == true);
         static_assert(gr::Stride<1LU, true>::kEnabled == true);
 
-        struct TestBlock0 : gr::node<TestBlock0> {
+        struct TestBlock0 : gr::Block<TestBlock0> {
         } testBlock0;
         static_assert(std::is_const_v<decltype(testBlock0.stride.value)>);
 
-        struct TestBlock1 : gr::node<TestBlock1, gr::Stride<>> {
+        struct TestBlock1 : gr::Block<TestBlock1, gr::Stride<>> {
         } testBlock1;
         static_assert(!std::is_const_v<decltype(testBlock1.stride.value)>);
 
-        struct TestBlock2 : gr::node<TestBlock2, gr::Stride<2LU, true>> {
+        struct TestBlock2 : gr::Block<TestBlock2, gr::Stride<2LU, true>> {
         } testBlock2;
         static_assert(std::is_const_v<decltype(testBlock2.stride.value)>);
         expect(eq(testBlock2.stride, 2LU));
@@ -239,7 +239,7 @@ const boost::ut::suite _stride_tests = [] {
     "User ResamplingRatio & Stride"_test = [] {
         using namespace gr;
 
-        struct TestBlock : gr::node<TestBlock, gr::ResamplingRatio<2LU, 1LU, true>, gr::Stride<2LU, false>> {
+        struct TestBlock : gr::Block<TestBlock, gr::ResamplingRatio<2LU, 1LU, true>, gr::Stride<2LU, false>> {
         } testBlock;
         static_assert(std::is_const_v<decltype(testBlock.numerator.value)>);
         static_assert(std::is_const_v<decltype(testBlock.denominator.value)>);

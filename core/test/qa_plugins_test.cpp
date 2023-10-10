@@ -7,7 +7,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <gnuradio-4.0/node_registry.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/plugin_loader.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
@@ -22,7 +22,7 @@ using namespace gr::literals;
 namespace grg = gr;
 
 struct test_context {
-    grg::node_registry registry;
+    grg::BlockRegistry registry;
     grg::plugin_loader loader;
 
     test_context() : loader(&registry, std::vector<std::filesystem::path>{ "test/plugins", "plugins" }) {}
@@ -35,7 +35,7 @@ context() {
 }
 
 template<typename T>
-class builtin_multiply : public grg::node<builtin_multiply<T>> {
+class builtin_multiply : public grg::Block<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
 
 public:
@@ -51,7 +51,7 @@ public:
     explicit builtin_multiply(T factor, std::string name = grg::this_source_location()) : _factor(factor) { this->set_name(name); }
 
     [[nodiscard]] constexpr auto
-    process_one(T a) const noexcept {
+    processOne(T a) const noexcept {
         return a * _factor;
     }
 };
@@ -86,8 +86,8 @@ const boost::ut::suite PluginLoaderTests = [] {
         }
     };
 
-    "KnownNodesList"_test = [] {
-        auto        known = context().loader.known_nodes();
+    "KnownBlocksList"_test = [] {
+        auto        known = context().loader.knownBlocks();
         std::vector requireds{ names::cout_sink, names::fixed_source, names::divide, names::multiply };
 
         for (const auto &required : requireds) {
@@ -96,11 +96,11 @@ const boost::ut::suite PluginLoaderTests = [] {
     };
 };
 
-const boost::ut::suite NodeInstantiationTests = [] {
+const boost::ut::suite BlockInstantiationTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    "KnownNodesInstantiate"_test = [] {
+    "KnownBlocksInstantiate"_test = [] {
         expect(context().loader.instantiate(names::fixed_source, "double") != nullptr);
         expect(context().loader.instantiate(names::cout_sink, "double") != nullptr);
         expect(context().loader.instantiate(names::multiply, "double") != nullptr);
@@ -114,74 +114,74 @@ const boost::ut::suite NodeInstantiationTests = [] {
         expect(context().loader.instantiate(names::convert, "float;float") == nullptr);
     };
 
-    "UnknownNodes"_test = [] { expect(context().loader.instantiate("ThisNodeDoesNotExist", "double") == nullptr); };
+    "UnknownBlocks"_test = [] { expect(context().loader.instantiate("ThisBlockDoesNotExist", "double") == nullptr); };
 };
 
-const boost::ut::suite BasicPluginNodesConnectionTests = [] {
+const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
     "FixedSourceToSink"_test = [] {
-        auto node_source  = context().loader.instantiate(names::fixed_source, "double");
-        auto node_sink    = context().loader.instantiate(names::cout_sink, "double");
-        auto connection_1 = node_source->dynamic_output_port(0).connect(node_sink->dynamic_input_port(0));
+        auto block_source = context().loader.instantiate(names::fixed_source, "double");
+        auto block_sink   = context().loader.instantiate(names::cout_sink, "double");
+        auto connection_1 = block_source->dynamic_output_port(0).connect(block_sink->dynamic_input_port(0));
         expect(connection_1 == grg::connection_result_t::SUCCESS);
     };
 
     "LongerPipeline"_test = [] {
-        auto                      node_source = context().loader.instantiate(names::fixed_source, "double");
+        auto             block_source = context().loader.instantiate(names::fixed_source, "double");
 
-        gr::property_map node_multiply_params;
-        node_multiply_params["factor"]          = 2.0;
-        auto                      node_multiply = context().loader.instantiate(names::multiply, "double", node_multiply_params);
+        gr::property_map block_multiply_params;
+        block_multiply_params["factor"] = 2.0;
+        auto             block_multiply = context().loader.instantiate(names::multiply, "double", block_multiply_params);
 
-        std::size_t               repeats       = 10;
-        gr::property_map node_sink_params;
-        node_sink_params["total_count"] = 100_UZ;
-        auto node_sink                  = context().loader.instantiate(names::cout_sink, "double");
+        std::size_t      repeats        = 10;
+        gr::property_map block_sink_params;
+        block_sink_params["total_count"] = 100_UZ;
+        auto block_sink                  = context().loader.instantiate(names::cout_sink, "double");
 
-        auto connection_1               = node_source->dynamic_output_port(0).connect(node_multiply->dynamic_input_port(0));
-        auto connection_2               = node_multiply->dynamic_output_port(0).connect(node_sink->dynamic_input_port(0));
+        auto connection_1                = block_source->dynamic_output_port(0).connect(block_multiply->dynamic_input_port(0));
+        auto connection_2                = block_multiply->dynamic_output_port(0).connect(block_sink->dynamic_input_port(0));
 
         expect(connection_1 == grg::connection_result_t::SUCCESS);
         expect(connection_2 == grg::connection_result_t::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
-            std::ignore = node_source->work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_multiply->work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_sink->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_sink->work(std::numeric_limits<std::size_t>::max());
         }
     };
 
     "Graph"_test = [] {
-        grg::graph flow_graph;
+        grg::graph testGraph;
 
         // Instantiate the node that is defined in a plugin
-        auto &node_source = context().loader.instantiate_in_graph(flow_graph, names::fixed_source, "double");
+        auto &block_source = context().loader.instantiate_in_graph(testGraph, names::fixed_source, "double");
 
         // Instantiate a built-in node in a static way
-        gr::property_map node_multiply_1_params;
-        node_multiply_1_params["factor"] = 2.0;
-        auto &node_multiply_double       = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
+        gr::property_map block_multiply_1_params;
+        block_multiply_1_params["factor"] = 2.0;
+        auto &block_multiply_double       = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
         // Instantiate a built-in node via the plugin loader
-        auto &node_multiply_float    = context().loader.instantiate_in_graph(flow_graph, names::builtin_multiply, "float");
+        auto &block_multiply_float    = context().loader.instantiate_in_graph(testGraph, names::builtin_multiply, "float");
 
-        auto &node_convert_to_float  = context().loader.instantiate_in_graph(flow_graph, names::convert, "double;float");
-        auto &node_convert_to_double = context().loader.instantiate_in_graph(flow_graph, names::convert, "float;double");
+        auto &block_convert_to_float  = context().loader.instantiate_in_graph(testGraph, names::convert, "double;float");
+        auto &block_convert_to_double = context().loader.instantiate_in_graph(testGraph, names::convert, "float;double");
 
         //
-        std::size_t               repeats = 10;
-        gr::property_map node_sink_params;
-        node_sink_params["total_count"] = 100_UZ;
-        auto  node_sink_load            = context().loader.instantiate(names::cout_sink, "double", node_sink_params);
-        auto &node_sink                 = flow_graph.add_node(std::move(node_sink_load));
+        std::size_t      repeats = 10;
+        gr::property_map block_sink_params;
+        block_sink_params["total_count"] = 100_UZ;
+        auto  block_sink_load            = context().loader.instantiate(names::cout_sink, "double", block_sink_params);
+        auto &block_sink                 = testGraph.add_block(std::move(block_sink_load));
 
-        auto  connection_1              = flow_graph.dynamic_connect(node_source, 0, node_multiply_double, 0);
-        auto  connection_2              = flow_graph.dynamic_connect(node_multiply_double, 0, node_convert_to_float, 0);
-        auto  connection_3              = flow_graph.dynamic_connect(node_convert_to_float, 0, node_multiply_float, 0);
-        auto  connection_4              = flow_graph.dynamic_connect(node_multiply_float, 0, node_convert_to_double, 0);
-        auto  connection_5              = flow_graph.dynamic_connect(node_convert_to_double, 0, node_sink, 0);
+        auto  connection_1               = testGraph.dynamic_connect(block_source, 0, block_multiply_double, 0);
+        auto  connection_2               = testGraph.dynamic_connect(block_multiply_double, 0, block_convert_to_float, 0);
+        auto  connection_3               = testGraph.dynamic_connect(block_convert_to_float, 0, block_multiply_float, 0);
+        auto  connection_4               = testGraph.dynamic_connect(block_multiply_float, 0, block_convert_to_double, 0);
+        auto  connection_5               = testGraph.dynamic_connect(block_convert_to_double, 0, block_sink, 0);
 
         expect(connection_1 == grg::connection_result_t::SUCCESS);
         expect(connection_2 == grg::connection_result_t::SUCCESS);
@@ -190,12 +190,12 @@ const boost::ut::suite BasicPluginNodesConnectionTests = [] {
         expect(connection_5 == grg::connection_result_t::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
-            std::ignore = node_source.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_multiply_double.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_convert_to_float.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_multiply_float.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_convert_to_double.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = node_sink.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply_double.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_convert_to_float.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply_float.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_convert_to_double.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_sink.work(std::numeric_limits<std::size_t>::max());
         }
     };
 };
