@@ -4,12 +4,12 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/node_registry.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/plugin_loader.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include <gnuradio-4.0/basic/common_nodes.hpp>
+#include <gnuradio-4.0/basic/common_blocks.hpp>
 
 using namespace std::chrono_literals;
 using namespace gr::literals;
@@ -19,7 +19,7 @@ namespace grg = gr;
 struct test_context {
     explicit test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
-    grg::node_registry registry;
+    grg::BlockRegistry registry;
     grg::plugin_loader loader;
 };
 
@@ -45,7 +45,7 @@ main(int argc, char *argv[]) {
     }
 
     test_context context(std::move(paths));
-    register_builtin_nodes(&context.registry);
+    registerBuiltinBlocks(&context.registry);
 
     fmt::print("PluginLoaderTests\n");
     using namespace gr;
@@ -58,40 +58,40 @@ main(int argc, char *argv[]) {
         assert(plugin.first.ends_with("bad_plugin.so"));
     }
 
-    auto        known = context.loader.known_nodes();
+    auto        known = context.loader.knownBlocks();
     std::vector requireds{ names::cout_sink, names::fixed_source, names::divide, names::multiply };
 
     for (const auto &required [[maybe_unused]] : requireds) {
         assert(std::ranges::find(known, required) != known.end());
     }
 
-    grg::graph flow_graph;
+    grg::graph testGraph;
 
     // Instantiate the node that is defined in a plugin
-    auto &node_source = context.loader.instantiate_in_graph(flow_graph, names::fixed_source, "double");
+    auto &block_source = context.loader.instantiate_in_graph(testGraph, names::fixed_source, "double");
 
     // Instantiate a built-in node in a static way
-    gr::property_map node_multiply_1_params;
-    node_multiply_1_params["factor"] = 2.0;
-    auto &node_multiply_1            = flow_graph.make_node<builtin_multiply<double>>(node_multiply_1_params);
+    gr::property_map block_multiply_1_params;
+    block_multiply_1_params["factor"] = 2.0;
+    auto &block_multiply_1            = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
     // Instantiate a built-in node via the plugin loader
-    auto &node_multiply_2 = context.loader.instantiate_in_graph(flow_graph, names::builtin_multiply, "double");
-    auto &node_counter    = context.loader.instantiate_in_graph(flow_graph, names::builtin_counter, "double");
+    auto &block_multiply_2 = context.loader.instantiate_in_graph(testGraph, names::builtin_multiply, "double");
+    auto &block_counter    = context.loader.instantiate_in_graph(testGraph, names::builtin_counter, "double");
 
     //
-    const std::size_t         repeats = 100;
-    gr::property_map node_sink_params;
-    node_sink_params["total_count"] = 100_UZ;
-    auto node_sink_load             = context.loader.instantiate(names::cout_sink, "double", node_sink_params);
+    const std::size_t repeats = 100;
+    gr::property_map  block_sink_params;
+    block_sink_params["total_count"] = 100_UZ;
+    auto block_sink_load             = context.loader.instantiate(names::cout_sink, "double", block_sink_params);
 
-    assert(node_sink_load);
-    auto &node_sink                     = flow_graph.add_node(std::move(node_sink_load));
+    assert(block_sink_load);
+    auto &block_sink                    = testGraph.add_block(std::move(block_sink_load));
 
-    auto  connection_1 [[maybe_unused]] = flow_graph.dynamic_connect(node_source, 0, node_multiply_1, 0);
-    auto  connection_2 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_1, 0, node_multiply_2, 0);
-    auto  connection_3 [[maybe_unused]] = flow_graph.dynamic_connect(node_multiply_2, 0, node_counter, 0);
-    auto  connection_4 [[maybe_unused]] = flow_graph.dynamic_connect(node_counter, 0, node_sink, 0);
+    auto  connection_1 [[maybe_unused]] = testGraph.dynamic_connect(block_source, 0, block_multiply_1, 0);
+    auto  connection_2 [[maybe_unused]] = testGraph.dynamic_connect(block_multiply_1, 0, block_multiply_2, 0);
+    auto  connection_3 [[maybe_unused]] = testGraph.dynamic_connect(block_multiply_2, 0, block_counter, 0);
+    auto  connection_4 [[maybe_unused]] = testGraph.dynamic_connect(block_counter, 0, block_sink, 0);
 
     assert(connection_1 == grg::connection_result_t::SUCCESS);
     assert(connection_2 == grg::connection_result_t::SUCCESS);
@@ -99,11 +99,11 @@ main(int argc, char *argv[]) {
     assert(connection_4 == grg::connection_result_t::SUCCESS);
 
     for (std::size_t i = 0; i < repeats; ++i) {
-        std::ignore = node_source.work(std::numeric_limits<std::size_t>::max());
-        std::ignore = node_multiply_1.work(std::numeric_limits<std::size_t>::max());
-        std::ignore = node_multiply_2.work(std::numeric_limits<std::size_t>::max());
-        std::ignore = node_counter.work(std::numeric_limits<std::size_t>::max());
-        std::ignore = node_sink.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = block_multiply_1.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = block_multiply_2.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = block_counter.work(std::numeric_limits<std::size_t>::max());
+        std::ignore = block_sink.work(std::numeric_limits<std::size_t>::max());
     }
 
     fmt::print("repeats {} event_count {}\n", repeats, builtin_counter<double>::s_event_count);

@@ -7,8 +7,8 @@
 
 #include <dlfcn.h>
 
+#include "BlockRegistry.hpp"
 #include "graph.hpp"
-#include "node_registry.hpp"
 
 #include <gnuradio-plugin_export.h>
 
@@ -35,16 +35,16 @@ public:
             = 0;
 
     virtual std::span<const std::string>
-    provided_nodes() const = 0;
-    virtual std::unique_ptr<gr::node_model>
-    create_node(std::string_view name, std::string_view type, const gr::property_map &params) = 0;
+    providedBlocks() const = 0;
+    virtual std::unique_ptr<gr::BlockModel>
+    createBlock(std::string_view name, std::string_view type, const gr::property_map &params) = 0;
 };
 
 namespace gr {
 template<std::uint8_t ABI_VERSION = GP_PLUGIN_CURRENT_ABI_VERSION>
 class plugin : public gp_plugin_base {
 private:
-    gr::node_registry registry;
+    gr::BlockRegistry registry;
 
 public:
     plugin() {}
@@ -55,19 +55,19 @@ public:
     }
 
     std::span<const std::string>
-    provided_nodes() const override {
-        return registry.provided_nodes();
+    providedBlocks() const override {
+        return registry.providedBlocks();
     }
 
-    std::unique_ptr<gr::node_model>
-    create_node(std::string_view name, std::string_view type, const property_map &params) override {
-        return registry.create_node(name, type, params);
+    std::unique_ptr<gr::BlockModel>
+    createBlock(std::string_view name, std::string_view type, const property_map &params) override {
+        return registry.createBlock(name, type, params);
     }
 
-    template<template<typename...> typename NodeTemplate, typename... Args>
+    template<template<typename...> typename TBlock, typename... Args>
     void
-    add_node_type(std::string node_type) {
-        registry.add_node_type<NodeTemplate, Args...>(std::move(node_type));
+    add_block_type(std::string block_type) {
+        registry.add_block_type<TBlock, Args...>(std::move(block_type));
     }
 };
 

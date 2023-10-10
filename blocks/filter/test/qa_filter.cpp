@@ -2,7 +2,7 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/Block.hpp>
 
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 
@@ -72,9 +72,9 @@ const boost::ut::suite SequenceTests = [] {
         for (std::size_t i = 0UL; i < 20; ++i) {
             const double input = (i == 0) ? 0.0 : 1.0; // Step function
 
-            fir_response.push_back(fir_filter.process_one(input));
-            iir_response1.push_back(iir_filter1.process_one(input));
-            iir_response2.push_back(iir_filter1.process_one(input));
+            fir_response.push_back(fir_filter.processOne(input));
+            iir_response1.push_back(iir_filter1.processOne(input));
+            iir_response2.push_back(iir_filter1.processOne(input));
         }
         expect(eq(fir_response[0], 0.0));
         expect(eq(iir_response1[0], 0.0));
@@ -114,10 +114,10 @@ const boost::ut::suite SequenceTests = [] {
         constexpr double tolerance = 0.00001;
         for (std::size_t i = 0UL; i < 20; ++i) {
             const double input     = (i == 0) ? 0.0 : 1.0; // Step function
-            const auto   form_I    = iir_filter_I.process_one(input);
-            const auto   form_II   = iir_filter_II.process_one(input);
-            const auto   form_I_T  = iir_filter_IT.process_one(input);
-            const auto   form_II_T = iir_filter_IIT.process_one(input);
+            const auto   form_I    = iir_filter_I.processOne(input);
+            const auto   form_II   = iir_filter_II.processOne(input);
+            const auto   form_I_T  = iir_filter_IT.processOne(input);
+            const auto   form_II_T = iir_filter_IIT.processOne(input);
             expect(approx(form_II, form_I, tolerance)) << "direct form II";
             expect(approx(form_I_T, form_I, tolerance)) << "direct form I - transposed";
             expect(approx(form_II_T, form_I, tolerance)) << "direct form II - transposed";

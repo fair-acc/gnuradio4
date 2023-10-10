@@ -8,9 +8,9 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "annotated.hpp"
+#include "Block.hpp"
 #include "circular_buffer.hpp"
 #include "dataset.hpp"
-#include "node.hpp"
 #include "tag.hpp"
 
 namespace gr {
@@ -191,7 +191,7 @@ struct Async {};
  *                            │                                       │                 │
  *         ───────────────────┘                                       └─────────────────┤
  *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Node implementations
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  *

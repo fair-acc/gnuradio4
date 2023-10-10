@@ -13,7 +13,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
@@ -27,7 +27,7 @@ using A = gr::Annotated<T, description, Arguments...>;
 using namespace gr;
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
-struct ClockSource : public gr::node<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
+struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, Doc<R""(
 ClockSource Documentation -- add here
 )"">> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
@@ -60,7 +60,7 @@ ClockSource Documentation -- add here
                     while (this->ioThreadShallRun.load()) {
                         std::this_thread::sleep_until(nextTimePoint);
                         // invoke and execute work function from user-provided thread
-                        if (this->invokeWork() == work_return_status_t::DONE) {
+                        if (this->invokeWork() == WorkReturnStatus::DONE) {
                             break;
                         } else {
                             retry = 2;
@@ -89,11 +89,11 @@ ClockSource Documentation -- add here
         nextTimePoint = ClockSourceType::now();
     }
 
-    work_return_status_t
-    process_bulk(PublishableSpan auto &output) noexcept {
+    WorkReturnStatus
+    processBulk(PublishableSpan auto &output) noexcept {
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
             output.publish(0_UZ);
-            return work_return_status_t::DONE;
+            return WorkReturnStatus::DONE;
         }
 
         if constexpr (useIoThread) { // using scheduler-graph provided user thread
@@ -103,7 +103,7 @@ ClockSource Documentation -- add here
         const auto writableSamples = static_cast<std::uint32_t>(output.size());
         if (writableSamples < chunk_size) {
             output.publish(0_UZ);
-            return work_return_status_t::INSUFFICIENT_OUTPUT_ITEMS;
+            return WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
         const std::uint32_t remaining_samples  = n_samples_max - n_samples_produced;
@@ -112,7 +112,7 @@ ClockSource Documentation -- add here
 
         std::uint32_t       samples_to_produce = n_available;
         while (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced + n_available)) {
-            gr::testing::print_tag(tags[next_tag], fmt::format("{}::process_bulk(...)\t publish tag at  {:6}", this->name, n_samples_produced));
+            gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced));
             tag_t &out_tag     = this->output_tags()[0];
             out_tag            = tags[next_tag];
             out_tag.index      = tags[next_tag].index - static_cast<std::make_signed_t<std::size_t>>(n_samples_produced);
@@ -139,17 +139,16 @@ ClockSource Documentation -- add here
             nextTimePoint += std::chrono::microseconds(static_cast<long>(static_cast<float>(updatePeriod.count()) * ratio));
         }
 
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 };
 
-} // namespace gr::sources
+} // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size,
-                                    sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size, sample_rate);
 
 namespace gr::basic {
 static_assert(gr::HasProcessBulkFunction<ClockSource<float>>);
-} // namespace gr::sources
+} // namespace gr::basic
 
 #endif // GNURADIO_CLOCK_SOURCE_HPP

@@ -22,21 +22,21 @@ using namespace std::string_literals;
 using namespace gr::literals;
 
 #ifdef ENABLE_DYNAMIC_PORTS
-class dynamic_node : public grg::node<dynamic_node> {
+class dynamicBlock : public grg::node<dynamicBlock> {
 public:
-    dynamic_node(std::string name) : grg::node<dynamic_node>(name) {}
+    dynamicBlock(std::string name) : grg::node<dynamicBlock>(name) {}
 };
 #endif
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public grg::node<scale<T, Scale, R>> {
+class scale : public grg::Block<scale<T, Scale, R>> {
 public:
     grg::PortIn<T>  original;
     grg::PortOut<R> scaled;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(V a) const noexcept {
+    processOne(V a) const noexcept {
         return a * Scale;
     }
 };
@@ -44,7 +44,7 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public grg::node<adder<T>> {
+class adder : public grg::Block<adder<T>> {
 public:
     grg::PortIn<T>  addend0;
     grg::PortIn<T>  addend1;
@@ -52,7 +52,7 @@ public:
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(V a, V b) const noexcept {
+    processOne(V a, V b) const noexcept {
         return a + b;
     }
 };
@@ -60,42 +60,42 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
-class cout_sink : public grg::node<cout_sink<T>> {
+class cout_sink : public grg::Block<cout_sink<T>> {
 public:
     grg::PortIn<T> sink;
 
     void
-    process_one(T value) {
+    processOne(T value) {
         fmt::print("Sinking a value: {}\n", value);
     }
 };
 
-static_assert(gr::NodeType<cout_sink<float>>);
+static_assert(gr::BlockLike<cout_sink<float>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10_UZ>
-class repeater_source : public grg::node<repeater_source<T, val>> {
+class repeater_source : public grg::Block<repeater_source<T, val>> {
 public:
     grg::PortOut<T> value;
-    std::size_t    _counter = 0;
+    std::size_t     _counter = 0;
 
-    gr::work_return_t
+    gr::WorkReturn
     work(std::size_t requested_work) {
         if (_counter < count) {
             _counter++;
-            auto &writer = output_port<"value">(this).streamWriter();
+            auto &writer = outputPort<"value">(this).streamWriter();
             auto  data   = writer.reserve_output_range(1);
             data[0]      = val;
             data.publish(1);
 
-            return { requested_work, 1_UZ, gr::work_return_status_t::OK };
+            return { requested_work, 1_UZ, gr::WorkReturnStatus::OK };
         } else {
-            return { requested_work, 0_UZ, gr::work_return_status_t::DONE };
+            return { requested_work, 0_UZ, gr::WorkReturnStatus::DONE };
         }
     }
 };
 
-static_assert(gr::NodeType<repeater_source<int, 42>>);
+static_assert(gr::BlockLike<repeater_source<int, 42>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
@@ -177,16 +177,16 @@ const boost::ut::suite PortApiTests = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
 
-        // Nodes need to be alive for as long as the flow is
+        // Block need to be alive for as long as the flow is
         grg::graph flow;
 
         // Generators
-        auto &answer = flow.make_node<repeater_source<int, 42>>();
-        auto &number = flow.make_node<repeater_source<int, 6>>();
+        auto &answer = flow.emplaceBlock<repeater_source<int, 42>>();
+        auto &number = flow.emplaceBlock<repeater_source<int, 6>>();
 
-        auto &scaled = flow.make_node<scale<int, 2>>();
-        auto &added  = flow.make_node<adder<int>>();
-        auto &out    = flow.make_node<cout_sink<int>>();
+        auto &scaled = flow.emplaceBlock<scale<int, 2>>();
+        auto &added  = flow.emplaceBlock<adder<int>>();
+        auto &out    = flow.emplaceBlock<cout_sink<int>>();
 
         expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
         expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
@@ -206,13 +206,13 @@ const boost::ut::suite PortApiTests = [] {
         BufferWriter auto &writer = output_port.writer();
         IN<float, "in0">   input_port;
 
-        auto               source = std::make_shared<dynamic_node>("source");
+        auto               source = std::make_shared<dynamicBlock>("source");
         source->add_port(output_port);
         source->add_port(OUT<float, "out1">());
         expect(eq(source->dynamic_output_ports().size(), 2U));
         expect(eq(source->dynamic_input_ports().size(), 0U));
 
-        auto sink = std::make_shared<dynamic_node>("sink");
+        auto sink = std::make_shared<dynamicBlock>("sink");
         expect(nothrow([&sink, &input_port]() { sink->add_port(input_port); }));
         expect(nothrow([&sink]() { sink->add_port(IN<float, "in1">()); }));
         expect(nothrow([&sink]() { sink->add_port(IN<float>("in2")); }));
@@ -230,7 +230,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(graph.edges_count(), 2U));
 
-        auto               mismatched_sink = std::make_shared<dynamic_node>("mismatched_sink");
+        auto               mismatched_sink = std::make_shared<dynamicBlock>("mismatched_sink");
         IN<int32_t, "in0"> mismatched_typed_port;
         mismatched_sink->add_port(mismatched_typed_port);
 

@@ -5,9 +5,9 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
@@ -37,7 +37,7 @@ struct fmt::formatter<gr::tag_t> {
 namespace gr::basic::data_sink_test {
 
 template<typename T>
-struct Source : public node<Source<T>> {
+struct Source : public Block<Source<T>> {
     PortOut<T>         out;
     std::int32_t       n_samples_produced = 0;
     std::int32_t       n_samples_max      = 1024;
@@ -71,13 +71,13 @@ struct Source : public node<Source<T>> {
     }
 
     T
-    process_one() noexcept {
+    processOne() noexcept {
         if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
             tag_t &out_tag = this->output_tags()[0];
             // TODO when not enforcing single samples in available_samples, one would have to do:
             // const auto base = std::max(out.streamWriter().position() + 1, tag_t::signed_index_type{0});
             // out_tag        = tag_t{ tags[next_tag].index - base, tags[next_tag].map };
-            // Still think there could be nicer API to set a tag from process_one()
+            // Still think there could be nicer API to set a tag from processOne()
             out_tag = tag_t{ 0, tags[next_tag].map };
             this->forward_tags();
             next_tag++;
@@ -207,7 +207,7 @@ run_matcher_test(std::span<const tag_t> tags, M o) {
     return to_ascii_art(r);
 }
 
-} // namespace gr::data_sink_test
+} // namespace gr::basic::data_sink_test
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::data_sink_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
 
@@ -239,12 +239,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto                    src_tags   = make_test_tags(0, 1000);
 
-        gr::graph              flow_graph;
-        auto                         &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto                         &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        gr::graph                     testGraph;
+        auto                         &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                         &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
         src.tags                           = src_tags;
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         std::atomic<std::size_t> samples_seen1 = 0;
         std::atomic<std::size_t> chunks_seen1  = 0;
@@ -300,7 +300,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags));
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags_and_sink));
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -316,13 +316,13 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking polling continuous mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph       flow_graph;
+        gr::graph              testGraph;
         const auto             tags = make_test_tags(0, 1000);
-        auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         src.tags                    = tags;
-        auto &sink                  = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto &sink                  = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto poller_data_only = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller_data_only, nullptr));
@@ -330,7 +330,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto poller_with_tags = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller_with_tags, nullptr));
 
-        auto                           runner1 = std::async([poller = poller_data_only] {
+        auto                  runner1 = std::async([poller = poller_data_only] {
             std::vector<float> received;
             bool               seen_finished = false;
             while (!seen_finished) {
@@ -342,7 +342,7 @@ const boost::ut::suite DataSinkTests = [] {
             return received;
         });
 
-        auto                           runner2 = std::async([poller = poller_with_tags] {
+        auto                  runner2 = std::async([poller = poller_with_tags] {
             std::vector<float> received;
             std::vector<tag_t> received_tags;
             bool               seen_finished = false;
@@ -362,7 +362,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received, received_tags);
         });
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -385,14 +385,14 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking polling trigger mode non-overlapping"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph       flow_graph;
-        auto                  &src  = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        gr::graph              testGraph;
+        auto                  &src  = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
         const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
-        auto &sink                  = flow_graph.make_node<data_sink<int32_t>>(
+        auto &sink                  = testGraph.emplaceBlock<data_sink<int32_t>>(
                 { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
@@ -403,7 +403,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto poller = data_sink_registry::instance().get_trigger_poller<int32_t>(data_sink_query::signal_name("test signal"), is_trigger, 3, 2, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
-        auto                           polling = std::async([poller] {
+        auto                  polling = std::async([poller] {
             std::vector<int32_t> received_data;
             std::vector<tag_t>   received_tags;
             bool                 seen_finished = false;
@@ -429,7 +429,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received_data, received_tags);
         });
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -447,8 +447,8 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking snapshot mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph       flow_graph;
-        auto                  &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        gr::graph              testGraph;
+        auto                  &src = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags                   = { { 0,
                                          { { std::string(tag::SIGNAL_NAME.key()), "test signal" },
                                            { std::string(tag::SIGNAL_UNIT.key()), "none" },
@@ -457,9 +457,9 @@ const boost::ut::suite DataSinkTests = [] {
                                        { 3000, { { "TYPE", "TRIGGER" } } },
                                        { 8000, { { "TYPE", "NO_TRIGGER" } } },
                                        { 180000, { { "TYPE", "TRIGGER" } } } };
-        auto &sink                 = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" }, { "sample_rate", 10000.f } });
+        auto &sink                 = testGraph.emplaceBlock<data_sink<int32_t>>({ { "name", "test_sink" }, { "sample_rate", 10000.f } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
@@ -476,7 +476,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(data_sink_registry::instance().register_snapshot_callback<int32_t>(data_sink_query::sink_name("test_sink"), is_trigger, delay, callback));
 
-        auto                           poller_result = std::async([poller] {
+        auto                  poller_result = std::async([poller] {
             std::vector<int32_t> received_data;
 
             bool                 seen_finished = false;
@@ -502,7 +502,7 @@ const boost::ut::suite DataSinkTests = [] {
             return received_data;
         });
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -517,12 +517,12 @@ const boost::ut::suite DataSinkTests = [] {
         const auto         tags      = make_test_tags(0, 10000);
 
         const std::int32_t n_samples = static_cast<std::int32_t>(tags.size() * 10000 + 100000);
-        gr::graph   flow_graph;
-        auto              &src = flow_graph.make_node<Source<int32_t>>({ { "n_samples_max", n_samples } });
+        gr::graph          testGraph;
+        auto              &src = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags               = tags;
-        auto &sink             = flow_graph.make_node<data_sink<int32_t>>({ { "name", "test_sink" } });
+        auto &sink             = testGraph.emplaceBlock<data_sink<int32_t>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         {
             const auto t = std::span(tags);
@@ -584,7 +584,7 @@ const boost::ut::suite DataSinkTests = [] {
             results.push_back(std::move(f));
         }
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -599,23 +599,23 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples  = 150000;
         constexpr std::size_t  n_triggers = 300;
 
-        gr::graph       flow_graph;
-        auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        gr::graph              testGraph;
+        auto                  &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
             src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
-        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
 
         auto poller     = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
-        auto                           polling = std::async([poller] {
+        auto                  polling = std::async([poller] {
             std::vector<float> received_data;
             std::vector<tag_t> received_tags;
             bool               seen_finished = false;
@@ -637,7 +637,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received_data, received_tags);
         });
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -654,16 +654,16 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples  = 150000;
         constexpr std::size_t  n_triggers = 300;
 
-        gr::graph       flow_graph;
-        auto                  &src = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
+        gr::graph              testGraph;
+        auto                  &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
             src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
-        auto &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        auto &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto               is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
 
@@ -679,7 +679,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         data_sink_registry::instance().register_trigger_callback<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, callback);
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -693,11 +693,11 @@ const boost::ut::suite DataSinkTests = [] {
     "non-blocking polling continuous mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph       flow_graph;
-        auto                  &src  = flow_graph.make_node<Source<float>>({ { "n_samples_max", n_samples } });
-        auto                  &sink = flow_graph.make_node<data_sink<float>>({ { "name", "test_sink" } });
+        gr::graph              testGraph;
+        auto                  &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
+        auto                  &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto invalid_type_poller = data_sink_registry::instance().get_streaming_poller<double>(data_sink_query::sink_name("test_sink"));
         expect(eq(invalid_type_poller, nullptr));
@@ -705,7 +705,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto poller = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"));
         expect(neq(poller, nullptr));
 
-        auto                           polling = std::async([poller] {
+        auto                  polling = std::async([poller] {
             expect(neq(poller, nullptr));
             std::size_t samples_seen  = 0;
             bool        seen_finished = false;
@@ -721,7 +721,7 @@ const boost::ut::suite DataSinkTests = [] {
             return samples_seen;
         });
 
-        gr::scheduler::simple sched{ std::move(flow_graph) };
+        gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         sink.stop(); // TODO the scheduler should call this

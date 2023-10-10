@@ -15,7 +15,7 @@
 #include "graph.hpp"
 #include "plugin.hpp"
 
-using plugin_create_function_t  = void (*)(gp_plugin_base **);
+using plugin_create_function_t  = void  (*)(gp_plugin_base **);
 using plugin_destroy_function_t = void (*)(gp_plugin_base *);
 
 namespace gr {
@@ -51,7 +51,7 @@ private:
 public:
     plugin_handler() = default;
 
-    explicit plugin_handler(const std::string& plugin_file) {
+    explicit plugin_handler(const std::string &plugin_file) {
         _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY);
         if (!_dl_handle) {
             _status = "Failed to load the plugin file";
@@ -109,7 +109,10 @@ public:
 
     ~plugin_handler() { release(); }
 
-    explicit operator bool() const { return _instance; }
+    explicit
+    operator bool() const {
+        return _instance;
+    }
 
     [[nodiscard]] const std::string &
     status() const {
@@ -128,11 +131,11 @@ private:
     std::unordered_map<std::string, gp_plugin_base *> _handler_for_name;
     std::unordered_map<std::string, std::string>      _failed_plugins;
 
-    node_registry                                    *_global_registry;
-    std::vector<std::string>                          _known_nodes;
+    BlockRegistry                                    *_global_registry;
+    std::vector<std::string>                          _knownBlocks;
 
 public:
-    plugin_loader(node_registry *global_registry, std::span<const std::filesystem::path> plugin_directories) : _global_registry(global_registry) {
+    plugin_loader(BlockRegistry *global_registry, std::span<const std::filesystem::path> plugin_directories) : _global_registry(global_registry) {
         for (const auto &directory : plugin_directories) {
             std::cerr << std::filesystem::current_path() << std::endl;
 
@@ -141,9 +144,9 @@ public:
             for (const auto &file : std::filesystem::directory_iterator{ directory }) {
                 if (file.is_regular_file() && file.path().extension() == ".so") {
                     if (plugin_handler handler(file.path().string()); handler) {
-                        for (const auto &node_name : handler->provided_nodes()) {
-                            _handler_for_name.emplace(std::string(node_name), handler.operator->());
-                            _known_nodes.emplace_back(node_name);
+                        for (const auto &block_name : handler->providedBlocks()) {
+                            _handler_for_name.emplace(std::string(block_name), handler.operator->());
+                            _knownBlocks.emplace_back(block_name);
                         }
 
                         _handlers.push_back(std::move(handler));
@@ -167,17 +170,17 @@ public:
     }
 
     auto
-    known_nodes() const {
-        auto        result  = _known_nodes;
-        const auto &builtin = _global_registry->known_nodes();
+    knownBlocks() const {
+        auto        result  = _knownBlocks;
+        const auto &builtin = _global_registry->knownBlocks();
         result.insert(result.end(), builtin.begin(), builtin.end());
         return result;
     }
 
-    std::unique_ptr<gr::node_model>
+    std::unique_ptr<gr::BlockModel>
     instantiate(std::string name, std::string_view type, const property_map &params = {}) {
         // Try to create a node from the global registry
-        if (auto result = _global_registry->create_node(name, type, params)) {
+        if (auto result = _global_registry->createBlock(name, type, params)) {
             return result;
         }
 
@@ -186,17 +189,17 @@ public:
 
         auto &handler = it->second;
 
-        return handler->create_node(std::move(name), type, params);
+        return handler->createBlock(std::move(name), type, params);
     }
 
     template<typename Graph, typename... InstantiateArgs>
-    gr::node_model &
+    gr::BlockModel &
     instantiate_in_graph(Graph &graph, InstantiateArgs &&...args) {
-        auto node_load = instantiate(std::forward<InstantiateArgs>(args)...);
-        if (!node_load) {
+        auto block_load = instantiate(std::forward<InstantiateArgs>(args)...);
+        if (!block_load) {
             throw fmt::format("Unable to create node");
         }
-        return graph.add_node(std::move(node_load));
+        return graph.add_block(std::move(block_load));
     }
 };
 #endif

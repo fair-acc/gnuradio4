@@ -95,8 +95,8 @@ concept IsGraph = requires(T t) {
 };
 
 /** @brief Represents a simple graph structure for signals. (alt documentation)*/
-template <typename TNode>
-class Graph : public Block<Graph<TNode>, Doc<R"(
+template <typename TBlock>
+class Graph : public Block<Graph<TBlock>, Doc<R"(
   @brief Represents a simple graph structure for signals. (preferred documentation)
 
   ... you may use markdown etc.
@@ -107,11 +107,11 @@ class Graph : public Block<Graph<TNode>, Doc<R"(
 
 public:
     static const int   kDefaultSize = 10;
-    std::vector<TNode> nodes;
+    std::vector<TBlock> nodes;
     bool               is_valid; // field is public API using snake_case
 
     // constructor with parameter using `_` suffix to avoid name clashes
-    Graph(std::vector<TNode> nodes_) : nodes(std::move(nodes_)) {
+    Graph(std::vector<TBlock> nodes_) : nodes(std::move(nodes_)) {
         // TODO: initialization of other components
     }
 

@@ -37,25 +37,25 @@ public:
 };
 
 template<typename T>
-class multiply : public grg::node<multiply<T>>, public math_base<T> {
+class multiply : public grg::Block<multiply<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(const V &a) const noexcept {
+    processOne(const V &a) const noexcept {
         return a * math_base<T>::_factor;
     }
 };
 
 template<typename T>
-class divide : public grg::node<divide<T>>, public math_base<T> {
+class divide : public grg::Block<divide<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(const V &a) const noexcept {
+    processOne(const V &a) const noexcept {
         return a / math_base<T>::_factor;
     }
 };

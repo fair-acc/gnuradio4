@@ -47,7 +47,7 @@ using property_map = pmtv::map_t;
  * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
  * any point in the signal processing flow, allowing for flexible and customisable data processing.
  *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Node implementations
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */

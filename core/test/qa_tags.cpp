@@ -2,9 +2,9 @@
 
 #include <fmt/format.h>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
@@ -61,8 +61,8 @@ const boost::ut::suite TagPropagation = [] {
 
     "tag_source"_test = [] {
         std::int64_t n_samples = 1024;
-        graph        flow_graph;
-        auto        &src = flow_graph.make_node<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
+        graph        testGraph;
+        auto        &src = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
         src.tags         = {
             // TODO: allow parameter settings to include maps?!?
             { 0, { { "key", "value@0" } } },       //
@@ -74,16 +74,16 @@ const boost::ut::suite TagPropagation = [] {
             { 1002, { { "key", "value@1002" } } }, //
             { 1023, { { "key", "value@1023" } } }  //
         };
-        auto &monitor1 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
-        auto &monitor2 = flow_graph.make_node<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
-        auto &sink1    = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
-        auto &sink2    = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(monitor1)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor1).to<"in">(monitor2)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink1)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(monitor2).to<"in">(sink2)));
+        auto &monitor1 = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
+        auto &monitor2 = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
+        auto &sink1    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
+        auto &sink2    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitor1)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(monitor1).to<"in">(monitor2)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink1)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink2)));
 
-        scheduler::simple sched{ std::move(flow_graph) };
+        scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";

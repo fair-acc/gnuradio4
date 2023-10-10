@@ -18,7 +18,7 @@ using namespace gr::literals;
 inline static std::size_t n_samples_produced = 0_UZ;
 
 template<typename T, std::size_t min = 0_UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
-class source : public gr::node<source<T, min, count>> {
+class source : public gr::Block<source<T, min, count>> {
 public:
     uint64_t       _n_samples_max;
     std::size_t    _n_tag_offset;
@@ -34,7 +34,7 @@ public:
     }
 
     [[nodiscard]] constexpr auto
-    process_one_simd(auto N) const noexcept -> gr::meta::simdize<T, decltype(N)::value> {
+    processOne_simd(auto N) const noexcept -> gr::meta::simdize<T, decltype(N)::value> {
         n_samples_produced += N;
         gr::meta::simdize<T, N> x{};
         benchmark::force_to_memory(x);
@@ -42,14 +42,14 @@ public:
     }
 
     [[nodiscard]] constexpr T
-    process_one() const noexcept {
+    processOne() const noexcept {
         n_samples_produced++;
         T x{};
         benchmark::force_to_memory(x);
         return x;
     }
 
-    gr::work_return_t
+    gr::WorkReturn
     work(std::size_t requested_work) {
         const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
         if (n_to_publish > 0) {
@@ -62,27 +62,27 @@ public:
             if constexpr (use_bulk_operation) {
                 std::size_t n_write = std::clamp(n_to_publish, 0UL, std::min(writer.available(), port.max_buffer_size()));
                 if (n_write == 0_UZ) {
-                    return { requested_work, 0_UZ, gr::work_return_status_t::INSUFFICIENT_INPUT_ITEMS };
+                    return { requested_work, 0_UZ, gr::WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
                 }
 
                 writer.publish( //
                         [this](std::span<T> output) {
                             for (auto &val : output) {
-                                val = process_one();
+                                val = processOne();
                             }
                         },
                         n_write);
             } else {
                 auto [data, token] = writer.get(1);
                 if (data.size() == 0_UZ) {
-                    return { requested_work, 0_UZ, gr::work_return_status_t::ERROR };
+                    return { requested_work, 0_UZ, gr::WorkReturnStatus::ERROR };
                 }
-                data[0] = process_one();
+                data[0] = processOne();
                 writer.publish(token, 1);
             }
-            return { requested_work, 1_UZ, gr::work_return_status_t::OK };
+            return { requested_work, 1_UZ, gr::WorkReturnStatus::OK };
         } else {
-            return { requested_work, 0_UZ, gr::work_return_status_t::DONE };
+            return { requested_work, 0_UZ, gr::WorkReturnStatus::DONE };
         }
     }
 };
@@ -90,14 +90,14 @@ public:
 inline static std::size_t n_samples_consumed = 0_UZ;
 
 template<typename T, std::size_t N_MIN = 1_UZ, std::size_t N_MAX = N_MAX>
-struct sink : public gr::node<sink<T, N_MIN, N_MAX>> {
+struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     gr::PortIn<T, gr::RequiredSamples<N_MIN, N_MAX>> in;
     std::size_t                                      should_receive_n_samples = 0;
     int64_t                                          _last_tag_position       = -1;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(V a) noexcept {
+    processOne(V a) noexcept {
         // optional user-level tag processing
         if (this->input_tags_present()) {
             if (this->input_tags_present() && this->input_tags()[0].map.contains("N_SAMPLES_MAX")) {
@@ -126,7 +126,7 @@ cascade(
     if constexpr (N <= 1) {
         return src;
     } else {
-        return cascade<N - 1, base>(gr::merge_by_index<0, 0>(std::forward<aggregate>(src), generator()), generator);
+        return cascade<N - 1, base>(gr::mergeByIndex<0, 0>(std::forward<aggregate>(src), generator()), generator);
     }
 }
 

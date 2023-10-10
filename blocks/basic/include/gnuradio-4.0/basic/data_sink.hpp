@@ -1,10 +1,10 @@
 #ifndef GNURADIO_DATA_SINK_HPP
 #define GNURADIO_DATA_SINK_HPP
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/circular_buffer.hpp>
 #include <gnuradio-4.0/dataset.hpp>
 #include <gnuradio-4.0/history_buffer.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
 #include <any>
@@ -303,7 +303,7 @@ get(const property_map &m, const std::string_view &key) {
  * @tparam T input sample type
  */
 template<typename T>
-class data_sink : public node<data_sink<T>> {
+class data_sink : public Block<data_sink<T>> {
     struct abstract_listener;
 
     static constexpr std::size_t                   _listener_buffer_size = 65536;
@@ -474,8 +474,8 @@ public:
         }
     }
 
-    [[nodiscard]] work_return_status_t
-    process_bulk(std::span<const T> in_data) noexcept {
+    [[nodiscard]] WorkReturnStatus
+    processBulk(std::span<const T> in_data) noexcept {
         std::optional<property_map> tagData;
         if (this->input_tags_present()) {
             assert(this->input_tags()[0].index == 0);
@@ -500,7 +500,7 @@ public:
             }
         }
 
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 
 private:

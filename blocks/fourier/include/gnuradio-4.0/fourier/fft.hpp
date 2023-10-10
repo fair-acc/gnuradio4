@@ -3,9 +3,9 @@
 
 #include <execution>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/dataset.hpp>
 #include <gnuradio-4.0/history_buffer.hpp>
-#include <gnuradio-4.0/node.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
@@ -19,7 +19,7 @@ using namespace gr;
 
 template<typename T, typename U = DataSet<float>, typename FourierAlgorithm = gr::algorithm::FFT<gr::algorithm::FFTInDataType<T, typename U::value_type>>>
     requires(gr::algorithm::ComplexType<T> || std::floating_point<T> || std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>)
-struct FFT : public node<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>, Doc<R""(
+struct FFT : public Block<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>, Doc<R""(
 @brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
 The FFT block is capable of performing Fourier Transform computations on real or complex data,
@@ -130,8 +130,8 @@ On the choice of window (mathematically aka. apodisation) functions
         _phaseSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
     }
 
-    [[nodiscard]] constexpr work_return_status_t
-    process_bulk(std::span<const T> input, std::span<U> output) {
+    [[nodiscard]] constexpr WorkReturnStatus
+    processBulk(std::span<const T> input, std::span<U> output) {
         if constexpr (std::is_same_v<T, InDataType>) {
             std::copy_n(input.begin(), fftSize, _inData.begin());
         } else {
@@ -158,7 +158,7 @@ On the choice of window (mathematically aka. apodisation) functions
             static_assert(!std::is_same_v<U, DataSet<float>> && "FFT output type not (yet) implemented");
         }
 
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 
     constexpr U

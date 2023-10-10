@@ -5,15 +5,15 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 
 #include <gnuradio-4.0/basic/selector.hpp>
 
 using namespace gr::literals;
 
 template<typename T>
-struct repeated_source : public gr::node<repeated_source<T>> {
+struct repeated_source : public gr::Block<repeated_source<T>> {
     std::uint32_t                  identifier = 0;
     std::uint32_t                  remaining_events_count;
     std::vector<T>                 values;
@@ -28,7 +28,7 @@ struct repeated_source : public gr::node<repeated_source<T>> {
         }
     }
 
-    gr::work_return_t
+    gr::WorkReturn
     work(std::size_t requested_work) {
         if (values_next == values.cend()) {
             values_next = values.cbegin();
@@ -36,7 +36,7 @@ struct repeated_source : public gr::node<repeated_source<T>> {
 
         if (remaining_events_count != 0) {
             using namespace gr::literals;
-            auto &port   = gr::output_port<0>(this);
+            auto &port   = gr::outputPort<0>(this);
             auto &writer = port.streamWriter();
             auto  data   = writer.reserve_output_range(1_UZ);
 
@@ -50,10 +50,10 @@ struct repeated_source : public gr::node<repeated_source<T>> {
 
             values_next++;
 
-            return {requested_work, 1UL, gr::work_return_status_t::OK };
+            return { requested_work, 1UL, gr::WorkReturnStatus::OK };
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            return {requested_work, 1UL, gr::work_return_status_t::DONE };
+            return { requested_work, 1UL, gr::WorkReturnStatus::DONE };
         }
     }
 };
@@ -61,7 +61,7 @@ struct repeated_source : public gr::node<repeated_source<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (repeated_source<T>), identifier, remaining_events_count, values, out);
 
 template<typename T>
-struct validator_sink : public gr::node<validator_sink<T>> {
+struct validator_sink : public gr::Block<validator_sink<T>> {
     std::uint32_t                  identifier = 0;
     gr::PortIn<T>                  in;
 
@@ -82,7 +82,7 @@ struct validator_sink : public gr::node<validator_sink<T>> {
     }
 
     void
-    process_one(T value) {
+    processOne(T value) {
         if (expected_values_next == expected_values.cend()) {
             all_ok = false;
             fmt::print("Error: {}#{}: We got more values than expected\n", static_cast<void *>(this), identifier);
@@ -102,14 +102,14 @@ struct validator_sink : public gr::node<validator_sink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (validator_sink<T>), identifier, expected_values, in);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public gr::node<adder<T>> {
+struct adder : public gr::Block<adder<T>> {
     gr::PortIn<T>  addend0;
     gr::PortIn<T>  addend1;
     gr::PortOut<T> sum;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(V a, V b) const noexcept {
+    processOne(V a, V b) const noexcept {
         return a + b;
     }
 };
@@ -136,36 +136,36 @@ execute_selector_test(test_definition definition) {
     gr::graph                              graph;
     std::vector<repeated_source<double> *> sources;
     std::vector<validator_sink<double> *>  sinks;
-    gr::basic::Selector<double>   *selector;
+    gr::basic::Selector<double>           *selector;
 
     std::vector<std::uint32_t>             mapIn(definition.mapping.size());
     std::vector<std::uint32_t>             mapOut(definition.mapping.size());
     std::ranges::transform(definition.mapping, mapIn.begin(), [](auto &p) { return p.first; });
     std::ranges::transform(definition.mapping, mapOut.begin(), [](auto &p) { return p.second; });
 
-    selector = std::addressof(graph.make_node<gr::basic::Selector<double>>({ { "nInputs", sources_count }, //
-                                                                                     { "nOutputs", sinks_count },  //
-                                                                                     { "mapIn", mapIn },           //
-                                                                                     { "mapOut", mapOut },         //
-                                                                                     { "backPressure", definition.back_pressure } }));
+    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({ { "nInputs", sources_count }, //
+                                                                                { "nOutputs", sinks_count },  //
+                                                                                { "mapIn", mapIn },           //
+                                                                                { "mapOut", mapOut },         //
+                                                                                { "backPressure", definition.back_pressure } }));
 
     for (std::uint32_t source_index = 0; source_index < sources_count; ++source_index) {
-        sources.push_back(std::addressof(graph.make_node<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
-                                                                                    { "identifier", source_index },                       //
-                                                                                    { "values", definition.input_values[source_index] } })));
+        sources.push_back(std::addressof(graph.emplaceBlock<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
+                                                                                       { "identifier", source_index },                       //
+                                                                                       { "values", definition.input_values[source_index] } })));
         expect(sources[source_index]->settings().apply_staged_parameters().empty());
         expect(gr::connection_result_t::SUCCESS == graph.dynamic_connect(*sources[source_index], 0, *selector, source_index + 1 /* there's one port before the inputs */));
     }
 
     for (std::uint32_t sink_index = 0; sink_index < sinks_count; ++sink_index) {
-        sinks.push_back(std::addressof(graph.make_node<validator_sink<double>>({ { "identifier", sink_index }, //
-                                                                                 { "expected_values", definition.output_values[sink_index] } })));
+        sinks.push_back(std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", sink_index }, //
+                                                                                    { "expected_values", definition.output_values[sink_index] } })));
         expect(sinks[sink_index]->settings().apply_staged_parameters().empty());
         expect(gr::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, sink_index + 1 /* there's one port before the outputs */, *sinks[sink_index], 0));
     }
 
-    validator_sink<double> *monitor_sink = std::addressof(graph.make_node<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
-                                                                                                    { "expected_values", definition.monitor_values } }));
+    validator_sink<double> *monitor_sink = std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
+                                                                                                       { "expected_values", definition.monitor_values } }));
     expect(monitor_sink->settings().apply_staged_parameters().empty());
     expect(gr::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, 0, *monitor_sink, 0));
 

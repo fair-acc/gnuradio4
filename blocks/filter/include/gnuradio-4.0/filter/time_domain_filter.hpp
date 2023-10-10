@@ -2,8 +2,8 @@
 #define GNURADIO_TIME_DOMAIN_FILTER_HPP
 #include <numeric>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/history_buffer.hpp>
-#include <gnuradio-4.0/node.hpp>
 
 namespace gr::filter {
 
@@ -11,7 +11,7 @@ using namespace gr;
 
 template<typename T>
     requires std::floating_point<T>
-struct fir_filter : node<fir_filter<T>, Doc<R""(
+struct fir_filter : Block<fir_filter<T>, Doc<R""(
 @brief Finite Impulse Response (FIR) filter class
 
 The transfer function of an FIR filter is given by:
@@ -30,7 +30,7 @@ H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
     }
 
     constexpr T
-    process_one(T input) noexcept {
+    processOne(T input) noexcept {
         inputHistory.push_back(input);
         return std::inner_product(b.begin(), b.end(), inputHistory.rbegin(), static_cast<T>(0));
     }
@@ -45,7 +45,7 @@ enum class IIRForm {
 
 template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
     requires std::floating_point<T>
-struct iir_filter : node<iir_filter<T, form>, Doc<R""(
+struct iir_filter : Block<iir_filter<T, form>, Doc<R""(
 @brief Infinite Impulse Response (IIR) filter class
 
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
@@ -68,7 +68,7 @@ a are the feedback coefficients
     }
 
     [[nodiscard]] T
-    process_one(T input) noexcept {
+    processOne(T input) noexcept {
         if constexpr (form == IIRForm::DF_I) {
             // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
             //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]

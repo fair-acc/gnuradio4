@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/graph.hpp>
-#include <gnuradio-4.0/node.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
@@ -24,8 +24,8 @@ const boost::ut::suite TagTests = [] {
         constexpr bool          useIoThreadPool = true; // true: scheduler/graph-provided thread, false: use user-provided call-back or thread
         constexpr std::uint32_t n_samples       = 1900;
         constexpr float         sample_rate     = 2000.f;
-        graph                   flow_graph;
-        auto &src = flow_graph.make_node<gr::basic::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
+        graph                   testGraph;
+        auto &src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
         src.tags  = {
             { 0, { { "key", "value@0" } } },       //
             { 1, { { "key", "value@1" } } },       //
@@ -36,12 +36,12 @@ const boost::ut::suite TagTests = [] {
             { 1002, { { "key", "value@1002" } } }, //
             { 1023, { { "key", "value@1023" } } }  //
         };
-        auto &sink1 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink1" } });
-        auto &sink2 = flow_graph.make_node<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink2" } });
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink1)));
-        expect(eq(connection_result_t::SUCCESS, flow_graph.connect<"out">(src).to<"in">(sink2)));
+        auto &sink1 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink1" } });
+        auto &sink2 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink2" } });
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink1)));
+        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink2)));
 
-        scheduler::simple sched{ std::move(flow_graph) };
+        scheduler::simple sched{ std::move(testGraph) };
         if constexpr (!useIoThreadPool) {
             src.tryStartThread();
         }

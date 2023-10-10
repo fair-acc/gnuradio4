@@ -1,7 +1,7 @@
 #ifndef GNURADIO_SELECTOR_HPP
 #define GNURADIO_SELECTOR_HPP
 
-#include <gnuradio-4.0/node.hpp>
+#include <gnuradio-4.0/Block.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -65,7 +65,7 @@ you can set the `backPressure` property to false.
 )"">;
 
 template<typename T>
-struct Selector : node<Selector<T>, SelectorDoc> {
+struct Selector : Block<Selector<T>, SelectorDoc> {
     // port definitions
     PortIn<std::uint32_t, Async, Optional> selectOut;
     PortOut<T, Async, Optional>            monitorOut; // optional monitor output (more for demo/API purposes than actual need)
@@ -108,11 +108,11 @@ struct Selector : node<Selector<T>, SelectorDoc> {
     using input_reader_t   = typename PortIn<T, Async>::ReaderType;
     using output_writer_t  = typename PortOut<T, Async>::WriterType;
 
-    gr::work_return_status_t
-    process_bulk(select_reader_t                      *select, //
-                 const std::vector<input_reader_t *>  &ins,
-                 monitor_writer_t                     *monOut, //
-                 const std::vector<output_writer_t *> &outs) {
+    gr::WorkReturnStatus
+    processBulk(select_reader_t                      *select, //
+                const std::vector<input_reader_t *>  &ins,
+                monitor_writer_t                     *monOut, //
+                const std::vector<output_writer_t *> &outs) {
         if (_internalMapping.empty()) {
             if (backPressure) {
                 std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(0_UZ); });
@@ -120,7 +120,7 @@ struct Selector : node<Selector<T>, SelectorDoc> {
                 // make the implicit consume all available behaviour explicit
                 std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(input->available()); });
             }
-            return work_return_status_t::OK;
+            return WorkReturnStatus::OK;
         }
 
         std::set<std::size_t> used_inputs;
@@ -181,8 +181,8 @@ struct Selector : node<Selector<T>, SelectorDoc> {
 
         if (!monitor_out_processed && _selectedSrc < ins.size()) {
             auto *input_reader    = ins[_selectedSrc];
-            auto input_available = std::min(input_reader->available(), monOut->available());
-            auto input_span = input_reader->get(input_available);
+            auto  input_available = std::min(input_reader->available(), monOut->available());
+            auto  input_span      = input_reader->get(input_available);
             copy_to_output(input_available, input_span, monOut);
             std::ignore = input_reader->consume(input_available);
         }
@@ -199,7 +199,7 @@ struct Selector : node<Selector<T>, SelectorDoc> {
             }
         }
 
-        return work_return_status_t::OK;
+        return WorkReturnStatus::OK;
     }
 };
 } // namespace gr::basic

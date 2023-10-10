@@ -11,7 +11,7 @@ inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000'000, 1024);
 inline constexpr std::size_t N_NODES   = 5;
 
 template<typename T, char op>
-class math_op : public gr::node<math_op<T, op>, gr::PortInNamed<T, "in">, gr::PortOutNamed<T, "out">> {
+class math_op : public gr::Block<math_op<T, op>, gr::PortInNamed<T, "in">, gr::PortOutNamed<T, "out">> {
     T _factor = static_cast<T>(1.0f);
 
 public:
@@ -21,7 +21,7 @@ public:
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    process_one(const V &a) const noexcept {
+    processOne(const V &a) const noexcept {
         if constexpr (op == '*') {
             return a * _factor;
         } else if constexpr (op == '/') {
@@ -43,39 +43,39 @@ using divide = math_op<T, '/'>;
 
 template<typename T, typename Sink, typename Source>
 void
-create_cascade(gr::graph &flow_graph, Sink &src, Source &sink, std::size_t depth = 1) {
+create_cascade(gr::graph &testGraph, Sink &src, Source &sink, std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
 
     std::vector<multiply<T> *> mult1;
     std::vector<divide<T> *>   mult2;
     for (std::size_t i = 0; i < depth; i++) {
-        mult1.emplace_back(std::addressof(flow_graph.make_node<multiply<T>>(T(2), fmt::format("mult.{}", i))));
-        mult2.emplace_back(std::addressof(flow_graph.make_node<divide<T>>(T(2), fmt::format("div.{}", i))));
+        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<multiply<T>>(T(2), fmt::format("mult.{}", i))));
+        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<divide<T>>(T(2), fmt::format("div.{}", i))));
     }
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
         if (i == 0) {
-            expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(src).template to<"in">(*mult1[i])));
+            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).template to<"in">(*mult1[i])));
         } else {
-            expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(*mult2[i - 1]).template to<"in">(*mult1[i])));
+            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult2[i - 1]).template to<"in">(*mult1[i])));
         }
-        expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(*mult1[i]).template to<"in">(*mult2[i])));
+        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult1[i]).template to<"in">(*mult2[i])));
     }
-    expect(eq(gr::connection_result_t::SUCCESS, flow_graph.connect<"out">(*mult2[mult2.size() - 1]).template to<"in">(sink)));
+    expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult2[mult2.size() - 1]).template to<"in">(sink)));
 }
 
 template<typename T>
 gr::graph
 test_graph_linear(std::size_t depth = 1) {
-    gr::graph flow_graph;
+    gr::graph testGraph;
 
-    auto     &src  = flow_graph.make_node<test::source<T>>(N_SAMPLES);
-    auto     &sink = flow_graph.make_node<test::sink<T>>();
+    auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
+    auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
 
-    create_cascade<T>(flow_graph, src, sink, depth);
+    create_cascade<T>(testGraph, src, sink, depth);
 
-    return flow_graph;
+    return testGraph;
 }
 
 template<typename T>
@@ -83,16 +83,16 @@ gr::graph
 test_graph_bifurcated(std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
-    gr::graph flow_graph;
+    gr::graph testGraph;
 
-    auto     &src   = flow_graph.make_node<test::source<T>>(N_SAMPLES);
-    auto     &sink1 = flow_graph.make_node<test::sink<T>>();
-    auto     &sink2 = flow_graph.make_node<test::sink<T>>();
+    auto     &src   = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
+    auto     &sink1 = testGraph.emplaceBlock<test::sink<T>>();
+    auto     &sink2 = testGraph.emplaceBlock<test::sink<T>>();
 
-    create_cascade<T>(flow_graph, src, sink1, depth);
-    create_cascade<T>(flow_graph, src, sink2, depth);
+    create_cascade<T>(testGraph, src, sink1, depth);
+    create_cascade<T>(testGraph, src, sink2, depth);
 
-    return flow_graph;
+    return testGraph;
 }
 
 void
