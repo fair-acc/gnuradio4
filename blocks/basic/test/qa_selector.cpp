@@ -154,20 +154,20 @@ execute_selector_test(test_definition definition) {
                                                                                        { "identifier", source_index },                       //
                                                                                        { "values", definition.input_values[source_index] } })));
         expect(sources[source_index]->settings().apply_staged_parameters().empty());
-        expect(gr::connection_result_t::SUCCESS == graph.dynamic_connect(*sources[source_index], 0, *selector, source_index + 1 /* there's one port before the inputs */));
+        expect(gr::ConnectionResult::SUCCESS == graph.dynamic_connect(*sources[source_index], 0, *selector, source_index + 1 /* there's one port before the inputs */));
     }
 
     for (std::uint32_t sink_index = 0; sink_index < sinks_count; ++sink_index) {
         sinks.push_back(std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", sink_index }, //
                                                                                     { "expected_values", definition.output_values[sink_index] } })));
         expect(sinks[sink_index]->settings().apply_staged_parameters().empty());
-        expect(gr::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, sink_index + 1 /* there's one port before the outputs */, *sinks[sink_index], 0));
+        expect(gr::ConnectionResult::SUCCESS == graph.dynamic_connect(*selector, sink_index + 1 /* there's one port before the outputs */, *sinks[sink_index], 0));
     }
 
     validator_sink<double> *monitor_sink = std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
                                                                                                        { "expected_values", definition.monitor_values } }));
     expect(monitor_sink->settings().apply_staged_parameters().empty());
-    expect(gr::connection_result_t::SUCCESS == graph.dynamic_connect(*selector, 0, *monitor_sink, 0));
+    expect(gr::ConnectionResult::SUCCESS == graph.dynamic_connect(*selector, 0, *monitor_sink, 0));
 
     for (std::size_t iterration = 0; iterration < definition.value_count * sources_count; ++iterration) {
         const auto max = std::numeric_limits<std::size_t>::max();

@@ -95,7 +95,7 @@ public:
             return;
         }
         auto result = std::all_of(_graph.connection_definitions().begin(), _graph.connection_definitions().end(),
-                                  [this](auto &connection_definition) { return connection_definition(_graph) == connection_result_t::SUCCESS; });
+                                  [this](auto &connection_definition) { return connection_definition(_graph) == ConnectionResult::SUCCESS; });
         if (result) {
             _graph.clear_connection_definitions();
             _state = INITIALISED;

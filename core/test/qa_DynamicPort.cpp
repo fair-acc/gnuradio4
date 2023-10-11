@@ -105,17 +105,17 @@ const boost::ut::suite PortApiTests = [] {
     using namespace gr;
 
     "PortApi"_test = [] {
-        static_assert(PortType<PortIn<float>>);
-        static_assert(PortType<decltype(PortIn<float>())>);
-        static_assert(PortType<PortOut<float>>);
-        static_assert(PortType<MsgPortIn<float>>);
-        static_assert(PortType<MsgPortOut<float>>);
+        static_assert(PortLike<PortIn<float>>);
+        static_assert(PortLike<decltype(PortIn<float>())>);
+        static_assert(PortLike<PortOut<float>>);
+        static_assert(PortLike<MsgPortIn<float>>);
+        static_assert(PortLike<MsgPortOut<float>>);
 
-        static_assert(PortType<PortInNamed<float, "in">>);
-        static_assert(PortType<decltype(PortInNamed<float, "">("in"))>);
-        static_assert(PortType<PortOutNamed<float, "out">>);
-        static_assert(PortType<MsgPortInNamed<"in_msg">>);
-        static_assert(PortType<MsgPortOutNamed<"out_msg">>);
+        static_assert(PortLike<PortInNamed<float, "in">>);
+        static_assert(PortLike<decltype(PortInNamed<float, "">("in"))>);
+        static_assert(PortLike<PortOutNamed<float, "out">>);
+        static_assert(PortLike<MsgPortInNamed<"in_msg">>);
+        static_assert(PortLike<MsgPortOutNamed<"out_msg">>);
 
         static_assert(PortIn<float, RequiredSamples<>>::Required::kMinSamples == 1LU);
         static_assert(PortIn<float, RequiredSamples<>>::Required::kMaxSamples == std::numeric_limits<std::size_t>::max());
@@ -131,8 +131,8 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(RequiredSamples<1LU, 2LU, true>::kIsConst);
         static_assert(std::is_const_v<decltype(PortIn<float, RequiredSamples<1LU, 2LU, true>>().min_samples)>);
         static_assert(std::is_const_v<decltype(PortIn<float, RequiredSamples<1LU, 2LU, true>>().max_samples)>);
-        static_assert(PortIn<float>::direction() == port_direction_t::INPUT);
-        static_assert(PortOut<float>::direction() == port_direction_t::OUTPUT);
+        static_assert(PortIn<float>::direction() == PortDirection::INPUT);
+        static_assert(PortOut<float>::direction() == PortDirection::OUTPUT);
     };
 
     "PortBufferApi"_test = [] {
@@ -165,17 +165,17 @@ const boost::ut::suite PortApiTests = [] {
         using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
         PortOut<float, ExplicitUnlimitedSize> out;
         PortIn<float, ExplicitUnlimitedSize>  in;
-        std::vector<dynamic_port>             port_list;
+        std::vector<DynamicPort>             port_list;
 
-        port_list.emplace_back(out, dynamic_port::non_owned_reference_tag{});
-        port_list.emplace_back(in, dynamic_port::non_owned_reference_tag{});
+        port_list.emplace_back(out, DynamicPort::non_owned_reference_tag{});
+        port_list.emplace_back(in, DynamicPort::non_owned_reference_tag{});
 
         expect(eq(port_list.size(), 2_UZ));
     };
 
     "ConnectionApi"_test = [] {
-        using port_direction_t::INPUT;
-        using port_direction_t::OUTPUT;
+        using PortDirection::INPUT;
+        using PortDirection::OUTPUT;
 
         // Block need to be alive for as long as the flow is
         grg::graph flow;
@@ -188,11 +188,11 @@ const boost::ut::suite PortApiTests = [] {
         auto &added  = flow.emplaceBlock<adder<int>>();
         auto &out    = flow.emplaceBlock<cout_sink<int>>();
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
 
-        expect(eq(connection_result_t::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
         gr::scheduler::simple sched{ std::move(flow) };
         sched.run_and_wait();
@@ -242,7 +242,7 @@ const boost::ut::suite PortApiTests = [] {
         expect(ge(writer.available(), 32U));
         expect(eq(output_port.buffer().n_readers(), 0U));
         const auto old_size = writer.available();
-        expect(eq(source->port<OUTPUT>("out0").value()->resize_buffer(old_size + 1), connection_result_t::SUCCESS));
+        expect(eq(source->port<OUTPUT>("out0").value()->resizeBuffer(old_size + 1), connection_result_t::SUCCESS));
         expect(gt(writer.available(), old_size)) << fmt::format("runtime increase of buffer size {} -> {}", old_size, writer.available());
 
         // test runtime connection between ports

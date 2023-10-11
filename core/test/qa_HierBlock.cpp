@@ -55,11 +55,11 @@ protected:
         std::ignore                  = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
         std::ignore                  = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
 
-        _dynamic_input_ports.emplace_back(grg::inputPort<0>(&left_scale_block), grg::dynamic_port::non_owned_reference_tag{});
-        _dynamic_input_ports.emplace_back(grg::inputPort<0>(&right_scale_block), grg::dynamic_port::non_owned_reference_tag{});
-        _dynamic_output_ports.emplace_back(grg::outputPort<0>(&adder_block), grg::dynamic_port::non_owned_reference_tag{});
+        _dynamic_input_ports.emplace_back(grg::inputPort<0>(&left_scale_block), grg::DynamicPort::non_owned_reference_tag{});
+        _dynamic_input_ports.emplace_back(grg::inputPort<0>(&right_scale_block), grg::DynamicPort::non_owned_reference_tag{});
+        _dynamic_output_ports.emplace_back(grg::outputPort<0>(&adder_block), grg::DynamicPort::non_owned_reference_tag{});
 
-        _dynamic_ports_loaded = true;
+        _DynamicPorts_loaded = true;
         return graph;
     }
 
@@ -190,7 +190,7 @@ make_graph(std::size_t events_count) {
     auto      &source_rightBlock = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
     auto      &sink              = graph.emplaceBlock<cout_sink<double>>({ { "remaining", events_count } });
 
-    auto      &hier              = graph. add_block(std::make_unique<HierBlock<double>>());
+    auto      &hier              = graph.add_block(std::make_unique<HierBlock<double>>());
 
     graph.dynamic_connect(source_leftBlock, 0, hier, 0);
     graph.dynamic_connect(source_rightBlock, 0, hier, 1);

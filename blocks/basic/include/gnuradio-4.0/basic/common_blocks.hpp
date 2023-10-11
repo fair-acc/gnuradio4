@@ -40,10 +40,10 @@ ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 template<typename T>
 class builtin_counter : public gr::Block<builtin_counter<T>> {
 public:
-    static std::size_t      s_event_count;
+    static std::size_t s_event_count;
 
-    gr::PortIn<T>  in;
-    gr::PortOut<T> out;
+    gr::PortIn<T>      in;
+    gr::PortOut<T>     out;
 
     [[nodiscard]] constexpr auto
     processOne(T a) const noexcept {
@@ -69,19 +69,19 @@ public:
     const std::string unique_name_ = fmt::format("multi_adder#{}", unique_id); // TODO: resolve symbol duplication
 
 protected:
-    using in_port_t = gr::PortIn<T>;
+    using TPortIn = gr::PortIn<T>;
     // std::list because ports don't like to change in-memory address
     // after connection is established, and vector might reallocate
-    std::list<in_port_t>    _input_ports;
-    gr::PortOut<T> _output_port;
+    std::list<TPortIn> _input_ports;
+    gr::PortOut<T>     _output_port;
 
 protected:
-    using setting_map                                      = std::map<std::string, int, std::less<>>;
-    std::string                                 _name      = "multi_adder";
-    std::string                                 _type_name = "multi_adder";
+    using setting_map                             = std::map<std::string, int, std::less<>>;
+    std::string                        _name      = "multi_adder";
+    std::string                        _type_name = "multi_adder";
     gr::property_map                   _meta_information; /// used to store non-graph-processing information like UI block position etc.
-    bool                                        _input_tags_present  = false;
-    bool                                        _output_tags_changed = false;
+    bool                               _input_tags_present  = false;
+    bool                               _output_tags_changed = false;
     std::vector<gr::property_map>      _tags_at_input;
     std::vector<gr::property_map>      _tags_at_output;
     std::unique_ptr<gr::settings_base> _settings = std::make_unique<gr::basic_settings<multi_adder<T>>>(*this);
@@ -94,12 +94,12 @@ protected:
 
         _dynamic_input_ports.clear();
         for (auto &input_port : _input_ports) {
-            _dynamic_input_ports.emplace_back(input_port, gr::dynamic_port::non_owned_reference_tag{});
+            _dynamic_input_ports.emplace_back(input_port, gr::DynamicPort::non_owned_reference_tag{});
         }
         if (_dynamic_output_ports.empty()) {
-            _dynamic_output_ports.emplace_back(_output_port, gr::dynamic_port::non_owned_reference_tag{});
+            _dynamic_output_ports.emplace_back(_output_port, gr::DynamicPort::non_owned_reference_tag{});
         }
-        _dynamic_ports_loaded = true;
+        _DynamicPorts_loaded = true;
     }
 
 public:

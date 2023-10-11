@@ -244,7 +244,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto                         &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
         src.tags                           = src_tags;
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         std::atomic<std::size_t> samples_seen1 = 0;
         std::atomic<std::size_t> chunks_seen1  = 0;
@@ -322,7 +322,7 @@ const boost::ut::suite DataSinkTests = [] {
         src.tags                    = tags;
         auto &sink                  = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto poller_data_only = data_sink_registry::instance().get_streaming_poller<float>(data_sink_query::sink_name("test_sink"), blocking_mode::Blocking);
         expect(neq(poller_data_only, nullptr));
@@ -392,7 +392,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto &sink                  = testGraph.emplaceBlock<data_sink<int32_t>>(
                 { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
@@ -459,7 +459,7 @@ const boost::ut::suite DataSinkTests = [] {
                                        { 180000, { { "TYPE", "TRIGGER" } } } };
         auto &sink                 = testGraph.emplaceBlock<data_sink<int32_t>>({ { "name", "test_sink" }, { "sample_rate", 10000.f } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto is_trigger = [](const tag_t &tag) {
             const auto v = tag.get("TYPE");
@@ -522,7 +522,7 @@ const boost::ut::suite DataSinkTests = [] {
         src.tags               = tags;
         auto &sink             = testGraph.emplaceBlock<data_sink<int32_t>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         {
             const auto t = std::span(tags);
@@ -608,7 +608,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
 
@@ -663,7 +663,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto               is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
 
@@ -697,7 +697,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto                  &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         auto                  &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         auto invalid_type_poller = data_sink_registry::instance().get_streaming_poller<double>(data_sink_query::sink_name("test_sink"));
         expect(eq(invalid_type_poller, nullptr));

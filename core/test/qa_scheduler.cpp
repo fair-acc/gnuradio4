@@ -113,8 +113,8 @@ public:
 
 gr::graph
 get_graph_linear(tracer &trace) {
-    using gr::port_direction_t::INPUT;
-    using gr::port_direction_t::OUTPUT;
+    using gr::PortDirection::INPUT;
+    using gr::PortDirection::OUTPUT;
 
     // Blocks need to be alive for as long as the flow is
     gr::graph flow;
@@ -133,8 +133,8 @@ get_graph_linear(tracer &trace) {
 
 gr::graph
 get_graph_parallel(tracer &trace) {
-    using gr::port_direction_t::INPUT;
-    using gr::port_direction_t::OUTPUT;
+    using gr::PortDirection::INPUT;
+    using gr::PortDirection::OUTPUT;
 
     // Blocks need to be alive for as long as the flow is
     gr::graph flow;
@@ -175,8 +175,8 @@ get_graph_parallel(tracer &trace) {
  */
 gr::graph
 get_graph_scaled_sum(tracer &trace) {
-    using gr::port_direction_t::INPUT;
-    using gr::port_direction_t::OUTPUT;
+    using gr::PortDirection::INPUT;
+    using gr::PortDirection::OUTPUT;
 
     // Blocks need to be alive for as long as the flow is
     gr::graph flow;

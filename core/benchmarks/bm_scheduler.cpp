@@ -56,13 +56,13 @@ create_cascade(gr::graph &testGraph, Sink &src, Source &sink, std::size_t depth 
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
         if (i == 0) {
-            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).template to<"in">(*mult1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(*mult1[i])));
         } else {
-            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult2[i - 1]).template to<"in">(*mult1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult2[i - 1]).template to<"in">(*mult1[i])));
         }
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult1[i]).template to<"in">(*mult2[i])));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult1[i]).template to<"in">(*mult2[i])));
     }
-    expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult2[mult2.size() - 1]).template to<"in">(sink)));
+    expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult2[mult2.size() - 1]).template to<"in">(sink)));
 }
 
 template<typename T>
