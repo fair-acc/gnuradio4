@@ -108,7 +108,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
     using input_reader_t   = typename PortIn<T, Async>::ReaderType;
     using output_writer_t  = typename PortOut<T, Async>::WriterType;
 
-    gr::WorkReturnStatus
+    gr::work::Status
     processBulk(select_reader_t                      *select, //
                 const std::vector<input_reader_t *>  &ins,
                 monitor_writer_t                     *monOut, //
@@ -120,7 +120,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
                 // make the implicit consume all available behaviour explicit
                 std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(input->available()); });
             }
-            return WorkReturnStatus::OK;
+            return work::Status::OK;
         }
 
         std::set<std::size_t> used_inputs;
@@ -199,7 +199,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
             }
         }
 
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 };
 } // namespace gr::basic

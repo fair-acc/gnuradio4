@@ -83,7 +83,7 @@ testFFT() {
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
-            expect(gr::WorkReturnStatus::OK == fft1.processBulk(signal, resultingDataSets));
+            expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets));
         };
     }
     {
@@ -92,7 +92,7 @@ testFFT() {
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
-            expect(gr::WorkReturnStatus::OK == fft1.processBulk(signal, resultingDataSets));
+            expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets));
         };
     }
 

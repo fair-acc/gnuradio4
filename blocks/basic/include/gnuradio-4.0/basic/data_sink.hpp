@@ -474,7 +474,7 @@ public:
         }
     }
 
-    [[nodiscard]] WorkReturnStatus
+    [[nodiscard]] work::Status
     processBulk(std::span<const T> in_data) noexcept {
         std::optional<property_map> tagData;
         if (this->input_tags_present()) {
@@ -500,7 +500,7 @@ public:
             }
         }
 
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 
 private:

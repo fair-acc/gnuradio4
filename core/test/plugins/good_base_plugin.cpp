@@ -53,11 +53,11 @@ public:
 
     T value = 1;
 
-    grg::WorkReturn
+    grg::work::Result
     work(std::size_t requested_work) {
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
-            return { requested_work, 0_UZ, grg::WorkReturnStatus::DONE };
+            return { requested_work, 0_UZ, grg::work::Status::DONE };
         }
 
         auto &port   = gr::outputPort<0>(this);
@@ -68,11 +68,11 @@ public:
 
         value += 1;
         if (event_count == -1_UZ) {
-            return { requested_work, 1_UZ, grg::WorkReturnStatus::OK };
+            return { requested_work, 1_UZ, grg::work::Status::OK };
         }
 
         event_count--;
-        return { requested_work, 1_UZ, grg::WorkReturnStatus::OK };
+        return { requested_work, 1_UZ, grg::work::Status::OK };
     }
 };
 } // namespace good

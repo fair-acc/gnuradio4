@@ -9,8 +9,8 @@
 
 #include <vir/simd.h>
 
-namespace gr {
-enum class WorkReturnStatus;
+namespace gr::work {
+enum class Status;
 }
 
 namespace gr::traits::block {
@@ -345,7 +345,7 @@ concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nes
                                    typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::output_ports<TBlock>>::tuple_type outputs) {
     {
         detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<TBlock>::size>(), std::make_index_sequence<output_port_types<TBlock>::size>())
-    } -> std::same_as<WorkReturnStatus>;
+    } -> std::same_as<work::Status>;
 };
 
 /**
@@ -367,7 +367,7 @@ concept processBulk_requires_ith_output_as_span = requires(TDerived             
                                                         std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
             return {};
         }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>())
-    } -> std::same_as<WorkReturnStatus>;
+    } -> std::same_as<work::Status>;
     not requires {
         []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                         std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {

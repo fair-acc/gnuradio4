@@ -96,10 +96,10 @@ public:
         return 0UL;
     }
 
-    grg::WorkReturn
+    grg::work::Result
     work(std::size_t requested_work) override {
         _scheduler.runAndWait();
-        return { requested_work, requested_work, gr::WorkReturnStatus::DONE };
+        return { requested_work, requested_work, gr::work::Status::DONE };
     }
 
     void *
@@ -141,7 +141,7 @@ struct fixed_source : public grg::Block<fixed_source<T>> {
 
     T                                              value = 1;
 
-    grg::WorkReturn
+    grg::work::Result
     work(std::size_t requested_work) {
         if (remaining_events_count != 0) {
             using namespace gr::literals;
@@ -156,10 +156,10 @@ struct fixed_source : public grg::Block<fixed_source<T>> {
             }
 
             value += 1;
-            return { requested_work, 1UL, grg::WorkReturnStatus::OK };
+            return { requested_work, 1UL, grg::work::Status::OK };
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            return { requested_work, 1UL, grg::WorkReturnStatus::DONE };
+            return { requested_work, 1UL, grg::work::Status::DONE };
         }
     }
 };

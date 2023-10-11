@@ -11,7 +11,7 @@ template<typename T>
 struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out">> {
     T value = 1;
 
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) {
         using namespace gr::literals;
         auto &port   = gr::outputPort<0>(this);
@@ -21,7 +21,7 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
         data.publish(1_UZ);
 
         value += 1;
-        return { requested_work, 1_UZ, gr::WorkReturnStatus::OK };
+        return { requested_work, 1_UZ, gr::work::Status::OK };
     }
 };
 

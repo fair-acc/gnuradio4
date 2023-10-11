@@ -170,7 +170,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             std::ignore = fftBlock.settings().apply_staged_parameters();
             const auto           signal{ generateSinSample<InType>(t.N, t.sample_rate, t.frequency, t.amplitude) };
             std::vector<OutType> resultingDataSets(1);
-            expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, resultingDataSets));
+            expect(gr::work::Status::OK == fftBlock.processBulk(signal, resultingDataSets));
 
             const auto peakIndex{
                 static_cast<std::size_t>(std::distance(fftBlock._magnitudeSpectrum.begin(),
@@ -224,7 +224,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
                 expectedPeakAmplitude = 1.;
             }
             std::vector<OutType> resultingDataSets(1);
-            expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, resultingDataSets));
+            expect(gr::work::Status::OK == fftBlock.processBulk(signal, resultingDataSets));
 
             const auto peakIndex{ static_cast<std::size_t>(std::distance(fftBlock._magnitudeSpectrum.begin(), std::ranges::max_element(fftBlock._magnitudeSpectrum))) };
             const auto peakAmplitude{ fftBlock._magnitudeSpectrum[peakIndex] };
@@ -252,7 +252,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         std::vector<OutType> v{ OutType() };
         std::span<OutType>   outSpan(v);
 
-        expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, outSpan));
+        expect(gr::work::Status::OK == fftBlock.processBulk(signal, outSpan));
         equalDataset(fftBlock, v[0], sample_rate);
     } | typesWithAlgoToTest;
 
@@ -338,7 +338,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
                 std::iota(signal.begin(), signal.end(), 1.);
             }
             std::vector<OutType> resultingDataSets(1);
-            expect(gr::WorkReturnStatus::OK == fftBlock.processBulk(signal, resultingDataSets));
+            expect(gr::work::Status::OK == fftBlock.processBulk(signal, resultingDataSets));
 
             expect(eq(fftBlock.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
             expect(eq(fftBlock._window.size(), N)) << fmt::format("<{}> equal window vector size", type_name<T>());

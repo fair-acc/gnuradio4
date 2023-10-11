@@ -185,7 +185,7 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
         }
     }
 
-    constexpr WorkReturnStatus
+    constexpr work::Status
     processBulk(std::span<const T> input, std::span<T> output) noexcept {
         assert(this->numerator == std::size_t(1) && "block implements only basic decimation");
         assert(this->denominator != std::size_t(0) && "denominator must be non-zero");
@@ -203,7 +203,7 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
             }
         }
 
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 };
 

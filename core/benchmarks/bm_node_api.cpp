@@ -80,7 +80,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr gr::WorkReturnStatus
+    [[nodiscard]] constexpr gr::work::Status
     processBulk(std::span<const T> input, std::span<T> output) const noexcept {
         // classic for-loop
         for (std::size_t i = 0; i < input.size(); i++) {
@@ -93,7 +93,7 @@ public:
         // C++20 ranges
         // std::ranges::transform(input, output.begin(), [this](const T& elem) { return processOne(elem); });
 
-        return gr::WorkReturnStatus::OK;
+        return gr::work::Status::OK;
     }
 };
 
@@ -189,7 +189,7 @@ public:
 
     explicit gen_operation_SIMD(T value, std::string name_ = gr::this_source_location()) : _value(value) { this->name = name_; }
 
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) noexcept {
         auto      &out_port   = outputPort<0>(this);
         auto      &in_port    = inputPort<0>(this);
@@ -199,9 +199,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
-            return { requested_work, 0UL, gr::WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+            return { requested_work, 0UL, gr::work::Status::INSUFFICIENT_INPUT_ITEMS };
         } else if (n_writable == 0) {
-            return { requested_work, 0UL, gr::WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+            return { requested_work, 0UL, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS };
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
 
@@ -250,9 +250,9 @@ public:
                 n_to_publish);
 
         if (!reader.consume(n_to_publish)) {
-            return { requested_work, n_to_publish, gr::WorkReturnStatus::ERROR };
+            return { requested_work, n_to_publish, gr::work::Status::ERROR };
         }
-        return { requested_work, n_to_publish, gr::WorkReturnStatus::OK };
+        return { requested_work, n_to_publish, gr::work::Status::OK };
     }
 };
 
@@ -280,7 +280,7 @@ public:
         return a;
     }
 
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) noexcept { // TODO - make this an alternate version to 'processOne'
         auto      &out_port   = out;
         auto      &in_port    = in;
@@ -290,9 +290,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable == 0) {
-            return { requested_work, 0UL, gr::WorkReturnStatus::DONE };
+            return { requested_work, 0UL, gr::work::Status::DONE };
         } else if (n_writable == 0) {
-            return { requested_work, 0UL, gr::WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+            return { requested_work, 0UL, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS };
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
 
@@ -311,9 +311,9 @@ public:
                     n_to_publish);
         }
         if (!reader.consume(n_to_publish)) {
-            return { requested_work, 0UL, gr::WorkReturnStatus::ERROR };
+            return { requested_work, 0UL, gr::work::Status::ERROR };
         }
-        return { requested_work, 0UL, gr::WorkReturnStatus::OK };
+        return { requested_work, 0UL, gr::work::Status::OK };
     }
 };
 
@@ -342,7 +342,7 @@ class convert : public gr::Block<convert<From, To, N_MIN, N_MAX>, gr::PortInName
     constexpr static std::size_t simd_size      = std::max(from_simd_size, to_simd_size);
 
 public:
-    gr::WorkReturnStatus
+    gr::work::Status
     work() noexcept {
         using namespace stdx;
         auto      &out_port   = outputPort<"out">(this);
@@ -353,9 +353,9 @@ public:
         const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
         const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
         if (n_readable < to_simd_size) {
-            return gr::WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS;
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         } else if (n_writable < from_simd_size) {
-            return gr::WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS;
+            return gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
         const auto n_readable_scalars = n_readable * from_simd_size;
         const auto n_writable_scalars = n_writable * to_simd_size;
@@ -364,7 +364,7 @@ public:
         const auto objects_to_write   = stdx::is_simd_v<To> ? n_simd_to_convert : scalars_to_convert;
         const auto objects_to_read    = stdx::is_simd_v<From> ? n_simd_to_convert : scalars_to_convert;
 
-        auto       return_value       = gr::WorkReturnStatus::OK;
+        auto       return_value       = gr::work::Status::OK;
         writer.publish( //
                 [&](std::span<To> output) {
                     const auto input = reader.get();
@@ -380,7 +380,7 @@ public:
                         }
                     }
                     if (!reader.consume(objects_to_read)) {
-                        return_value = gr::WorkReturnStatus::ERROR;
+                        return_value = gr::work::Status::ERROR;
                         return;
                     }
                 },

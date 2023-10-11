@@ -128,7 +128,7 @@ public:
     }
 
     void
-    runOnPool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<WorkReturn(const std::span<BlockModel *const> &)> work_function) {
+    runOnPool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<work::Result(const std::span<BlockModel *const> &)> work_function) {
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.runOnPool");
         _progress                      = 0;
         _running_threads               = jobs.size();
@@ -138,14 +138,14 @@ public:
     }
 
     void
-    poolWorker(const std::function<WorkReturn()> &work, std::size_t n_batches) {
+    poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
         auto    &profiler_handler = _profiler.forThisThread();
 
         uint32_t done             = 0;
         uint32_t progress_count   = 0;
         while (done < n_batches && !_stop_requested) {
             auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
-            bool something_happened = work().status == WorkReturnStatus::OK;
+            bool something_happened = work().status == work::Status::OK;
             pe.finish();
             uint64_t progress_local, progress_new;
             if (something_happened) { // something happened in this thread => increase progress and reset done count
@@ -211,7 +211,7 @@ public:
     }
 
     template<typename block_type>
-    WorkReturn
+    work::Result
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
@@ -219,11 +219,11 @@ public:
         for (auto &currentBlock : blocks) {
             auto result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
-            if (result.status == WorkReturnStatus::ERROR) {
-                return { requested_work, performed_work, WorkReturnStatus::ERROR };
-            } else if (result.status == WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS || result.status == WorkReturnStatus::DONE) {
+            if (result.status == work::Status::ERROR) {
+                return { requested_work, performed_work, work::Status::ERROR };
+            } else if (result.status == work::Status::INSUFFICIENT_INPUT_ITEMS || result.status == work::Status::DONE) {
                 // nothing
-            } else if (result.status == WorkReturnStatus::OK || result.status == WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status == work::Status::OK || result.status == work::Status::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
             if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
@@ -232,7 +232,7 @@ public:
                 something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
             }
         }
-        return { requested_work, performed_work, something_happened ? WorkReturnStatus::OK : WorkReturnStatus::DONE };
+        return { requested_work, performed_work, something_happened ? work::Status::OK : work::Status::DONE };
     }
 
     // todo: could be moved to base class, but would make `start()` virtual or require CRTP
@@ -262,12 +262,12 @@ public:
         }
         if constexpr (executionPolicy == singleThreaded) {
             this->_state = RUNNING;
-            WorkReturn result;
-            auto       blocklist = std::span{ this->_graph.blocks() };
+            work::Result result;
+            auto         blocklist = std::span{ this->_graph.blocks() };
             do {
                 result = workOnce(blocklist);
-            } while (result.status == WorkReturnStatus::OK);
-            if (result.status == WorkReturnStatus::ERROR) {
+            } while (result.status == work::Status::OK);
+            if (result.status == work::Status::ERROR) {
                 this->_state = ERROR;
             } else {
                 this->_state = STOPPED;
@@ -350,7 +350,7 @@ public:
     }
 
     template<typename block_type>
-    WorkReturn
+    work::Result
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
@@ -359,11 +359,11 @@ public:
         for (auto &currentBlock : blocks) {
             auto result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
-            if (result.status == WorkReturnStatus::ERROR) {
-                return { requested_work, performed_work, WorkReturnStatus::ERROR };
-            } else if (result.status == WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS || result.status == WorkReturnStatus::DONE) {
+            if (result.status == work::Status::ERROR) {
+                return { requested_work, performed_work, work::Status::ERROR };
+            } else if (result.status == work::Status::INSUFFICIENT_INPUT_ITEMS || result.status == work::Status::DONE) {
                 // nothing
-            } else if (result.status == WorkReturnStatus::OK || result.status == WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status == work::Status::OK || result.status == work::Status::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
 
@@ -374,7 +374,7 @@ public:
             }
         }
 
-        return { requested_work, performed_work, something_happened ? WorkReturnStatus::OK : WorkReturnStatus::DONE };
+        return { requested_work, performed_work, something_happened ? work::Status::OK : work::Status::DONE };
     }
 
     void
@@ -401,10 +401,10 @@ public:
         }
         if constexpr (executionPolicy == singleThreaded) {
             this->_state = RUNNING;
-            WorkReturn result;
-            auto       blocklist = std::span{ this->_blocklist };
-            while ((result = workOnce(blocklist)).status == WorkReturnStatus::OK) {
-                if (result.status == WorkReturnStatus::ERROR) {
+            work::Result result;
+            auto         blocklist = std::span{ this->_blocklist };
+            while ((result = workOnce(blocklist)).status == work::Status::OK) {
+                if (result.status == work::Status::ERROR) {
                     this->_state = ERROR;
                     return;
                 }
