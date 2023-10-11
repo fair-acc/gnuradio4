@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
@@ -24,7 +24,7 @@ const boost::ut::suite TagTests = [] {
         constexpr bool          useIoThreadPool = true; // true: scheduler/graph-provided thread, false: use user-provided call-back or thread
         constexpr std::uint32_t n_samples       = 1900;
         constexpr float         sample_rate     = 2000.f;
-        graph                   testGraph;
+        Graph                   testGraph;
         auto &src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
         src.tags  = {
             { 0, { { "key", "value@0" } } },       //

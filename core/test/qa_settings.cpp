@@ -8,7 +8,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/buffer.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
@@ -256,7 +256,7 @@ const boost::ut::suite SettingsTests = [] {
     using namespace std::string_view_literals;
 
     "basic node settings tag"_test = [] {
-        graph                  testGraph;
+        Graph                  testGraph;
         constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
@@ -352,7 +352,7 @@ const boost::ut::suite SettingsTests = [] {
 #endif
 
         "empty via graph"_test = [] {
-            graph testGraph;
+            Graph testGraph;
             auto &block = testGraph.emplaceBlock<TestBlock<float>>();
             expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 1.f));
@@ -360,7 +360,7 @@ const boost::ut::suite SettingsTests = [] {
         };
 
         "with init parameter via graph"_test = [] {
-            graph testGraph;
+            Graph testGraph;
             auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "scaling_factor", 2.f } });
             expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 2.f));
@@ -369,7 +369,7 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "vector-type support"_test = [] {
-        graph testGraph;
+        Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>();
         block.settings().update_active_parameters();
         expect(eq(block.settings().get().size(), 11UL));
@@ -384,7 +384,7 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "unique ID"_test = [] {
-        graph       testGraph;
+        Graph       testGraph;
         const auto &block1 = testGraph.emplaceBlock<TestBlock<float>>();
         const auto &block2 = testGraph.emplaceBlock<TestBlock<float>>();
         expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
@@ -402,26 +402,26 @@ const boost::ut::suite SettingsTests = [] {
         //
         auto wrapped1 = BlockWrapper<TestBlock<float>>();
         wrapped1.init(progress, ioThreadPool);
-        wrapped1.set_name("test_name");
+        wrapped1.setName("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "BlockModel wrapper name";
-        expect(not wrapped1.unique_name().empty()) << "unique name";
-        std::ignore                          = wrapped1.settings().set({ { "context", "a string" } });
-        (wrapped1.meta_information())["key"] = "value";
-        expect(eq(std::get<std::string>(wrapped1.meta_information().at("key")), "value"sv)) << "BlockModel meta-information";
+        expect(not wrapped1.uniqueName().empty()) << "unique name";
+        std::ignore                         = wrapped1.settings().set({ { "context", "a string" } });
+        (wrapped1.metaInformation())["key"] = "value";
+        expect(eq(std::get<std::string>(wrapped1.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
         auto wrapped2 = BlockWrapper<TestBlock<float>>({ { "name", "test_name" } });
         std::ignore   = wrapped2.settings().set({ { "context", "a string" } });
         wrapped2.init(progress, ioThreadPool);
         expect(eq(wrapped2.name(), "test_name"sv)) << "BlockModel wrapper name";
-        expect(not wrapped2.unique_name().empty()) << "unique name";
-        std::ignore                          = wrapped2.settings().set({ { "context", "a string" } });
-        (wrapped2.meta_information())["key"] = "value";
-        expect(eq(std::get<std::string>(wrapped2.meta_information().at("key")), "value"sv)) << "BlockModel meta-information";
+        expect(not wrapped2.uniqueName().empty()) << "unique name";
+        std::ignore                         = wrapped2.settings().set({ { "context", "a string" } });
+        (wrapped2.metaInformation())["key"] = "value";
+        expect(eq(std::get<std::string>(wrapped2.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
     };
 
     "basic decimation test"_test = []() {
-        graph                  testGraph;
+        Graph                  testGraph;
         constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
         auto                  &src       = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
         auto                  &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::size_t(2) } });
@@ -450,7 +450,7 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "basic store/reset settings"_test = []() {
-        graph testGraph;
+        Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
@@ -490,7 +490,7 @@ const boost::ut::suite AnnotationTests = [] {
     using namespace std::literals;
 
     "basic node annotations"_test = [] {
-        graph             testGraph;
+        Graph             testGraph;
         TestBlock<float> &block = testGraph.emplaceBlock<TestBlock<float>>();
         expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
         expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlockDoc::value))) << "type-erased block description";
@@ -503,7 +503,7 @@ const boost::ut::suite AnnotationTests = [] {
         expect(eq(block.scaling_factor.unit(), std::string_view{ "As" }));
         expect(eq(block.context.unit(), std::string_view{ "" }));
         expect(block.context.visible());
-        expect(block.is_blocking());
+        expect(block.isBlocking());
 
         block.scaling_factor = 42.f; // test wrapper assignment operator
         expect(block.scaling_factor == 42.f) << "the answer to everything failed -- equal operator";
@@ -555,7 +555,7 @@ const boost::ut::suite TransactionTests = [] {
     using namespace gr::setting_test;
 
     "CtxSettings"_test = [] {
-        graph testGraph;
+        Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
         auto  s     = ctx_settings(block);
         auto  ctx0  = SettingsCtx(std::chrono::system_clock::now());
@@ -579,7 +579,7 @@ const boost::ut::suite TransactionTests = [] {
     };
 
     "CtxSettings Matching"_test = [&] {
-        graph      testGraph;
+        Graph      testGraph;
         auto      &block = testGraph.emplaceBlock<TestBlock<int>>({ { "scaling_factor", 42 } });
         auto       s     = ctx_settings(block, matchPred);
         const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 1 } });
@@ -610,7 +610,7 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings Drop-In Settings replacement"_test = [&] {
         // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
-        graph testGraph;
+        Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
         auto  s     = std::make_unique<ctx_settings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
         block.setSettings(s);

@@ -1,8 +1,8 @@
 {
-	"project": "graph.hpp",
-	"target": "singleheader/graph.hpp",
+	"project": "Graph.hpp",
+	"target": "singleheader/Graph.hpp",
 	"sources": [
-		"graph.hpp"
+		"Graph.hpp"
 	],
 	"include_paths": [
 		".",

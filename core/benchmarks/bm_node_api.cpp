@@ -7,7 +7,7 @@
 
 // #include <gnuradio-4.0/BlockTraits.hpp> // TODO: fix header recursion (if this is enabled instead of the next one)
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #include <gnuradio-4.0/testing/bm_test_helper.hpp>
@@ -490,7 +490,7 @@ inline const boost::ut::suite _runtime_tests = [] {
     using namespace benchmark;
 
     {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
@@ -501,7 +501,7 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
         auto     &cpy  = testGraph.emplaceBlock<copy<float>>();
@@ -515,7 +515,7 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
 
@@ -539,7 +539,7 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<float, 1, 1024>>(N_SAMPLES);
         auto     &b1   = testGraph.emplaceBlock<copy<float, 1, 128>>();
         auto     &b2   = testGraph.emplaceBlock<copy<float, 1024, 1024>>();
@@ -557,7 +557,7 @@ inline const boost::ut::suite _runtime_tests = [] {
     }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
         auto     &mult = testGraph.emplaceBlock<multiply<T>>({ { { "factor", factor } } });
         auto     &div  = testGraph.emplaceBlock<divide<T>>({ { { "factor", factor } } });
@@ -577,7 +577,7 @@ inline const boost::ut::suite _runtime_tests = [] {
     templated_cascaded_test(static_cast<int>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - int");
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char *test_name) {
-        gr::graph                  testGraph;
+        gr::Graph                  testGraph;
         auto                      &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
         auto                      &sink = testGraph.emplaceBlock<test::sink<T>>();
 
@@ -620,7 +620,7 @@ inline const boost::ut::suite _simd_tests = [] {
     using namespace benchmark;
 
     {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src   = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto     &mult1 = testGraph.emplaceBlock<multiply_SIMD<float>>(2.0f);
         auto     &mult2 = testGraph.emplaceBlock<multiply_SIMD<float>>(0.5f);
@@ -644,7 +644,7 @@ inline const boost::ut::suite _simd_tests = [] {
     }
 
     {
-        gr::graph                           testGraph;
+        gr::Graph                           testGraph;
         auto                               &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto                               &sink = testGraph.emplaceBlock<test::sink<float>>();
 
@@ -686,7 +686,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
     using namespace benchmark;
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char *test_name) {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
         auto     &mult = testGraph.emplaceBlock<multiply<T>>({ { { "factor", factor } } });
         auto     &div  = testGraph.emplaceBlock<divide<T>>({ { { "factor", factor } } });
@@ -711,7 +711,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
     templated_cascaded_test(static_cast<int>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - int single");
 
     constexpr auto templated_cascaded_test_bulk = []<typename T>(T factor, const char *test_name) {
-        gr::graph testGraph;
+        gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
         auto     &mult = testGraph.emplaceBlock<multiply_bulk<T>>(factor);
         auto     &div  = testGraph.emplaceBlock<divide_bulk<T>>(factor);

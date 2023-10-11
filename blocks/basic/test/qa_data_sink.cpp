@@ -7,7 +7,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/buffer.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
@@ -239,7 +239,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto                    src_tags   = make_test_tags(0, 1000);
 
-        gr::graph                     testGraph;
+        gr::Graph                     testGraph;
         auto                         &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         auto                         &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
         src.tags                           = src_tags;
@@ -316,7 +316,7 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking polling continuous mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph              testGraph;
+        gr::Graph              testGraph;
         const auto             tags = make_test_tags(0, 1000);
         auto                  &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         src.tags                    = tags;
@@ -385,7 +385,7 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking polling trigger mode non-overlapping"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph              testGraph;
+        gr::Graph              testGraph;
         auto                  &src  = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
         const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
@@ -447,7 +447,7 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking snapshot mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph              testGraph;
+        gr::Graph              testGraph;
         auto                  &src = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags                   = { { 0,
                                          { { std::string(tag::SIGNAL_NAME.key()), "test signal" },
@@ -517,7 +517,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto         tags      = make_test_tags(0, 10000);
 
         const std::int32_t n_samples = static_cast<std::int32_t>(tags.size() * 10000 + 100000);
-        gr::graph          testGraph;
+        gr::Graph          testGraph;
         auto              &src = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
         src.tags               = tags;
         auto &sink             = testGraph.emplaceBlock<data_sink<int32_t>>({ { "name", "test_sink" } });
@@ -599,7 +599,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples  = 150000;
         constexpr std::size_t  n_triggers = 300;
 
-        gr::graph              testGraph;
+        gr::Graph              testGraph;
         auto                  &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
@@ -654,7 +654,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::int32_t n_samples  = 150000;
         constexpr std::size_t  n_triggers = 300;
 
-        gr::graph              testGraph;
+        gr::Graph              testGraph;
         auto                  &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
@@ -693,7 +693,7 @@ const boost::ut::suite DataSinkTests = [] {
     "non-blocking polling continuous mode"_test = [] {
         constexpr std::int32_t n_samples = 200000;
 
-        gr::graph              testGraph;
+        gr::Graph              testGraph;
         auto                  &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         auto                  &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 

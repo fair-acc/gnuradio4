@@ -94,18 +94,18 @@ public:
                 using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                 // disable clang format because v16 cannot handle in-line requires clauses with return types nicely yet
                 // clang-format off
-                if constexpr (requires(TBlock t) { t.meta_information; }) {
-                    static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_block->meta_information)>, property_map>);
+                if constexpr (requires(TBlock t) { t.metaInformation; }) {
+                    static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_block->metaInformation)>, property_map>);
                     if constexpr (requires(TBlock t) { t.description; }) {
                         static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(TBlock::description)>>, std::string_view>);
-                        _block->meta_information.value["description"] = std::string(_block->description);
+                        _block->metaInformation.value["description"] = std::string(_block->description);
                     }
 
                     if constexpr (AnnotatedType<RawType>) {
-                        _block->meta_information.value[fmt::format("{}::description", get_display_name(member))] = std::string(RawType::description());
-                        _block->meta_information.value[fmt::format("{}::documentation", get_display_name(member))] = std::string(RawType::documentation());
-                        _block->meta_information.value[fmt::format("{}::unit", get_display_name(member))] = std::string(RawType::unit());
-                        _block->meta_information.value[fmt::format("{}::visible", get_display_name(member))] = RawType::visible();
+                        _block->metaInformation.value[fmt::format("{}::description", get_display_name(member))] = std::string(RawType::description());
+                        _block->metaInformation.value[fmt::format("{}::documentation", get_display_name(member))] = std::string(RawType::documentation());
+                        _block->metaInformation.value[fmt::format("{}::unit", get_display_name(member))] = std::string(RawType::unit());
+                        _block->metaInformation.value[fmt::format("{}::visible", get_display_name(member))] = RawType::visible();
                     }
                 }
                 // clang-format on
@@ -190,10 +190,10 @@ public:
         // copy items that could not be matched to the node's meta_information map (if available)
         if constexpr (requires(TBlock t) {
                           {
-                              unwrap_if_wrapped_t<decltype(t.meta_information)> {}
+                              unwrap_if_wrapped_t<decltype(t.metaInformation)> {}
                           } -> std::same_as<property_map>;
                       }) {
-            update_maps(ret, _block->meta_information);
+            update_maps(ret, _block->metaInformation);
         }
 
         _settings[ctx] = parameters;
@@ -335,7 +335,7 @@ public:
                                                RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
 #else
                                     fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                               "_block->unique_name", "_block->name", member(*_block), std::get<Type>(staged_value),                              //
+                                               "_block->uniqueName", "_block->name", member(*_block), std::get<Type>(staged_value),                               //
                                                std::string(get_display_name(member)), RawType::LimitType::MinRange,
                                                RawType::LimitType::MaxRange, //
                                                RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");

@@ -6,7 +6,7 @@
 #include <utility>
 #include <queue>
 
-#include "graph.hpp"
+#include "Graph.hpp"
 #include "profiler.hpp"
 #include "thread/thread_pool.hpp"
 
@@ -21,7 +21,7 @@ template<profiling::Profiler Profiler = profiling::null::profiler>
 class scheduler_base {
 protected:
     SchedulerState                        _state = IDLE;
-    gr::graph                             _graph;
+    gr::Graph                             _graph;
     Profiler                              _profiler;
     decltype(_profiler.for_this_thread()) _profiler_handler;
     std::shared_ptr<BasicThreadPool>      _pool;
@@ -30,7 +30,7 @@ protected:
     std::atomic_bool                      _stop_requested;
 
 public:
-    explicit scheduler_base(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+    explicit scheduler_base(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                             const profiling::options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.for_this_thread() }, _pool(std::move(thread_pool)) {}
 
@@ -94,10 +94,9 @@ public:
         if (_state != IDLE) {
             return;
         }
-        auto result = std::all_of(_graph.connection_definitions().begin(), _graph.connection_definitions().end(),
-                                  [this](auto &connection_definition) { return connection_definition(_graph) == ConnectionResult::SUCCESS; });
+        auto result = std::all_of(_graph.connections().begin(), _graph.connections().end(), [this](auto &connection_definition) { return connection_definition(_graph) == ConnectionResult::SUCCESS; });
         if (result) {
-            _graph.clear_connection_definitions();
+            _graph.clearConnections();
             _state = INITIALISED;
         } else {
             _state = ERROR;
@@ -188,9 +187,9 @@ class simple : public scheduler_base<Profiler> {
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
-    explicit simple(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+    explicit simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                     const profiling::options &profiling_options = {})
-        : scheduler_base<Profiler>(std::forward<gr::graph>(graph), thread_pool, profiling_options) {}
+        : scheduler_base<Profiler>(std::forward<gr::Graph>(graph), thread_pool, profiling_options) {}
 
     void
     init() {
@@ -227,9 +226,9 @@ public:
             } else if (result.status == WorkReturnStatus::OK || result.status == WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS) {
                 something_happened = true;
             }
-            if (currentBlock->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
+            if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
                 std::vector<std::size_t> available_input_samples(20);
-                std::ignore = currentBlock->available_input_samples(available_input_samples);
+                std::ignore = currentBlock->availableInputSamples(available_input_samples);
                 something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
             }
         }
@@ -291,7 +290,7 @@ class breadth_first : public scheduler_base<Profiler> {
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
-    explicit breadth_first(gr::graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
+    explicit breadth_first(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
                            const profiling::options &profiling_options = {})
         : scheduler_base<Profiler>(std::move(graph), thread_pool, profiling_options) {}
 
@@ -368,9 +367,9 @@ public:
                 something_happened = true;
             }
 
-            if (currentBlock->is_blocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
+            if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
                 std::vector<std::size_t> available_input_samples(20);
-                std::ignore = currentBlock->available_input_samples(available_input_samples);
+                std::ignore = currentBlock->availableInputSamples(available_input_samples);
                 something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
             }
         }

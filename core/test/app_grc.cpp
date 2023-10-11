@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 
-#include <gnuradio-4.0/graph_yaml_importer.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #include <build_configure.hpp>
@@ -71,17 +71,17 @@ main(int argc, char *argv[]) {
 
         auto                  graph_2            = grg::load_grc(context.loader, graph_saved_source);
 
-        [[maybe_unused]] auto collectBlocks      = [](grg::graph &graph) {
+        [[maybe_unused]] auto collectBlocks      = [](grg::Graph &graph) {
             std::set<std::string> result;
-            graph.for_each_block([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.type_name())); });
+            graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
             return result;
         };
 
         assert(collectBlocks(graph_1) == collectBlocks(graph_2));
 
-        [[maybe_unused]] auto collect_edges = [](grg::graph &graph) {
+        [[maybe_unused]] auto collect_edges = [](grg::Graph &graph) {
             std::set<std::string> result;
-            graph.for_each_edge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_block().name(), edge.src_port_index(), edge.dst_block().name(), edge.dst_port_index())); });
+            graph.forEachEdge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_block().name(), edge.src_port_index(), edge.dst_block().name(), edge.dst_port_index())); });
             return result;
         };
 

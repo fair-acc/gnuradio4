@@ -6,7 +6,7 @@
 #include <vir/simd.h>
 
 #include <gnuradio-4.0/BlockTraits.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>

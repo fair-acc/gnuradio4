@@ -13,7 +13,7 @@ header_files = [
     'buffer.hpp',
     'circular_buffer.hpp',
     'claim_strategy.hpp',
-    'graph.hpp',
+    'Graph.hpp',
     'BlockTraits.hpp',
     'Block.hpp',
     'PortTraits.hpp',

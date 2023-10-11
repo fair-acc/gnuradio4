@@ -14,7 +14,7 @@ continuously improve this document.
 * [(sub-) flow-graph](#Flow-Graph) refers to a collection of interconnected processing elements, often referred to as
   *blocks*, *nodes* or *vertices*, that perform signal processing operations on data. The graph represents the flow of
   data from one block to another, with blocks performing computations on the data at each step. Each graph may contain
-  sub-flow-graphs. For the specific implementation, see [graph.hpp](graph.hpp).
+  sub-flow-graphs. For the specific implementation, see [Graph.hpp](Graph.hpp).
 * [Block/Node/Vertex](#Blocks) is a single processing element that performs a specific signal processing operation
   through a general `work()` function. Blocks are the building blocks of a flow-graph and can be thought of as vertices
   in a graph, and *ports* are their input/output connections to neighboring blocks for data streaming, streaming tags,
@@ -31,7 +31,7 @@ continuously improve this document.
   block execution based on constraints defined by the blocks or externally, to ensure smooth data flow from one block to
   another. As there is no one-size-fits-all scheduler implementation, multiple user-defined scheduler implementations
   may be associated with top-level and sub-graphs. For one possible specific implementation, see
-  the `work_return_t work() {...}` in [graph.hpp](graph.hpp) for details.
+  the `work_return_t work() {...}` in [Graph.hpp](Graph.hpp) for details.
 
   *N.B. this is an active area of development and will likely see further changes.*
 

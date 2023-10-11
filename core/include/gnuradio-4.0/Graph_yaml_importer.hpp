@@ -9,7 +9,7 @@
 #include <yaml-cpp/yaml.h>
 #pragma GCC diagnostic pop
 
-#include "graph.hpp"
+#include "Graph.hpp"
 #include "plugin_loader.hpp"
 
 namespace gr {
@@ -54,9 +54,9 @@ struct YamlSeq {
 };
 } // namespace detail
 
-inline gr::graph
+inline gr::Graph
 load_grc(plugin_loader &loader, const std::string &yaml_source) {
-    graph                               testGraph;
+    Graph                               testGraph;
 
     std::map<std::string, BlockModel *> createdBlocks;
 
@@ -70,7 +70,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
         // in general handle nodes that are parametrised by more than one type
         auto &currentBlock = loader.instantiate_in_graph(testGraph, id, "double");
 
-        currentBlock.set_name(name);
+        currentBlock.setName(name);
         createdBlocks[name]                = &currentBlock;
 
         auto         currentBlock_settings = currentBlock.settings().get();
@@ -111,14 +111,14 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
                     [&] {
                         // Fallback to string, and non-defined property
                         const auto& value = grc_value.template as<std::string>();
-                        currentBlock.meta_information()[key] = value;
+                        currentBlock.metaInformation()[key] = value;
                         return true;
                     }();
                     // clang-format on
 
                 } else {
                     const auto &value                    = kv.second.as<std::string>();
-                    currentBlock.meta_information()[key] = value;
+                    currentBlock.metaInformation()[key] = value;
                 }
             }
         }
@@ -165,7 +165,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
 }
 
 inline std::string
-save_grc(const gr::graph &testGraph) {
+save_grc(const gr::Graph &testGraph) {
     YAML::Emitter out;
     {
         detail::YamlMap root(out);
@@ -177,12 +177,12 @@ save_grc(const gr::graph &testGraph) {
                 detail::YamlMap map(out);
                 map.write("name", std::string(node.name()));
 
-                const auto &full_type_name = node.type_name();
+                const auto &full_type_name = node.typeName();
                 std::string type_name(full_type_name.cbegin(), std::find(full_type_name.cbegin(), full_type_name.cend(), '<'));
                 map.write("id", std::move(type_name));
 
                 const auto &settings_map = node.settings().get();
-                if (!node.meta_information().empty() || !settings_map.empty()) {
+                if (!node.metaInformation().empty() || !settings_map.empty()) {
                     map.write_fn("parameters", [&]() {
                         detail::YamlMap parameters(out);
                         auto            write_map = [&](const auto &local_map) {
@@ -202,12 +202,12 @@ save_grc(const gr::graph &testGraph) {
                         };
 
                         write_map(settings_map);
-                        write_map(node.meta_information());
+                        write_map(node.metaInformation());
                     });
                 }
             };
 
-            testGraph.for_each_block(writeBlock);
+            testGraph.forEachBlock(writeBlock);
         });
 
         root.write_fn("connections", [&]() {
@@ -219,7 +219,7 @@ save_grc(const gr::graph &testGraph) {
                 out << edge.dst_block().name().data() << std::to_string(edge.dst_port_index());
             };
 
-            testGraph.for_each_edge(write_edge);
+            testGraph.forEachEdge(write_edge);
         });
     }
 

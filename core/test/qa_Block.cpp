@@ -5,7 +5,7 @@
 #include <fmt/format.h>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
@@ -108,7 +108,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     using namespace boost::ut;
     using scheduler = gr::scheduler::simple<>;
 
-    gr::graph flow;
+    gr::Graph flow;
     auto     &source          = flow.emplaceBlock<CountSource<int>>();
     source.n_samples          = static_cast<int>(data.n_samples);
 
@@ -134,7 +134,7 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
 
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
-    gr::graph  flow;
+    gr::Graph  flow;
     auto      &source             = flow.emplaceBlock<CountSource<int>>();
     source.n_samples              = static_cast<int>(data.n_samples);
 

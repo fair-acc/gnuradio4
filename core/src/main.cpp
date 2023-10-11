@@ -4,7 +4,7 @@
 #include <cassert>
 
 #include <gnuradio-4.0/config.h> // contains the project and compiler flags definitions
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 
 namespace grg = gr;
 

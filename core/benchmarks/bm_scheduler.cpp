@@ -1,6 +1,6 @@
 #include <benchmark.hpp>
 
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/profiler.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
@@ -43,7 +43,7 @@ using divide = math_op<T, '/'>;
 
 template<typename T, typename Sink, typename Source>
 void
-create_cascade(gr::graph &testGraph, Sink &src, Source &sink, std::size_t depth = 1) {
+create_cascade(gr::Graph &testGraph, Sink &src, Source &sink, std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
 
@@ -66,9 +66,9 @@ create_cascade(gr::graph &testGraph, Sink &src, Source &sink, std::size_t depth 
 }
 
 template<typename T>
-gr::graph
+gr::Graph
 test_graph_linear(std::size_t depth = 1) {
-    gr::graph testGraph;
+    gr::Graph testGraph;
 
     auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
     auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
@@ -79,11 +79,11 @@ test_graph_linear(std::size_t depth = 1) {
 }
 
 template<typename T>
-gr::graph
+gr::Graph
 test_graph_bifurcated(std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
-    gr::graph testGraph;
+    gr::Graph testGraph;
 
     auto     &src   = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
     auto     &sink1 = testGraph.emplaceBlock<test::sink<T>>();
