@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
@@ -276,7 +276,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     "FFT flow graph example"_test = [] {
         // This test checks how fftw works if one creates and destroys several fft blocks in different graph flows
         using namespace boost::ut;
-        using Scheduler      = gr::scheduler::simple<>;
+        using Scheduler      = gr::scheduler::Simple<>;
         auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         gr::Graph flow1;
         auto     &source1  = flow1.emplaceBlock<CountSource<double>>();
@@ -291,10 +291,10 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             auto     &fft2    = flow2.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
             std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);
             auto sched2       = Scheduler(std::move(flow2), threadPool);
-            sched2.run_and_wait();
+            sched2.runAndWait();
             expect(approx(source2.count, source2.nSamples, 1e-4));
         }
-        sched1.run_and_wait();
+        sched1.runAndWait();
         expect(approx(source1.count, source1.nSamples, 1e-4));
     };
 

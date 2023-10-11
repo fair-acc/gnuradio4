@@ -1,7 +1,7 @@
 #include <list>
 
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 namespace grg = gr;
 
@@ -43,7 +43,7 @@ protected:
 
     using in_port_t                               = grg::PortIn<T>;
 
-    grg::scheduler::simple<> _scheduler;
+    grg::scheduler::Simple<> _scheduler;
 
     grg::Graph
     make_graph() {
@@ -98,7 +98,7 @@ public:
 
     grg::WorkReturn
     work(std::size_t requested_work) override {
-        _scheduler.run_and_wait();
+        _scheduler.runAndWait();
         return { requested_work, requested_work, gr::WorkReturnStatus::DONE };
     }
 
@@ -203,7 +203,7 @@ int
 main() {
     auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
 
-    grg::scheduler::simple scheduler(make_graph(10), thread_pool);
+    grg::scheduler::Simple scheduler(make_graph(10), thread_pool);
 
-    scheduler.run_and_wait();
+    scheduler.runAndWait();
 }

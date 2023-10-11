@@ -1,6 +1,6 @@
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -211,40 +211,40 @@ const boost::ut::suite SchedulerTests = [] {
     auto thread_pool              = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     "SimpleScheduler_linear"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::simple<>;
+        using scheduler = gr::scheduler::Simple<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
     };
 
     "BreadthFirstScheduler_linear"_test = [&] {
-        using scheduler = gr::scheduler::breadth_first<>;
+        using scheduler = gr::scheduler::BreadthFirst<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
     };
 
     "SimpleScheduler_parallel"_test = [&] {
-        using scheduler = gr::scheduler::simple<>;
+        using scheduler = gr::scheduler::Simple<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 14u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb", "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb" });
     };
 
     "BreadthFirstScheduler_parallel"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::breadth_first<>;
+        using scheduler = gr::scheduler::BreadthFirst<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 14u);
         expect(boost::ut::that % t
@@ -267,89 +267,89 @@ const boost::ut::suite SchedulerTests = [] {
     };
 
     "SimpleScheduler_scaled_sum"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::simple<>;
+        using scheduler = gr::scheduler::Simple<>;
         // construct an example graph and get an adjacency list for it
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out" });
     };
 
     "BreadthFirstScheduler_scaled_sum"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::breadth_first<>;
+        using scheduler = gr::scheduler::BreadthFirst<>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == trace_vector_type{ "s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out" });
     };
 
     "SimpleScheduler_linear_multi_threaded"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::simple<gr::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(that % t.size() >= 8u);
     };
 
     "BreadthFirstScheduler_linear_multi_threaded"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::breadth_first<gr::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_linear(trace), thread_pool };
         sched.init();
-        expect(sched.getJobLists().size() == 2u);
-        checkBlockNames(sched.getJobLists()[0], { "s1", "mult2" });
-        checkBlockNames(sched.getJobLists()[1], { "mult1", "out" });
-        sched.run_and_wait();
+        expect(sched.jobs().size() == 2u);
+        checkBlockNames(sched.jobs()[0], { "s1", "mult2" });
+        checkBlockNames(sched.jobs()[1], { "mult1", "out" });
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 8u);
     };
 
     "SimpleScheduler_parallel_multi_threaded"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::simple<gr::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 14u);
     };
 
     "BreadthFirstScheduler_parallel_multi_threaded"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::breadth_first<gr::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_parallel(trace), thread_pool };
         sched.init();
-        expect(sched.getJobLists().size() == 2u);
-        checkBlockNames(sched.getJobLists()[0], { "s1", "mult1b", "mult2b", "outb" });
-        checkBlockNames(sched.getJobLists()[1], { "mult1a", "mult2a", "outa" });
-        sched.run_and_wait();
+        expect(sched.jobs().size() == 2u);
+        checkBlockNames(sched.jobs()[0], { "s1", "mult1b", "mult2b", "outb" });
+        checkBlockNames(sched.jobs()[1], { "mult1a", "mult2a", "outa" });
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 14u);
     };
 
     "SimpleScheduler_scaled_sum_multi_threaded"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::simple<gr::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         // construct an example graph and get an adjacency list for it
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
-        sched.run_and_wait();
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 10u);
     };
 
     "BreadthFirstScheduler_scaled_sum_multi_threaded"_test = [&thread_pool] {
-        using scheduler = gr::scheduler::breadth_first<gr::scheduler::execution_policy::multi_threaded>;
+        using scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         tracer trace{};
         auto   sched = scheduler{ get_graph_scaled_sum(trace), thread_pool };
         sched.init();
-        expect(sched.getJobLists().size() == 2u);
-        checkBlockNames(sched.getJobLists()[0], { "s1", "mult", "out" });
-        checkBlockNames(sched.getJobLists()[1], { "s2", "add" });
-        sched.run_and_wait();
+        expect(sched.jobs().size() == 2u);
+        checkBlockNames(sched.jobs()[0], { "s1", "mult", "out" });
+        checkBlockNames(sched.jobs()[1], { "s2", "add" });
+        sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 10u);
     };

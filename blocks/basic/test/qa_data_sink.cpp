@@ -9,7 +9,7 @@
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/data_sink.hpp>
 
@@ -300,8 +300,8 @@ const boost::ut::suite DataSinkTests = [] {
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags));
         expect(data_sink_registry::instance().register_streaming_callback<float>(data_sink_query::sink_name("test_sink"), chunk_size, callback_with_tags_and_sink));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -362,8 +362,8 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received, received_tags);
         });
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -429,8 +429,8 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received_data, received_tags);
         });
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -502,8 +502,8 @@ const boost::ut::suite DataSinkTests = [] {
             return received_data;
         });
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -584,8 +584,8 @@ const boost::ut::suite DataSinkTests = [] {
             results.push_back(std::move(f));
         }
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -637,8 +637,8 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received_data, received_tags);
         });
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -679,8 +679,8 @@ const boost::ut::suite DataSinkTests = [] {
 
         data_sink_registry::instance().register_trigger_callback<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, callback);
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 
@@ -721,8 +721,8 @@ const boost::ut::suite DataSinkTests = [] {
             return samples_seen;
         });
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
 

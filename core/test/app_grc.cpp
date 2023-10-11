@@ -6,7 +6,7 @@
 #include <sstream>
 
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include <build_configure.hpp>
 #include <gnuradio-4.0/basic/common_blocks.hpp>
@@ -54,8 +54,8 @@ main(int argc, char *argv[]) {
         assert(graph_saved_source + "\n"
                == graph_expected_source); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
 
-        gr::scheduler::simple scheduler(std::move(graph));
-        scheduler.run_and_wait();
+        gr::scheduler::Simple scheduler(std::move(graph));
+        scheduler.runAndWait();
     }
 
     // Test if we get the same graph when saving it and loading the saved

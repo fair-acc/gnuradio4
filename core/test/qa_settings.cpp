@@ -10,7 +10,7 @@
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
 #include <gnuradio-4.0/transactions.hpp>
 
@@ -307,10 +307,10 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
-        gr::scheduler::simple sched{ std::move(testGraph), thread_pool };
+        gr::scheduler::Simple sched{ std::move(testGraph), thread_pool };
         expect(src.settings().auto_update_parameters().contains("sample_rate"));
         std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
-        sched.run_and_wait();
+        sched.runAndWait();
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
         expect(eq(sink.n_samples_consumed, n_samples)) << "did not consume enough input samples";
 
@@ -437,8 +437,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
         expect(eq(sink.n_samples_consumed, n_samples / (2 * 5))) << "did not consume enough input samples";

@@ -2,7 +2,7 @@
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/profiler.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/testing/bm_test_helper.hpp>
 
@@ -101,7 +101,7 @@ exec_bm(auto &scheduler, const std::string &test_case) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    scheduler.run_and_wait();
+    scheduler.runAndWait();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << fmt::format("did not produce enough output samples for {}", test_case);
     expect(ge(test::n_samples_consumed, N_SAMPLES)) << fmt::format("did not consume enough input samples for {}", test_case);
 }
@@ -111,35 +111,35 @@ exec_bm(auto &scheduler, const std::string &test_case) {
     using namespace boost::ut;
     using namespace benchmark;
     using thread_pool = gr::thread_pool::BasicThreadPool;
-    using gr::scheduler::execution_policy::multi_threaded;
+    using gr::scheduler::ExecutionPolicy::multiThreaded;
 
     auto                  pool = std::make_shared<thread_pool>("custom-pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
-    gr::scheduler::simple sched1(test_graph_linear<float>(2 * N_NODES), pool);
+    gr::scheduler::Simple sched1(test_graph_linear<float>(2 * N_NODES), pool);
     "linear graph - simple scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1]() { exec_bm(sched1, "linear-graph simple-sched"); };
 
-    gr::scheduler::breadth_first sched2(test_graph_linear<float>(2 * N_NODES), pool);
+    gr::scheduler::BreadthFirst sched2(test_graph_linear<float>(2 * N_NODES), pool);
     "linear graph - BFS scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched2]() { exec_bm(sched2, "linear-graph BFS-sched"); };
 
-    gr::scheduler::simple sched3(test_graph_bifurcated<float>(N_NODES), pool);
+    gr::scheduler::Simple sched3(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - simple scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched3]() { exec_bm(sched3, "bifurcated-graph simple-sched"); };
 
-    gr::scheduler::breadth_first sched4(test_graph_bifurcated<float>(N_NODES), pool);
+    gr::scheduler::BreadthFirst sched4(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - BFS scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4]() { exec_bm(sched4, "bifurcated-graph BFS-sched"); };
 
-    gr::scheduler::simple<multi_threaded> sched1_mt(test_graph_linear<float>(2 * N_NODES), pool);
+    gr::scheduler::Simple<multiThreaded> sched1_mt(test_graph_linear<float>(2 * N_NODES), pool);
     "linear graph - simple scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1_mt]() { exec_bm(sched1_mt, "linear-graph simple-sched (multi-threaded)"); };
 
-    gr::scheduler::breadth_first<multi_threaded> sched2_mt(test_graph_linear<float>(2 * N_NODES), pool);
+    gr::scheduler::BreadthFirst<multiThreaded> sched2_mt(test_graph_linear<float>(2 * N_NODES), pool);
     "linear graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched2_mt]() { exec_bm(sched2_mt, "linear-graph BFS-sched (multi-threaded)"); };
 
-    gr::scheduler::simple<multi_threaded> sched3_mt(test_graph_bifurcated<float>(N_NODES), pool);
+    gr::scheduler::Simple<multiThreaded> sched3_mt(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - simple scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched3_mt]() { exec_bm(sched3_mt, "bifurcated-graph simple-sched (multi-threaded)"); };
 
-    gr::scheduler::breadth_first<multi_threaded> sched4_mt(test_graph_bifurcated<float>(N_NODES), pool);
+    gr::scheduler::BreadthFirst<multiThreaded> sched4_mt(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt]() { exec_bm(sched4_mt, "bifurcated-graph BFS-sched (multi-threaded)"); };
 
-    gr::scheduler::breadth_first<multi_threaded, profiler> sched4_mt_prof(test_graph_bifurcated<float>(N_NODES), pool);
+    gr::scheduler::BreadthFirst<multiThreaded, profiler> sched4_mt_prof(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - BFS scheduler (multi-threaded) with profiling"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt_prof]() {
         exec_bm(sched4_mt_prof, "bifurcated-graph BFS-sched (multi-threaded) with profiling");
     };

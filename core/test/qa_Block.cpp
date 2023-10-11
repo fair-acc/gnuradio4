@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -106,7 +106,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (IntDecBlock<T>), in, out);
 void
 interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
-    using scheduler = gr::scheduler::simple<>;
+    using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
     auto     &source          = flow.emplaceBlock<CountSource<int>>();
@@ -120,7 +120,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
 
     std::ignore = flow.connect<"out">(source).to<"in">(int_dec_block);
     auto sched  = scheduler(std::move(flow), thread_pool);
-    sched.run_and_wait();
+    sched.runAndWait();
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_inputs, data.exp_in)) << "last number of input samples, parameters = " << data.to_string();
@@ -130,7 +130,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
 void
 stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
-    using scheduler = gr::scheduler::simple<>;
+    using scheduler = gr::scheduler::Simple<>;
 
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
@@ -148,7 +148,7 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
 
     std::ignore = flow.connect<"out">(source).to<"in">(int_dec_block);
     auto sched  = scheduler(std::move(flow), thread_pool);
-    sched.run_and_wait();
+    sched.runAndWait();
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_inputs, data.exp_in)) << "last number of input samples, parameters = " << data.to_string();
