@@ -31,17 +31,17 @@ private:
     const std::string         _unique_name = fmt::format("multi_adder#{}", _unique_id);
 
 protected:
-    using setting_map                              = std::map<std::string, int, std::less<>>;
-    std::string                         _name      = "multi_adder";
-    std::string                         _type_name = "multi_adder";
-    grg::property_map                   _meta_information; /// used to store non-graph-processing information like UI block position etc.
-    bool                                _input_tags_present  = false;
-    bool                                _output_tags_changed = false;
-    std::vector<grg::property_map>      _tags_at_input;
-    std::vector<grg::property_map>      _tags_at_output;
-    std::unique_ptr<grg::settings_base> _settings = std::make_unique<grg::basic_settings<HierBlock<T>>>(*this);
+    using setting_map                             = std::map<std::string, int, std::less<>>;
+    std::string                        _name      = "multi_adder";
+    std::string                        _type_name = "multi_adder";
+    grg::property_map                  _meta_information; /// used to store non-graph-processing information like UI block position etc.
+    bool                               _input_tags_present  = false;
+    bool                               _output_tags_changed = false;
+    std::vector<grg::property_map>     _tags_at_input;
+    std::vector<grg::property_map>     _tags_at_output;
+    std::unique_ptr<grg::SettingsBase> _settings = std::make_unique<grg::BasicSettings<HierBlock<T>>>(*this);
 
-    using in_port_t                               = grg::PortIn<T>;
+    using in_port_t                              = grg::PortIn<T>;
 
     grg::scheduler::Simple<> _scheduler;
 
@@ -120,7 +120,7 @@ public:
         return _meta_information;
     }
 
-    [[nodiscard]] grg::settings_base &
+    [[nodiscard]] grg::SettingsBase &
     settings() const override {
         return *_settings;
     }

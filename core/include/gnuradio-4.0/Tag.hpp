@@ -28,7 +28,7 @@ inline constexpr std::size_t hardware_constructive_interference_size = 64;
 
 namespace gr {
 
-enum class tag_propagation_policy_t {
+enum class TagPropagationPolicy {
     TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The
                        block itself is free to insert tags. */
     TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The
@@ -42,7 +42,7 @@ enum class tag_propagation_policy_t {
 using property_map = pmtv::map_t;
 
 /**
- * @brief 'tag_t' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
+ * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
  * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
  * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
  * any point in the signal processing flow, allowing for flexible and customisable data processing.
@@ -51,17 +51,17 @@ using property_map = pmtv::map_t;
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
-struct alignas(hardware_constructive_interference_size) tag_t {
+struct alignas(hardware_constructive_interference_size) Tag {
     using signed_index_type = std::make_signed_t<std::size_t>;
     signed_index_type index{ 0 };
     property_map      map{};
 
-    tag_t() = default; // TODO: remove -- needed only for Clang <=15
+    Tag() = default; // TODO: remove -- needed only for Clang <=15
 
-    tag_t(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
+    Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
 
     bool
-    operator==(const tag_t &other) const
+    operator==(const Tag &other) const
             = default;
 
     // TODO: do we need the convenience methods below?
@@ -111,13 +111,13 @@ struct alignas(hardware_constructive_interference_size) tag_t {
 };
 } // namespace gr
 
-ENABLE_REFLECTION(gr::tag_t, index, map);
+ENABLE_REFLECTION(gr::Tag, index, map);
 
 namespace gr {
 using meta::fixed_string;
 
 inline void
-update_maps(const property_map &src, property_map &dest) {
+updateMaps(const property_map &src, property_map &dest) {
     for (const auto &[key, value] : src) {
         if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
             // If it's a nested map
@@ -126,7 +126,7 @@ update_maps(const property_map &src, property_map &dest) {
                 auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
                 if (dest_nested_map) {
                     // Merge the nested maps recursively
-                    update_maps(*nested_map, *dest_nested_map);
+                    updateMaps(*nested_map, *dest_nested_map);
                 } else {
                     // Key exists but not a map, replace it
                     dest[key] = value;
@@ -145,7 +145,7 @@ update_maps(const property_map &src, property_map &dest) {
 constexpr fixed_string GR_TAG_PREFIX = "gr:";
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
-class default_tag {
+class DefaultTag {
     constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
 
 public:
@@ -182,18 +182,18 @@ public:
 };
 
 namespace tag { // definition of default tags and names
-inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
-inline EM_CONSTEXPR_STATIC default_tag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
-inline EM_CONSTEXPR_STATIC default_tag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_name", std::string> TRIGGER_NAME;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
-inline EM_CONSTEXPR_STATIC default_tag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC default_tag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
-inline EM_CONSTEXPR_STATIC default_tag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
-inline EM_CONSTEXPR_STATIC default_tag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
+inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 
 inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT, RESET_DEFAULTS, STORE_DEFAULTS };
 } // namespace tag

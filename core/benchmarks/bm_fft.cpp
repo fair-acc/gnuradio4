@@ -79,7 +79,7 @@ testFFT() {
 
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFTw<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
-        std::ignore = fft1.settings().apply_staged_parameters();
+        std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {
@@ -88,7 +88,7 @@ testFFT() {
     }
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
-        std::ignore = fft1.settings().apply_staged_parameters();
+        std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] {

@@ -11,7 +11,7 @@
 #include "Block.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
-#include "tag.hpp"
+#include "Tag.hpp"
 
 namespace gr {
 
@@ -153,7 +153,7 @@ using is_tag_buffer_attribute = std::bool_constant<IsTagBufferAttribute<T>>;
 template<typename T>
 struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<tag_t>> {};
+struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<Tag>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
@@ -186,7 +186,7 @@ struct Async {};
  *         ───────────────────┐                                       ┌─────────────────┤  <node/block definition>
  *             output-port    │                                       │    input-port   │  ...
  *          stream-buffer<T>  │>───────┬─────────────────┬───────────>│                 │
- *          tag-buffer<tag_t> │      tag#0             tag#1          │                 │
+ *          tag-buffer<Tag> │      tag#0             tag#1          │                 │
  *                            │                                       │                 │
  *         ───────────────────┘                                       └─────────────────┤
  *
@@ -844,7 +844,7 @@ static_assert(PortLike<DynamicPort>);
 constexpr void
 publish_tag(PortLike auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
-            [&port, data = std::move(tag_data), &tag_offset](std::span<gr::tag_t> tag_output) {
+            [&port, data = std::move(tag_data), &tag_offset](std::span<gr::Tag> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
                 tag_output[0].map   = std::move(data);
             },
@@ -854,7 +854,7 @@ publish_tag(PortLike auto &port, property_map &&tag_data, std::size_t tag_offset
 constexpr void
 publish_tag(PortLike auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
     port.tagWriter().publish(
-            [&port, &tag_data, &tag_offset](std::span<gr::tag_t> tag_output) {
+            [&port, &tag_data, &tag_offset](std::span<gr::Tag> tag_output) {
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
                 tag_output[0].map   = tag_data;
             },

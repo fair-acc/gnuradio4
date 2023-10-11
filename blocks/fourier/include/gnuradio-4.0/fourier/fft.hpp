@@ -107,7 +107,7 @@ On the choice of window (mathematically aka. apodisation) functions
     std::vector<value_type>  _phaseSpectrum     = std::vector<value_type>(_outData.size(), 0);
 
     void
-    settings_changed(const property_map & /*old_settings*/, const property_map &newSettings) noexcept {
+    settingsChanged(const property_map & /*old_settings*/, const property_map &newSettings) noexcept {
         if (!newSettings.contains("fftSize") && !newSettings.contains("window")) {
             // do need to only handle interdependent settings -> can early return
             return;

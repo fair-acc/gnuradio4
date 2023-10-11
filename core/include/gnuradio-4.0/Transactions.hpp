@@ -16,8 +16,8 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "settings.hpp"
-#include "tag.hpp"
+#include "Settings.hpp"
+#include "Tag.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
@@ -29,7 +29,7 @@ namespace gr {
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
 template<typename TBlock>
-class ctx_settings : public settings_base {
+class CtxSettings : public SettingsBase {
     /**
      * A predicate for matching two contexts
      * The third "attempt" parameter indicates the current round of matching being done.
@@ -53,9 +53,9 @@ class ctx_settings : public settings_base {
     MatchPredicate                                _match_pred = nullMatchPred;
 
 public:
-    explicit ctx_settings(TBlock &block, MatchPredicate matchPred = nullMatchPred) noexcept : settings_base(), _block(&block), _match_pred(matchPred) {
-        if constexpr (requires { &TBlock::settings_changed; }) { // if settings_changed is defined
-            static_assert(HasSettingsChangedCallback<TBlock>, "if provided, settings_changed must have either a `(const property_map& old, property_map& new, property_map& fwd)`"
+    explicit CtxSettings(TBlock &block, MatchPredicate matchPred = nullMatchPred) noexcept : SettingsBase(), _block(&block), _match_pred(matchPred) {
+        if constexpr (requires { &TBlock::settingsChanged; }) { // if settingsChanged is defined
+            static_assert(HasSettingsChangedCallback<TBlock>, "if provided, settingsChanged must have either a `(const property_map& old, property_map& new, property_map& fwd)`"
                                                               "or `(const property_map& old, property_map& new)` paremeter signatures.");
         }
 
@@ -117,35 +117,35 @@ public:
         }
     }
 
-    constexpr ctx_settings(const ctx_settings &other) noexcept : settings_base(other) {
-        ctx_settings temp(other);
+    constexpr CtxSettings(const CtxSettings &other) noexcept : SettingsBase(other) {
+        CtxSettings temp(other);
         swap(temp);
     }
 
-    constexpr ctx_settings(ctx_settings &&other) noexcept : settings_base(std::move(other)) {
-        ctx_settings temp(std::move(other));
+    constexpr CtxSettings(CtxSettings &&other) noexcept : SettingsBase(std::move(other)) {
+        CtxSettings temp(std::move(other));
         swap(temp);
     }
 
-    ctx_settings &
-    operator=(const ctx_settings &other) noexcept {
+    CtxSettings &
+    operator=(const CtxSettings &other) noexcept {
         swap(other);
         return *this;
     }
 
-    ctx_settings &
-    operator=(ctx_settings &&other) noexcept {
-        ctx_settings temp(std::move(other));
+    CtxSettings &
+    operator=(CtxSettings &&other) noexcept {
+        CtxSettings temp(std::move(other));
         swap(temp);
         return *this;
     }
 
     void
-    swap(ctx_settings &other) noexcept {
+    swap(CtxSettings &other) noexcept {
         if (this == &other) {
             return;
         }
-        settings_base::swap(other);
+        SettingsBase::swap(other);
         std::swap(_block, other._block);
         std::scoped_lock lock(_lock, other._lock);
         std::swap(_active, other._active);
@@ -172,7 +172,7 @@ public:
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
                             }
-                            settings_base::_changed.store(true);
+                            SettingsBase::_changed.store(true);
                             is_set = true;
                         }
                     }
@@ -193,7 +193,7 @@ public:
                               unwrap_if_wrapped_t<decltype(t.metaInformation)> {}
                           } -> std::same_as<property_map>;
                       }) {
-            update_maps(ret, _block->metaInformation);
+            updateMaps(ret, _block->metaInformation);
         }
 
         _settings[ctx] = parameters;
@@ -203,22 +203,22 @@ public:
     }
 
     void
-    store_defaults() override {
-        this->store_default_settings(_default_settings);
+    storeDefaults() override {
+        this->storeDefaultSettings(_default_settings);
     }
 
     void
-    reset_defaults() override {
+    resetDefaults() override {
         _settings.clear();
         _staged     = _default_settings;
-        std::ignore = apply_staged_parameters();
+        std::ignore = applyStagedParameters();
         if constexpr (HasSettingsResetCallback<TBlock>) {
             _block->reset();
         }
     }
 
     void
-    auto_update(const property_map &parameters, SettingsCtx = {}) override {
+    autoUpdate(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             for (const auto &[localKey, localValue] : parameters) {
                 const auto &key                 = localKey;
@@ -228,7 +228,7 @@ public:
                     if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
-                            settings_base::_changed.store(true);
+                            SettingsBase::_changed.store(true);
                         }
                     }
                 };
@@ -241,7 +241,7 @@ public:
     }
 
     [[nodiscard]] const property_map
-    staged_parameters() const noexcept override {
+    stagedParameters() const noexcept override {
         std::lock_guard lg(_lock);
         return _staged;
     }
@@ -281,17 +281,17 @@ public:
     }
 
     [[nodiscard]] std::set<std::string, std::less<>> &
-    auto_update_parameters() noexcept override {
+    autoUpdateParameters() noexcept override {
         return _auto_update;
     }
 
     [[nodiscard]] std::set<std::string, std::less<>> &
-    auto_forward_parameters() noexcept override {
+    autoForwardParameters() noexcept override {
         return _auto_forward;
     }
 
     [[nodiscard]] const property_map
-    apply_staged_parameters() noexcept override {
+    applyStagedParameters() noexcept override {
         property_map forward_parameters; // parameters that should be forwarded to dependent child nodes
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
@@ -299,13 +299,13 @@ public:
             // prepare old settings if required
             property_map oldSettings;
             if constexpr (HasSettingsChangedCallback<TBlock>) {
-                store_default_settings(oldSettings);
+                storeDefaultSettings(oldSettings);
             }
 
             // check if reset of settings should be performed
             if (_staged.contains(gr::tag::RESET_DEFAULTS)) {
                 _staged.clear();
-                reset_defaults();
+                resetDefaults();
             }
 
             // update staged and forward parameters based on member properties
@@ -316,7 +316,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (!std::is_const_v<Type> && is_writable(member) && is_supported_type<Type>()) {
+                    if constexpr (!std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
@@ -355,29 +355,29 @@ public:
                         }
                     }
                 };
-                process_members<TBlock>(apply_member_changes);
+                processMembers<TBlock>(apply_member_changes);
             }
 
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr (is_readable(member) && isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
-            process_members<TBlock>(update_active);
+            processMembers<TBlock>(update_active);
 
             // invoke user-callback function if staged is not empty
             if (!staged.empty()) {
-                if constexpr (requires { _block->settings_changed(/* old settings */ _active, /* new settings */ staged); }) {
-                    _block->settings_changed(/* old settings */ oldSettings, /* new settings */ staged);
-                } else if constexpr (requires { _block->settings_changed(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
-                    _block->settings_changed(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
+                if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged); }) {
+                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged);
+                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
+                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
                 }
             }
 
             if (_staged.contains(gr::tag::STORE_DEFAULTS)) {
-                store_defaults();
+                storeDefaults();
             }
 
             if constexpr (HasSettingsResetCallback<TBlock>) {
@@ -389,18 +389,18 @@ public:
             _staged.clear();
         }
 
-        settings_base::_changed.store(false);
+        SettingsBase::_changed.store(false);
         return forward_parameters;
     }
 
     void
-    update_active_parameters() noexcept override {
+    updateActiveParameters() noexcept override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr (is_readable(member) && isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_block));
                 }
             };
@@ -428,13 +428,13 @@ private:
     }
 
     void
-    store_default_settings(property_map &oldSettings) {
+    storeDefaultSettings(property_map &oldSettings) {
         // take a copy of the field -> map value of the old settings
         if constexpr (refl::is_reflectable<TBlock>()) {
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr (is_readable(member) && is_supported_type<Type>()) {
+                if constexpr (is_readable(member) && isSupportedType<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
@@ -447,13 +447,13 @@ private:
 
     template<typename Type>
     inline constexpr static bool
-    is_supported_type() {
+    isSupportedType() {
         return std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>;
     }
 
     template<typename T, typename Func>
     inline constexpr static void
-    process_members(Func func) {
+    processMembers(Func func) {
         if constexpr (detail::HasBaseType<T>) {
             refl::util::for_each(refl::reflect<typename std::remove_cvref_t<T>::base_t>().members, func);
         }
@@ -461,7 +461,7 @@ private:
     }
 };
 
-static_assert(Settings<ctx_settings<int>>);
+static_assert(SettingsLike<CtxSettings<int>>);
 
 } // namespace gr
 

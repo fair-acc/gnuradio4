@@ -155,7 +155,7 @@ public:
     uniqueName() const
             = 0;
 
-    [[nodiscard]] virtual settings_base &
+    [[nodiscard]] virtual SettingsBase &
     settings() const
             = 0;
 
@@ -310,7 +310,7 @@ public:
         return blockRef().unique_name;
     }
 
-    [[nodiscard]] settings_base &
+    [[nodiscard]] SettingsBase &
     settings() const override {
         return blockRef().settings();
     }

@@ -167,7 +167,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             std::ignore = fftBlock.settings().set({ { "fftSize", t.N } });
             std::ignore = fftBlock.settings().set({ { "outputInDb", t.outputInDb } });
             std::ignore = fftBlock.settings().set({ { "window", "None" } });
-            std::ignore = fftBlock.settings().apply_staged_parameters();
+            std::ignore = fftBlock.settings().applyStagedParameters();
             const auto           signal{ generateSinSample<InType>(t.N, t.sample_rate, t.frequency, t.amplitude) };
             std::vector<OutType> resultingDataSets(1);
             expect(gr::work::Status::OK == fftBlock.processBulk(signal, resultingDataSets));
@@ -192,7 +192,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         constexpr double               tolerance{ 1.e-5 };
         constexpr std::uint32_t        N{ 16 };
         FFT<InType, OutType, AlgoType> fftBlock({ { "fftSize", N }, { "window", "None" } });
-        std::ignore = fftBlock.settings().apply_staged_parameters();
+        std::ignore = fftBlock.settings().applyStagedParameters();
 
         std::vector<InType> signal(N);
 
@@ -244,7 +244,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         constexpr std::uint32_t        N{ 16 };
         constexpr float                sample_rate{ 1.f };
         FFT<InType, OutType, AlgoType> fftBlock({ { "fftSize", N }, { "sample_rate", sample_rate } });
-        std::ignore = fftBlock.settings().apply_staged_parameters();
+        std::ignore = fftBlock.settings().applyStagedParameters();
         expect(eq(fftBlock.algorithm, gr::meta::type_name<AlgoType>()));
 
         std::vector<InType> signal(N);
@@ -325,7 +325,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         for (const auto &window : gr::algorithm::window::TypeList) {
             std::ignore = fftBlock.settings().set({ { "fftSize", N } });
             std::ignore = fftBlock.settings().set({ { "window", std::string(gr::algorithm::window::to_string(window)) } });
-            std::ignore = fftBlock.settings().apply_staged_parameters();
+            std::ignore = fftBlock.settings().applyStagedParameters();
 
             std::vector<InType> signal(N);
             if constexpr (gr::algorithm::ComplexType<InType>) {

@@ -22,7 +22,7 @@ struct repeated_source : public gr::Block<repeated_source<T>> {
     gr::PortOut<T>                 out;
 
     void
-    settings_changed(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
+    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
         if (new_settings.contains("values")) {
             values_next = values.cbegin();
         }
@@ -75,7 +75,7 @@ struct validator_sink : public gr::Block<validator_sink<T>> {
     }
 
     void
-    settings_changed(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
+    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
         if (new_settings.contains("expected_values")) {
             expected_values_next = expected_values.cbegin();
         }
@@ -153,20 +153,20 @@ execute_selector_test(test_definition definition) {
         sources.push_back(std::addressof(graph.emplaceBlock<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
                                                                                        { "identifier", source_index },                       //
                                                                                        { "values", definition.input_values[source_index] } })));
-        expect(sources[source_index]->settings().apply_staged_parameters().empty());
+        expect(sources[source_index]->settings().applyStagedParameters().empty());
         expect(gr::ConnectionResult::SUCCESS == graph.dynamic_connect(*sources[source_index], 0, *selector, source_index + 1 /* there's one port before the inputs */));
     }
 
     for (std::uint32_t sink_index = 0; sink_index < sinks_count; ++sink_index) {
         sinks.push_back(std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", sink_index }, //
                                                                                     { "expected_values", definition.output_values[sink_index] } })));
-        expect(sinks[sink_index]->settings().apply_staged_parameters().empty());
+        expect(sinks[sink_index]->settings().applyStagedParameters().empty());
         expect(gr::ConnectionResult::SUCCESS == graph.dynamic_connect(*selector, sink_index + 1 /* there's one port before the outputs */, *sinks[sink_index], 0));
     }
 
     validator_sink<double> *monitor_sink = std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
                                                                                                        { "expected_values", definition.monitor_values } }));
-    expect(monitor_sink->settings().apply_staged_parameters().empty());
+    expect(monitor_sink->settings().applyStagedParameters().empty());
     expect(gr::ConnectionResult::SUCCESS == graph.dynamic_connect(*selector, 0, *monitor_sink, 0));
 
     for (std::size_t iterration = 0; iterration < definition.value_count * sources_count; ++iterration) {
@@ -198,7 +198,7 @@ const boost::ut::suite SelectorTest = [] {
 
     "Selector<T> constructor"_test = [] {
         Selector<double> block_nop({ { "name", "block_nop" } });
-        expect(block_nop.settings().apply_staged_parameters().empty());
+        expect(block_nop.settings().applyStagedParameters().empty());
         expect(eq(block_nop.nInputs, 0U));
         expect(eq(block_nop.nOutputs, 0U));
         expect(eq(block_nop.inputs.size(), 0U));
@@ -206,7 +206,7 @@ const boost::ut::suite SelectorTest = [] {
         expect(eq(block_nop._internalMapping.size(), 0U));
 
         Selector<double> block({ { "name", "block" }, { "nInputs", 4U }, { "nOutputs", 3U } });
-        expect(block.settings().apply_staged_parameters().empty());
+        expect(block.settings().applyStagedParameters().empty());
         expect(eq(block.nInputs, 4U));
         expect(eq(block.nOutputs, 3U));
         expect(eq(block.inputs.size(), 4U));
@@ -218,7 +218,7 @@ const boost::ut::suite SelectorTest = [] {
         using T = double;
         const std::vector<uint32_t> outputMap{ 1U, 0U };
         Selector<T>                 block({ { "nInputs", 3U }, { "nOutputs", 2U }, { "mapIn", std::vector<uint32_t>{ 0U, 1U } }, { "mapOut", outputMap } }); // N.B. 3rd input is unconnected
-        expect(block.settings().apply_staged_parameters().empty());
+        expect(block.settings().applyStagedParameters().empty());
         expect(eq(block._internalMapping.size(), 2U));
 
         using internal_mapping_t = decltype(block._internalMapping);

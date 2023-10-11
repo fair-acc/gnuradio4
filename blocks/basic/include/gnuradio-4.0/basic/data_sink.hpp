@@ -5,7 +5,7 @@
 #include <gnuradio-4.0/CircularBuffer.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
-#include <gnuradio-4.0/tag.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 #include <any>
 #include <chrono>
@@ -35,7 +35,7 @@ concept DataSetCallback = std::invocable<T, DataSet<V>>;
  * Stream callback functions receive the span of data, with optional tags and reference to the sink.
  */
 template<typename T, typename V>
-concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const tag_t>> || std::invocable<T, std::span<const V>, std::span<const tag_t>, const data_sink<V>&>;
+concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const Tag>> || std::invocable<T, std::span<const V>, std::span<const Tag>, const data_sink<V>&>;
 
 /**
  * Used for testing whether a tag should trigger data acquisition.
@@ -64,7 +64,7 @@ concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable
  * // matcher observing three possible tag values, "green", "yellow", "red".
  * // starting a dataset when seeing "green", stopping on "red", starting a new dataset on "yellow"
  * struct color_matcher {
- *     matcher_result operator()(const tag_t &tag) {
+ *     matcher_result operator()(const Tag &tag) {
  *         if (tag == green || tag == yellow) {
  *             return trigger_match_result::Matching;
  *         }
@@ -80,7 +80,7 @@ concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable
  * @see trigger_match_result
  */
 template<typename T>
-concept TriggerMatcher = requires(T matcher, tag_t tag) {
+concept TriggerMatcher = requires(T matcher, Tag tag) {
     { matcher(tag) } -> std::convertible_to<trigger_match_result>;
 };
 
@@ -326,7 +326,7 @@ public:
         gr::CircularBuffer<T>             buffer       = gr::CircularBuffer<T>(_listener_buffer_size);
         decltype(buffer.new_reader())     reader       = buffer.new_reader();
         decltype(buffer.new_writer())     writer       = buffer.new_writer();
-        gr::CircularBuffer<tag_t>         tag_buffer   = gr::CircularBuffer<tag_t>(1024);
+        gr::CircularBuffer<Tag>           tag_buffer   = gr::CircularBuffer<Tag>(1024);
         decltype(tag_buffer.new_reader()) tag_reader   = tag_buffer.new_reader();
         decltype(tag_buffer.new_writer()) tag_writer   = tag_buffer.new_writer();
         std::size_t                       samples_read = 0; // reader thread
@@ -342,14 +342,14 @@ public:
             }
 
             const auto read_data = reader.get(available);
-            if constexpr (requires { fnc(std::span<const T>(), std::span<const tag_t>()); }) {
+            if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
                 const auto tags          = tag_reader.get();
                 const auto it            = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + available)](const auto &tag) { return tag.index < until; });
-                auto       relevant_tags = std::vector<tag_t>(tags.begin(), it);
+                auto       relevant_tags = std::vector<Tag>(tags.begin(), it);
                 for (auto &t : relevant_tags) {
                     t.index -= static_cast<int64_t>(samples_read);
                 }
-                fnc(read_data, std::span<const tag_t>(relevant_tags));
+                fnc(read_data, std::span<const Tag>(relevant_tags));
                 std::ignore = tag_reader.consume(relevant_tags.size());
             } else {
                 std::ignore = tag_reader.consume(tag_reader.available());
@@ -392,7 +392,7 @@ public:
     }
 
     void
-    settings_changed(const property_map & /*old_settings*/, const property_map &new_settings) {
+    settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) {
         if (apply_signal_info(new_settings)) {
             _has_signal_info_from_settings = true;
         }
@@ -616,17 +616,17 @@ private:
     template<typename Callback>
     struct continuous_listener : public abstract_listener {
         static constexpr auto has_callback        = !std::is_same_v<Callback, gr::meta::null_type>;
-        static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>
-                                                 || std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>, const data_sink<T> &>;
+        static constexpr auto callback_takes_tags = std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>
+                                                 || std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const data_sink<T> &>;
 
         const data_sink<T> &parent_sink;
         bool                block           = false;
         std::size_t         samples_written = 0;
 
         // callback-only
-        std::size_t        buffer_fill = 0;
-        std::vector<T>     buffer;
-        std::vector<tag_t> tag_buffer;
+        std::size_t      buffer_fill = 0;
+        std::vector<T>   buffer;
+        std::vector<Tag> tag_buffer;
 
         // polling-only
         std::weak_ptr<poller> polling_handler = {};
@@ -639,10 +639,10 @@ private:
         explicit continuous_listener(std::shared_ptr<poller> poller, bool do_block, const data_sink<T> &parent) : parent_sink(parent), block(do_block), polling_handler{ std::move(poller) } {}
 
         inline void
-        call_callback(std::span<const T> data, std::span<const tag_t> tags) {
-            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>, const data_sink<T> &>) {
+        call_callback(std::span<const T> data, std::span<const Tag> tags) {
+            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const data_sink<T> &>) {
                 callback(std::move(data), std::move(tags), parent_sink);
-            } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const tag_t>>) {
+            } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>) {
                 callback(std::move(data), std::move(tags));
             } else {
                 callback(std::move(data));
@@ -660,7 +660,7 @@ private:
                     detail::copy_span(data.first(n), std::span(buffer).subspan(buffer_fill, n));
                     if constexpr (callback_takes_tags) {
                         if (tag_data0) {
-                            tag_buffer.push_back({ static_cast<tag_t::signed_index_type>(buffer_fill), *tag_data0 });
+                            tag_buffer.push_back({ static_cast<Tag::signed_index_type>(buffer_fill), *tag_data0 });
                             tag_data0.reset();
                         }
                     }
@@ -678,7 +678,7 @@ private:
                 // send out complete chunks directly
                 while (data.size() >= buffer.size()) {
                     if constexpr (callback_takes_tags) {
-                        std::vector<tag_t> tags;
+                        std::vector<Tag> tags;
                         if (tag_data0) {
                             tags.push_back({ 0, std::move(*tag_data0) });
                             tag_data0.reset();
@@ -713,7 +713,7 @@ private:
                 if (to_write > 0) {
                     if (tag_data0) {
                         auto tw = poller->tag_writer.reserve_output_range(1);
-                        tw[0]   = { static_cast<tag_t::signed_index_type>(samples_written), std::move(*tag_data0) };
+                        tw[0]   = { static_cast<Tag::signed_index_type>(samples_written), std::move(*tag_data0) };
                         tw.publish(1);
                     }
                     auto write_data = poller->writer.reserve_output_range(to_write);
@@ -800,14 +800,14 @@ private:
 
         void
         process(std::span<const T> history, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
-            if (tag_data0 && trigger_matcher(tag_t{ 0, *tag_data0 }) == trigger_match_result::Matching) {
+            if (tag_data0 && trigger_matcher(Tag{ 0, *tag_data0 }) == trigger_match_result::Matching) {
                 DataSet<T> dataset = dataset_template;
                 dataset.signal_values.reserve(pre_samples + post_samples); // TODO maybe make the circ. buffer smaller but preallocate these
 
                 const auto pre_sample_view = history.last(std::min(pre_samples, history.size()));
                 dataset.signal_values.insert(dataset.signal_values.end(), pre_sample_view.begin(), pre_sample_view.end());
 
-                dataset.timing_events = { { { static_cast<tag_t::signed_index_type>(pre_sample_view.size()), *tag_data0 } } };
+                dataset.timing_events = { { { static_cast<Tag::signed_index_type>(pre_sample_view.size()), *tag_data0 } } };
                 pending_trigger_windows.push_back({ .dataset = std::move(dataset), .pending_post_samples = post_samples });
             }
 
@@ -892,11 +892,11 @@ private:
         void
         process(std::span<const T>, std::span<const T> in_data, std::optional<property_map> tag_data0) override {
             if (tag_data0) {
-                const auto obsr = matcher(tag_t{ 0, *tag_data0 });
+                const auto obsr = matcher(Tag{ 0, *tag_data0 });
                 if (obsr == trigger_match_result::NotMatching || obsr == trigger_match_result::Matching) {
                     if (pending_dataset) {
                         if (obsr == trigger_match_result::NotMatching) {
-                            pending_dataset->timing_events[0].push_back({ static_cast<tag_t::signed_index_type>(pending_dataset->signal_values.size()), *tag_data0 });
+                            pending_dataset->timing_events[0].push_back({ static_cast<Tag::signed_index_type>(pending_dataset->signal_values.size()), *tag_data0 });
                         }
                         this->publish_dataset(std::move(*pending_dataset));
                         pending_dataset.reset();
@@ -1011,7 +1011,7 @@ private:
                 }
 
                 DataSet<T> dataset    = dataset_template;
-                dataset.timing_events = { { { -static_cast<tag_t::signed_index_type>(it->delay), std::move(it->tag_data) } } };
+                dataset.timing_events = { { { -static_cast<Tag::signed_index_type>(it->delay), std::move(it->tag_data) } } };
                 dataset.signal_values = { in_data[it->pending_samples] };
                 this->publish_dataset(std::move(dataset));
 

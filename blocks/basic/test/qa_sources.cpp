@@ -3,7 +3,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/tag.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/testing/tag_monitors.hpp>

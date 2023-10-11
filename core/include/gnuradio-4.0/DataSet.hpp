@@ -1,12 +1,12 @@
 #ifndef GNURADIO_DATASET_HPP
 #define GNURADIO_DATASET_HPP
 
+#include "reflection.hpp"
+#include "Tag.hpp"
 #include <chrono>
 #include <cstdint>
 #include <map>
 #include <pmtv/pmt.hpp>
-#include "reflection.hpp"
-#include "tag.hpp"
 #include <variant>
 #include <vector>
 
@@ -72,7 +72,7 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
     // meta data
     std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    std::is_same_v<decltype(t.timing_events), std::vector<std::vector<tag_t>>>;
+    std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
 };
 
 template<typename T>
@@ -99,8 +99,8 @@ struct DataSet {
     std::vector<std::vector<T>> signal_ranges; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>            meta_information;
-    std::vector<std::vector<tag_t>> timing_events;
+    std::vector<pmt_map>          meta_information;
+    std::vector<std::vector<Tag>> timing_events;
 };
 
 static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
@@ -118,8 +118,8 @@ struct Tensor {
     using pmt_map                       = std::map<std::string, pmtv::pmt>;
     std::int64_t              timestamp = 0; // UTC timestamp [ns]
 
-    std::vector<std::int32_t> extents;       // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout;        // row-major, column-major, “special”
+    std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout;  // row-major, column-major, “special”
 
     std::vector<T>            signal_values; // size = \PI_i extents[i]
     std::vector<T>            signal_errors; // size = \PI_i extents[i] or '0' if not applicable
@@ -148,8 +148,8 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 
 } // namespace gr
 
-ENABLE_REFLECTION(gr::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
-                  meta_information, timing_events)
-ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges,
-                  meta_information, timing_events)
+ENABLE_REFLECTION(gr::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
+                  timing_events)
+ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
+                  timing_events)
 #endif // GNURADIO_DATASET_HPP

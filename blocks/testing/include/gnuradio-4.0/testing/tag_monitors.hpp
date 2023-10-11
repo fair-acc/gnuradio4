@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/reflection.hpp>
-#include <gnuradio-4.0/tag.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 namespace gr::testing {
 
@@ -16,7 +16,7 @@ enum class ProcessFunction {
 };
 
 void
-print_tag(const tag_t &tag, std::string_view prefix = {}) {
+print_tag(const Tag &tag, std::string_view prefix = {}) {
     fmt::print("{} @index= {}: {{", prefix, tag.index);
     if (tag.map.empty()) {
         fmt::print("}}\n");
@@ -65,7 +65,7 @@ mismatch_report(const IterType &mismatchedTag1, const IterType &mismatchedTag2, 
 }
 
 bool
-equal_tag_lists(const std::vector<tag_t> &tags1, const std::vector<tag_t> &tags2) {
+equal_tag_lists(const std::vector<Tag> &tags1, const std::vector<Tag> &tags2) {
     if (tags1.size() != tags2.size()) {
         fmt::print("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
         return false;
@@ -81,11 +81,11 @@ equal_tag_lists(const std::vector<tag_t> &tags1, const std::vector<tag_t> &tags2
 
 template<typename T, ProcessFunction UseProcessOne>
 struct TagSource : public Block<TagSource<T, UseProcessOne>> {
-    PortOut<T>         out;
-    std::vector<tag_t> tags{};
-    std::size_t        next_tag{ 0 };
-    std::int64_t       n_samples_max = 1024;
-    std::int64_t       n_samples_produced{ 0 };
+    PortOut<T>       out;
+    std::vector<Tag> tags{};
+    std::size_t      next_tag{ 0 };
+    std::int64_t     n_samples_max = 1024;
+    std::int64_t     n_samples_produced{ 0 };
 
     constexpr std::make_signed_t<std::size_t>
     available_samples(const TagSource &) noexcept {
@@ -93,7 +93,7 @@ struct TagSource : public Block<TagSource<T, UseProcessOne>> {
             // '-1' -> DONE, produced enough samples
             return n_samples_max == n_samples_produced ? -1 : n_samples_max - n_samples_produced;
         } else if constexpr (UseProcessOne == ProcessFunction::USE_PROCESS_BULK) {
-            tag_t::signed_index_type nextTagIn = next_tag < tags.size() ? tags[next_tag].index - n_samples_produced : n_samples_max - n_samples_produced;
+            Tag::signed_index_type nextTagIn = next_tag < tags.size() ? tags[next_tag].index - n_samples_produced : n_samples_max - n_samples_produced;
             return n_samples_produced < n_samples_max ? std::max(1L, nextTagIn) : -1L; // '-1L' -> DONE, produced enough samples
         } else {
             static_assert(gr::meta::always_false<T>, "ProcessFunction-type not handled");
@@ -106,9 +106,9 @@ struct TagSource : public Block<TagSource<T, UseProcessOne>> {
     {
         if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
             print_tag(tags[next_tag], fmt::format("{}::processOne(...)\t publish tag at  {:6}", this->name.value, n_samples_produced));
-            tag_t &out_tag = this->output_tags()[0];
-            out_tag        = tags[next_tag];
-            out_tag.index  = offset;
+            Tag &out_tag  = this->output_tags()[0];
+            out_tag       = tags[next_tag];
+            out_tag.index = offset;
             this->forward_tags();
             next_tag++;
             n_samples_produced++;
@@ -125,9 +125,9 @@ struct TagSource : public Block<TagSource<T, UseProcessOne>> {
     {
         if (next_tag < tags.size() && tags[next_tag].index <= n_samples_produced) {
             print_tag(tags[next_tag], fmt::format("{}::processBulk(...{})\t publish tag at  {:6}", this->name, output.size(), n_samples_produced));
-            tag_t &out_tag = this->output_tags()[0];
-            out_tag        = tags[next_tag];
-            out_tag.index  = 0; // indices > 0 write tags in the future ... handle with care
+            Tag &out_tag  = this->output_tags()[0];
+            out_tag       = tags[next_tag];
+            out_tag.index = 0; // indices > 0 write tags in the future ... handle with care
             this->forward_tags();
             next_tag++;
         }
@@ -139,17 +139,17 @@ struct TagSource : public Block<TagSource<T, UseProcessOne>> {
 
 template<typename T, ProcessFunction UseProcessOne>
 struct TagMonitor : public Block<TagMonitor<T, UseProcessOne>> {
-    PortIn<T>          in;
-    PortOut<T>         out;
-    std::vector<tag_t> tags{};
-    std::int64_t       n_samples_produced{ 0 };
+    PortIn<T>        in;
+    PortOut<T>       out;
+    std::vector<Tag> tags{};
+    std::int64_t     n_samples_produced{ 0 };
 
     constexpr T
     processOne(const T &input) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (this->input_tags_present()) {
-            const tag_t &tag = this->input_tags()[0];
+            const Tag &tag = this->input_tags()[0];
             print_tag(tag, fmt::format("{}::processOne(...)\t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
@@ -163,7 +163,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessOne>> {
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
         if (this->input_tags_present()) {
-            const tag_t &tag = this->input_tags()[0];
+            const Tag &tag = this->input_tags()[0];
             print_tag(tag, fmt::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
@@ -180,7 +180,7 @@ template<typename T, ProcessFunction UseProcessOne>
 struct TagSink : public Block<TagSink<T, UseProcessOne>> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T>                                in;
-    std::vector<tag_t>                       tags{};
+    std::vector<Tag>                         tags{};
     std::int64_t                             n_samples_produced{ 0 };
     std::chrono::time_point<ClockSourceType> timeFirstSample = ClockSourceType::now();
     std::chrono::time_point<ClockSourceType> timeLastSample  = ClockSourceType::now();
@@ -194,7 +194,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
             timeFirstSample = ClockSourceType::now();
         }
         if (this->input_tags_present()) {
-            const tag_t &tag = this->input_tags()[0];
+            const Tag &tag = this->input_tags()[0];
             print_tag(tag, fmt::format("{}::processOne(...1)    \t received tag at {:6}", this->name, n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();
@@ -212,7 +212,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
             timeFirstSample = ClockSourceType::now();
         }
         if (this->input_tags_present()) {
-            const tag_t &tag = this->input_tags()[0];
+            const Tag &tag = this->input_tags()[0];
             print_tag(tag, fmt::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), n_samples_produced));
             tags.emplace_back(n_samples_produced, tag.map);
             this->forward_tags();

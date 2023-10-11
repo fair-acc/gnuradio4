@@ -7,7 +7,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/tag.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/testing/tag_monitors.hpp>
 
@@ -22,15 +22,15 @@ const boost::ut::suite TagTests = [] {
     using namespace gr;
 
     "TagReflection"_test = [] {
-        static_assert(sizeof(tag_t) % 64 == 0, "needs to meet L1 cache size");
-        static_assert(refl::descriptor::type_descriptor<gr::tag_t>::name == "gr::tag_t");
-        static_assert(refl::member_list<tag_t>::size == 2, "index and map being declared");
-        static_assert(refl::trait::get_t<0, refl::member_list<tag_t>>::name == "index", "class field index is public API");
-        static_assert(refl::trait::get_t<1, refl::member_list<tag_t>>::name == "map", "class field map is public API");
+        static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
+        static_assert(refl::descriptor::type_descriptor<gr::Tag>::name == "gr::Tag");
+        static_assert(refl::member_list<Tag>::size == 2, "index and map being declared");
+        static_assert(refl::trait::get_t<0, refl::member_list<Tag>>::name == "index", "class field index is public API");
+        static_assert(refl::trait::get_t<1, refl::member_list<Tag>>::name == "map", "class field map is public API");
     };
 
     "DefaultTags"_test = [] {
-        tag_t testTag{};
+        Tag testTag{};
 
         testTag.insert_or_assign(tag::SAMPLE_RATE, pmtv::pmt(3.0f));
         testTag.insert_or_assign(tag::SAMPLE_RATE(4.0f));

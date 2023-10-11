@@ -31,7 +31,7 @@ protected:
 
 public:
     explicit SchedulerBase(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
-                           const profiling::options &profiling_options = {})
+                           const profiling::Options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.forThisThread() }, _pool(std::move(thread_pool)) {}
 
     ~SchedulerBase() {
@@ -188,7 +188,7 @@ class Simple : public SchedulerBase<TProfiler> {
 
 public:
     explicit Simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
-                    const profiling::options &profiling_options = {})
+                    const profiling::Options &profiling_options = {})
         : SchedulerBase<TProfiler>(std::forward<gr::Graph>(graph), thread_pool, profiling_options) {}
 
     void
@@ -291,7 +291,7 @@ class BreadthFirst : public SchedulerBase<TProfiler> {
 
 public:
     explicit BreadthFirst(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
-                          const profiling::options &profiling_options = {})
+                          const profiling::Options &profiling_options = {})
         : SchedulerBase<TProfiler>(std::move(graph), thread_pool, profiling_options) {}
 
     void
