@@ -130,7 +130,7 @@ On the choice of window (mathematically aka. apodisation) functions
         _phaseSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
     }
 
-    [[nodiscard]] constexpr WorkReturnStatus
+    [[nodiscard]] constexpr work::Status
     processBulk(std::span<const T> input, std::span<U> output) {
         if constexpr (std::is_same_v<T, InDataType>) {
             std::copy_n(input.begin(), fftSize, _inData.begin());
@@ -158,7 +158,7 @@ On the choice of window (mathematically aka. apodisation) functions
             static_assert(!std::is_same_v<U, DataSet<float>> && "FFT output type not (yet) implemented");
         }
 
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 
     constexpr U

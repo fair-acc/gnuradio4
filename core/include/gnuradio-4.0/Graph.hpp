@@ -159,7 +159,7 @@ public:
     settings() const
             = 0;
 
-    [[nodiscard]] virtual WorkReturn
+    [[nodiscard]] virtual work::Result
     work(std::size_t requested_work)
             = 0;
 
@@ -260,7 +260,7 @@ public:
         return blockRef().init(progress, ioThreadPool);
     }
 
-    [[nodiscard]] constexpr WorkReturn
+    [[nodiscard]] constexpr work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return blockRef().work(requested_work);
     }

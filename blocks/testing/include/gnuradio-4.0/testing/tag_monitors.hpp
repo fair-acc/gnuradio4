@@ -119,7 +119,7 @@ struct TagSource : public Block<TagSource<T, UseProcessOne>> {
         return static_cast<T>(0);
     }
 
-    WorkReturnStatus
+    work::Status
     processBulk(std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
@@ -133,7 +133,7 @@ struct TagSource : public Block<TagSource<T, UseProcessOne>> {
         }
 
         n_samples_produced += static_cast<std::int64_t>(output.size());
-        return n_samples_produced < n_samples_max ? WorkReturnStatus::OK : WorkReturnStatus::DONE;
+        return n_samples_produced < n_samples_max ? work::Status::OK : work::Status::DONE;
     }
 };
 
@@ -158,7 +158,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessOne>> {
         return input;
     }
 
-    constexpr WorkReturnStatus
+    constexpr work::Status
     processBulk(std::span<const T> input, std::span<T> output) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
@@ -172,7 +172,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessOne>> {
         n_samples_produced += static_cast<std::int64_t>(input.size());
         std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
 
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 };
 
@@ -204,7 +204,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
     }
 
     // template<gr::meta::t_or_simd<T> V>
-    constexpr WorkReturnStatus
+    constexpr work::Status
     processBulk(std::span<const T> input) noexcept
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
@@ -220,7 +220,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
 
         n_samples_produced += static_cast<std::int64_t>(input.size());
         timeLastSample = ClockSourceType::now();
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 
     float

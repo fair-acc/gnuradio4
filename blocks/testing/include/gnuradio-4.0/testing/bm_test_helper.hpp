@@ -49,7 +49,7 @@ public:
         return x;
     }
 
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) {
         const std::size_t n_to_publish = _n_samples_max - n_samples_produced;
         if (n_to_publish > 0) {
@@ -62,7 +62,7 @@ public:
             if constexpr (use_bulk_operation) {
                 std::size_t n_write = std::clamp(n_to_publish, 0UL, std::min(writer.available(), port.max_buffer_size()));
                 if (n_write == 0_UZ) {
-                    return { requested_work, 0_UZ, gr::WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+                    return { requested_work, 0_UZ, gr::work::Status::INSUFFICIENT_INPUT_ITEMS };
                 }
 
                 writer.publish( //
@@ -75,14 +75,14 @@ public:
             } else {
                 auto [data, token] = writer.get(1);
                 if (data.size() == 0_UZ) {
-                    return { requested_work, 0_UZ, gr::WorkReturnStatus::ERROR };
+                    return { requested_work, 0_UZ, gr::work::Status::ERROR };
                 }
                 data[0] = processOne();
                 writer.publish(token, 1);
             }
-            return { requested_work, 1_UZ, gr::WorkReturnStatus::OK };
+            return { requested_work, 1_UZ, gr::work::Status::OK };
         } else {
-            return { requested_work, 0_UZ, gr::WorkReturnStatus::DONE };
+            return { requested_work, 0_UZ, gr::work::Status::DONE };
         }
     }
 };

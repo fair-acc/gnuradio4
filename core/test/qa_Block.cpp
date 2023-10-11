@@ -87,7 +87,7 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr:
     ProcessStatus  status{};
     bool           write_to_vector{ false };
 
-    gr::WorkReturnStatus
+    gr::work::Status
     processBulk(std::span<const T> input, std::span<T> output) noexcept {
         status.n_inputs  = input.size();
         status.n_outputs = output.size();
@@ -96,7 +96,7 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr:
         status.total_out += output.size();
         if (write_to_vector) status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
 
-        return gr::WorkReturnStatus::OK;
+        return gr::work::Status::OK;
     }
 };
 

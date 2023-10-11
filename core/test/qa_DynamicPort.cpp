@@ -79,7 +79,7 @@ public:
     grg::PortOut<T> value;
     std::size_t     _counter = 0;
 
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) {
         if (_counter < count) {
             _counter++;
@@ -88,9 +88,9 @@ public:
             data[0]      = val;
             data.publish(1);
 
-            return { requested_work, 1_UZ, gr::WorkReturnStatus::OK };
+            return { requested_work, 1_UZ, gr::work::Status::OK };
         } else {
-            return { requested_work, 0_UZ, gr::WorkReturnStatus::DONE };
+            return { requested_work, 0_UZ, gr::work::Status::DONE };
         }
     }
 };

@@ -65,14 +65,14 @@ public:
 
     ~expect_sink() { boost::ut::expect(boost::ut::that % _count == N); }
 
-    [[nodiscard]] gr::WorkReturnStatus
+    [[nodiscard]] gr::work::Status
     processBulk(std::span<const T> input) noexcept {
         _tracer.trace(this->name);
         for (auto data : input) {
             _checker(_count, data);
             _count++;
         }
-        return gr::WorkReturnStatus::OK;
+        return gr::work::Status::OK;
     }
 
     constexpr void

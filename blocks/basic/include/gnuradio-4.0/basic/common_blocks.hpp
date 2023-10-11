@@ -141,7 +141,7 @@ public:
     }
 
     // TODO: integrate with Block::work
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) override {
         // TODO: Rewrite with ranges once we can use them
         std::size_t available_samples = -1_UZ;
@@ -153,7 +153,7 @@ public:
         }
 
         if (available_samples == 0) {
-            return { requested_work, 0_UZ, gr::WorkReturnStatus::OK };
+            return { requested_work, 0_UZ, gr::work::Status::OK };
         }
 
         std::vector<std::span<const double>> readers;
@@ -174,7 +174,7 @@ public:
         for (auto &input_port [[maybe_unused]] : _input_ports) {
             assert(available_samples == input_port.streamReader().consume(available_samples));
         }
-        return { requested_work, available_samples, gr::WorkReturnStatus::OK };
+        return { requested_work, available_samples, gr::work::Status::OK };
     }
 
     void *

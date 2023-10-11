@@ -60,7 +60,7 @@ ClockSource Documentation -- add here
                     while (this->ioThreadShallRun.load()) {
                         std::this_thread::sleep_until(nextTimePoint);
                         // invoke and execute work function from user-provided thread
-                        if (this->invokeWork() == WorkReturnStatus::DONE) {
+                        if (this->invokeWork() == work::Status::DONE) {
                             break;
                         } else {
                             retry = 2;
@@ -89,11 +89,11 @@ ClockSource Documentation -- add here
         nextTimePoint = ClockSourceType::now();
     }
 
-    WorkReturnStatus
+    work::Status
     processBulk(PublishableSpan auto &output) noexcept {
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
             output.publish(0_UZ);
-            return WorkReturnStatus::DONE;
+            return work::Status::DONE;
         }
 
         if constexpr (useIoThread) { // using scheduler-graph provided user thread
@@ -103,7 +103,7 @@ ClockSource Documentation -- add here
         const auto writableSamples = static_cast<std::uint32_t>(output.size());
         if (writableSamples < chunk_size) {
             output.publish(0_UZ);
-            return WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS;
+            return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
         const std::uint32_t remaining_samples  = n_samples_max - n_samples_produced;
@@ -139,7 +139,7 @@ ClockSource Documentation -- add here
             nextTimePoint += std::chrono::microseconds(static_cast<long>(static_cast<float>(updatePeriod.count()) * ratio));
         }
 
-        return WorkReturnStatus::OK;
+        return work::Status::OK;
     }
 };
 

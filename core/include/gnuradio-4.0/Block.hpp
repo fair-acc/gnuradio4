@@ -57,22 +57,6 @@ invokeProcessOneWithOrWithoutOffset(T &node, std::size_t offset, const Us &...in
         return node.processOne(inputs...);
 }
 
-// TODO: inline in work namespace and rename to Status
-enum class WorkReturnStatus {
-    ERROR                     = -100, /// error occurred in the work function
-    INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
-    INSUFFICIENT_INPUT_ITEMS  = -2,   /// work requires a larger input buffer to produce output
-    DONE                      = -1,   /// this block has completed its processing and the flowgraph should be done
-    OK                        = 0,    /// work call was successful and return values in i/o structs are valid
-};
-
-// TODO: inline in work namespace and rename WorkReturn to something better 'WorkResult'?
-struct WorkReturn {
-    std::size_t      requested_work = std::numeric_limits<std::size_t>::max();
-    std::size_t      performed_work = 0;
-    WorkReturnStatus status         = WorkReturnStatus::OK;
-};
-
 template<std::size_t Index, typename Self>
 [[nodiscard]] constexpr auto &
 inputPort(Self *self) noexcept {
@@ -123,27 +107,9 @@ outputPorts(Self *self) noexcept {
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx>(self)...); }(std::make_index_sequence<traits::block::output_ports<Self>::size>());
 }
 
-template<typename T>
-concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::same_as<const std::string &>;
-    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
-    { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
-    { t.description } noexcept -> std::same_as<const std::string_view &>;
+namespace work {
 
-    { t.isBlocking() } noexcept -> std::same_as<bool>;
-
-    { t.settings() } -> std::same_as<settings_base &>;
-    { t.work(requested_work) } -> std::same_as<WorkReturn>;
-
-    // N.B. TODO discuss these requirements
-    requires !std::is_copy_constructible_v<T>;
-    requires !std::is_copy_assignable_v<T>;
-    // requires !std::is_move_constructible_v<T>;
-    // requires !std::is_move_assignable_v<T>;
-};
-
-namespace detail {
-class WorkCounter {
+class Counter {
     std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<std::uint32_t>::max()) << 32 };
 
 public:
@@ -185,7 +151,40 @@ public:
         return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
     }
 };
-} // namespace detail
+
+enum class Status {
+    ERROR                     = -100, /// error occurred in the work function
+    INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
+    INSUFFICIENT_INPUT_ITEMS  = -2,   /// work requires a larger input buffer to produce output
+    DONE                      = -1,   /// this block has completed its processing and the flowgraph should be done
+    OK                        = 0,    /// work call was successful and return values in i/o structs are valid
+};
+
+struct Result {
+    std::size_t requested_work = std::numeric_limits<std::size_t>::max();
+    std::size_t performed_work = 0;
+    Status      status         = Status::OK;
+};
+} // namespace work
+
+template<typename T>
+concept BlockLike = requires(T t, std::size_t requested_work) {
+    { t.unique_name } -> std::same_as<const std::string &>;
+    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
+    { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
+    { t.description } noexcept -> std::same_as<const std::string_view &>;
+
+    { t.isBlocking() } noexcept -> std::same_as<bool>;
+
+    { t.settings() } -> std::same_as<settings_base &>;
+    { t.work(requested_work) } -> std::same_as<work::Result>;
+
+    // N.B. TODO discuss these requirements
+    requires !std::is_copy_constructible_v<T>;
+    requires !std::is_copy_assignable_v<T>;
+    // requires !std::is_move_constructible_v<T>;
+    // requires !std::is_move_assignable_v<T>;
+};
 
 template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
@@ -269,9 +268,9 @@ static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
  *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
  *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
  *     if (n_readable == 0) {
- *         return { 0, gr::WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+ *         return { 0, gr::work::Status::INSUFFICIENT_INPUT_ITEMS };
  *     } else if (n_writable == 0) {
- *         return { 0, gr::WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+ *         return { 0, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS };
  *     }
  *     const std::size_t n_to_publish = std::min(n_readable, n_writable); // N.B. here enforcing N_input == N_output
  *
@@ -283,9 +282,9 @@ static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
  *     }, n_to_publish);
  *
  *     if (!reader.consume(n_to_publish)) {
- *         return { n_to_publish, gr::WorkReturnStatus::ERROR };
+ *         return { n_to_publish, gr::work::Status::ERROR };
  *     }
- *     return { n_to_publish, gr::WorkReturnStatus::OK };
+ *     return { n_to_publish, gr::work::Status::OK };
  * }
  * @endcode
  * <li> <b>case 4</b>:  Python -> map to cases 1-3 and/or dedicated callback (to-be-implemented)
@@ -314,8 +313,8 @@ struct Block : protected std::tuple<Arguments...> {
     alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
     alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadShallRun{ false };
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
-    alignas(hardware_destructive_interference_size) detail::WorkCounter ioWorkDone{};
-    alignas(hardware_destructive_interference_size) std::atomic<WorkReturnStatus> ioLastWorkStatus{ WorkReturnStatus::OK };
+    alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
+    alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
@@ -750,9 +749,9 @@ protected:
      * @brief
      * @return struct { std::size_t produced_work, work_return_t}
      */
-    WorkReturn
+    work::Result
     workInternal(std::size_t requested_work) {
-        using gr::WorkReturnStatus;
+        using gr::work::Status;
         using TInputTypes             = traits::block::input_port_types<Derived>;
         using TOutputTypes            = traits::block::output_port_types<Derived>;
 
@@ -789,17 +788,17 @@ protected:
                 std::size_t                           max_buffer        = ports_status.out_available;
                 const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
                 if (available_samples < 0 && max_buffer > 0) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::DONE };
+                    return { requested_work, 0_UZ, work::Status::DONE };
                 }
                 if (available_samples == 0) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::OK };
+                    return { requested_work, 0_UZ, work::Status::OK };
                 }
                 std::size_t samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (not ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (samples_to_process == 0) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
@@ -810,13 +809,13 @@ protected:
                 // the (source) node wants to determine the number of samples to process
                 std::size_t samples_to_process = available_samples(self());
                 if (samples_to_process == 0) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::OK };
+                    return { requested_work, 0_UZ, work::Status::OK };
                 }
                 if (not ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (not ports_status.spaceAvailableOnOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
@@ -834,7 +833,7 @@ protected:
                 // derive value from output buffer size
                 std::size_t samples_to_process = std::min(ports_status.out_available, ports_status.out_max_samples);
                 if (not ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
@@ -846,7 +845,7 @@ protected:
             ports_status.out_samples = ports_status.in_samples;
 
             if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
-                return { requested_work, 0_UZ, ports_status.in_at_least_one_port_has_data ? WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS : WorkReturnStatus::DONE };
+                return { requested_work, 0_UZ, ports_status.in_at_least_one_port_has_data ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::DONE };
             }
 
             if constexpr (Resampling::kEnabled) {
@@ -857,7 +856,7 @@ protected:
                                        || (static_cast<double>(ports_status.in_max_samples) * ratio < static_cast<double>(ports_status.out_min_samples));
                     assert(!is_ill_defined);
                     if (is_ill_defined) {
-                        return { requested_work, 0_UZ, WorkReturnStatus::ERROR };
+                        return { requested_work, 0_UZ, work::Status::ERROR };
                     }
 
                     ports_status.in_samples          = static_cast<std::size_t>(ports_status.in_samples / denominator) * denominator; // remove reminder
@@ -872,7 +871,7 @@ protected:
                     const std::size_t in_max_samples     = static_cast<std::size_t>(static_cast<double>(out_max_limit) / ratio);
                     std::size_t       in_max_wo_reminder = (in_max_samples / denominator) * denominator;
 
-                    if (ports_status.in_samples < in_min_wo_reminder) return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+                    if (ports_status.in_samples < in_min_wo_reminder) return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
                     ports_status.in_samples  = std::clamp(ports_status.in_samples, in_min_wo_reminder, in_max_wo_reminder);
                     ports_status.out_samples = numerator * (ports_status.in_samples / denominator);
                 }
@@ -881,10 +880,10 @@ protected:
             // TODO: special case for ports_status.in_samples == 0 ?
 
             if (not ports_status.enoughSamplesForOutputPorts(ports_status.out_samples)) {
-                return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
+                return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
             if (not ports_status.spaceAvailableOnOutputPorts(ports_status.out_samples)) {
-                return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
+                return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
             }
         }
 
@@ -983,7 +982,7 @@ protected:
                     }
                     const bool success = consume_readers(self(), n_samples_to_consume);
                     forward_tags();
-                    return { requested_work, n_samples_to_consume, success ? WorkReturnStatus::OK : WorkReturnStatus::ERROR };
+                    return { requested_work, n_samples_to_consume, success ? work::Status::OK : work::Status::ERROR };
                 }
             }
         }
@@ -1033,14 +1032,14 @@ protected:
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             // cannot use std::apply because it requires tuple_cat(input_spans, writers_tuple). The latter doesn't work because writers_tuple isn't copyable.
-            const WorkReturnStatus ret = [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
+            const work::Status ret = [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
                 return self().processBulk(std::get<InIdx>(input_spans)..., std::get<OutIdx>(writers_tuple)...);
             }(std::make_index_sequence<traits::block::input_ports<Derived>::size>(), std::make_index_sequence<traits::block::output_ports<Derived>::size>());
 
             write_to_outputs(ports_status.out_samples, writers_tuple);
             const bool success = consume_readers(self(), n_samples_to_consume);
             forward_tags();
-            return { requested_work, ports_status.in_samples, success ? ret : WorkReturnStatus::ERROR };
+            return { requested_work, ports_status.in_samples, success ? ret : work::Status::ERROR };
 
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (ports_status.in_samples != ports_status.out_samples)
@@ -1087,26 +1086,26 @@ protected:
             }
 #endif
             forward_tags();
-            return { requested_work, ports_status.in_samples, success ? WorkReturnStatus::OK : WorkReturnStatus::ERROR };
+            return { requested_work, ports_status.in_samples, success ? work::Status::OK : work::Status::ERROR };
         } // processOne(...) handling
         //        else {
         //            static_assert(gr::meta::always_false<Derived>, "neither processBulk(...) nor processOne(...) implemented");
         //        }
-        return { requested_work, 0_UZ, WorkReturnStatus::ERROR };
+        return { requested_work, 0_UZ, work::Status::ERROR };
     } // end: work_return_t work_internal() noexcept { ..}
 
 public:
-    WorkReturnStatus
+    work::Status
     invokeWork()
         requires(blockingIO)
     {
         auto [work_requested, work_done, last_status] = workInternal(ioRequestedWork.load(std::memory_order_relaxed));
         ioWorkDone.increment(work_requested, work_done);
-        if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == WorkReturnStatus::DONE && incWorkDone > 0) {
+        if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == work::Status::DONE && incWorkDone > 0) {
             // finished local iteration but need to report more work to be done until
             // external scheduler loop acknowledged all samples being processed
             // via the 'ioWorkDone.getAndReset()' call
-            last_status = WorkReturnStatus::OK;
+            last_status = work::Status::OK;
         }
         ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
 
@@ -1122,7 +1121,7 @@ public:
      * requested_work limit as an affine relation with the returned performed_work.
      * @return { requested_work, performed_work, status}
      */
-    WorkReturn
+    work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
@@ -1137,7 +1136,7 @@ public:
 #endif
                         for (int retryCount = 2; ioThreadShallRun && retryCount > 0; retryCount--) {
                             while (ioThreadShallRun && retryCount) {
-                                if (invokeWork() == WorkReturnStatus::DONE) {
+                                if (invokeWork() == work::Status::DONE) {
                                     break;
                                 } else {
                                     // processed data before shutting down wait (see below) and retry (here: once)
@@ -1160,13 +1159,13 @@ public:
                     // let user call '' explicitly
                 }
             }
-            const WorkReturnStatus lastStatus                     = ioLastWorkStatus.exchange(WorkReturnStatus::OK, std::memory_order_relaxed);
+            const work::Status lastStatus                         = ioLastWorkStatus.exchange(work::Status::OK, std::memory_order_relaxed);
             const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
             // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
 #if defined(__EMSCRIPTEN__)
             std::this_thread::sleep_for(std::chrono::nanoseconds(1));
 #endif
-            return { accumulatedRequestedWork, performedWork, performedWork > 0 ? WorkReturnStatus::OK : lastStatus };
+            return { accumulatedRequestedWork, performedWork, performedWork > 0 ? work::Status::OK : lastStatus };
         } else {
             return workInternal(requested_work);
         }
@@ -1396,7 +1395,7 @@ public:
         }
     } // end:: processOne
 
-    WorkReturn
+    work::Result
     work(std::size_t requested_work) noexcept {
         return base::work(requested_work);
     }
@@ -1548,7 +1547,7 @@ struct RegisterBlock {
 #ifdef FMT_FORMAT_H_
 
 template<>
-struct fmt::formatter<gr::WorkReturnStatus> {
+struct fmt::formatter<gr::work::Status> {
     static constexpr auto
     parse(const format_parse_context &ctx) {
         const auto it = ctx.begin();
@@ -1558,8 +1557,8 @@ struct fmt::formatter<gr::WorkReturnStatus> {
 
     template<typename FormatContext>
     auto
-    format(const gr::WorkReturnStatus &status, FormatContext &ctx) {
-        using enum gr::WorkReturnStatus;
+    format(const gr::work::Status &status, FormatContext &ctx) {
+        using enum gr::work::Status;
         switch (status) {
         case ERROR: return fmt::format_to(ctx.out(), "ERROR");
         case INSUFFICIENT_OUTPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_OUTPUT_ITEMS");
@@ -1573,7 +1572,7 @@ struct fmt::formatter<gr::WorkReturnStatus> {
 };
 
 template<>
-struct fmt::formatter<gr::WorkReturn> {
+struct fmt::formatter<gr::work::Result> {
     static constexpr auto
     parse(const format_parse_context &ctx) {
         const auto it = ctx.begin();
@@ -1583,7 +1582,7 @@ struct fmt::formatter<gr::WorkReturn> {
 
     template<typename FormatContext>
     auto
-    format(const gr::WorkReturn &work_return, FormatContext &ctx) {
+    format(const gr::work::Result &work_return, FormatContext &ctx) {
         return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
     }
 };

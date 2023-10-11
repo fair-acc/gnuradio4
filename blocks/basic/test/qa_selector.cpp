@@ -28,7 +28,7 @@ struct repeated_source : public gr::Block<repeated_source<T>> {
         }
     }
 
-    gr::WorkReturn
+    gr::work::Result
     work(std::size_t requested_work) {
         if (values_next == values.cend()) {
             values_next = values.cbegin();
@@ -50,10 +50,10 @@ struct repeated_source : public gr::Block<repeated_source<T>> {
 
             values_next++;
 
-            return { requested_work, 1UL, gr::WorkReturnStatus::OK };
+            return { requested_work, 1UL, gr::work::Status::OK };
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            return { requested_work, 1UL, gr::WorkReturnStatus::DONE };
+            return { requested_work, 1UL, gr::work::Status::DONE };
         }
     }
 };
