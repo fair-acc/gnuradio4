@@ -4,7 +4,7 @@
 #include <execution>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/dataset.hpp>
+#include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>

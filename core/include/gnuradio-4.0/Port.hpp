@@ -10,7 +10,7 @@
 #include "annotated.hpp"
 #include "Block.hpp"
 #include "CircularBuffer.hpp"
-#include "dataset.hpp"
+#include "DataSet.hpp"
 #include "tag.hpp"
 
 namespace gr {

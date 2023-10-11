@@ -4,7 +4,7 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/dataset.hpp>
+#include <gnuradio-4.0/DataSet.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
