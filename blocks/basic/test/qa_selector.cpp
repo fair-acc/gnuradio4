@@ -6,7 +6,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 
 #include <gnuradio-4.0/basic/selector.hpp>
 
@@ -133,7 +133,7 @@ execute_selector_test(test_definition definition) {
     const std::uint32_t                    sources_count = definition.input_values.size();
     const std::uint32_t                    sinks_count   = definition.output_values.size();
 
-    gr::graph                              graph;
+    gr::Graph                              graph;
     std::vector<repeated_source<double> *> sources;
     std::vector<validator_sink<double> *>  sinks;
     gr::basic::Selector<double>           *selector;

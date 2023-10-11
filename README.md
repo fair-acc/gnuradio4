@@ -9,7 +9,7 @@ A small proof-of-concept for evaluating efficient [directed graph](https://en.wi
 The expressed goal is to guide the low-level API design and functionality for the upcoming
 [GNU Radio 4.0](https://github.com/gnuradio/gnuradio/tree/dev-4.0) release.
 
-A [single header version](https://raw.githubusercontent.com/fair-acc/graph-prototype/single-header/singleheader/graph.hpp)
+A [single header version](https://raw.githubusercontent.com/fair-acc/graph-prototype/single-header/singleheader/Graph.hpp)
 is provided in the `singleheader/`subdirectory of the single-header branch.
 If you want to locally regenerate the single header file, just follow
 the [CI step](https://github.com/fair-acc/graph-prototype/blob/main/.github/workflows/single-header.yml#L38-L41).

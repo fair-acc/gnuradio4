@@ -5,7 +5,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/buffer.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -165,7 +165,7 @@ const boost::ut::suite PortApiTests = [] {
         using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
         PortOut<float, ExplicitUnlimitedSize> out;
         PortIn<float, ExplicitUnlimitedSize>  in;
-        std::vector<DynamicPort>             port_list;
+        std::vector<DynamicPort>              port_list;
 
         port_list.emplace_back(out, DynamicPort::non_owned_reference_tag{});
         port_list.emplace_back(in, DynamicPort::non_owned_reference_tag{});
@@ -178,7 +178,7 @@ const boost::ut::suite PortApiTests = [] {
         using PortDirection::OUTPUT;
 
         // Block need to be alive for as long as the flow is
-        grg::graph flow;
+        grg::Graph flow;
 
         // Generators
         auto &answer = flow.emplaceBlock<repeater_source<int, 42>>();

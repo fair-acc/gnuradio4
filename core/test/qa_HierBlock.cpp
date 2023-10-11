@@ -1,6 +1,6 @@
 #include <list>
 
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 namespace grg = gr;
@@ -45,9 +45,9 @@ protected:
 
     grg::scheduler::simple<> _scheduler;
 
-    grg::graph
+    grg::Graph
     make_graph() {
-        grg::graph graph;
+        grg::Graph graph;
         auto      &adder_block       = graph.emplaceBlock<adder<double>>({ { "name", "adder" } });
         auto      &left_scale_block  = graph.emplaceBlock<scale<double>>();
         auto      &right_scale_block = graph.emplaceBlock<scale<double>>();
@@ -77,22 +77,22 @@ public:
     }
 
     std::string_view
-    type_name() const override {
+    typeName() const override {
         return _type_name;
     }
 
     constexpr bool
-    is_blocking() const noexcept override {
+    isBlocking() const noexcept override {
         return false;
     }
 
     [[nodiscard]] constexpr std::size_t
-    available_input_samples(std::vector<std::size_t> &) const noexcept override {
+    availableInputSamples(std::vector<std::size_t> &) const noexcept override {
         return 0UL;
     }
 
     [[nodiscard]] constexpr std::size_t
-    available_output_samples(std::vector<std::size_t> &) const noexcept override {
+    availableOutputSamples(std::vector<std::size_t> &) const noexcept override {
         return 0UL;
     }
 
@@ -108,15 +108,15 @@ public:
     }
 
     void
-    set_name(std::string /*name*/) noexcept override {}
+    setName(std::string /*name*/) noexcept override {}
 
     [[nodiscard]] grg::property_map &
-    meta_information() noexcept override {
+    metaInformation() noexcept override {
         return _meta_information;
     }
 
     [[nodiscard]] const grg::property_map &
-    meta_information() const noexcept override {
+    metaInformation() const override {
         return _meta_information;
     }
 
@@ -126,7 +126,7 @@ public:
     }
 
     [[nodiscard]] std::string_view
-    unique_name() const override {
+    uniqueName() const override {
         return _unique_name;
     }
 };
@@ -182,15 +182,15 @@ struct cout_sink : public grg::Block<cout_sink<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), in, remaining);
 
-grg::graph
+grg::Graph
 make_graph(std::size_t events_count) {
-    grg::graph graph;
+    grg::Graph graph;
 
     auto      &source_leftBlock  = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
     auto      &source_rightBlock = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
     auto      &sink              = graph.emplaceBlock<cout_sink<double>>({ { "remaining", events_count } });
 
-    auto      &hier              = graph.add_block(std::make_unique<HierBlock<double>>());
+    auto      &hier              = graph.addBlock(std::make_unique<HierBlock<double>>());
 
     graph.dynamic_connect(source_leftBlock, 0, hier, 0);
     graph.dynamic_connect(source_rightBlock, 0, hier, 1);

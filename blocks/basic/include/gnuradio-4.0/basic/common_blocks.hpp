@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 
 using namespace gr::literals;
@@ -121,22 +121,22 @@ public:
     }
 
     std::string_view
-    type_name() const override {
+    typeName() const override {
         return _type_name;
     }
 
     constexpr bool
-    is_blocking() const noexcept override {
+    isBlocking() const noexcept override {
         return false;
     }
 
     [[nodiscard]] constexpr std::size_t
-    available_input_samples(std::vector<std::size_t> &) const noexcept override {
+    availableInputSamples(std::vector<std::size_t> &) const noexcept override {
         return 0_UZ;
     }
 
     [[nodiscard]] constexpr std::size_t
-    available_output_samples(std::vector<std::size_t> &) const noexcept override {
+    availableOutputSamples(std::vector<std::size_t> &) const noexcept override {
         return 0_UZ;
     }
 
@@ -183,15 +183,15 @@ public:
     }
 
     void
-    set_name(std::string /*name*/) noexcept override {}
+    setName(std::string /*name*/) noexcept override {}
 
     [[nodiscard]] gr::property_map &
-    meta_information() noexcept override {
+    metaInformation() noexcept override {
         return _meta_information;
     }
 
     [[nodiscard]] const gr::property_map &
-    meta_information() const noexcept override {
+    metaInformation() const override {
         return _meta_information;
     }
 
@@ -201,7 +201,7 @@ public:
     }
 
     [[nodiscard]] std::string_view
-    unique_name() const override {
+    uniqueName() const override {
         return unique_name_;
     }
 };

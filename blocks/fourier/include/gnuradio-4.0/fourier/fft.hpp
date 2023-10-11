@@ -197,14 +197,14 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         ds.signal_errors    = {};
-        ds.meta_information = { { { "sampleRate", sample_rate },
-                                  { "signalName", signal_name },
-                                  { "signalUnit", signal_unit },
-                                  { "signalMin", signal_min },
-                                  { "signalMax", signal_max },
-                                  { "fftSize", fftSize },
+        ds.meta_information = { { { "sample_rate", sample_rate },
+                                  { "signal_name", signal_name },
+                                  { "signal_unit", signal_unit },
+                                  { "signal_min", signal_min },
+                                  { "signal_max", signal_max },
+                                  { "fft_size", fftSize },
                                   { "window", window },
-                                  { "outputInDb", outputInDb },
+                                  { "output_in_db", outputInDb },
                                   { "numerator", this->numerator },
                                   { "denominator", this->denominator },
                                   { "stride", this->stride } } };

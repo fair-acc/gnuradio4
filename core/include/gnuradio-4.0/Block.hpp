@@ -130,7 +130,7 @@ concept BlockLike = requires(T t, std::size_t requested_work) {
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
     { t.description } noexcept -> std::same_as<const std::string_view &>;
 
-    { t.is_blocking() } noexcept -> std::same_as<bool>;
+    { t.isBlocking() } noexcept -> std::same_as<bool>;
 
     { t.settings() } -> std::same_as<settings_base &>;
     { t.work(requested_work) } -> std::same_as<WorkReturn>;
@@ -330,7 +330,7 @@ struct Block : protected std::tuple<Arguments...> {
     std::size_t                                                                                                         stride_counter = 0_UZ;
     const std::size_t                                                                                                   unique_id      = _unique_id_counter++;
     const std::string                                                                                                   unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                                 name        = gr::meta::type_name<Derived>();
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::uniqueName">>                                  name        = gr::meta::type_name<Derived>();
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">>      meta_information;
     constexpr static std::string_view                                                                                   description = static_cast<std::string_view>(Description::value);
 
@@ -506,7 +506,7 @@ public:
 
     template<gr::meta::array_or_vector_type Container>
     [[nodiscard]] constexpr std::size_t
-    available_input_samples(Container &data) const noexcept {
+    availableInputSamples(Container &data) const noexcept {
         if constexpr (gr::meta::vector_type<Container>) {
             data.resize(traits::block::input_port_types<Derived>::size);
         } else if constexpr (gr::meta::array_type<Container>) {
@@ -531,7 +531,7 @@ public:
 
     template<gr::meta::array_or_vector_type Container>
     [[nodiscard]] constexpr std::size_t
-    available_output_samples(Container &data) const noexcept {
+    availableOutputSamples(Container &data) const noexcept {
         if constexpr (gr::meta::vector_type<Container>) {
             data.resize(traits::block::output_port_types<Derived>::size);
         } else if constexpr (gr::meta::array_type<Container>) {
@@ -555,7 +555,7 @@ public:
     }
 
     [[nodiscard]] constexpr bool
-    is_blocking() const noexcept {
+    isBlocking() const noexcept {
         return blockingIO;
     }
 
@@ -1191,12 +1191,12 @@ blockDescription() noexcept {
     using ArgumentList         = typename TBlock::block_template_parameters;
     using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
     using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
-    constexpr bool is_blocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
+    constexpr bool kIsBlocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
                                                 gr::meta::type_name<DerivedBlock>(), Description::value._data,
-                                                is_blocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
+                                                kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
     gr::meta::typelist<SupportedTypes>::template apply_func([&](std::size_t index, auto &&t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
         ret += fmt::format("{}:{} ", index, type_name);

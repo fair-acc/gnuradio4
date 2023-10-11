@@ -1,6 +1,6 @@
 #include <list>
 
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 
@@ -49,12 +49,12 @@ main() {
     constexpr const std::size_t sources_count = 10;
     constexpr const std::size_t events_count  = 5;
 
-    gr::graph                   testGraph;
+    gr::Graph                   testGraph;
 
     // Adder has sources_count inputs in total, but let's create
     // sources_count / 2 inputs on construction, and change the number
     // via settings
-    auto &adder = testGraph.add_block(std::make_unique<multi_adder<double>>(sources_count / 2));
+    auto &adder = testGraph.addBlock(std::make_unique<multi_adder<double>>(sources_count / 2));
     auto &sink  = testGraph.emplaceBlock<cout_sink<double>>({ { "remaining", events_count } });
 
     // Function that adds a new source node to the graph, and connects

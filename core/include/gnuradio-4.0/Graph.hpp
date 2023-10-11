@@ -56,31 +56,31 @@ public:
             = delete;
 
     void
-    init_DynamicPorts() const {
+    initDynamicPorts() const {
         if (!_DynamicPorts_loaded) _DynamicPorts_loader();
     }
 
     gr::DynamicPort &
-    dynamic_input_port(std::size_t index) {
-        init_DynamicPorts();
+    dynamicInputPort(std::size_t index) { // TODO: do we need the 'dynamic' prefix here?
+        initDynamicPorts();
         return _dynamic_input_ports.at(index);
     }
 
     gr::DynamicPort &
-    dynamic_output_port(std::size_t index) {
-        init_DynamicPorts();
+    dynamicOutputPort(std::size_t index) { // TODO: do we need the 'dynamic' prefix here?
+        initDynamicPorts();
         return _dynamic_output_ports.at(index);
     }
 
     [[nodiscard]] auto
-    dynamic_input_ports_size() const {
-        init_DynamicPorts();
+    dynamicInputPortsSize() const { // TODO: return collection and rely on 'size()' of underlying collection
+        initDynamicPorts();
         return _dynamic_input_ports.size();
     }
 
     [[nodiscard]] auto
-    dynamic_output_ports_size() const {
-        init_DynamicPorts();
+    dynamicOutputPortsSize() const { // TODO: return collection and rely on 'size()' of underlying collection
+        initDynamicPorts();
         return _dynamic_output_ports.size();
     }
 
@@ -97,21 +97,21 @@ public:
      * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
      */
     [[nodiscard]] virtual constexpr bool
-    is_blocking() const noexcept
+    isBlocking() const noexcept
             = 0;
 
     /**
      * @brief number of available readable samples at the block's input ports
      */
     [[nodiscard]] virtual constexpr std::size_t
-    available_input_samples(std::vector<std::size_t> &) const noexcept
+    availableInputSamples(std::vector<std::size_t> &) const noexcept
             = 0;
 
     /**
      * @brief number of available writable samples at the block's output ports
      */
     [[nodiscard]] virtual constexpr std::size_t
-    available_output_samples(std::vector<std::size_t> &) const noexcept
+    availableOutputSamples(std::vector<std::size_t> &) const noexcept
             = 0;
 
     /**
@@ -125,26 +125,26 @@ public:
      * @brief the type of the node as a string
      */
     [[nodiscard]] virtual std::string_view
-    type_name() const
+    typeName() const
             = 0;
 
     /**
      * @brief user-defined name
-     * N.B. may not be unique -> ::unique_name
+     * N.B. may not be unique -> ::uniqueName
      */
     virtual void
-    set_name(std::string name) noexcept
+    setName(std::string name) noexcept
             = 0;
 
     /**
      * @brief used to store non-graph-processing information like UI block position etc.
      */
     [[nodiscard]] virtual property_map &
-    meta_information() noexcept
+    metaInformation() noexcept
             = 0;
 
     [[nodiscard]] virtual const property_map &
-    meta_information() const
+    metaInformation() const
             = 0;
 
     /**
@@ -152,7 +152,7 @@ public:
      * N.B. can be used to disambiguate in case user provided the same 'name()' for several blocks.
      */
     [[nodiscard]] virtual std::string_view
-    unique_name() const
+    uniqueName() const
             = 0;
 
     [[nodiscard]] virtual settings_base &
@@ -193,7 +193,7 @@ private:
     }
 
     void
-    create_DynamicPorts_loader() {
+    createDynamicPortsLoader() {
         _DynamicPorts_loader = [this] {
             if (_DynamicPorts_loaded) return;
 
@@ -239,21 +239,21 @@ public:
 
     ~BlockWrapper() override = default;
 
-    BlockWrapper() { create_DynamicPorts_loader(); }
+    BlockWrapper() { createDynamicPortsLoader(); }
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
     explicit BlockWrapper(Arg &&arg) : _block(std::forward<Arg>(arg)) {
-        create_DynamicPorts_loader();
+        createDynamicPortsLoader();
     }
 
     template<typename... Args>
         requires(sizeof...(Args) > 1)
     explicit BlockWrapper(Args &&...args) : _block{ std::forward<Args>(args)... } {
-        create_DynamicPorts_loader();
+        createDynamicPortsLoader();
     }
 
-    explicit BlockWrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _block{ std::move(init_parameter) } { create_DynamicPorts_loader(); }
+    explicit BlockWrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _block{ std::move(init_parameter) } { createDynamicPortsLoader(); }
 
     void
     init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
@@ -266,18 +266,18 @@ public:
     }
 
     [[nodiscard]] constexpr bool
-    is_blocking() const noexcept override {
-        return blockRef().is_blocking();
+    isBlocking() const noexcept override {
+        return blockRef().isBlocking();
     }
 
     [[nodiscard]] constexpr std::size_t
-    available_input_samples(std::vector<std::size_t> &data) const noexcept override {
-        return blockRef().available_input_samples(data);
+    availableInputSamples(std::vector<std::size_t> &data) const noexcept override {
+        return blockRef().availableInputSamples(data);
     }
 
     [[nodiscard]] constexpr std::size_t
-    available_output_samples(std::vector<std::size_t> &data) const noexcept override {
-        return blockRef().available_output_samples(data);
+    availableOutputSamples(std::vector<std::size_t> &data) const noexcept override {
+        return blockRef().availableOutputSamples(data);
     }
 
     [[nodiscard]] std::string_view
@@ -286,27 +286,27 @@ public:
     }
 
     void
-    set_name(std::string name) noexcept override {
+    setName(std::string name) noexcept override {
         blockRef().name = std::move(name);
     }
 
     [[nodiscard]] std::string_view
-    type_name() const override {
+    typeName() const override {
         return _type_name;
     }
 
     [[nodiscard]] property_map &
-    meta_information() noexcept override {
+    metaInformation() noexcept override {
         return blockRef().meta_information;
     }
 
     [[nodiscard]] const property_map &
-    meta_information() const noexcept override {
+    metaInformation() const override {
         return blockRef().meta_information;
     }
 
     [[nodiscard]] std::string_view
-    unique_name() const override {
+    uniqueName() const override {
         return blockRef().unique_name;
     }
 
@@ -393,19 +393,19 @@ public:
     }
 };
 
-struct graph {
+struct Graph {
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
 private:
-    std::vector<std::function<ConnectionResult(graph &)>> _connection_definitions;
+    std::vector<std::function<ConnectionResult(Graph &)>> _connection_definitions;
     std::vector<std::unique_ptr<BlockModel>>              _blocks;
     std::vector<edge>                                     _edges;
 
     template<typename TBlock>
     std::unique_ptr<BlockModel> &
-    find_block(TBlock &what) {
+    findBlock(TBlock &what) {
         static_assert(!std::is_pointer_v<std::remove_cvref_t<TBlock>>);
         auto it = [&, this] {
             if constexpr (std::is_same_v<TBlock, BlockModel>) {
@@ -421,19 +421,19 @@ private:
 
     template<typename TBlock>
     [[nodiscard]] DynamicPort &
-    dynamic_output_port(TBlock &node, std::size_t index) {
-        return find_block(node)->dynamic_output_port(index);
+    dynamicOutputPort(TBlock &node, std::size_t index) {
+        return findBlock(node)->dynamicOutputPort(index);
     }
 
     template<typename TBlock>
     [[nodiscard]] DynamicPort &
-    dynamic_input_port(TBlock &node, std::size_t index) {
-        return find_block(node)->dynamic_input_port(index);
+    dynamicInputPort(TBlock &node, std::size_t index) {
+        return findBlock(node)->dynamicInputPort(index);
     }
 
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] ConnectionResult
-    connect_impl(Source &src_block_raw, SourcePort &source_port, Destination &dst_block_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
+    connectImpl(Source &src_block_raw, SourcePort &source_port, Destination &dst_block_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
                  std::string_view name = "unnamed edge") {
         static_assert(std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>, "The source port type needs to match the sink port type");
 
@@ -444,8 +444,8 @@ private:
 
         auto result = source_port.connect(destination_port);
         if (result == ConnectionResult::SUCCESS) {
-            auto *src_block = find_block(src_block_raw).get();
-            auto *dst_block = find_block(dst_block_raw).get();
+            auto *src_block = findBlock(src_block_raw).get();
+            auto *dst_block = findBlock(dst_block_raw).get();
             _edges.emplace_back(src_block, src_port_index, dst_block, src_port_index, min_buffer_size, weight, name);
         }
 
@@ -456,12 +456,12 @@ private:
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
     template<typename Source, typename Port, std::size_t src_port_index = 1_UZ>
-    struct source_connector {
-        graph  &self;
+    struct SourceConnector {
+        Graph  &self;
         Source &source;
         Port   &port;
 
-        source_connector(graph &_self, Source &_source, Port &_port) : self(_self), source(_source), port(_port) {}
+        SourceConnector(Graph &_self, Source &_source, Port &_port) : self(_self), source(_source), port(_port) {}
 
     private:
         template<typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
@@ -475,8 +475,8 @@ private:
             if (!is_block_known(source) || !is_block_known(destination)) {
                 throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
             }
-            self._connection_definitions.push_back([source_ = &source, source_port = &port, destination = &destination, destination_port = &destination_port](graph &graph) {
-                return graph.connect_impl<src_port_index, dst_port_index>(*source_, *source_port, *destination, *destination_port);
+            self._connection_definitions.push_back([source_ = &source, source_port = &port, destination = &destination, destination_port = &destination_port](Graph &graph) {
+                return graph.connectImpl<src_port_index, dst_port_index>(*source_, *source_port, *destination, *destination_port);
             });
             return ConnectionResult::SUCCESS;
         }
@@ -508,13 +508,13 @@ private:
             return to<dst_port_index, Destination>(destination);
         }
 
-        source_connector(const source_connector &) = delete;
-        source_connector(source_connector &&)      = delete;
-        source_connector &
-        operator=(const source_connector &)
+        SourceConnector(const SourceConnector &) = delete;
+        SourceConnector(SourceConnector &&)      = delete;
+        SourceConnector &
+        operator=(const SourceConnector &)
                 = delete;
-        source_connector &
-        operator=(source_connector &&)
+        SourceConnector &
+        operator=(SourceConnector &&)
                 = delete;
     };
 
@@ -531,14 +531,14 @@ private:
     connect(Source &source, Port Source::*member_ptr);
 
 public:
-    graph(graph &)  = delete;
-    graph(graph &&) = default;
-    graph()         = default;
-    graph &
-    operator=(graph &)
+    Graph(Graph &)  = delete;
+    Graph(Graph &&) = default;
+    Graph()         = default;
+    Graph &
+    operator=(Graph &)
             = delete;
-    graph &
-    operator=(graph &&)
+    Graph &
+    operator=(Graph &&)
             = default;
 
     /**
@@ -559,8 +559,8 @@ public:
     }
 
     BlockModel &
-    add_block(std::unique_ptr<BlockModel> node) {
-        auto &new_block_ref = _blocks.emplace_back(std::move(node));
+    addBlock(std::unique_ptr<BlockModel> block) {
+        auto &new_block_ref = _blocks.emplace_back(std::move(block));
         new_block_ref->init(progress, ioThreadPool);
         return *new_block_ref.get();
     }
@@ -590,7 +590,7 @@ public:
     [[nodiscard]] auto
     connect(Source &source) {
         auto &port = outputPort<src_port_index>(&source);
-        return graph::source_connector<Source, std::remove_cvref_t<decltype(port)>, src_port_index>(*this, source, port);
+        return Graph::SourceConnector<Source, std::remove_cvref_t<decltype(port)>, src_port_index>(*this, source, port);
     }
 
     template<fixed_string src_port_name, typename Source>
@@ -609,7 +609,7 @@ public:
     template<typename Source, typename Port>
     [[nodiscard]] auto
     connect(Source &source, Port Source::*member_ptr) {
-        return graph::source_connector<Source, Port>(*this, source, std::invoke(member_ptr, source));
+        return Graph::SourceConnector<Source, Port>(*this, source, std::invoke(member_ptr, source));
     }
 
     template<typename Source, typename Destination>
@@ -617,34 +617,34 @@ public:
     ConnectionResult
     dynamic_connect(Source &src_block_raw, std::size_t src_port_index, Destination &dst_block_raw, std::size_t dst_port_index, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
                     std::string_view name = "unnamed edge") {
-        auto result = dynamic_output_port(src_block_raw, src_port_index).connect(dynamic_input_port(dst_block_raw, dst_port_index));
+        auto result = dynamicOutputPort(src_block_raw, src_port_index).connect(dynamicInputPort(dst_block_raw, dst_port_index));
         if (result == ConnectionResult::SUCCESS) {
-            auto *src_block = find_block(src_block_raw).get();
-            auto *dst_block = find_block(dst_block_raw).get();
+            auto *src_block = findBlock(src_block_raw).get();
+            auto *dst_block = findBlock(dst_block_raw).get();
             _edges.emplace_back(src_block, src_port_index, dst_block, src_port_index, min_buffer_size, weight, name);
         }
         return result;
     }
 
-    const std::vector<std::function<ConnectionResult(graph &)>> &
-    connection_definitions() {
+    const std::vector<std::function<ConnectionResult(Graph &)>> &
+    connections() {
         return _connection_definitions;
     }
 
     void
-    clear_connection_definitions() {
+    clearConnections() {
         _connection_definitions.clear();
     }
 
-    template<typename F>
+    template<typename F> // TODO: F must be constraint by a descriptive concept
     void
-    for_each_block(F &&f) const {
+    forEachBlock(F &&f) const {
         std::for_each(_blocks.cbegin(), _blocks.cend(), [f](const auto &block_ptr) { f(*block_ptr.get()); });
     }
 
-    template<typename F>
+    template<typename F> // TODO: F must be constraint by a descriptive concept
     void
-    for_each_edge(F &&f) const {
+    forEachEdge(F &&f) const {
         std::for_each(_edges.cbegin(), _edges.cend(), [f](const auto &edge) { f(edge); });
     }
 };

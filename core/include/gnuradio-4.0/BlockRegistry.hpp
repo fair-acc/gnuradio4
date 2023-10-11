@@ -7,7 +7,7 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "graph.hpp"
+#include "Graph.hpp"
 
 namespace gr {
 
@@ -17,7 +17,7 @@ using namespace std::string_view_literals;
 class BlockRegistry {
 private:
     using block_type_handler = std::function<void(std::unique_ptr<gr::BlockModel> &, const property_map &)>;
-    std::vector<std::string>                                                            _block_types;
+    std::vector<std::string>                                                             _block_types;
     std::unordered_map<std::string, std::unordered_map<std::string, block_type_handler>> _block_type_handlers;
 
     template<template<typename...> typename TBlock, typename... TBlockParameters>
@@ -68,8 +68,8 @@ private:
 public:
     template<template<typename...> typename TBlock, typename... TBlockParameters>
     void
-     add_block_type(std::string block_type) {
-        auto &block_handlers                                       = findBlock_type_handlers_map(block_type);
+    add_block_type(std::string block_type) {
+        auto &block_handlers                                         = findBlock_type_handlers_map(block_type);
         block_handlers[encoded_list_of_types<TBlockParameters...>()] = create_handler<TBlock, TBlockParameters...>();
         fmt::print("Registered {} {}\n", block_type, encoded_list_of_types<TBlockParameters...>());
     }
@@ -86,7 +86,7 @@ public:
         if (block_it == _block_type_handlers.end()) return nullptr;
 
         auto &block_handlers = block_it->second;
-        auto  handler_it    = block_handlers.find(std::string(type));
+        auto  handler_it     = block_handlers.find(std::string(type));
         if (handler_it == block_handlers.end()) return nullptr;
 
         handler_it->second(result, params);

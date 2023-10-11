@@ -4,7 +4,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/buffer.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
@@ -61,7 +61,7 @@ const boost::ut::suite TagPropagation = [] {
 
     "tag_source"_test = [] {
         std::int64_t n_samples = 1024;
-        graph        testGraph;
+        Graph        testGraph;
         auto        &src = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
         src.tags         = {
             // TODO: allow parameter settings to include maps?!?

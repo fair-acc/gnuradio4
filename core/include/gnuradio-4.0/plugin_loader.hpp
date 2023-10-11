@@ -12,7 +12,7 @@
 
 #include <dlfcn.h>
 
-#include "graph.hpp"
+#include "Graph.hpp"
 #include "plugin.hpp"
 
 using plugin_create_function_t  = void  (*)(gp_plugin_base **);
@@ -199,7 +199,7 @@ public:
         if (!block_load) {
             throw fmt::format("Unable to create node");
         }
-        return graph.add_block(std::move(block_load));
+        return graph.addBlock(std::move(block_load));
     }
 };
 #endif

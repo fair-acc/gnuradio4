@@ -8,7 +8,7 @@
 #include <dlfcn.h>
 
 #include "BlockRegistry.hpp"
-#include "graph.hpp"
+#include "Graph.hpp"
 
 #include <gnuradio-plugin_export.h>
 

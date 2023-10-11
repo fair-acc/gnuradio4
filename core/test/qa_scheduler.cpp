@@ -111,13 +111,13 @@ public:
     }
 };
 
-gr::graph
+gr::Graph
 get_graph_linear(tracer &trace) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
 
     // Blocks need to be alive for as long as the flow is
-    gr::graph flow;
+    gr::Graph flow;
     // Generators
     auto &source1      = flow.emplaceBlock<count_source<int, 100000>>(trace, "s1");
     auto &scale_block1 = flow.emplaceBlock<scale<int, 2>>(trace, "mult1");
@@ -131,13 +131,13 @@ get_graph_linear(tracer &trace) {
     return flow;
 }
 
-gr::graph
+gr::Graph
 get_graph_parallel(tracer &trace) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
 
     // Blocks need to be alive for as long as the flow is
-    gr::graph flow;
+    gr::Graph flow;
     // Generators
     auto &source1       = flow.emplaceBlock<count_source<int, 100000>>(trace, "s1");
     auto &scale_block1a = flow.emplaceBlock<scale<int, 2>>(trace, "mult1a");
@@ -173,13 +173,13 @@ get_graph_parallel(tracer &trace) {
  * │           │
  * └───────────┘
  */
-gr::graph
+gr::Graph
 get_graph_scaled_sum(tracer &trace) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
 
     // Blocks need to be alive for as long as the flow is
-    gr::graph flow;
+    gr::Graph flow;
 
     // Generators
     auto &source1     = flow.emplaceBlock<count_source<int, 100000>>(trace, "s1");

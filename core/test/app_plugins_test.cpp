@@ -65,7 +65,7 @@ main(int argc, char *argv[]) {
         assert(std::ranges::find(known, required) != known.end());
     }
 
-    grg::graph testGraph;
+    grg::Graph testGraph;
 
     // Instantiate the node that is defined in a plugin
     auto &block_source = context.loader.instantiate_in_graph(testGraph, names::fixed_source, "double");
@@ -86,7 +86,7 @@ main(int argc, char *argv[]) {
     auto block_sink_load             = context.loader.instantiate(names::cout_sink, "double", block_sink_params);
 
     assert(block_sink_load);
-    auto &block_sink                    = testGraph.add_block(std::move(block_sink_load));
+    auto &block_sink                    = testGraph.addBlock(std::move(block_sink_load));
 
     auto  connection_1 [[maybe_unused]] = testGraph.dynamic_connect(block_source, 0, block_multiply_1, 0);
     auto  connection_2 [[maybe_unused]] = testGraph.dynamic_connect(block_multiply_1, 0, block_multiply_2, 0);

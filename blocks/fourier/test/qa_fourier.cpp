@@ -5,7 +5,7 @@
 #include <fmt/format.h>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/graph.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/scheduler.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
@@ -278,7 +278,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using namespace boost::ut;
         using Scheduler      = gr::scheduler::simple<>;
         auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
-        gr::graph flow1;
+        gr::Graph flow1;
         auto     &source1  = flow1.emplaceBlock<CountSource<double>>();
         auto     &fftBlock = flow1.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
         std::ignore        = flow1.connect<"out">(source1).to<"in">(fftBlock);
@@ -286,7 +286,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
-            gr::graph flow2;
+            gr::Graph flow2;
             auto     &source2 = flow2.emplaceBlock<CountSource<double>>();
             auto     &fft2    = flow2.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
             std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);

@@ -124,7 +124,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     "FixedSourceToSink"_test = [] {
         auto block_source = context().loader.instantiate(names::fixed_source, "double");
         auto block_sink   = context().loader.instantiate(names::cout_sink, "double");
-        auto connection_1 = block_source->dynamic_output_port(0).connect(block_sink->dynamic_input_port(0));
+        auto connection_1 = block_source->dynamicOutputPort(0).connect(block_sink->dynamicInputPort(0));
         expect(connection_1 == grg::ConnectionResult::SUCCESS);
     };
 
@@ -140,8 +140,8 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         block_sink_params["total_count"] = 100_UZ;
         auto block_sink                  = context().loader.instantiate(names::cout_sink, "double");
 
-        auto connection_1                = block_source->dynamic_output_port(0).connect(block_multiply->dynamic_input_port(0));
-        auto connection_2                = block_multiply->dynamic_output_port(0).connect(block_sink->dynamic_input_port(0));
+        auto connection_1                = block_source->dynamicOutputPort(0).connect(block_multiply->dynamicInputPort(0));
+        auto connection_2                = block_multiply->dynamicOutputPort(0).connect(block_sink->dynamicInputPort(0));
 
         expect(connection_1 == grg::ConnectionResult::SUCCESS);
         expect(connection_2 == grg::ConnectionResult::SUCCESS);
@@ -154,7 +154,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     };
 
     "Graph"_test = [] {
-        grg::graph testGraph;
+        grg::Graph testGraph;
 
         // Instantiate the node that is defined in a plugin
         auto &block_source = context().loader.instantiate_in_graph(testGraph, names::fixed_source, "double");
@@ -175,7 +175,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         gr::property_map block_sink_params;
         block_sink_params["total_count"] = 100_UZ;
         auto  block_sink_load            = context().loader.instantiate(names::cout_sink, "double", block_sink_params);
-        auto &block_sink                 = testGraph.add_block(std::move(block_sink_load));
+        auto &block_sink                 = testGraph.addBlock(std::move(block_sink_load));
 
         auto  connection_1               = testGraph.dynamic_connect(block_source, 0, block_multiply_double, 0);
         auto  connection_2               = testGraph.dynamic_connect(block_multiply_double, 0, block_convert_to_float, 0);
