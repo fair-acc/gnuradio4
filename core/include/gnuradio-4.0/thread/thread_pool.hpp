@@ -20,8 +20,8 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include "../WaitStrategy.hpp"
 #include "thread_affinity.hpp"
-#include "../wait_strategy.hpp"
 
 namespace gr::thread_pool {
 namespace detail {
@@ -176,9 +176,9 @@ using fixed_string = basic_fixed_string<char, N>;
  * https://en.cppreference.com/w/cpp/utility/functional/move_only_function/move_only_function
  */
 class move_only_function {
-    using FunPtr          = std::unique_ptr<void, void (*)(void *)>;
-    FunPtr _erased_fun    = { nullptr, [](void *) {} };
-    void (*_call)(void *) = nullptr;
+    using FunPtr            = std::unique_ptr<void, void (*)(void *)>;
+    FunPtr _erased_fun      = { nullptr, [](void *) {} };
+    void   (*_call)(void *) = nullptr;
 
 public:
     constexpr move_only_function() = default;
@@ -732,7 +732,7 @@ private:
                 running = false;
             } else if (timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
                 unsigned long nThreads = numThreads();
-                while (nThreads > minThreads()) {                   // compare and swap loop
+                while (nThreads > minThreads()) { // compare and swap loop
                     if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
                         _numThreads.notify_all();
                         if (nThreads == 1) { // cleanup last thread

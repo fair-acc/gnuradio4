@@ -1,5 +1,5 @@
-#ifndef GNURADIO_HISTORY_BUFFER_HPP
-#define GNURADIO_HISTORY_BUFFER_HPP
+#ifndef GNURADIO_HISTORYBUFFER_HPP
+#define GNURADIO_HISTORYBUFFER_HPP
 
 #include <algorithm>
 #include <array>
@@ -42,7 +42,7 @@ namespace gr {
  * buffer.get_span(1);     // span: [2, 3, 4, 5]
  */
 template<typename T, std::size_t N = std::dynamic_extent, typename Allocator = std::allocator<T>>
-class history_buffer {
+class HistoryBuffer {
     using signed_index_type = std::make_signed_t<std::size_t>;
     using buffer_type       = typename std::conditional_t<N == std::dynamic_extent, std::vector<T, Allocator>, std::array<T, N * 2>>;
     using size_type         = typename std::conditional_t<N == std::dynamic_extent, std::size_t, std::size_t>;
@@ -65,9 +65,9 @@ class history_buffer {
     }
 
 public:
-    constexpr explicit history_buffer() noexcept { static_assert(N != std::dynamic_extent, "need to specify capacity"); }
+    constexpr explicit HistoryBuffer() noexcept { static_assert(N != std::dynamic_extent, "need to specify capacity"); }
 
-    constexpr explicit history_buffer(size_t capacity) : _buffer(capacity * 2), _capacity(capacity) {
+    constexpr explicit HistoryBuffer(size_t capacity) : _buffer(capacity * 2), _capacity(capacity) {
         if (capacity == 0) {
             throw std::out_of_range("capacity is zero");
         }
@@ -221,4 +221,4 @@ public:
 
 } // namespace gr
 
-#endif // GNURADIO_HISTORY_BUFFER_HPP
+#endif // GNURADIO_HISTORYBUFFER_HPP

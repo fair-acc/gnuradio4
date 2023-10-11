@@ -1,5 +1,5 @@
-#ifndef GNURADIO_CIRCULAR_BUFFER_HPP
-#define GNURADIO_CIRCULAR_BUFFER_HPP
+#ifndef GNURADIO_CIRCULARBUFFER_HPP
+#define GNURADIO_CIRCULARBUFFER_HPP
 
 #if defined(_LIBCPP_VERSION) and _LIBCPP_VERSION < 16000
 #include <experimental/memory_resource>
@@ -51,10 +51,10 @@ static constexpr bool has_posix_mmap_interface = false;
 }
 #endif
 
-#include "buffer.hpp"
-#include "claim_strategy.hpp"
-#include "sequence.hpp"
-#include "wait_strategy.hpp"
+#include "Buffer.hpp"
+#include "ClaimStrategy.hpp"
+#include "Sequence.hpp"
+#include "WaitStrategy.hpp"
 
 namespace gr {
 
@@ -216,10 +216,10 @@ public:
  * for more details see
  */
 template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-class circular_buffer
+class CircularBuffer
 {
     using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = circular_buffer<T, SIZE, producer_type, WAIT_STRATEGY>;
+    using BufferType        = CircularBuffer<T, SIZE, producer_type, WAIT_STRATEGY>;
     using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
     using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
     using signed_index_type = Sequence::signed_index_type;
@@ -388,7 +388,7 @@ class circular_buffer
             return *this;
         }
 
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
             try {
@@ -499,7 +499,7 @@ class circular_buffer
         };
         ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
 
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return circular_buffer(_buffer); };
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
@@ -542,13 +542,13 @@ class circular_buffer
     }
 
     std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    explicit circular_buffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    explicit CircularBuffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
-    circular_buffer() = delete;
-    explicit circular_buffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
+    CircularBuffer() = delete;
+    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
         : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
-    ~circular_buffer() = default;
+    ~CircularBuffer() = default;
 
     [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
     [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
@@ -561,9 +561,9 @@ public:
     [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
 
 };
-static_assert(Buffer<circular_buffer<int32_t>>);
+static_assert(Buffer<CircularBuffer<int32_t>>);
 // clang-format on
 
 } // namespace gr
 
-#endif // GNURADIO_CIRCULAR_BUFFER_HPP
+#endif // GNURADIO_CIRCULARBUFFER_HPP

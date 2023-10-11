@@ -1,5 +1,5 @@
-#ifndef GNURADIO_WAIT_STRATEGY_HPP
-#define GNURADIO_WAIT_STRATEGY_HPP
+#ifndef GNURADIO_WAITSTRATEGY_HPP
+#define GNURADIO_WAITSTRATEGY_HPP
 
 #include <condition_variable>
 #include <atomic>
@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-#include "sequence.hpp"
+#include "Sequence.hpp"
 
 namespace gr {
 // clang-format off
@@ -371,4 +371,4 @@ public:
 } // namespace gr
 
 
-#endif // GNURADIO_WAIT_STRATEGY_HPP
+#endif // GNURADIO_WAITSTRATEGY_HPP

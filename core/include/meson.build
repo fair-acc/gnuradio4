@@ -2,25 +2,21 @@
 graph_dep = declare_dependency(include_directories: '.', dependencies : [fmt_dep, reflcpp_dep, pmt_dep])
 
 header_files = [
-    'vir/detail.h',
-    'vir/simd_bit.h',
-    'vir/simd_bitset.h',
-    'vir/simd_cast.h',
-    'vir/simd_float_ops.h',
-    'vir/simd_resize.h',
-    'vir/simd.h',
-    'buffer_skeleton.hpp',
-    'buffer.hpp',
-    'circular_buffer.hpp',
-    'claim_strategy.hpp',
+    'BufferSkeleton.hpp',
+    'Buffer.hpp',
+    'CircularBuffer.hpp',
+    'ClaimStrategy.hpp',
     'Graph.hpp',
     'BlockTraits.hpp',
     'Block.hpp',
     'PortTraits.hpp',
     'Port.hpp',
-    'sequence.hpp',
+    'Sequence.hpp',
+    'settings.hpp',
     'typelist.hpp',
+    'tag.hpp',
+    'transactions.hpp',
     'utils.hpp',
-    'wait_strategy.hpp'
+    'WaitStrategy.hpp'
 ]
 install_headers(header_files, subdir : 'graph-prototype', preserve_path: true)

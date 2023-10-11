@@ -1,5 +1,5 @@
-#ifndef GNURADIO_CLAIM_STRATEGY_HPP
-#define GNURADIO_CLAIM_STRATEGY_HPP
+#ifndef GNURADIO_CLAIMSTRATEGY_HPP
+#define GNURADIO_CLAIMSTRATEGY_HPP
 
 #include <cassert>
 #include <concepts>
@@ -11,8 +11,8 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "sequence.hpp"
-#include "wait_strategy.hpp"
+#include "Sequence.hpp"
+#include "WaitStrategy.hpp"
 
 namespace gr {
 
@@ -323,4 +323,4 @@ using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY
 
 } // namespace gr
 
-#endif // GNURADIO_CLAIM_STRATEGY_HPP
+#endif // GNURADIO_CLAIMSTRATEGY_HPP

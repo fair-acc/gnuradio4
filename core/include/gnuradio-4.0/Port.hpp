@@ -9,7 +9,7 @@
 
 #include "annotated.hpp"
 #include "Block.hpp"
-#include "circular_buffer.hpp"
+#include "CircularBuffer.hpp"
 #include "dataset.hpp"
 #include "tag.hpp"
 
@@ -151,9 +151,9 @@ template<typename T>
 using is_tag_buffer_attribute = std::bool_constant<IsTagBufferAttribute<T>>;
 
 template<typename T>
-struct DefaultStreamBuffer : StreamBufferType<gr::circular_buffer<T>> {};
+struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::circular_buffer<tag_t>> {};
+struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<tag_t>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
