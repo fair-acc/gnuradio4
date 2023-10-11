@@ -298,7 +298,7 @@ get(const property_map &m, const std::string_view &key) {
  * if data is not being retrieved in time, or non-blocking, i.e. data being dropped when
  * the user-defined buffer size is full.
  * N.B. due to the nature of the GR scheduler, signals from the same sink are notified
- * synchronuously (/asynchronuously) if handled by the same (/different) sink block.
+ * synchronously (/asynchronously) if handled by the same (/different) sink block.
  *
  * @tparam T input sample type
  */

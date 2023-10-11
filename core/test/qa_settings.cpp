@@ -302,9 +302,9 @@ const boost::ut::suite SettingsTests = [] {
         block1.settings().update_active_parameters();
 
         // src -> block1 -> block2 -> sink
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
         gr::scheduler::simple sched{ std::move(testGraph), thread_pool };
@@ -433,9 +433,9 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block2.denominator, std::size_t(5)));
 
         // src -> block1 -> block2 -> sink
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();

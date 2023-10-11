@@ -61,7 +61,7 @@ struct adder : public grg::Block<adder<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
-using grg::port_type_t::STREAM, grg::port_direction_t::INPUT, grg::port_direction_t::OUTPUT;
+using grg::PortType::STREAM, grg::PortDirection::INPUT, grg::PortDirection::OUTPUT;
 
 template<typename T, std::size_t Count = 2>
 class duplicate : public grg::Block<duplicate<T, Count>, gr::meta::typelist<grg::PortInNamed<T, "in">>, grg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {

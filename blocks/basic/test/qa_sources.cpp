@@ -38,8 +38,8 @@ const boost::ut::suite TagTests = [] {
         };
         auto &sink1 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink1" } });
         auto &sink2 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink2" } });
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink1)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink2)));
 
         scheduler::simple sched{ std::move(testGraph) };
         if constexpr (!useIoThreadPool) {

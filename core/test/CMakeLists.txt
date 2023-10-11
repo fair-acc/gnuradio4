@@ -31,7 +31,7 @@ endfunction()
 
 add_ut_test(qa_buffer)
 add_ut_test(qa_DynamicBlock)
-add_ut_test(qa_dynamic_port)
+add_ut_test(qa_DynamicPort)
 add_ut_test(qa_HierBlock)
 add_ut_test(qa_Block)
 add_ut_test(qa_scheduler)

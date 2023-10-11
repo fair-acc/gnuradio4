@@ -8,7 +8,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "BlockTraits.hpp"
-#include "port.hpp"
+#include "Port.hpp"
 #include "sequence.hpp"
 #include "tag.hpp"
 #include "thread/thread_pool.hpp"
@@ -57,7 +57,7 @@ invokeProcessOneWithOrWithoutOffset(T &node, std::size_t offset, const Us &...in
         return node.processOne(inputs...);
 }
 
-//TODO: inline in work namespace and rename to Status
+// TODO: inline in work namespace and rename to Status
 enum class WorkReturnStatus {
     ERROR                     = -100, /// error occurred in the work function
     INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
@@ -66,22 +66,22 @@ enum class WorkReturnStatus {
     OK                        = 0,    /// work call was successful and return values in i/o structs are valid
 };
 
-//TODO: inline in work namespace and rename WorkReturn to something better 'WorkResult'?
+// TODO: inline in work namespace and rename WorkReturn to something better 'WorkResult'?
 struct WorkReturn {
-    std::size_t          requested_work = std::numeric_limits<std::size_t>::max();
-    std::size_t          performed_work = 0;
-    WorkReturnStatus     status         = WorkReturnStatus::OK;
+    std::size_t      requested_work = std::numeric_limits<std::size_t>::max();
+    std::size_t      performed_work = 0;
+    WorkReturnStatus status         = WorkReturnStatus::OK;
 };
 
 template<std::size_t Index, typename Self>
 [[nodiscard]] constexpr auto &
 inputPort(Self *self) noexcept {
-    using requested_port_type = typename traits::block::input_ports<Self>::template at<Index>;
+    using TRequestedPortType = typename traits::block::input_ports<Self>::template at<Index>;
     if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
-        using member_descriptor = traits::block::get_port_member_descriptor<Self, requested_port_type>;
+        using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
         return member_descriptor()(*self);
     } else {
-        return std::get<requested_port_type>(*self);
+        return std::get<TRequestedPortType>(*self);
     }
 }
 
@@ -305,7 +305,7 @@ struct Block : protected std::tuple<Arguments...> {
     using base_t                     = Block<Derived, Arguments...>;
     using derived_t                  = Derived;
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
-    using block_template_parameters   = meta::typelist<Arguments...>;
+    using block_template_parameters  = meta::typelist<Arguments...>;
     using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1_UZ, 1_UZ, true>>;
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0_UZ, true>>;
@@ -334,7 +334,7 @@ struct Block : protected std::tuple<Arguments...> {
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">>      meta_information;
     constexpr static std::string_view                                                                                   description = static_cast<std::string_view>(Description::value);
 
-    struct ports_status_t {
+    struct PortsStatus {
         std::size_t in_min_samples{ std::numeric_limits<std::size_t>::min() };         // max of `port.min_buffer_size()` of all input ports
         std::size_t in_max_samples{ std::numeric_limits<std::size_t>::max() };         // min of `port.max_buffer_size()` of all input ports
         std::size_t in_available{ std::numeric_limits<std::size_t>::max() };           // min of `port.streamReader().available()` of all input ports
@@ -354,17 +354,17 @@ struct Block : protected std::tuple<Arguments...> {
         bool        has_sync_output_ports{ false }; // if all ports are async, status is not important
 
         constexpr bool
-        enough_samples_for_output_ports(std::size_t n) {
+        enoughSamplesForOutputPorts(std::size_t n) {
             return !has_sync_output_ports || n >= out_min_samples;
         }
 
         constexpr bool
-        space_available_on_output_ports(std::size_t n) {
+        spaceAvailableOnOutputPorts(std::size_t n) {
             return !has_sync_output_ports || n <= out_available;
         }
     };
 
-    ports_status_t ports_status{};
+    PortsStatus ports_status{};
 
 protected:
     bool               _input_tags_present  = false;
@@ -386,11 +386,11 @@ protected:
     }
 
     void
-    update_ports_status() {
-        ports_status               = ports_status_t();
+    updatePortsStatus() {
+        ports_status               = PortsStatus();
 
-        auto adjust_for_input_port = [&ps = ports_status]<PortType Port>(Port &port) {
-            if constexpr (std::remove_cvref_t<Port>::synchronous) {
+        auto adjust_for_input_port = [&ps = ports_status]<PortLike Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                 ps.has_sync_input_ports          = true;
                 ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
                 ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
@@ -412,8 +412,8 @@ protected:
                 },
                 inputPorts(&self()));
 
-        auto adjust_for_output_port = [&ps = ports_status]<PortType Port>(Port &port) {
-            if constexpr (std::remove_cvref_t<Port>::synchronous) {
+        auto adjust_for_output_port = [&ps = ports_status]<PortLike Port>(Port &port) {
+            if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                 ps.has_sync_output_ports = true;
                 ps.out_min_samples       = std::max(ps.out_min_samples, port.min_buffer_size());
                 ps.out_max_samples       = std::min(ps.out_max_samples, port.max_buffer_size());
@@ -751,20 +751,19 @@ protected:
      * @return struct { std::size_t produced_work, work_return_t}
      */
     WorkReturn
-    work_internal(std::size_t requested_work) {
+    workInternal(std::size_t requested_work) {
         using gr::WorkReturnStatus;
-        using input_types             = traits::block::input_port_types<Derived>;
-        using output_types            = traits::block::output_port_types<Derived>;
+        using TInputTypes             = traits::block::input_port_types<Derived>;
+        using TOutputTypes            = traits::block::output_port_types<Derived>;
 
-        constexpr bool is_sourceBlock = input_types::size == 0;
-        constexpr bool is_sinkBlock   = output_types::size == 0;
+        constexpr bool kIsSourceBlock = TInputTypes::size == 0;
+        constexpr bool kIsSinkBlock   = TOutputTypes::size == 0;
 
         // TODO: these checks can be moved to setting changed
         if constexpr (Resampling::kEnabled) {
-            static_assert(!is_sinkBlock, "Decimation/interpolation is not available for sink blocks. Remove 'ResamplingRatio<>' from the block definition.");
-            static_assert(!is_sourceBlock, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
-            static_assert(HasProcessBulkFunction<Derived>,
-                          "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
+            static_assert(!kIsSinkBlock, "Decimation/interpolation is not available for sink blocks. Remove 'ResamplingRatio<>' from the block definition.");
+            static_assert(!kIsSourceBlock, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
+            static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
             if (numerator != 1_UZ || denominator != 1_UZ) {
                 throw std::runtime_error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
@@ -772,16 +771,16 @@ protected:
         }
 
         if constexpr (StrideControl::kEnabled) {
-            static_assert(!is_sourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
+            static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
             if (stride != 0_UZ) {
                 throw std::runtime_error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
             }
         }
 
-        update_ports_status();
+        updatePortsStatus();
 
-        if constexpr (is_sourceBlock) {
+        if constexpr (kIsSourceBlock) {
             ports_status.in_samples_to_next_tag = std::numeric_limits<std::size_t>::max(); // no tags to processed for source node
             if constexpr (requires(const Derived &d) {
                               { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
@@ -796,7 +795,7 @@ protected:
                     return { requested_work, 0_UZ, WorkReturnStatus::OK };
                 }
                 std::size_t samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
-                if (not ports_status.enough_samples_for_output_ports(samples_to_process)) {
+                if (not ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
                     return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (samples_to_process == 0) {
@@ -813,16 +812,16 @@ protected:
                 if (samples_to_process == 0) {
                     return { requested_work, 0_UZ, WorkReturnStatus::OK };
                 }
-                if (not ports_status.enough_samples_for_output_ports(samples_to_process)) {
+                if (not ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
                     return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
                 }
-                if (not ports_status.space_available_on_output_ports(samples_to_process)) {
+                if (not ports_status.spaceAvailableOnOutputPorts(samples_to_process)) {
                     return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
 
-            } else if constexpr (is_sinkBlock) {
+            } else if constexpr (kIsSinkBlock) {
                 // no input or output buffers, derive from internal "buffer sizes" (i.e. what the
                 // buffer size would be if the node were not merged)
                 constexpr std::size_t chunk_size = Derived::merged_work_chunk_size();
@@ -834,7 +833,7 @@ protected:
             } else {
                 // derive value from output buffer size
                 std::size_t samples_to_process = std::min(ports_status.out_available, ports_status.out_max_samples);
-                if (not ports_status.enough_samples_for_output_ports(samples_to_process)) {
+                if (not ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
                     return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
@@ -881,10 +880,10 @@ protected:
 
             // TODO: special case for ports_status.in_samples == 0 ?
 
-            if (not ports_status.enough_samples_for_output_ports(ports_status.out_samples)) {
+            if (not ports_status.enoughSamplesForOutputPorts(ports_status.out_samples)) {
                 return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_INPUT_ITEMS };
             }
-            if (not ports_status.space_available_on_output_ports(ports_status.out_samples)) {
+            if (not ports_status.spaceAvailableOnOutputPorts(ports_status.out_samples)) {
                 return { requested_work, 0_UZ, WorkReturnStatus::INSUFFICIENT_OUTPUT_ITEMS };
             }
         }
@@ -994,7 +993,7 @@ protected:
                     auto in_samples          = sync_in_samples;
 
                     auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
-                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                             return std::forward<Port>(port).streamReader().get(in_samples);
                         } else {
                             return std::addressof(std::forward<Port>(port).streamReader());
@@ -1015,7 +1014,7 @@ protected:
                     auto out_samples         = sync_out_samples;
 
                     auto process_single_port = [&out_samples]<typename Port>(Port &&port) {
-                        if constexpr (std::remove_cvref_t<Port>::synchronous) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                             return std::forward<Port>(port).streamWriter().reserve_output_range(out_samples);
                         } else {
                             return std::addressof(std::forward<Port>(port).streamWriter());
@@ -1047,14 +1046,14 @@ protected:
             if (ports_status.in_samples != ports_status.out_samples)
                 throw std::runtime_error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", ports_status.in_samples, ports_status.out_samples));
             // handle processOne(...)
-            using input_simd_types  = meta::simdize<typename input_types::template apply<std::tuple>>;
-            using output_simd_types = meta::simdize<typename output_types::template apply<std::tuple>>;
+            using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
+            using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
 
             std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
                                                                                              : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
                     width{};
 
-            if constexpr ((is_sinkBlock or meta::simdize_size_v<output_simd_types> != 0) and ((is_sourceBlock and requires(Derived &d) {
+            if constexpr ((kIsSinkBlock or meta::simdize_size_v<output_simd_types> != 0) and ((kIsSourceBlock and requires(Derived &d) {
                                                                                                   { d.processOne_simd(width) };
                                                                                               }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) {
                 // SIMD loop
@@ -1101,7 +1100,7 @@ public:
     invokeWork()
         requires(blockingIO)
     {
-        auto [work_requested, work_done, last_status] = work_internal(ioRequestedWork.load(std::memory_order_relaxed));
+        auto [work_requested, work_done, last_status] = workInternal(ioRequestedWork.load(std::memory_order_relaxed));
         ioWorkDone.increment(work_requested, work_done);
         if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == WorkReturnStatus::DONE && incWorkDone > 0) {
             // finished local iteration but need to report more work to be done until
@@ -1161,7 +1160,7 @@ public:
                     // let user call '' explicitly
                 }
             }
-            const WorkReturnStatus lastStatus                 = ioLastWorkStatus.exchange(WorkReturnStatus::OK, std::memory_order_relaxed);
+            const WorkReturnStatus lastStatus                     = ioLastWorkStatus.exchange(WorkReturnStatus::OK, std::memory_order_relaxed);
             const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
             // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
 #if defined(__EMSCRIPTEN__)
@@ -1169,7 +1168,7 @@ public:
 #endif
             return { accumulatedRequestedWork, performedWork, performedWork > 0 ? WorkReturnStatus::OK : lastStatus };
         } else {
-            return work_internal(requested_work);
+            return workInternal(requested_work);
         }
     }
 };
@@ -1188,7 +1187,7 @@ namespace gr {
 template<BlockLike TBlock>
 [[nodiscard]] /*constexpr*/ std::string
 blockDescription() noexcept {
-    using DerivedBlock          = typename TBlock::derived_t;
+    using DerivedBlock         = typename TBlock::derived_t;
     using ArgumentList         = typename TBlock::block_template_parameters;
     using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
     using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
@@ -1243,7 +1242,7 @@ static_assert(not SinkBlockLike<int>);
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
 class MergedBlock : public Block<MergedBlock<Left, Right, OutId, InId>, meta::concat<typename traits::block::input_ports<Left>, meta::remove_at<InId, typename traits::block::input_ports<Right>>>,
-                                meta::concat<meta::remove_at<OutId, typename traits::block::output_ports<Left>>, typename traits::block::output_ports<Right>>> {
+                                 meta::concat<meta::remove_at<OutId, typename traits::block::output_ports<Left>>, typename traits::block::output_ports<Right>>> {
     static std::atomic_size_t _unique_id_counter;
 
 public:
@@ -1253,7 +1252,7 @@ public:
 private:
     // copy-paste from above, keep in sync
     using base = Block<MergedBlock<Left, Right, OutId, InId>, meta::concat<typename traits::block::input_ports<Left>, meta::remove_at<InId, typename traits::block::input_ports<Right>>>,
-                      meta::concat<meta::remove_at<OutId, typename traits::block::output_ports<Left>>, typename traits::block::output_ports<Right>>>;
+                       meta::concat<meta::remove_at<OutId, typename traits::block::output_ports<Left>>, typename traits::block::output_ports<Right>>>;
 
     Left  left;
     Right right;
@@ -1310,9 +1309,9 @@ private:
     }
 
 public:
-    using input_port_types  = typename traits::block::input_port_types<base>;
-    using output_port_types = typename traits::block::output_port_types<base>;
-    using return_type       = typename traits::block::return_type<base>;
+    using TInputPortTypes  = typename traits::block::input_port_types<base>;
+    using TOutputPortTypes = typename traits::block::output_port_types<base>;
+    using TReturnType      = typename traits::block::return_type<base>;
 
     constexpr MergedBlock(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
@@ -1328,11 +1327,11 @@ public:
 
     template<meta::any_simd... Ts>
         requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr meta::simdize<return_type, meta::simdize_size_v<std::tuple<Ts...>>>
+    constexpr meta::simdize<TReturnType, meta::simdize_size_v<std::tuple<Ts...>>>
     processOne(std::size_t offset, const Ts &...inputs) {
         static_assert(traits::block::output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
         return apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...),
-                                                                                           apply_left<traits::block::input_port_types<Left>::size()>(offset, std::tie(inputs...)));
+                                                                                            apply_left<traits::block::input_port_types<Left>::size()>(offset, std::tie(inputs...)));
     }
 
     constexpr auto
@@ -1360,8 +1359,8 @@ public:
 
     template<typename... Ts>
     // Nicer error messages for the following would be good, but not at the expense of breaking can_processOne_simd.
-        requires(input_port_types::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr return_type
+        requires(TInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
+    constexpr TReturnType
     processOne(std::size_t offset, Ts &&...inputs) {
         // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
@@ -1369,14 +1368,14 @@ public:
         if constexpr (traits::block::output_port_types<Left>::size == 1) {
             // only the result from the right node needs to be returned
             return apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                               apply_left<traits::block::input_port_types<Left>::size()>(offset, std::forward_as_tuple(
-                                                                                                                                                                        std::forward<Ts>(inputs)...)));
+                                                                                                apply_left<traits::block::input_port_types<Left>::size()>(offset, std::forward_as_tuple(
+                                                                                                                                                                          std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
             auto left_out  = apply_left<traits::block::input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
             auto right_out = apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                                         std::move(std::get<OutId>(left_out)));
+                                                                                                          std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::output_port_types<Left>::size == 2 && traits::block::output_port_types<Right>::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
@@ -1473,7 +1472,8 @@ merge(A &&a, B &&b) {
     static_assert(InIdUnchecked != -1);
     constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
     constexpr auto InId  = static_cast<std::size_t>(InIdUnchecked);
-    static_assert(std::same_as<typename traits::block::output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+    static_assert(std::same_as<typename traits::block::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+                               typename traits::block::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
                   "Port types do not match");
     return MergedBlock<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
@@ -1519,11 +1519,11 @@ static_assert(SinkBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
 
 namespace detail {
 template<typename... Types>
-struct block_parameters {
+struct BlockParameters {
     template<template<typename...> typename TBlock, typename RegisterInstance>
     void
-    register_on(RegisterInstance *plugin_instance, std::string block_type) const {
-        plugin_instance->template  add_block_type<TBlock, Types...>(block_type);
+    registerOn(RegisterInstance *plugin_instance, std::string block_type) const {
+        plugin_instance->template add_block_type<TBlock, Types...>(block_type);
     }
 };
 
@@ -1531,14 +1531,14 @@ template<template<typename...> typename TBlock, typename... TBlockParameters>
 struct RegisterBlock {
     template<typename RegisterInstance>
     RegisterBlock(RegisterInstance *plugin_instance, std::string block_type) {
-        auto  add_block_type = [&]<typename Type> {
-            if constexpr (meta::is_instantiation_of<Type, block_parameters>) {
-                Type().template register_on<TBlock>(plugin_instance, block_type);
+        auto add_block_type = [&]<typename Type> {
+            if constexpr (meta::is_instantiation_of<Type, BlockParameters>) {
+                Type().template registerOn<TBlock>(plugin_instance, block_type);
             } else {
-                plugin_instance->template  add_block_type<TBlock, Type>(block_type);
+                plugin_instance->template add_block_type<TBlock, Type>(block_type);
             }
         };
-        (( add_block_type.template operator()<TBlockParameters>()), ...);
+        ((add_block_type.template operator()<TBlockParameters>()), ...);
     }
 };
 } // namespace detail

@@ -5,7 +5,7 @@ buffer_test_exe = executable('qa_buffer', 'qa_buffer.cpp',
 test('qa_buffer', buffer_test_exe)
 
 ut_test_names = [
-    'qa_dynamic_port',
+    'qa_DynamicPort',
 ]
 deps = deps + reflcpp_dep
 

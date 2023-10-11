@@ -78,10 +78,10 @@ const boost::ut::suite TagPropagation = [] {
         auto &monitor2 = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
         auto &sink1    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
         auto &sink2    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitor1)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(monitor1).to<"in">(monitor2)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink1)));
-        expect(eq(connection_result_t::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitor1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor1).to<"in">(monitor2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink2)));
 
         scheduler::simple sched{ std::move(testGraph) };
         sched.run_and_wait();

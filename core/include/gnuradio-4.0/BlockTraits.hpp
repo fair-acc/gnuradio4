@@ -3,8 +3,8 @@
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "port.hpp"
-#include "port_traits.hpp"
+#include "Port.hpp"
+#include "PortTraits.hpp"
 #include "reflection.hpp"
 
 #include <vir/simd.h>
@@ -119,7 +119,7 @@ all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info
 
 // This specialization defines node attributes when the node is created
 // with a list of ports as template arguments
-template<typename TBlock, port::has_fixed_info_v... Ports>
+template<typename TBlock, port::HasFixedInfo... Ports>
 struct fixedBlock_ports_data_helper<TBlock, Ports...> {
     using member_ports_detector = detail::member_ports_detector<TBlock>;
 
@@ -140,7 +140,7 @@ struct fixedBlock_ports_data_helper<TBlock, Ports...> {
 
 // clang-format off
 template<typename TBlock,
-         typename Derived = typename TBlock::derived_t,
+         typename TDerived = typename TBlock::derived_t,
          typename ArgumentList = typename TBlock::block_template_parameters>
 using fixedBlock_ports_data =
     typename ArgumentList::template filter<port::has_fixed_info_or_is_typelist>
@@ -178,9 +178,9 @@ using output_port_names = typename output_ports<TBlock>::template transform<deta
 template<typename TBlock>
 constexpr bool block_defines_ports_as_member_variables = fixedBlock_ports_data<TBlock>::member_ports_detector::value;
 
-template<typename TBlock, typename PortType>
+template<typename TBlock, typename TPortType>
 using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<detail::is_port_or_collection_descriptor>::template filter<
-        detail::member_descriptor_has_type<PortType>::template matches>::template at<0>;
+        detail::member_descriptor_has_type<TPortType>::template matches>::template at<0>;
 
 // TODO: Why is this not done with requires?
 namespace detail {
@@ -307,16 +307,16 @@ port_to_processBulk_argument_helper() {
                   }) {
         return static_cast<to_any_vector *>(nullptr);
 
-    } else if constexpr (Port::synchronous) {
-        if constexpr (Port::IS_INPUT) {
+    } else if constexpr (Port::kIsSynch) {
+        if constexpr (Port::kIsInput) {
             return static_cast<dummy_input_span<typename Port::value_type> *>(nullptr);
-        } else if constexpr (Port::IS_OUTPUT) {
+        } else if constexpr (Port::kIsOutput) {
             return static_cast<dummy_output_span<typename Port::value_type> *>(nullptr);
         }
     } else {
-        if constexpr (Port::IS_INPUT) {
+        if constexpr (Port::kIsInput) {
             return static_cast<to_any_pointer *>(nullptr);
-        } else if constexpr (Port::IS_OUTPUT) {
+        } else if constexpr (Port::kIsOutput) {
             return static_cast<to_any_pointer *>(nullptr);
         }
     }
@@ -342,37 +342,37 @@ can_processBulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std::
 
 template<typename TBlock>
 concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::input_ports<TBlock>>::tuple_type inputs,
-                                    typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::output_ports<TBlock>>::tuple_type outputs) {
+                                   typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::output_ports<TBlock>>::tuple_type outputs) {
     {
         detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<TBlock>::size>(), std::make_index_sequence<output_port_types<TBlock>::size>())
     } -> std::same_as<WorkReturnStatus>;
 };
 
-/*
- * Satisfied if `Derived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
+/**
+ * Satisfied if `TDerived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
  * std::span<const T> or any type satisfying ConsumableSpan<T>. Output arguments must accept either a std::span<T> or any type satisfying PublishableSpan<T>, except for the I-th output argument, which
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
-template<typename Derived, std::size_t I>
-concept processBulk_requires_ith_output_as_span = requires(Derived                                                                                                                      &d,
-                                                            typename meta::transform_types<detail::dummy_input_span, traits::block::input_port_types<Derived>>::template apply<std::tuple> inputs,
-                                                            typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
-                                                                                                 traits::block::output_port_types<Derived>>::template apply<std::tuple>
-                                                                    outputs,
-                                                            typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
-                                                                                                 traits::block::output_port_types<Derived>>::template apply<std::tuple>
-                                                                    bad_outputs) {
+template<typename TDerived, std::size_t I>
+concept processBulk_requires_ith_output_as_span = requires(TDerived                                                                                                                       &d,
+                                                           typename meta::transform_types<detail::dummy_input_span, traits::block::input_port_types<TDerived>>::template apply<std::tuple> inputs,
+                                                           typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
+                                                                                                traits::block::output_port_types<TDerived>>::template apply<std::tuple>
+                                                                   outputs,
+                                                           typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
+                                                                                                traits::block::output_port_types<TDerived>>::template apply<std::tuple>
+                                                                   bad_outputs) {
     {
         []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                         std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
             return {};
-        }(std::make_index_sequence<traits::block::input_port_types<Derived>::size>(), std::make_index_sequence<traits::block::output_port_types<Derived>::size>())
+        }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>())
     } -> std::same_as<WorkReturnStatus>;
     not requires {
         []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                         std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
             return {};
-        }(std::make_index_sequence<traits::block::input_port_types<Derived>::size>(), std::make_index_sequence<traits::block::output_port_types<Derived>::size>());
+        }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>());
     };
 };
 

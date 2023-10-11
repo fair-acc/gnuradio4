@@ -493,7 +493,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         gr::graph testGraph;
         auto     &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -506,8 +506,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
         auto     &cpy  = testGraph.emplaceBlock<copy<float>>();
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect(src, &test::source<float>::out).to<"in">(cpy)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(cpy).to(sink, &test::sink<float>::in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, &test::source<float>::out).to<"in">(cpy)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(cpy).to(sink, &test::sink<float>::in)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -525,13 +525,13 @@ inline const boost::ut::suite _runtime_tests = [] {
             cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({ { "name", fmt::format("copy {} at {}", i, gr::this_source_location()) } }));
 
             if (i == 0) {
-                expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));
             } else {
-                expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect(*cpy[i - 1], &copy::out).to(*cpy[i], &copy::in)));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(*cpy[i - 1], &copy::out).to(*cpy[i], &copy::in)));
             }
         }
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -546,10 +546,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &b3   = testGraph.emplaceBlock<copy<float, 32, 128>>();
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(b1)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(b1).to<"in">(b2)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(b2).to<"in">(b3)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(b3).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(b1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b1).to<"in">(b2)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b2).to<"in">(b3)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b3).to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -564,10 +564,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &add1 = testGraph.emplaceBlock<add<T, -1>>();
         auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -592,14 +592,14 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).template to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(*mult1[i])));
             } else {
-                expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*add1[i - 1]).template to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[i - 1]).template to<"in">(*mult1[i])));
             }
-            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult1[i]).template to<"in">(*div1[i])));
-            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*div1[i]).template to<"in">(*add1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult1[i]).template to<"in">(*div1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*div1[i]).template to<"in">(*add1[i])));
         }
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -627,10 +627,10 @@ inline const boost::ut::suite _simd_tests = [] {
         auto     &add1  = testGraph.emplaceBlock<add_SIMD<float>>(-1.0f);
         auto     &sink  = testGraph.emplaceBlock<test::sink<float>>();
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(mult1)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(mult1).to<"in">(mult2)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(mult2).to<"in">(add1)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(add1).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(mult1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult1).to<"in">(mult2)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult2).to<"in">(add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -659,14 +659,14 @@ inline const boost::ut::suite _simd_tests = [] {
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*mult1[i])));
             } else {
-                expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*add1[i - 1]).to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[i - 1]).to<"in">(*mult1[i])));
             }
-            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult1[i]).to<"in">(*mult2[i])));
-            expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*mult2[i]).to<"in">(*add1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult1[i]).to<"in">(*mult2[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult2[i]).to<"in">(*add1[i])));
         }
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 
@@ -693,10 +693,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         auto     &add1 = testGraph.emplaceBlock<add<T, -1>>();
         auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&testGraph]() {
             test::n_samples_produced = 0LU;
@@ -718,10 +718,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         auto     &add1 = testGraph.emplaceBlock<add_bulk<T>>(static_cast<T>(-1.f));
         auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
 
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
-        expect(eq(gr::connection_result_t::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
         gr::scheduler::simple sched{ std::move(testGraph) };
 

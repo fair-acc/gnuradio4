@@ -93,10 +93,10 @@ main(int argc, char *argv[]) {
     auto  connection_3 [[maybe_unused]] = testGraph.dynamic_connect(block_multiply_2, 0, block_counter, 0);
     auto  connection_4 [[maybe_unused]] = testGraph.dynamic_connect(block_counter, 0, block_sink, 0);
 
-    assert(connection_1 == grg::connection_result_t::SUCCESS);
-    assert(connection_2 == grg::connection_result_t::SUCCESS);
-    assert(connection_3 == grg::connection_result_t::SUCCESS);
-    assert(connection_4 == grg::connection_result_t::SUCCESS);
+    assert(connection_1 == grg::ConnectionResult::SUCCESS);
+    assert(connection_2 == grg::ConnectionResult::SUCCESS);
+    assert(connection_3 == grg::ConnectionResult::SUCCESS);
+    assert(connection_4 == grg::ConnectionResult::SUCCESS);
 
     for (std::size_t i = 0; i < repeats; ++i) {
         std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());

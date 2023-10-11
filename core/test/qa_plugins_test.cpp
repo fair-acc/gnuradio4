@@ -125,7 +125,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto block_source = context().loader.instantiate(names::fixed_source, "double");
         auto block_sink   = context().loader.instantiate(names::cout_sink, "double");
         auto connection_1 = block_source->dynamic_output_port(0).connect(block_sink->dynamic_input_port(0));
-        expect(connection_1 == grg::connection_result_t::SUCCESS);
+        expect(connection_1 == grg::ConnectionResult::SUCCESS);
     };
 
     "LongerPipeline"_test = [] {
@@ -143,8 +143,8 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto connection_1                = block_source->dynamic_output_port(0).connect(block_multiply->dynamic_input_port(0));
         auto connection_2                = block_multiply->dynamic_output_port(0).connect(block_sink->dynamic_input_port(0));
 
-        expect(connection_1 == grg::connection_result_t::SUCCESS);
-        expect(connection_2 == grg::connection_result_t::SUCCESS);
+        expect(connection_1 == grg::ConnectionResult::SUCCESS);
+        expect(connection_2 == grg::ConnectionResult::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
@@ -183,11 +183,11 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto  connection_4               = testGraph.dynamic_connect(block_multiply_float, 0, block_convert_to_double, 0);
         auto  connection_5               = testGraph.dynamic_connect(block_convert_to_double, 0, block_sink, 0);
 
-        expect(connection_1 == grg::connection_result_t::SUCCESS);
-        expect(connection_2 == grg::connection_result_t::SUCCESS);
-        expect(connection_3 == grg::connection_result_t::SUCCESS);
-        expect(connection_4 == grg::connection_result_t::SUCCESS);
-        expect(connection_5 == grg::connection_result_t::SUCCESS);
+        expect(connection_1 == grg::ConnectionResult::SUCCESS);
+        expect(connection_2 == grg::ConnectionResult::SUCCESS);
+        expect(connection_3 == grg::ConnectionResult::SUCCESS);
+        expect(connection_4 == grg::ConnectionResult::SUCCESS);
+        expect(connection_5 == grg::ConnectionResult::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());
