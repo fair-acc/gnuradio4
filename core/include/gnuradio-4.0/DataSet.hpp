@@ -17,10 +17,10 @@ struct layout_right {};
 struct layout_left {};
 
 /**
- * @brief a concept that describes a packet, which is a subset of the DataSet struct.
+ * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
  */
 template<typename T>
-concept packet = requires(T t, const std::size_t n_items) {
+concept PacketLike = requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
     std::is_same_v<decltype(t.timestamp), int64_t>;
@@ -29,10 +29,10 @@ concept packet = requires(T t, const std::size_t n_items) {
 };
 
 /**
- * @brief A concept that describes a tensor, which is a subset of the DataSet struct.
+ * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
  */
 template<typename T>
-concept tensor = packet<T> && requires(T t, const std::size_t n_items) {
+concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
@@ -44,15 +44,15 @@ concept tensor = packet<T> && requires(T t, const std::size_t n_items) {
 };
 
 /**
- * @brief: a dataset consists of signal data, metadata, and associated axis information.
+ * @brief: a DataSet consists of signal data, metadata, and associated axis information.
  *
- * The dataset can be used to store and manipulate data in a structured way, and supports various types of axes,
+ * The DataSet can be used to store and manipulate data in a structured way, and supports various types of axes,
  * layouts, and signal data. The dataset contains information such as timestamp, axis names and units, signal names,
  * values, and ranges, as well as metadata and timing events. This struct provides a flexible way to store and organize
  * data with associated metadata, and can be customized for different types of data and applications.
  */
 template<typename T>
-concept dataset = tensor<T> && requires(T t, const std::size_t n_items) {
+concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
@@ -103,9 +103,9 @@ struct DataSet {
     std::vector<std::vector<tag_t>> timing_events;
 };
 
-static_assert(dataset<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
-static_assert(dataset<DataSet<float>>, "DataSet<std::byte> concept conformity");
-static_assert(dataset<DataSet<double>>, "DataSet<std::byte> concept conformity");
+static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
+static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
+static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
 
 // public type definitions to allow simple reflection
 using DataSet_float  = DataSet<double>;
@@ -128,9 +128,9 @@ struct Tensor {
     std::vector<pmt_map> meta_information;
 };
 
-static_assert(tensor<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
-static_assert(tensor<Tensor<float>>, "Tensor<std::byte> concept conformity");
-static_assert(tensor<Tensor<double>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<float>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity");
 
 template<typename T>
 struct Packet {
@@ -142,9 +142,9 @@ struct Packet {
     std::vector<pmt_map> meta_information;
 };
 
-static_assert(packet<Packet<std::byte>>, "Packet<std::byte> concept conformity");
-static_assert(packet<Packet<float>>, "Packet<std::byte> concept conformity");
-static_assert(packet<Packet<double>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
 
 } // namespace gr
 
