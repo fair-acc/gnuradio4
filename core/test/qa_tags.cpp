@@ -6,7 +6,7 @@
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
 #include <gnuradio-4.0/testing/tag_monitors.hpp>
@@ -83,8 +83,8 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink1)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink2)));
 
-        scheduler::simple sched{ std::move(testGraph) };
-        sched.run_and_wait();
+        scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
         expect(eq(monitor1.n_samples_produced, n_samples)) << "monitor1 did not consume enough input samples";

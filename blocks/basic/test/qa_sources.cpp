@@ -2,7 +2,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
 #include <gnuradio-4.0/basic/clock_source.hpp>
@@ -41,11 +41,11 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink1)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink2)));
 
-        scheduler::simple sched{ std::move(testGraph) };
+        scheduler::Simple sched{ std::move(testGraph) };
         if constexpr (!useIoThreadPool) {
             src.tryStartThread();
         }
-        sched.run_and_wait();
+        sched.runAndWait();
         if constexpr (!useIoThreadPool) {
             src.stopThread();
         }

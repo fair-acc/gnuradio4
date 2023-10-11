@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -194,8 +194,8 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        gr::scheduler::simple sched{ std::move(flow) };
-        sched.run_and_wait();
+        gr::scheduler::Simple sched{ std::move(flow) };
+        sched.runAndWait();
     };
 
 #ifdef ENABLE_DYNAMIC_PORTS

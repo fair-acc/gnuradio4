@@ -8,7 +8,7 @@
 // #include <gnuradio-4.0/BlockTraits.hpp> // TODO: fix header recursion (if this is enabled instead of the next one)
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/scheduler.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/testing/bm_test_helper.hpp>
 
@@ -480,7 +480,7 @@ invoke_work(auto &sched) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    sched.run_and_wait();
+    sched.runAndWait();
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
 }
@@ -495,7 +495,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -509,7 +509,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, &test::source<float>::out).to<"in">(cpy)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(cpy).to(sink, &test::sink<float>::in)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -533,7 +533,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -551,7 +551,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b2).to<"in">(b3)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b3).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
@@ -569,7 +569,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     };
@@ -601,12 +601,12 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.run_and_wait();
+            sched.runAndWait();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -632,12 +632,12 @@ inline const boost::ut::suite _simd_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult2).to<"in">(add1)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.run_and_wait();
+            sched.runAndWait();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -668,12 +668,12 @@ inline const boost::ut::suite _simd_tests = [] {
         }
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.run_and_wait();
+            sched.runAndWait();
             sched.reset();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
@@ -701,8 +701,8 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&testGraph]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            gr::scheduler::simple sched{ std::move(testGraph) };
-            sched.run_and_wait();
+            gr::scheduler::Simple sched{ std::move(testGraph) };
+            sched.runAndWait();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -723,12 +723,12 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{ std::move(testGraph) };
 
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.run_and_wait();
+            sched.runAndWait();
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };

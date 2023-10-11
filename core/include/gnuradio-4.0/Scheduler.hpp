@@ -13,12 +13,12 @@
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
 
-enum execution_policy { single_threaded, multi_threaded };
+enum ExecutionPolicy { singleThreaded, multiThreaded };
 
 enum SchedulerState { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, SHUTTING_DOWN, ERROR };
 
 template<profiling::Profiler Profiler = profiling::null::profiler>
-class scheduler_base {
+class SchedulerBase {
 protected:
     SchedulerState                        _state = IDLE;
     gr::Graph                             _graph;
@@ -30,11 +30,11 @@ protected:
     std::atomic_bool                      _stop_requested;
 
 public:
-    explicit scheduler_base(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+    explicit SchedulerBase(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                             const profiling::options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.for_this_thread() }, _pool(std::move(thread_pool)) {}
 
-    ~scheduler_base() {
+    ~SchedulerBase() {
         stop();
         _state = SHUTTING_DOWN;
     }
@@ -45,9 +45,9 @@ public:
             return;
         }
         if (_state == RUNNING) {
-            request_stop();
+            requestStop();
         }
-        wait_done();
+        waitDone();
         _state = STOPPED;
     }
 
@@ -57,15 +57,15 @@ public:
             return;
         }
         if (_state == RUNNING) {
-            request_pause();
+            requestPause();
         }
-        wait_done();
+        waitDone();
         _state = PAUSED;
     }
 
     void
-    wait_done() {
-        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.wait_done");
+    waitDone() {
+        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.waitDone");
         for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
             _running_threads.wait(running);
         }
@@ -77,13 +77,13 @@ public:
     }
 
     void
-    request_stop() {
+    requestStop() {
         _stop_requested = true;
         _state          = REQUESTED_STOP;
     }
 
     void
-    request_pause() {
+    requestPause() {
         _stop_requested = true;
         _state          = REQUESTED_PAUSE;
     }
@@ -128,17 +128,17 @@ public:
     }
 
     void
-    run_on_pool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<WorkReturn(const std::span<BlockModel *const> &)> work_function) {
-        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.run_on_pool");
+    runOnPool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<WorkReturn(const std::span<BlockModel *const> &)> work_function) {
+        [[maybe_unused]] const auto pe = _profiler_handler.start_complete_event("scheduler_base.runOnPool");
         _progress                      = 0;
         _running_threads               = jobs.size();
         for (auto &jobset : jobs) {
-            _pool->execute([this, &jobset, work_function, &jobs]() { pool_worker([&work_function, &jobset]() { return work_function(jobset); }, jobs.size()); });
+            _pool->execute([this, &jobset, work_function, &jobs]() { poolWorker([&work_function, &jobset]() { return work_function(jobset); }, jobs.size()); });
         }
     }
 
     void
-    pool_worker(const std::function<WorkReturn()> &work, std::size_t n_batches) {
+    poolWorker(const std::function<WorkReturn()> &work, std::size_t n_batches) {
         auto    &profiler_handler = _profiler.for_this_thread();
 
         uint32_t done             = 0;
@@ -182,21 +182,21 @@ public:
 /**
  * Trivial loop based scheduler, which iterates over all blocks in definition order in the graph until no node did any processing
  */
-template<execution_policy executionPolicy = single_threaded, profiling::Profiler Profiler = profiling::null::profiler>
-class simple : public scheduler_base<Profiler> {
+template<ExecutionPolicy executionPolicy = singleThreaded, profiling::Profiler Profiler = profiling::null::profiler>
+class Simple : public SchedulerBase<Profiler> {
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
-    explicit simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
+    explicit Simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                     const profiling::options &profiling_options = {})
-        : scheduler_base<Profiler>(std::forward<gr::Graph>(graph), thread_pool, profiling_options) {}
+        : SchedulerBase<Profiler>(std::forward<gr::Graph>(graph), thread_pool, profiling_options) {}
 
     void
     init() {
-        scheduler_base<Profiler>::init();
+        SchedulerBase<Profiler>::init();
         [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("scheduler_simple.init");
         // generate job list
-        if constexpr (executionPolicy == multi_threaded) {
+        if constexpr (executionPolicy == multiThreaded) {
             const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), this->_graph.blocks().size());
             this->_job_lists.reserve(n_batches);
             for (std::size_t i = 0; i < n_batches; i++) {
@@ -212,7 +212,7 @@ public:
 
     template<typename block_type>
     WorkReturn
-    work_once(const std::span<block_type> &blocks) {
+    workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
         std::size_t           performed_work     = 0_UZ;
@@ -238,10 +238,10 @@ public:
     // todo: could be moved to base class, but would make `start()` virtual or require CRTP
     // todo: iterate api for continuous flowgraphs vs ones that become "DONE" at some point
     void
-    run_and_wait() {
-        [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("scheduler_simple.run_and_wait");
+    runAndWait() {
+        [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("scheduler_simple.runAndWait");
         start();
-        this->wait_done();
+        this->waitDone();
     }
 
     void
@@ -260,20 +260,20 @@ public:
         if (this->_state != INITIALISED) {
             throw std::runtime_error("simple scheduler work(): graph not initialised");
         }
-        if constexpr (executionPolicy == single_threaded) {
+        if constexpr (executionPolicy == singleThreaded) {
             this->_state = RUNNING;
             WorkReturn result;
             auto       blocklist = std::span{ this->_graph.blocks() };
             do {
-                result = work_once(blocklist);
+                result = workOnce(blocklist);
             } while (result.status == WorkReturnStatus::OK);
             if (result.status == WorkReturnStatus::ERROR) {
                 this->_state = ERROR;
             } else {
                 this->_state = STOPPED;
             }
-        } else if (executionPolicy == multi_threaded) {
-            this->run_on_pool(this->_job_lists, [this](auto &job) { return this->work_once(job); });
+        } else if (executionPolicy == multiThreaded) {
+            this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
         }
@@ -284,21 +284,21 @@ public:
  * Breadth first traversal scheduler which traverses the graph starting from the source blocks in a breath first fashion
  * detecting cycles and blocks which can be reached from several source blocks.
  */
-template<execution_policy executionPolicy = single_threaded, profiling::Profiler Profiler = profiling::null::profiler>
-class breadth_first : public scheduler_base<Profiler> {
+template<ExecutionPolicy executionPolicy = singleThreaded, profiling::Profiler Profiler = profiling::null::profiler>
+class BreadthFirst : public SchedulerBase<Profiler> {
     std::vector<BlockModel *>              _blocklist;
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
-    explicit breadth_first(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
+    explicit BreadthFirst(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
                            const profiling::options &profiling_options = {})
-        : scheduler_base<Profiler>(std::move(graph), thread_pool, profiling_options) {}
+        : SchedulerBase<Profiler>(std::move(graph), thread_pool, profiling_options) {}
 
     void
     init() {
         [[maybe_unused]] const auto pe = this->_profiler_handler.start_complete_event("breadth_first.init");
         using block_t                  = BlockModel *;
-        scheduler_base<Profiler>::init();
+        SchedulerBase<Profiler>::init();
         // calculate adjacency list
         std::map<block_t, std::vector<block_t>> _adjacency_list{};
         std::vector<block_t>                    _source_blocks{};
@@ -335,7 +335,7 @@ public:
             }
         }
         // generate job list
-        if constexpr (executionPolicy == multi_threaded) {
+        if constexpr (executionPolicy == multiThreaded) {
             const auto n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _blocklist.size());
             this->_job_lists.reserve(n_batches);
             for (std::size_t i = 0; i < n_batches; i++) {
@@ -351,7 +351,7 @@ public:
 
     template<typename block_type>
     WorkReturn
-    work_once(const std::span<block_type> &blocks) {
+    workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
         std::size_t           performed_work     = 0_UZ;
@@ -378,9 +378,9 @@ public:
     }
 
     void
-    run_and_wait() {
+    runAndWait() {
         start();
-        this->wait_done();
+        this->waitDone();
     }
 
     void
@@ -399,26 +399,26 @@ public:
         if (this->_state != INITIALISED) {
             throw std::runtime_error("simple scheduler work(): graph not initialised");
         }
-        if constexpr (executionPolicy == single_threaded) {
+        if constexpr (executionPolicy == singleThreaded) {
             this->_state = RUNNING;
             WorkReturn result;
             auto       blocklist = std::span{ this->_blocklist };
-            while ((result = work_once(blocklist)).status == WorkReturnStatus::OK) {
+            while ((result = workOnce(blocklist)).status == WorkReturnStatus::OK) {
                 if (result.status == WorkReturnStatus::ERROR) {
                     this->_state = ERROR;
                     return;
                 }
             }
             this->_state = STOPPED;
-        } else if (executionPolicy == multi_threaded) {
-            this->run_on_pool(this->_job_lists, [this](auto &job) { return this->work_once(job); });
+        } else if (executionPolicy == multiThreaded) {
+            this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
         }
     }
 
     [[nodiscard]] const std::vector<std::vector<BlockModel *>> &
-    getJobLists() const {
+    jobs() const {
         return _job_lists;
     }
 };
