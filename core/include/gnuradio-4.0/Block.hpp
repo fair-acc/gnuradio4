@@ -329,7 +329,7 @@ struct Block : protected std::tuple<Arguments...> {
     std::size_t                                                                                                         stride_counter = 0_UZ;
     const std::size_t                                                                                                   unique_id      = _unique_id_counter++;
     const std::string                                                                                                   unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::uniqueName">>                                  name        = gr::meta::type_name<Derived>();
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                                 name        = gr::meta::type_name<Derived>();
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">>      meta_information;
     constexpr static std::string_view                                                                                   description = static_cast<std::string_view>(Description::value);
 

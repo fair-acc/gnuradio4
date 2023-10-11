@@ -385,7 +385,6 @@ public:
                 }
                 refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
                 if (!is_set) {
-                    fmt::print(stderr, "The property {} was not set\n", key);
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
             }
