@@ -7,7 +7,7 @@
 #include <benchmark.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/tag.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
 

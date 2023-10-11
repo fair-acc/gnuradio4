@@ -15,7 +15,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/reflection.hpp>
-#include <gnuradio-4.0/tag.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/testing/tag_monitors.hpp>
 
@@ -32,9 +32,9 @@ ClockSource Documentation -- add here
 )"">> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
     //
-    PortOut<T>         out;
-    std::vector<tag_t> tags{};
-    std::size_t        next_tag{ 0 };
+    PortOut<T>       out;
+    std::vector<Tag> tags{};
+    std::size_t      next_tag{ 0 };
     //
     A<std::uint32_t, "n_samples_max", Visible, Doc<"0: unlimited">>              n_samples_max = 1024;
     std::uint32_t                                                                n_samples_produced{ 0 };
@@ -85,7 +85,7 @@ ClockSource Documentation -- add here
     }
 
     void
-    settings_changed(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
+    settingsChanged(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
         nextTimePoint = ClockSourceType::now();
     }
 
@@ -113,7 +113,7 @@ ClockSource Documentation -- add here
         std::uint32_t       samples_to_produce = n_available;
         while (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced + n_available)) {
             gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced));
-            tag_t &out_tag     = this->output_tags()[0];
+            Tag &out_tag       = this->output_tags()[0];
             out_tag            = tags[next_tag];
             out_tag.index      = tags[next_tag].index - static_cast<std::make_signed_t<std::size_t>>(n_samples_produced);
             samples_to_produce = static_cast<std::uint32_t>(tags[next_tag].index) - n_samples_produced;

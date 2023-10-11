@@ -10,12 +10,12 @@
 #include "BlockTraits.hpp"
 #include "Port.hpp"
 #include "Sequence.hpp"
-#include "tag.hpp"
+#include "Tag.hpp"
 #include "thread/thread_pool.hpp"
 
 #include "annotated.hpp" // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include "reflection.hpp"
-#include "settings.hpp"
+#include "Settings.hpp"
 
 #ifdef FMT_FORMAT_H_
 #include <fmt/core.h>
@@ -176,7 +176,7 @@ concept BlockLike = requires(T t, std::size_t requested_work) {
 
     { t.isBlocking() } noexcept -> std::same_as<bool>;
 
-    { t.settings() } -> std::same_as<settings_base &>;
+    { t.settings() } -> std::same_as<SettingsBase &>;
     { t.work(requested_work) } -> std::same_as<work::Result>;
 
     // N.B. TODO discuss these requirements
@@ -319,7 +319,7 @@ struct Block : protected std::tuple<Arguments...> {
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
-    constexpr static tag_propagation_policy_t tag_policy = tag_propagation_policy_t::TPP_ALL_TO_ALL;
+    constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
     //
     using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
     A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
@@ -366,13 +366,13 @@ struct Block : protected std::tuple<Arguments...> {
     PortsStatus ports_status{};
 
 protected:
-    bool               _input_tags_present  = false;
-    bool               _output_tags_changed = false;
-    std::vector<tag_t> _tags_at_input;
-    std::vector<tag_t> _tags_at_output;
+    bool             _input_tags_present  = false;
+    bool             _output_tags_changed = false;
+    std::vector<Tag> _tags_at_input;
+    std::vector<Tag> _tags_at_output;
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<settings_base> _settings = std::make_unique<basic_settings<Derived>>(self());
+    std::unique_ptr<SettingsBase> _settings = std::make_unique<BasicSettings<Derived>>(self());
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -460,7 +460,7 @@ public:
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter)
         : _tags_at_input(traits::block::input_port_types<Derived>::size())
         , _tags_at_output(traits::block::output_port_types<Derived>::size())
-        , _settings(std::make_unique<basic_settings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+        , _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
         if (init_parameter.size() != 0) {
             const auto failed = settings().set(init_parameter);
             if (!failed.empty()) {
@@ -480,8 +480,8 @@ public:
     init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
         progress     = std::move(progress_);
         ioThreadPool = std::move(ioThreadPool_);
-        if (const auto forward_parameters = settings().apply_staged_parameters(); !forward_parameters.empty()) {
-            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) {
+        if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
+            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](Tag &tag) {
                 for (const auto &[key, value] : forward_parameters) {
                     tag.map.insert_or_assign(key, value);
                 }
@@ -489,8 +489,8 @@ public:
             _output_tags_changed = true;
         }
 
-        // store default settings -> can be recovered with 'reset_defaults()'
-        settings().store_defaults();
+        // store default settings -> can be recovered with 'resetDefaults()'
+        settings().storeDefaults();
     }
 
     void
@@ -572,28 +572,28 @@ public:
         return false;
     };
 
-    [[nodiscard]] constexpr std::span<const tag_t>
+    [[nodiscard]] constexpr std::span<const Tag>
     input_tags() const noexcept {
         return { _tags_at_input.data(), _tags_at_input.size() };
     }
 
-    [[nodiscard]] constexpr std::span<const tag_t>
+    [[nodiscard]] constexpr std::span<const Tag>
     output_tags() const noexcept {
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    [[nodiscard]] constexpr std::span<tag_t>
+    [[nodiscard]] constexpr std::span<Tag>
     output_tags() noexcept {
         _output_tags_changed = true;
         return { _tags_at_output.data(), _tags_at_output.size() };
     }
 
-    [[nodiscard]] constexpr settings_base &
+    [[nodiscard]] constexpr SettingsBase &
     settings() const noexcept {
         return *_settings;
     }
 
-    [[nodiscard]] constexpr settings_base &
+    [[nodiscard]] constexpr SettingsBase &
     settings() noexcept {
         return *_settings;
     }
@@ -740,8 +740,8 @@ public:
         // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
         _input_tags_present  = false;
         _output_tags_changed = false;
-        std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](tag_t &tag) { tag.reset(); });
-        std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](tag_t &tag) { tag.reset(); });
+        std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](Tag &tag) { tag.reset(); });
+        std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](Tag &tag) { tag.reset(); });
     }
 
 protected:
@@ -922,19 +922,19 @@ protected:
                     inputPorts(&self()));
 
             if (_input_tags_present && !merged_tag_map.empty()) { // apply tags as new settings if matching
-                settings().auto_update(merged_tag_map);
+                settings().autoUpdate(merged_tag_map);
             }
 
-            if constexpr (Derived::tag_policy == tag_propagation_policy_t::TPP_ALL_TO_ALL) {
+            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
                 // N.B. ranges omitted because of missing Clang/Emscripten support
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](tag_t &tag) { tag.map = merged_tag_map; });
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](Tag &tag) { tag.map = merged_tag_map; });
                 _output_tags_changed = true;
             }
         }
 
         if (settings().changed() || _input_tags_present || _output_tags_changed) {
-            if (const auto forward_parameters = settings().apply_staged_parameters(); !forward_parameters.empty()) {
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](tag_t &tag) {
+            if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
+                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](Tag &tag) {
                     for (const auto &[key, value] : forward_parameters) {
                         tag.map.insert_or_assign(key, value);
                     }

@@ -139,11 +139,11 @@ concept ProfilerLike = requires(T p) {
     { p.forThisThread() } -> ProfilerHandlerLike;
 };
 
-enum class output_mode_t { StdOut, File };
+enum class OutputMode { StdOut, File };
 
-struct options {
-    std::string   output_file;
-    output_mode_t output_mode = output_mode_t::File;
+struct Options {
+    std::string output_file;
+    OutputMode  output_mode = OutputMode::File;
 };
 
 namespace null {
@@ -199,7 +199,7 @@ class Profiler {
     Handler _handler;
 
 public:
-    constexpr explicit Profiler(const options & = {}) {}
+    constexpr explicit Profiler(const Options & = {}) {}
 
     constexpr void
     reset() const {}
@@ -309,7 +309,7 @@ class Handler {
     using this_t = Handler<TProfiler, TWriterType>;
     TProfiler  &_profiler;
     TWriterType _writer;
-    int        _nextId = 1;
+    int         _nextId = 1;
 
 public:
     explicit Handler(TProfiler &profiler, TWriterType &&writer) : _profiler(profiler), _writer{ std::move(writer) } {}
@@ -382,17 +382,17 @@ class Profiler {
     detail::time_point                     _start = detail::clock::now();
 
 public:
-    explicit Profiler(const options &options = {}) : _buffer(500000) {
+    explicit Profiler(const Options &options = {}) : _buffer(500000) {
         _event_handler = std::thread([options, &reader = _reader, &finished = _finished]() {
             auto          file_name = options.output_file;
             std::ofstream out_file;
-            if (file_name.empty() && options.output_mode == output_mode_t::File) {
+            if (file_name.empty() && options.output_mode == OutputMode::File) {
                 static std::atomic<int> counter = 0;
                 file_name                       = fmt::format("profile.{}.{}.trace", getpid(), counter++);
                 out_file                        = std::ofstream(file_name, std::ios::out | std::ios::binary);
             }
 
-            std::ostream &out_stream = options.output_mode == output_mode_t::File ? out_file : std::cout;
+            std::ostream &out_stream = options.output_mode == OutputMode::File ? out_file : std::cout;
             const int     pid        = getpid();
 
             // assign numerical values to threads as we see them

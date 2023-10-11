@@ -23,7 +23,7 @@ H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
     HistoryBuffer<T> inputHistory{ 32 };
 
     void
-    settings_changed(const property_map & /*old_settings*/, const property_map &new_settings) noexcept {
+    settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) noexcept {
         if (new_settings.contains("b") && b.size() >= inputHistory.capacity()) {
             inputHistory = HistoryBuffer<T>(std::bit_ceil(b.size()));
         }
@@ -59,7 +59,7 @@ a are the feedback coefficients
     HistoryBuffer<T> outputHistory{ 32 };
 
     void
-    settings_changed(const property_map & /*old_settings*/, const property_map &new_settings) noexcept {
+    settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) noexcept {
         const auto new_size = std::max(a.size(), b.size());
         if ((new_settings.contains("b") || new_settings.contains("a")) && (new_size >= inputHistory.capacity() || new_size >= inputHistory.capacity())) {
             inputHistory  = HistoryBuffer<T>(std::bit_ceil(new_size));

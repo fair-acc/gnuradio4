@@ -82,7 +82,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
     std::uint32_t                                                                              _selectedSrc = -1U;
 
     void
-    settings_changed(const gr::property_map &old_settings, const gr::property_map &new_settings) {
+    settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
         if (new_settings.contains("nInputs") || new_settings.contains("nOutputs")) {
             fmt::print("{}: configuration changed: nInputs {} -> {}, nOutputs {} -> {}\n", static_cast<void *>(this), old_settings.at("nInputs"),
                        new_settings.contains("nInputs") ? new_settings.at("nInputs") : "same", old_settings.at("nOutputs"), new_settings.contains("nOutputs") ? new_settings.at("nOutputs") : "same");

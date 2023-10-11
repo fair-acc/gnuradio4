@@ -20,7 +20,7 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 #endif
 
 template<>
-struct fmt::formatter<gr::tag_t> {
+struct fmt::formatter<gr::Tag> {
     template<typename ParseContext>
     constexpr auto
     parse(ParseContext &ctx) {
@@ -29,7 +29,7 @@ struct fmt::formatter<gr::tag_t> {
 
     template<typename FormatContext>
     constexpr auto
-    format(const gr::tag_t &tag, FormatContext &ctx) const {
+    format(const gr::Tag &tag, FormatContext &ctx) const {
         return fmt::format_to(ctx.out(), "{}", tag.index);
     }
 };
@@ -38,17 +38,17 @@ namespace gr::basic::data_sink_test {
 
 template<typename T>
 struct Source : public Block<Source<T>> {
-    PortOut<T>         out;
-    std::int32_t       n_samples_produced = 0;
-    std::int32_t       n_samples_max      = 1024;
-    std::size_t        n_tag_offset       = 0;
-    float              sample_rate        = 1000.0f;
-    T                  next_value         = {};
-    std::size_t        next_tag           = 0;
-    std::vector<tag_t> tags; // must be sorted by index, only one tag per sample
+    PortOut<T>       out;
+    std::int32_t     n_samples_produced = 0;
+    std::int32_t     n_samples_max      = 1024;
+    std::size_t      n_tag_offset       = 0;
+    float            sample_rate        = 1000.0f;
+    T                next_value         = {};
+    std::size_t      next_tag           = 0;
+    std::vector<Tag> tags; // must be sorted by index, only one tag per sample
 
     void
-    settings_changed(const property_map &, const property_map &) {
+    settingsChanged(const property_map &, const property_map &) {
         // optional init function that is called after construction and whenever settings change
         gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
     }
@@ -73,12 +73,12 @@ struct Source : public Block<Source<T>> {
     T
     processOne() noexcept {
         if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
-            tag_t &out_tag = this->output_tags()[0];
+            Tag &out_tag = this->output_tags()[0];
             // TODO when not enforcing single samples in available_samples, one would have to do:
-            // const auto base = std::max(out.streamWriter().position() + 1, tag_t::signed_index_type{0});
-            // out_tag        = tag_t{ tags[next_tag].index - base, tags[next_tag].map };
+            // const auto base = std::max(out.streamWriter().position() + 1, Tag::signed_index_type{0});
+            // out_tag        = Tag{ tags[next_tag].index - base, tags[next_tag].map };
             // Still think there could be nicer API to set a tag from processOne()
-            out_tag = tag_t{ 0, tags[next_tag].map };
+            out_tag = Tag{ 0, tags[next_tag].map };
             this->forward_tags();
             next_tag++;
         }
@@ -120,7 +120,7 @@ struct Matcher {
     }
 
     trigger_match_result
-    operator()(const tag_t &tag) {
+    operator()(const Tag &tag) {
         const auto ty = tag.get("YEAR");
         const auto tm = tag.get("MONTH");
         const auto td = tag.get("DAY");
@@ -157,14 +157,14 @@ struct Matcher {
     }
 };
 
-static tag_t
-make_tag(tag_t::signed_index_type index, int year, int month, int day) {
-    return tag_t{ index, { { "YEAR", year }, { "MONTH", month }, { "DAY", day } } };
+static Tag
+make_tag(Tag::signed_index_type index, int year, int month, int day) {
+    return Tag{ index, { { "YEAR", year }, { "MONTH", month }, { "DAY", day } } };
 }
 
-static std::vector<tag_t>
-make_test_tags(tag_t::signed_index_type first_index, tag_t::signed_index_type interval) {
-    std::vector<tag_t> tags;
+static std::vector<Tag>
+make_test_tags(Tag::signed_index_type first_index, Tag::signed_index_type interval) {
+    std::vector<Tag> tags;
     for (int y = 1; y <= 3; ++y) {
         for (int m = 1; m <= 2; ++m) {
             for (int d = 1; d <= 3; ++d) {
@@ -198,7 +198,7 @@ to_ascii_art(std::span<trigger_match_result> states) {
 
 template<TriggerMatcher M>
 std::string
-run_matcher_test(std::span<const tag_t> tags, M o) {
+run_matcher_test(std::span<const Tag> tags, M o) {
     std::vector<trigger_match_result> r;
     r.reserve(tags.size());
     for (const auto &tag : tags) {
@@ -262,11 +262,11 @@ const boost::ut::suite DataSinkTests = [] {
             }
         };
 
-        std::mutex         m2;
-        std::size_t        samples_seen2 = 0;
-        std::size_t        chunks_seen2  = 0;
-        std::vector<tag_t> received_tags;
-        auto               callback_with_tags = [&samples_seen2, &chunks_seen2, &m2, &received_tags](std::span<const float> buffer, std::span<const tag_t> tags) {
+        std::mutex       m2;
+        std::size_t      samples_seen2 = 0;
+        std::size_t      chunks_seen2  = 0;
+        std::vector<Tag> received_tags;
+        auto             callback_with_tags = [&samples_seen2, &chunks_seen2, &m2, &received_tags](std::span<const float> buffer, std::span<const Tag> tags) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
                 expect(eq(buffer[i], static_cast<float>(samples_seen2 + i)));
             }
@@ -276,10 +276,10 @@ const boost::ut::suite DataSinkTests = [] {
                 expect(lt(tag.index, static_cast<decltype(tag.index)>(buffer.size())));
             }
 
-            auto               lg = std::lock_guard{ m2 };
-            std::vector<tag_t> adjusted;
+            auto             lg = std::lock_guard{ m2 };
+            std::vector<Tag> adjusted;
             std::transform(tags.begin(), tags.end(), std::back_inserter(adjusted), [samples_seen2](const auto &tag) {
-                return tag_t{ static_cast<tag_t::signed_index_type>(samples_seen2) + tag.index, tag.map };
+                return Tag{ static_cast<Tag::signed_index_type>(samples_seen2) + tag.index, tag.map };
             });
             received_tags.insert(received_tags.end(), adjusted.begin(), adjusted.end());
             samples_seen2 += buffer.size();
@@ -291,7 +291,7 @@ const boost::ut::suite DataSinkTests = [] {
             }
         };
 
-        auto callback_with_tags_and_sink = [&sink](std::span<const float>, std::span<const tag_t>, const data_sink<float> &passed_sink) {
+        auto callback_with_tags_and_sink = [&sink](std::span<const float>, std::span<const Tag>, const data_sink<float> &passed_sink) {
             expect(eq(passed_sink.name.value, "test_sink"s));
             expect(eq(sink.unique_name, passed_sink.unique_name));
         };
@@ -344,12 +344,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto                  runner2 = std::async([poller = poller_with_tags] {
             std::vector<float> received;
-            std::vector<tag_t> received_tags;
+            std::vector<Tag>   received_tags;
             bool               seen_finished = false;
             while (!seen_finished) {
                 seen_finished = poller->finished;
                 while (poller->process([&received, &received_tags](const auto &data, const auto &tags_) {
-                    auto rtags = std::vector<tag_t>(tags_.begin(), tags_.end());
+                    auto rtags = std::vector<Tag>(tags_.begin(), tags_.end());
                     for (auto &t : rtags) {
                         t.index += static_cast<int64_t>(received.size());
                     }
@@ -387,14 +387,14 @@ const boost::ut::suite DataSinkTests = [] {
 
         gr::Graph              testGraph;
         auto                  &src  = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
-        const auto             tags = std::vector<tag_t>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
+        const auto             tags = std::vector<Tag>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags                    = tags;
         auto &sink                  = testGraph.emplaceBlock<data_sink<int32_t>>(
                 { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ n_samples - 1 } } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        auto is_trigger = [](const tag_t &tag) {
+        auto is_trigger = [](const Tag &tag) {
             const auto v = tag.get("TYPE");
             return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger_match_result::Matching : trigger_match_result::Ignore;
         };
@@ -405,7 +405,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto                  polling = std::async([poller] {
             std::vector<int32_t> received_data;
-            std::vector<tag_t>   received_tags;
+            std::vector<Tag>     received_tags;
             bool                 seen_finished = false;
             while (!seen_finished) {
                 seen_finished           = poller->finished;
@@ -461,7 +461,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        auto is_trigger = [](const tag_t &tag) {
+        auto is_trigger = [](const Tag &tag) {
             const auto v = tag.get("TYPE");
             return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger_match_result::Matching : trigger_match_result::Ignore;
         };
@@ -603,21 +603,21 @@ const boost::ut::suite DataSinkTests = [] {
         auto                  &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
-            src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
+            src.tags.push_back(Tag{ static_cast<Tag::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
         auto &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        auto is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
+        auto is_trigger = [](const Tag &) { return trigger_match_result::Matching; };
 
         auto poller     = data_sink_registry::instance().get_trigger_poller<float>(data_sink_query::sink_name("test_sink"), is_trigger, 3000, 2000, blocking_mode::Blocking);
         expect(neq(poller, nullptr));
 
         auto                  polling = std::async([poller] {
             std::vector<float> received_data;
-            std::vector<tag_t> received_tags;
+            std::vector<Tag>   received_tags;
             bool               seen_finished = false;
             while (!seen_finished) {
                 seen_finished = poller->finished.load();
@@ -658,14 +658,14 @@ const boost::ut::suite DataSinkTests = [] {
         auto                  &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
 
         for (std::size_t i = 0; i < n_triggers; ++i) {
-            src.tags.push_back(tag_t{ static_cast<tag_t::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
+            src.tags.push_back(Tag{ static_cast<Tag::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
         }
 
         auto &sink = testGraph.emplaceBlock<data_sink<float>>({ { "name", "test_sink" } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        auto               is_trigger = [](const tag_t &) { return trigger_match_result::Matching; };
+        auto               is_trigger = [](const Tag &) { return trigger_match_result::Matching; };
 
         std::mutex         m;
         std::vector<float> received_data;

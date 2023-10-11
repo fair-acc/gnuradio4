@@ -117,7 +117,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
                     // clang-format on
 
                 } else {
-                    const auto &value                    = kv.second.as<std::string>();
+                    const auto &value                   = kv.second.as<std::string>();
                     currentBlock.metaInformation()[key] = value;
                 }
             }
@@ -126,7 +126,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
         std::ignore = currentBlock.settings().set(new_properties);
         // currentBlock.init(); TODO: reverse and first initialise block via property_map constructor and then add to flow-graph -> does the init implicitely then, this is a workaround for the
         // apply_staged_settigns
-        std::ignore = currentBlock.settings().apply_staged_parameters();
+        std::ignore = currentBlock.settings().applyStagedParameters();
     }
 
     for (const auto &connection : tree["connections"]) {

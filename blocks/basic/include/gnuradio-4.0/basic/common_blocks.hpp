@@ -76,15 +76,15 @@ protected:
     gr::PortOut<T>     _output_port;
 
 protected:
-    using setting_map                             = std::map<std::string, int, std::less<>>;
-    std::string                        _name      = "multi_adder";
-    std::string                        _type_name = "multi_adder";
-    gr::property_map                   _meta_information; /// used to store non-graph-processing information like UI block position etc.
-    bool                               _input_tags_present  = false;
-    bool                               _output_tags_changed = false;
-    std::vector<gr::property_map>      _tags_at_input;
-    std::vector<gr::property_map>      _tags_at_output;
-    std::unique_ptr<gr::settings_base> _settings = std::make_unique<gr::basic_settings<multi_adder<T>>>(*this);
+    using setting_map                            = std::map<std::string, int, std::less<>>;
+    std::string                       _name      = "multi_adder";
+    std::string                       _type_name = "multi_adder";
+    gr::property_map                  _meta_information; /// used to store non-graph-processing information like UI block position etc.
+    bool                              _input_tags_present  = false;
+    bool                              _output_tags_changed = false;
+    std::vector<gr::property_map>     _tags_at_input;
+    std::vector<gr::property_map>     _tags_at_output;
+    std::unique_ptr<gr::SettingsBase> _settings = std::make_unique<gr::BasicSettings<multi_adder<T>>>(*this);
 
     void
     apply_input_count() {
@@ -108,7 +108,7 @@ public:
     ~multi_adder() override = default;
 
     void
-    settings_changed(const gr::property_map & /*old_setting*/, const gr::property_map & /*new_setting*/) noexcept {
+    settingsChanged(const gr::property_map & /*old_setting*/, const gr::property_map & /*new_setting*/) noexcept {
         apply_input_count();
     }
 
@@ -195,7 +195,7 @@ public:
         return _meta_information;
     }
 
-    [[nodiscard]] gr::settings_base &
+    [[nodiscard]] gr::SettingsBase &
     settings() const override {
         return *_settings;
     }

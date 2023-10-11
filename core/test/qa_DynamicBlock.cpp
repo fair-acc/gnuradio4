@@ -60,7 +60,7 @@ main() {
     // Function that adds a new source node to the graph, and connects
     // it to one of adder's ports
     std::ignore = adder.settings().set({ { "input_port_count", 10 } });
-    std::ignore = adder.settings().apply_staged_parameters();
+    std::ignore = adder.settings().applyStagedParameters();
 
     std::vector<fixed_source<double> *> sources;
     for (std::size_t i = 0; i < sources_count; ++i) {

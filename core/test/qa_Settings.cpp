@@ -11,8 +11,8 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/tag.hpp>
-#include <gnuradio-4.0/transactions.hpp>
+#include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/Transactions.hpp>
 
 using namespace std::string_literals;
 
@@ -99,7 +99,7 @@ struct Source : public Block<Source<T>> {
     float        sample_rate        = 1000.0f;
 
     void
-    settings_changed(const property_map & /*old_settings*/, property_map & /*new_settings*/) {
+    settingsChanged(const property_map & /*old_settings*/, property_map & /*new_settings*/) {
         // optional init function that is called after construction and whenever settings change
         gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t>(n_tag_offset));
     }
@@ -142,7 +142,7 @@ struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Su
     bool                                                                             resetCalled           = false;
 
     void
-    settings_changed(const property_map &old_settings, property_map &new_settings) noexcept {
+    settingsChanged(const property_map &old_settings, property_map &new_settings) noexcept {
         // optional function that is called whenever settings change
         update_count++;
 
@@ -178,7 +178,7 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
     A<float, "sample rate", Visible> sample_rate = 1.f;
 
     void
-    settings_changed(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
+    settingsChanged(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
         if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
             const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->denominator);
             fwd_settings[std::string(gr::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
@@ -261,18 +261,18 @@ const boost::ut::suite SettingsTests = [] {
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
-        expect(eq(src.settings().auto_update_parameters().size(), 4UL));
-        expect(eq(src.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
+        expect(eq(src.settings().autoUpdateParameters().size(), 4UL));
+        expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // sample_rate
         auto &block1 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#1" } });
         auto &block2 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#2" } });
         auto &sink   = testGraph.emplaceBlock<Sink<float>>();
-        expect(eq(sink.settings().auto_update_parameters().size(), 5UL));
-        expect(eq(sink.settings().auto_forward_parameters().size(), 1UL)); // sample_rate
+        expect(eq(sink.settings().autoUpdateParameters().size(), 5UL));
+        expect(eq(sink.settings().autoForwardParameters().size(), 1UL)); // sample_rate
 
         block1.context = "Test Context";
-        block1.settings().update_active_parameters();
-        expect(eq(block1.settings().auto_update_parameters().size(), 6UL));
-        expect(eq(block1.settings().auto_forward_parameters().size(), 2UL));
+        block1.settings().updateActiveParameters();
+        expect(eq(block1.settings().autoUpdateParameters().size(), 6UL));
+        expect(eq(block1.settings().autoForwardParameters().size(), 2UL));
 
         expect(block1.settings().get("context").has_value());
         expect(block1.settings().get({ "context" }).has_value());
@@ -294,12 +294,12 @@ const boost::ut::suite SettingsTests = [] {
 
         expect(not block1.settings().changed());
         auto ret2 = block1.settings().set({ { "context", "alt context" } });
-        expect(not block1.settings().staged_parameters().empty());
+        expect(not block1.settings().stagedParameters().empty());
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().changed()) << "settings changed";
-        auto forwarding_parameter = block1.settings().apply_staged_parameters();
+        auto forwarding_parameter = block1.settings().applyStagedParameters();
         expect(eq(forwarding_parameter.size(), 1u)) << "initial forward declarations";
-        block1.settings().update_active_parameters();
+        block1.settings().updateActiveParameters();
 
         // src -> block1 -> block2 -> sink
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
@@ -308,7 +308,7 @@ const boost::ut::suite SettingsTests = [] {
 
         auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
         gr::scheduler::Simple sched{ std::move(testGraph), thread_pool };
-        expect(src.settings().auto_update_parameters().contains("sample_rate"));
+        expect(src.settings().autoUpdateParameters().contains("sample_rate"));
         std::ignore = src.settings().set({ { "sample_rate", 49000.0f } });
         sched.runAndWait();
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
@@ -324,10 +324,10 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(sink.sample_rate, 49000.0f)) << "sink matching src sample_rate";
 
         // check auto-update flags
-        expect(!src.settings().auto_update_parameters().contains("sample_rate")) << "src should not retain auto-update flag (was manually set)";
-        expect(block1.settings().auto_update_parameters().contains("sample_rate")) << "block1 retained auto-update flag";
-        expect(block2.settings().auto_update_parameters().contains("sample_rate")) << "block1 retained auto-update flag";
-        expect(sink.settings().auto_update_parameters().contains("sample_rate")) << "sink retained auto-update flag";
+        expect(!src.settings().autoUpdateParameters().contains("sample_rate")) << "src should not retain auto-update flag (was manually set)";
+        expect(block1.settings().autoUpdateParameters().contains("sample_rate")) << "block1 retained auto-update flag";
+        expect(block2.settings().autoUpdateParameters().contains("sample_rate")) << "block1 retained auto-update flag";
+        expect(sink.settings().autoUpdateParameters().contains("sample_rate")) << "sink retained auto-update flag";
     };
 
     "constructor"_test = [] {
@@ -341,10 +341,10 @@ const boost::ut::suite SettingsTests = [] {
 #if !defined(__clang_major__) && __clang_major__ <= 15
         "with init parameter"_test = [] {
             auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
-            expect(eq(block.settings().staged_parameters().size(), 1u));
+            expect(eq(block.settings().stagedParameters().size(), 1u));
             block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
-            expect(eq(block.settings().staged_parameters().size(), 0u));
-            block.settings().update_active_parameters();
+            expect(eq(block.settings().stagedParameters().size(), 0u));
+            block.settings().updateActiveParameters();
             expect(eq(block.settings().get().size(), 11UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
@@ -371,7 +371,7 @@ const boost::ut::suite SettingsTests = [] {
     "vector-type support"_test = [] {
         Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>();
-        block.settings().update_active_parameters();
+        block.settings().updateActiveParameters();
         expect(eq(block.settings().get().size(), 11UL));
 
         block.debug    = true;
@@ -456,27 +456,27 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.scaling_factor, 2.f));
 
         std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } });
-        std::ignore = block.settings().apply_staged_parameters();
+        std::ignore = block.settings().applyStagedParameters();
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
 
         expect(not block.resetCalled);
-        block.settings().reset_defaults();
+        block.settings().resetDefaults();
         expect(block.resetCalled);
         block.resetCalled = false;
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
 
         std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } });
-        std::ignore = block.settings().apply_staged_parameters();
+        std::ignore = block.settings().applyStagedParameters();
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
-        block.settings().store_defaults();
+        block.settings().storeDefaults();
         std::ignore = block.settings().set({ { "name", "TestNameAlt2" }, { "scaling_factor", 43.f } });
-        std::ignore = block.settings().apply_staged_parameters();
+        std::ignore = block.settings().applyStagedParameters();
         expect(block.name == "TestNameAlt2");
         expect(eq(block.scaling_factor, 43.f));
-        block.settings().reset_defaults();
+        block.settings().resetDefaults();
         expect(block.resetCalled);
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
@@ -527,7 +527,7 @@ const boost::ut::suite AnnotationTests = [] {
         expect(not needPowerOfTwoAlt.validate_and_set(5));
 
         std::ignore = block.settings().set({ { "sample_rate", -1.0f } });
-        std::ignore = block.settings().apply_staged_parameters(); // should print out a warning -> TODO: replace with pmt error message on msgOut port
+        std::ignore = block.settings().applyStagedParameters(); // should print out a warning -> TODO: replace with pmt error message on msgOut port
 
         // fmt::print("description:\n {}", gr::node_description<TestBlock<float>>());
     };
@@ -557,7 +557,7 @@ const boost::ut::suite TransactionTests = [] {
     "CtxSettings"_test = [] {
         Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
-        auto  s     = ctx_settings(block);
+        auto  s     = CtxSettings(block);
         auto  ctx0  = SettingsCtx(std::chrono::system_clock::now());
         std::ignore = s.set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
         auto ctx1   = SettingsCtx(std::chrono::system_clock::now() + std::chrono::seconds(1));
@@ -581,7 +581,7 @@ const boost::ut::suite TransactionTests = [] {
     "CtxSettings Matching"_test = [&] {
         Graph      testGraph;
         auto      &block = testGraph.emplaceBlock<TestBlock<int>>({ { "scaling_factor", 42 } });
-        auto       s     = ctx_settings(block, matchPred);
+        auto       s     = CtxSettings(block, matchPred);
         const auto ctx0  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 }, { "GID", 1 } });
         std::ignore      = s.set({ { "scaling_factor", 101 } }, ctx0);
         const auto ctx1  = SettingsCtx(std::chrono::system_clock::now(), { { "BPCID", 1 }, { "SID", 1 }, { "BPID", 1 } });
@@ -612,7 +612,7 @@ const boost::ut::suite TransactionTests = [] {
         // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
         Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
-        auto  s     = std::make_unique<ctx_settings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
+        auto  s     = std::make_unique<CtxSettings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
         block.setSettings(s);
         auto ctx0   = SettingsCtx(std::chrono::system_clock::now());
         std::ignore = block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0);
