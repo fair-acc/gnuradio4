@@ -4,7 +4,7 @@
 
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/buffer.hpp>
+#include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 

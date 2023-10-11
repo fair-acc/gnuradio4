@@ -7,9 +7,9 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/buffer.hpp> // new buffer header interface
-#include <gnuradio-4.0/buffer_skeleton.hpp>
-#include <gnuradio-4.0/circular_buffer.hpp>
+#include <gnuradio-4.0/Buffer.hpp> // new buffer header interface
+#include <gnuradio-4.0/BufferSkeleton.hpp>
+#include <gnuradio-4.0/CircularBuffer.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -149,11 +149,11 @@ inline const boost::ut::suite _buffer_tests = [] {
                             }
                         };
                         if (nP == 1) {
-                            using BufferType   = circular_buffer<int32_t, std::dynamic_extent, ProducerType::Single>;
+                            using BufferType   = CircularBuffer<int32_t, std::dynamic_extent, ProducerType::Single>;
                             Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
                             invoke(buffer);
                         } else {
-                            using BufferType   = circular_buffer<int32_t, std::dynamic_extent, ProducerType::Multi>;
+                            using BufferType   = CircularBuffer<int32_t, std::dynamic_extent, ProducerType::Multi>;
                             Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
                             invoke(buffer);
                         }

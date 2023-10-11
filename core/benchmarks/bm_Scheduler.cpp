@@ -1,7 +1,7 @@
 #include <benchmark.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/profiler.hpp>
+#include <gnuradio-4.0/Profiler.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/testing/bm_test_helper.hpp>
@@ -139,7 +139,7 @@ exec_bm(auto &scheduler, const std::string &test_case) {
     gr::scheduler::BreadthFirst<multiThreaded> sched4_mt(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt]() { exec_bm(sched4_mt, "bifurcated-graph BFS-sched (multi-threaded)"); };
 
-    gr::scheduler::BreadthFirst<multiThreaded, profiler> sched4_mt_prof(test_graph_bifurcated<float>(N_NODES), pool);
+    gr::scheduler::BreadthFirst<multiThreaded, Profiler> sched4_mt_prof(test_graph_bifurcated<float>(N_NODES), pool);
     "bifurcated graph - BFS scheduler (multi-threaded) with profiling"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt_prof]() {
         exec_bm(sched4_mt_prof, "bifurcated-graph BFS-sched (multi-threaded) with profiling");
     };

@@ -7,12 +7,12 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/buffer.hpp>
-#include <gnuradio-4.0/buffer_skeleton.hpp>
-#include <gnuradio-4.0/circular_buffer.hpp>
-#include <gnuradio-4.0/history_buffer.hpp>
-#include <gnuradio-4.0/sequence.hpp>
-#include <gnuradio-4.0/wait_strategy.hpp>
+#include <gnuradio-4.0/Buffer.hpp>
+#include <gnuradio-4.0/BufferSkeleton.hpp>
+#include <gnuradio-4.0/CircularBuffer.hpp>
+#include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/Sequence.hpp>
+#include <gnuradio-4.0/WaitStrategy.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -68,8 +68,8 @@ const boost::ut::suite BasicConceptsTests = [] {
                     value.publish(1);
                 }
             }
-            | std::tuple<gr::test::buffer_skeleton<int32_t>, gr::circular_buffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>,
-                         gr::circular_buffer<int32_t, std::dynamic_extent, gr::ProducerType::Multi>>{ 2, 2, 2 };
+            | std::tuple<gr::test::BufferSkeleton<int32_t>, gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>,
+                         gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Multi>>{ 2, 2, 2 };
 };
 
 const boost::ut::suite SequenceTests = [] {
@@ -186,7 +186,7 @@ const boost::ut::suite UserApiExamples = [] {
 
     "UserApi"_test = [] {
         using namespace gr;
-        Buffer auto       buffer = circular_buffer<int32_t>(1024);
+        Buffer auto       buffer = CircularBuffer<int32_t>(1024);
 
         BufferWriter auto writer = buffer.new_writer();
         { // source only write example
@@ -205,7 +205,7 @@ const boost::ut::suite UserApiExamples = [] {
             expect(eq(localReader.available(), std::size_t{ 10 }));
             expect(eq(buffer.n_readers(), std::size_t{ 1 })); // N.B. circular_buffer<..> specific
         }
-        expect(eq(buffer.n_readers(), std::size_t{ 0 }));     // reader not in scope release atomic reader index
+        expect(eq(buffer.n_readers(), std::size_t{ 0 })); // reader not in scope release atomic reader index
 
         BufferReader auto reader = buffer.new_reader();
         // reader does not know about previous submitted data as it joined only after
@@ -249,7 +249,7 @@ const boost::ut::suite CircularBufferTests = [] {
     "CircularBuffer"_test =
             [](const Allocator &allocator) {
                 using namespace gr;
-                Buffer auto buffer = circular_buffer<int32_t>(1024, allocator);
+                Buffer auto buffer = CircularBuffer<int32_t>(1024, allocator);
                 expect(ge(buffer.size(), 1024u));
 
                 BufferWriter auto writer = buffer.new_writer();
@@ -360,7 +360,7 @@ const boost::ut::suite CircularBufferExceptionTests = [] {
     using namespace boost::ut;
     "CircularBufferExceptions"_test = [] {
         using namespace gr;
-        Buffer auto buffer = circular_buffer<int32_t>(1024);
+        Buffer auto buffer = CircularBuffer<int32_t>(1024);
         expect(ge(buffer.size(), 1024u));
 
         BufferWriter auto writer = buffer.new_writer();
@@ -381,7 +381,7 @@ const boost::ut::suite UserDefinedTypeCasting = [] {
     using namespace boost::ut;
     "UserDefinedTypeCasting"_test = [] {
         using namespace gr;
-        Buffer auto buffer = circular_buffer<std::complex<float>>(1024);
+        Buffer auto buffer = CircularBuffer<std::complex<float>>(1024);
         expect(ge(buffer.size(), 1024u));
 
         BufferWriter auto writer = buffer.new_writer();
@@ -428,8 +428,8 @@ const boost::ut::suite StreamTagConcept = [] {
         };
 
         expect(eq(sizeof(buffer_tag), std::size_t{ 64 })) << "tag size";
-        Buffer auto buffer    = circular_buffer<int32_t>(1024);
-        Buffer auto tagBuffer = circular_buffer<buffer_tag>(32);
+        Buffer auto buffer    = CircularBuffer<int32_t>(1024);
+        Buffer auto tagBuffer = CircularBuffer<buffer_tag>(32);
         expect(ge(buffer.size(), 1024u));
         expect(ge(tagBuffer.size(), 32u));
 
@@ -475,7 +475,7 @@ const boost::ut::suite NonPowerTwoTests = [] {
         using Type                     = std::vector<int>;
         constexpr std::size_t typeSize = sizeof(std::vector<int>);
         expect(not std::has_single_bit(typeSize)) << "type is non-power-of-two";
-        Buffer auto buffer = circular_buffer<Type>(1024);
+        Buffer auto buffer = CircularBuffer<Type>(1024);
         expect(ge(buffer.size(), 1024u));
         if (gr::has_posix_mmap_interface) {
             expect(buffer.size() % typeSize == 0u) << "divisible by the type size";
@@ -524,7 +524,7 @@ const boost::ut::suite HistoryBufferTest = [] {
     using namespace gr;
 
     "history_buffer<double>"_test = [](const std::size_t &capacity) {
-        history_buffer<int> hb(capacity);
+        HistoryBuffer<int> hb(capacity);
         expect(eq(hb.capacity(), capacity));
         expect(eq(hb.size(), 0u));
 
@@ -542,7 +542,7 @@ const boost::ut::suite HistoryBufferTest = [] {
     } | std::vector<std::size_t>{ 5, 3, 10 };
 
     "history_buffer - range tests"_test = [] {
-        history_buffer<int> hb(5);
+        HistoryBuffer<int> hb(5);
         hb.push_back_bulk(std::array{ 1, 2, 3 });
         hb.push_back_bulk(std::vector{ 4, 5, 6 });
         expect(eq(hb.capacity(), 5u));
@@ -576,10 +576,10 @@ const boost::ut::suite HistoryBufferTest = [] {
 
     "history_buffer<T> edge cases"_test = [] {
         fmt::print("\n\ntesting edge cases:\n");
-        expect(throws<std::out_of_range>([] { history_buffer<int>(0); })) << "throws for 0 capacity";
+        expect(throws<std::out_of_range>([] { HistoryBuffer<int>(0); })) << "throws for 0 capacity";
 
         // Create a history buffer of size 1
-        history_buffer<int> hb_one(1);
+        HistoryBuffer<int> hb_one(1);
         expect(eq(hb_one.capacity(), 1u));
         expect(eq(hb_one.size(), 0u));
         hb_one.push_back(41);
@@ -592,8 +592,8 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(-2); })) << "throws for index > 0";
 
         // Push more elements than buffer size
-        history_buffer<int> hb_overflow(5);
-        auto                in = std::vector{ 1, 2, 3, 4, 5, 6 };
+        HistoryBuffer<int> hb_overflow(5);
+        auto               in = std::vector{ 1, 2, 3, 4, 5, 6 };
         hb_overflow.push_back_bulk(in.begin(), in.end());
         expect(eq(hb_overflow[0], 6));
         hb_overflow.push_back_bulk(std::vector{ 7, 8, 9 });
@@ -602,7 +602,7 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb_overflow[0], 12));
 
         // Test with different types, e.g., double
-        history_buffer<double> hb_double(5);
+        HistoryBuffer<double> hb_double(5);
         for (int i = 0; i < 10; ++i) {
             hb_double.push_back(i * 0.1);
         }

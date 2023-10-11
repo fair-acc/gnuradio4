@@ -3,7 +3,7 @@
 #include <fmt/format.h>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/buffer.hpp>
+#include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>

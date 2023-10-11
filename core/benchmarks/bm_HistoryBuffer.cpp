@@ -6,8 +6,8 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/circular_buffer.hpp>
-#include <gnuradio-4.0/history_buffer.hpp>
+#include <gnuradio-4.0/CircularBuffer.hpp>
+#include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 inline const boost::ut::suite _buffer_tests = [] {
@@ -17,9 +17,9 @@ inline const boost::ut::suite _buffer_tests = [] {
     using namespace gr;
 
     {
-        circular_buffer<int, std::dynamic_extent, ProducerType::Multi> buffer(32);
-        auto                                                           writer                   = buffer.new_writer();
-        auto                                                           reader                   = buffer.new_reader();
+        CircularBuffer<int, std::dynamic_extent, ProducerType::Multi> buffer(32);
+        auto                                                          writer                    = buffer.new_writer();
+        auto                                                          reader                    = buffer.new_reader();
 
         "circular_buffer<int>(32) - multiple producer"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
@@ -34,9 +34,9 @@ inline const boost::ut::suite _buffer_tests = [] {
         };
     }
     {
-        circular_buffer<int> buffer(32);
-        auto                 writer                                                                      = buffer.new_writer();
-        auto                 reader                                                                      = buffer.new_reader();
+        CircularBuffer<int> buffer(32);
+        auto                writer                                                                       = buffer.new_writer();
+        auto                reader                                                                       = buffer.new_reader();
 
         "circular_buffer<int>(32) - single producer via lambda"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
@@ -51,9 +51,9 @@ inline const boost::ut::suite _buffer_tests = [] {
         };
     }
     {
-        circular_buffer<int> buffer(32);
-        auto                 writer                                                                       = buffer.new_writer();
-        auto                 reader                                                                       = buffer.new_reader();
+        CircularBuffer<int> buffer(32);
+        auto                writer                                                                        = buffer.new_writer();
+        auto                reader                                                                        = buffer.new_reader();
 
         "circular_buffer<int>(32) - single producer via reserve"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
@@ -73,7 +73,7 @@ inline const boost::ut::suite _buffer_tests = [] {
      * left intentionally some space to improve the circular_buffer<T> implementation here
      */
     {
-        history_buffer<int> buffer(32);
+        HistoryBuffer<int> buffer(32);
 
         "history_buffer<int>(32)"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
@@ -87,7 +87,7 @@ inline const boost::ut::suite _buffer_tests = [] {
         };
     }
     {
-        history_buffer<int> buffer(32);
+        HistoryBuffer<int> buffer(32);
 
         "history_buffer<int, 32>"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
@@ -102,9 +102,9 @@ inline const boost::ut::suite _buffer_tests = [] {
     }
 
     {
-        circular_buffer<int> buffer(32);
-        auto                 writer                                                     = buffer.new_writer();
-        auto                 reader                                                     = buffer.new_reader();
+        CircularBuffer<int> buffer(32);
+        auto                writer                                                      = buffer.new_writer();
+        auto                reader                                                      = buffer.new_reader();
 
         "circular_buffer<int>(32) - no checks"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter    = 0;
@@ -119,7 +119,7 @@ inline const boost::ut::suite _buffer_tests = [] {
         };
     }
     {
-        history_buffer<int, 32> buffer;
+        HistoryBuffer<int, 32> buffer;
 
         "history_buffer<int, 32>  - no checks"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
@@ -131,7 +131,7 @@ inline const boost::ut::suite _buffer_tests = [] {
         };
     }
     {
-        history_buffer<int> buffer(32);
+        HistoryBuffer<int> buffer(32);
 
         "history_buffer<int>(32)  - no checks"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;

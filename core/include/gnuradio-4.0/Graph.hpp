@@ -4,10 +4,10 @@
 #include <gnuradio-4.0/meta/typelist.hpp>
 
 #include "Block.hpp"
-#include "buffer.hpp"
-#include "circular_buffer.hpp"
+#include "Buffer.hpp"
+#include "CircularBuffer.hpp"
 #include "Port.hpp"
-#include "sequence.hpp"
+#include "Sequence.hpp"
 #include "thread/thread_pool.hpp"
 
 #include <algorithm>
@@ -434,7 +434,7 @@ private:
     template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
     [[nodiscard]] ConnectionResult
     connectImpl(Source &src_block_raw, SourcePort &source_port, Destination &dst_block_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
-                 std::string_view name = "unnamed edge") {
+                std::string_view name = "unnamed edge") {
         static_assert(std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>, "The source port type needs to match the sink port type");
 
         if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registered_block) { return registered_block->raw() == std::addressof(src_block_raw); })

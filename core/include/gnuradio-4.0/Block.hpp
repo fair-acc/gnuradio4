@@ -9,7 +9,7 @@
 
 #include "BlockTraits.hpp"
 #include "Port.hpp"
-#include "sequence.hpp"
+#include "Sequence.hpp"
 #include "tag.hpp"
 #include "thread/thread_pool.hpp"
 

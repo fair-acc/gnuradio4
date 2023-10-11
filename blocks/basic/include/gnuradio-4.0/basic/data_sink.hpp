@@ -2,9 +2,9 @@
 #define GNURADIO_DATA_SINK_HPP
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/circular_buffer.hpp>
+#include <gnuradio-4.0/CircularBuffer.hpp>
 #include <gnuradio-4.0/dataset.hpp>
-#include <gnuradio-4.0/history_buffer.hpp>
+#include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/tag.hpp>
 
 #include <any>
@@ -309,7 +309,7 @@ class data_sink : public Block<data_sink<T>> {
     static constexpr std::size_t                   _listener_buffer_size = 65536;
     std::deque<std::unique_ptr<abstract_listener>> _listeners;
     std::mutex                                     _listener_mutex;
-    std::optional<gr::history_buffer<T>>           _history;
+    std::optional<gr::HistoryBuffer<T>>            _history;
     bool                                           _has_signal_info_from_settings = false;
 
 public:
@@ -323,10 +323,10 @@ public:
 
     struct poller {
         // TODO consider whether reusing port<T> here makes sense
-        gr::circular_buffer<T>            buffer       = gr::circular_buffer<T>(_listener_buffer_size);
+        gr::CircularBuffer<T>             buffer       = gr::CircularBuffer<T>(_listener_buffer_size);
         decltype(buffer.new_reader())     reader       = buffer.new_reader();
         decltype(buffer.new_writer())     writer       = buffer.new_writer();
-        gr::circular_buffer<tag_t>        tag_buffer   = gr::circular_buffer<tag_t>(1024);
+        gr::CircularBuffer<tag_t>         tag_buffer   = gr::CircularBuffer<tag_t>(1024);
         decltype(tag_buffer.new_reader()) tag_reader   = tag_buffer.new_reader();
         decltype(tag_buffer.new_writer()) tag_writer   = tag_buffer.new_writer();
         std::size_t                       samples_read = 0; // reader thread
@@ -363,12 +363,12 @@ public:
     };
 
     struct dataset_poller {
-        gr::circular_buffer<DataSet<T>> buffer     = gr::circular_buffer<DataSet<T>>(_listener_buffer_size);
-        decltype(buffer.new_reader())   reader     = buffer.new_reader();
-        decltype(buffer.new_writer())   writer     = buffer.new_writer();
+        gr::CircularBuffer<DataSet<T>> buffer     = gr::CircularBuffer<DataSet<T>>(_listener_buffer_size);
+        decltype(buffer.new_reader())  reader     = buffer.new_reader();
+        decltype(buffer.new_writer())  writer     = buffer.new_writer();
 
-        std::atomic<bool>               finished   = false;
-        std::atomic<std::size_t>        drop_count = 0;
+        std::atomic<bool>              finished   = false;
+        std::atomic<std::size_t>       drop_count = 0;
 
         [[nodiscard]] bool
         process(std::invocable<std::span<DataSet<T>>> auto fnc) {
@@ -572,7 +572,7 @@ private:
 
         // transitional, do not reallocate/copy, but create a shared buffer with size N,
         // and a per-listener history buffer where more than N samples is needed.
-        auto new_history = gr::history_buffer<T>(new_size);
+        auto new_history = gr::HistoryBuffer<T>(new_size);
         if (_history) {
             new_history.push_back_bulk(_history->begin(), _history->end());
         }

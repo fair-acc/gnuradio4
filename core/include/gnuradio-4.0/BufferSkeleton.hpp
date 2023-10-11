@@ -1,5 +1,5 @@
-#ifndef GNURADIO_BUFFER_SKELETON_HPP
-#define GNURADIO_BUFFER_SKELETON_HPP
+#ifndef GNURADIO_BUFFERSKELETON_HPP
+#define GNURADIO_BUFFERSKELETON_HPP
 
 #ifndef GNURADIO_BUFFER2_H
 #include "buffer.hpp" // TODO: why is this include guard outside of the buffer hpp needed?
@@ -18,7 +18,7 @@ namespace gr::test {
  * @tparam T the internally stored type parameter
  */
 template<typename T>
-class buffer_skeleton {
+class BufferSkeleton {
     struct buffer_impl {
         const std::size_t _size;
         std::vector<T>    _data;
@@ -36,12 +36,12 @@ class buffer_skeleton {
 
         explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) : _buffer(buffer) {}
 
-        friend buffer_skeleton<T>;
+        friend BufferSkeleton<T>;
 
     public:
-        [[nodiscard]] buffer_skeleton
+        [[nodiscard]] BufferSkeleton
         buffer() const noexcept {
-            return buffer_skeleton(_buffer);
+            return BufferSkeleton(_buffer);
         };
 
         template<bool strict_check = true>
@@ -75,12 +75,12 @@ class buffer_skeleton {
 
         explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) : _buffer(buffer) {}
 
-        friend buffer_skeleton<T>;
+        friend BufferSkeleton<T>;
 
     public:
-        [[nodiscard]] buffer_skeleton
+        [[nodiscard]] BufferSkeleton
         buffer() const noexcept {
-            return buffer_skeleton(_buffer);
+            return BufferSkeleton(_buffer);
         };
 
         [[nodiscard]] constexpr auto
@@ -113,14 +113,14 @@ class buffer_skeleton {
     // or generating buffer itself
     std::shared_ptr<buffer_impl> _shared_buffer_ptr;
 
-    explicit buffer_skeleton(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    explicit BufferSkeleton(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
-    buffer_skeleton() = delete;
+    BufferSkeleton() = delete;
 
-    explicit buffer_skeleton(const std::size_t min_size) : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size)) {}
+    explicit BufferSkeleton(const std::size_t min_size) : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size)) {}
 
-    ~buffer_skeleton() = default;
+    ~BufferSkeleton() = default;
 
     [[nodiscard]] std::size_t
     size() const {
@@ -140,8 +140,8 @@ public:
     }
 };
 
-static_assert(Buffer<buffer_skeleton<int32_t>>);
+static_assert(Buffer<BufferSkeleton<int32_t>>);
 
 } // namespace gr::test
 
-#endif // GNURADIO_BUFFER_SKELETON_HPP
+#endif // GNURADIO_BUFFERSKELETON_HPP
