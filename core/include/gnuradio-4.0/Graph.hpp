@@ -167,6 +167,11 @@ public:
     raw() = 0;
 };
 
+namespace detail {
+template <typename T, typename... Ts>
+constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
+}
+
 template<BlockLike T>
 class BlockWrapper : public BlockModel {
 private:
@@ -248,7 +253,7 @@ public:
     }
 
     template<typename... Args>
-        requires(sizeof...(Args) > 1)
+        requires (!detail::contains_type<BlockWrapper, std::decay_t<Args>...> && sizeof...(Args) > 1)
     explicit BlockWrapper(Args &&...args) : _block{ std::forward<Args>(args)... } {
         createDynamicPortsLoader();
     }

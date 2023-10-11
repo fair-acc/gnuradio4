@@ -12,20 +12,20 @@
 
 namespace gr {
 
-struct layout_right {};
+struct LayoutRight {};
 
-struct layout_left {};
+struct LayoutLeft {};
 
 /**
  * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
  */
 template<typename T>
-concept PacketLike = requires(T t, const std::size_t n_items) {
+concept PacketLike = requires(T t) {
     typename T::value_type;
     typename T::pmt_map;
-    std::is_same_v<decltype(t.timestamp), int64_t>;
-    std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.timestamp), int64_t>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
 };
 
 /**
@@ -36,11 +36,11 @@ concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
-    std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
-    std::is_same_v<decltype(t.layout), std::vector<typename T::tensor_layout_type>>;
-    std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-    std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
+    requires std::is_same_v<decltype(t.layout), typename T::tensor_layout_type>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
 };
 
 /**
@@ -56,29 +56,29 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
-    std::is_same_v<decltype(t.timestamp), int64_t>;
+    requires std::is_same_v<decltype(t.timestamp), int64_t>;
 
     // axis layout:
-    std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
-    std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
-    std::is_same_v<decltype(t.axis_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.axis_values), std::vector<std::vector<typename T::value_type>>>;
 
     // signal data storage
-    std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
-    std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
-    std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-    std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
+    requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
 
     // meta data
-    std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
 };
 
 template<typename T>
 struct DataSet {
     using value_type         = T;
-    using tensor_layout_type = std::variant<layout_right, layout_left, std::string>;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
     using pmt_map            = std::map<std::string, pmtv::pmt>;
     std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
@@ -114,7 +114,7 @@ using DataSet_double = DataSet<float>;
 template<typename T>
 struct Tensor {
     using value_type                    = T;
-    using tensor_layout_type            = std::variant<layout_right, layout_left, std::string>;
+    using tensor_layout_type            = std::variant<LayoutRight, LayoutLeft, std::string>;
     using pmt_map                       = std::map<std::string, pmtv::pmt>;
     std::int64_t              timestamp = 0; // UTC timestamp [ns]
 
