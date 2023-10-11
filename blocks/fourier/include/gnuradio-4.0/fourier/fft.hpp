@@ -171,7 +171,7 @@ On the choice of window (mathematically aka. apodisation) functions
         ds.axis_names         = { "Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase" };
         ds.axis_units         = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
         ds.extents            = { dim, static_cast<int32_t>(N) };
-        ds.layout             = gr::layout_right{};
+        ds.layout             = gr::LayoutRight{};
         ds.signal_names       = { signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name),
                                   fmt::format("Phase({})", signal_name) };
         ds.signal_units       = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };

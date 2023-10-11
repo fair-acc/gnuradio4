@@ -189,7 +189,7 @@ class Simple : public SchedulerBase<TProfiler> {
 public:
     explicit Simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                     const profiling::Options &profiling_options = {})
-        : SchedulerBase<TProfiler>(std::forward<gr::Graph>(graph), thread_pool, profiling_options) {}
+        : SchedulerBase<TProfiler>(std::move(graph), thread_pool, profiling_options) {}
 
     void
     init() {

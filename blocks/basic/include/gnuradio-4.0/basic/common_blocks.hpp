@@ -144,7 +144,7 @@ public:
     gr::work::Result
     work(std::size_t requested_work) override {
         // TODO: Rewrite with ranges once we can use them
-        std::size_t available_samples = -1_UZ;
+        std::size_t available_samples = std::numeric_limits<std::size_t>::max();
         for (const auto &input_port : _input_ports) {
             auto available_samples_for_port = input_port.streamReader().available();
             if (available_samples_for_port < available_samples) {
