@@ -3,26 +3,22 @@
 
 #include <fftw3.h>
 
-#include "fft_types.hpp"
 #include "window.hpp"
 
 namespace gr::algorithm {
 
-template<typename T>
-concept FFTwDoubleType = std::is_same_v<T, std::complex<double>> || std::is_same_v<T, double>;
-
-template<typename T>
-    requires(ComplexType<T> || std::floating_point<T>)
+template<typename TInput, typename TOutput = std::conditional<gr::meta::complex_like<TInput>, TInput, std::complex<typename TInput::value_type>>>
+    requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>) && (gr::meta::complex_like<TOutput>) )
 struct FFTw {
 private:
     inline static std::mutex fftw_plan_mutex;
 
 public:
     // clang-format off
-    template<typename FftwT>
-    struct fftwImpl {
+    template<typename TData>
+    struct FFTwImpl {
         using PlanType        = fftwf_plan;
-        using InAlgoDataType  = std::conditional_t<ComplexType<FftwT>, fftwf_complex, float>;
+        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftwf_complex, float>;
         using OutAlgoDataType = fftwf_complex;
         using InUniquePtr     = std::unique_ptr<InAlgoDataType [], decltype([](InAlgoDataType *ptr) { fftwf_free(ptr); })>;
         using OutUniquePtr    = std::unique_ptr<OutAlgoDataType [], decltype([](OutAlgoDataType *ptr) { fftwf_free(ptr); })>;
@@ -51,10 +47,11 @@ public:
         static void forgetWisdom() {fftwf_forget_wisdom();}
     };
 
-    template<FFTwDoubleType FftwDoubleT>
-    struct fftwImpl<FftwDoubleT> {
+    template<typename TData>
+       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+    struct FFTwImpl<TData> {
         using PlanType        = fftw_plan;
-        using InAlgoDataType  = std::conditional_t<ComplexType<FftwDoubleT>, fftw_complex, double>;
+        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftw_complex, double>;
         using OutAlgoDataType = fftw_complex;
         using InUniquePtr     = std::unique_ptr<InAlgoDataType [], decltype([](InAlgoDataType *ptr) { fftwf_free(ptr); })>;
         using OutUniquePtr    = std::unique_ptr<OutAlgoDataType [], decltype([](OutAlgoDataType *ptr) { fftwf_free(ptr); })>;
@@ -84,12 +81,13 @@ public:
     };
 
     // clang-format on
-    using OutDataType     = std::conditional_t<ComplexType<T>, T, std::complex<T>>;
-    using InAlgoDataType  = typename fftwImpl<T>::InAlgoDataType;
-    using OutAlgoDataType = typename fftwImpl<T>::OutAlgoDataType;
-    using InUniquePtr     = typename fftwImpl<T>::InUniquePtr;
-    using OutUniquePtr    = typename fftwImpl<T>::OutUniquePtr;
-    using PlanUniquePtr   = typename fftwImpl<T>::PlanUniquePtr;
+    // Precision of the algorithm is defined by the output type `TOutput:value_type`
+    using AlgoDataType    = std::conditional_t<gr::meta::complex_like<TInput>, TOutput, typename TOutput::value_type>;
+    using InAlgoDataType  = typename FFTwImpl<AlgoDataType>::InAlgoDataType;
+    using OutAlgoDataType = typename FFTwImpl<AlgoDataType>::OutAlgoDataType;
+    using InUniquePtr     = typename FFTwImpl<AlgoDataType>::InUniquePtr;
+    using OutUniquePtr    = typename FFTwImpl<AlgoDataType>::OutUniquePtr;
+    using PlanUniquePtr   = typename FFTwImpl<AlgoDataType>::PlanUniquePtr;
 
     std::size_t   fftSize{ 0 };
     std::string   wisdomPath{ ".gr_fftw_wisdom" };
@@ -111,19 +109,16 @@ public:
 
     ~FFTw() { clearFftw(); }
 
-    std::vector<OutDataType>
-    computeFFT(const std::vector<T> &in) {
-        if (fftSize != in.size()) {
-            fftSize = in.size();
-            initAll();
+    auto
+    compute(const std::ranges::input_range auto &in, std::ranges::output_range<TOutput> auto &&out) {
+        if constexpr (requires(std::size_t n) { out.resize(n); }) {
+            if (out.size() != in.size()) {
+                out.resize(in.size());
+            }
+        } else {
+            static_assert(std::tuple_size_v<decltype(in)> == std::tuple_size_v<decltype(out)>, "Size mismatch for fixed-size container.");
         }
-        std::vector<OutDataType> out(getOutputSize());
-        computeFFT(in, out);
-        return out;
-    }
 
-    void
-    computeFFT(const std::vector<T> &in, std::vector<OutDataType> &out) {
         if (!std::has_single_bit(in.size())) {
             throw std::invalid_argument(fmt::format("Input data must have 2^N samples, input size: ", in.size()));
         }
@@ -133,50 +128,69 @@ public:
             initAll();
         }
 
-        if (out.size() < getOutputSize()) {
-            throw std::out_of_range(fmt::format("Output vector size ({}) is not enough, at least {} needed. ", out.size(), getOutputSize()));
+        if (out.size() < fftSize) {
+            throw std::out_of_range(fmt::format("Output vector size ({}) is not enough, at least {} needed. ", out.size(), fftSize));
         }
 
-        static_assert(sizeof(InAlgoDataType) == sizeof(T), "Input std::complex<T> and T[2] must have the same size.");
-        std::memcpy(fftwIn.get(), &(*in.begin()), sizeof(InAlgoDataType) * fftSize);
+        // precision is defined by output type, if needed cast input
+        if constexpr (!std::is_same_v<TInput, AlgoDataType>) {
+            std::span<AlgoDataType> inSpan(reinterpret_cast<AlgoDataType *>(fftwIn.get()), in.size());
+            std::ranges::transform(in.begin(), in.end(), inSpan.begin(), [](const auto c) { return static_cast<AlgoDataType>(c); });
+        } else {
+            std::memcpy(fftwIn.get(), &(*in.begin()), sizeof(InAlgoDataType) * fftSize);
+        }
 
-        fftwImpl<T>::execute(fftwPlan.get());
+        FFTwImpl<AlgoDataType>::execute(fftwPlan.get());
 
-        static_assert(sizeof(OutDataType) == sizeof(OutAlgoDataType), "Output std::complex<T> and T[2] must have the same size.");
-        std::memcpy(out.data(), fftwOut.get(), sizeof(OutDataType) * getOutputSize());
+        static_assert(sizeof(TOutput) == sizeof(OutAlgoDataType), "Sizes of TOutput type and OutAlgoDataType are not equal.");
+        std::memcpy(out.data(), fftwOut.get(), sizeof(TOutput) * getOutputSize());
+
+        // for the real input to complex a Hermitian output is produced by fftw, perform mirroring and conjugation fftw spectra to the second half
+        if (!gr::meta::complex_like<TInput>) {
+            const auto halfIt = std::next(out.begin(), static_cast<std::ptrdiff_t>(fftSize / 2));
+            std::ranges::transform(out.begin(), halfIt, halfIt, [](auto c) { return std::conj(c); });
+            std::reverse(halfIt, out.end());
+        }
+
+        return out;
+    }
+
+    auto
+    compute(const std::ranges::input_range auto &in) {
+        return compute(in, std::vector<TOutput>());
     }
 
     [[nodiscard]] inline int
     importWisdom() const {
         // lock file while importing wisdom?
-        return fftwImpl<T>::importWisdomFromFilename(wisdomPath);
+        return FFTwImpl<AlgoDataType>::importWisdomFromFilename(wisdomPath);
     }
 
     [[nodiscard]] inline int
     exportWisdom() const {
         // lock file while exporting wisdom?
-        return fftwImpl<T>::exportWisdomToFilename(wisdomPath);
+        return FFTwImpl<AlgoDataType>::exportWisdomToFilename(wisdomPath);
     }
 
     [[nodiscard]] inline int
     importWisdomFromString(const std::string &wisdomString) const {
-        return fftwImpl<T>::importWisdomFromString(wisdomString);
+        return FFTwImpl<AlgoDataType>::importWisdomFromString(wisdomString);
     }
 
     [[nodiscard]] std::string
     exportWisdomToString() const {
-        return fftwImpl<T>::exportWisdomToString();
+        return FFTwImpl<AlgoDataType>::exportWisdomToString();
     }
 
     inline void
     forgetWisdom() const {
-        return fftwImpl<T>::forgetWisdom();
+        return FFTwImpl<AlgoDataType>::forgetWisdom();
     }
 
 private:
     [[nodiscard]] constexpr std::size_t
     getOutputSize() const {
-        if constexpr (ComplexType<T>) {
+        if constexpr (gr::meta::complex_like<TInput>) {
             return fftSize;
         } else {
             return 1 + fftSize / 2;
@@ -186,14 +200,14 @@ private:
     void
     initAll() {
         clearFftw();
-        fftwIn  = InUniquePtr(static_cast<InAlgoDataType *>(fftwImpl<T>::malloc(sizeof(InAlgoDataType) * fftSize)));
-        fftwOut = OutUniquePtr(static_cast<OutAlgoDataType *>(fftwImpl<T>::malloc(sizeof(OutAlgoDataType) * getOutputSize())));
+        fftwIn  = InUniquePtr(static_cast<InAlgoDataType *>(FFTwImpl<AlgoDataType>::malloc(sizeof(InAlgoDataType) * fftSize)));
+        fftwOut = OutUniquePtr(static_cast<OutAlgoDataType *>(FFTwImpl<AlgoDataType>::malloc(sizeof(OutAlgoDataType) * getOutputSize())));
 
         {
             std::lock_guard lg{ fftw_plan_mutex };
             // what to do if error is returned
             std::ignore = importWisdom();
-            fftwPlan    = PlanUniquePtr(fftwImpl<T>::plan(static_cast<int>(fftSize), fftwIn.get(), fftwOut.get(), sign, flags));
+            fftwPlan    = PlanUniquePtr(FFTwImpl<AlgoDataType>::plan(static_cast<int>(fftSize), fftwIn.get(), fftwOut.get(), sign, flags));
             std::ignore = exportWisdom();
         }
     }

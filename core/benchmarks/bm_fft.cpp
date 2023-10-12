@@ -17,9 +17,9 @@
  * reference: https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm#Pseudocode
  */
 template<typename T>
-    requires gr::algorithm::ComplexType<T>
+    requires gr::meta::complex_like<T>
 void
-computeFFFTCooleyTukey(std::vector<T> &signal) {
+computeFFTCooleyTukey(std::vector<T> &signal) {
     const std::size_t N{ signal.size() };
 
     if (N == 1) return;
@@ -31,8 +31,8 @@ computeFFFTCooleyTukey(std::vector<T> &signal) {
         odd[i]  = signal[2 * i + 1];
     }
 
-    computeFFFTCooleyTukey(even);
-    computeFFFTCooleyTukey(odd);
+    computeFFTCooleyTukey(even);
+    computeFFTCooleyTukey(odd);
 
     const typename T::value_type wn{ static_cast<typename T::value_type>(2. * std::numbers::pi_v<double>) / static_cast<typename T::value_type>(N) };
     for (std::size_t i = 0; i < N / 2; i++) {
@@ -47,7 +47,7 @@ std::vector<T>
 generateSinSample(std::size_t N, double sampleRate, double frequency, double amplitude) {
     std::vector<T> signal(N);
     for (std::size_t i = 0; i < N; i++) {
-        if constexpr (gr::algorithm::ComplexType<T>) {
+        if constexpr (gr::meta::complex_like<T>) {
             signal[i] = { static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate)), 0. };
         } else {
             signal[i] = static_cast<T>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate));
@@ -55,6 +55,16 @@ generateSinSample(std::size_t N, double sampleRate, double frequency, double amp
     }
     return signal;
 }
+
+template<typename T>
+struct FFTAlgoPrecision {
+    using type = T;
+};
+
+template<gr::meta::complex_like T>
+struct FFTAlgoPrecision<T> {
+    using type = T::value_type;
+};
 
 template<typename T>
 void
@@ -78,7 +88,7 @@ testFFT() {
     std::vector<T> signal = generateSinSample<T>(N, sampleRate, frequency, amplitude);
 
     {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFTw<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
+        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFTw> fft1({ { "fftSize", N } });
         std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
@@ -87,7 +97,7 @@ testFFT() {
         };
     }
     {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT<FFTInDataType<T, PrecisionType>>> fft1({ { "fftSize", N } });
+        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({ { "fftSize", N } });
         std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
@@ -96,10 +106,10 @@ testFFT() {
         };
     }
 
-    if constexpr (gr::algorithm::ComplexType<T>) {
+    if constexpr (gr::meta::complex_like<T>) {
         ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftCT", type_name<T>())) = [&signal] {
             auto signalCopy = signal;
-            computeFFFTCooleyTukey<T>(signalCopy);
+            computeFFTCooleyTukey<T>(signalCopy);
         };
     }
 

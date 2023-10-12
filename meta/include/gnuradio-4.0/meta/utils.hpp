@@ -1,6 +1,7 @@
 #ifndef GNURADIO_GRAPH_UTILS_HPP
 #define GNURADIO_GRAPH_UTILS_HPP
 
+#include <complex>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -250,6 +251,9 @@ concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
 
 template<typename T>
 using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
+
+template<typename T>
+concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
 
 /**
  * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
