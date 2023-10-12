@@ -177,11 +177,11 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto  block_sink_load            = context().loader.instantiate(names::cout_sink, "double", block_sink_params);
         auto &block_sink                 = testGraph.addBlock(std::move(block_sink_load));
 
-        auto  connection_1               = testGraph.dynamic_connect(block_source, 0, block_multiply_double, 0);
-        auto  connection_2               = testGraph.dynamic_connect(block_multiply_double, 0, block_convert_to_float, 0);
-        auto  connection_3               = testGraph.dynamic_connect(block_convert_to_float, 0, block_multiply_float, 0);
-        auto  connection_4               = testGraph.dynamic_connect(block_multiply_float, 0, block_convert_to_double, 0);
-        auto  connection_5               = testGraph.dynamic_connect(block_convert_to_double, 0, block_sink, 0);
+        auto  connection_1               = testGraph.connect(block_source, 0, block_multiply_double, 0);
+        auto  connection_2               = testGraph.connect(block_multiply_double, 0, block_convert_to_float, 0);
+        auto  connection_3               = testGraph.connect(block_convert_to_float, 0, block_multiply_float, 0);
+        auto  connection_4               = testGraph.connect(block_multiply_float, 0, block_convert_to_double, 0);
+        auto  connection_5               = testGraph.connect(block_convert_to_double, 0, block_sink, 0);
 
         expect(connection_1 == grg::ConnectionResult::SUCCESS);
         expect(connection_2 == grg::ConnectionResult::SUCCESS);

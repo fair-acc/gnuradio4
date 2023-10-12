@@ -3,10 +3,8 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
-namespace grg = gr;
-
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public grg::Block<scale<T, R>, grg::PortInNamed<T, "original">, grg::PortOutNamed<R, "scaled">> {
+struct scale : public gr::Block<scale<T, R>, gr::PortInNamed<T, "original">, gr::PortOutNamed<R, "scaled">> {
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     processOne(V a) const noexcept {
@@ -15,7 +13,7 @@ struct scale : public grg::Block<scale<T, R>, grg::PortInNamed<T, "original">, g
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public grg::Block<adder<T>, grg::PortInNamed<T, "addend0">, grg::PortInNamed<T, "addend1">, grg::PortOutNamed<R, "sum">> {
+struct adder : public gr::Block<adder<T>, gr::PortInNamed<T, "addend0">, gr::PortInNamed<T, "addend1">, gr::PortOutNamed<R, "sum">> {
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
     processOne(V a, V b) const noexcept {
@@ -24,42 +22,42 @@ struct adder : public grg::Block<adder<T>, grg::PortInNamed<T, "addend0">, grg::
 };
 
 template<typename T>
-class HierBlock : public grg::BlockModel {
+class HierBlock : public gr::BlockModel {
 private:
     static std::atomic_size_t _unique_id_counter;
     const std::size_t         _unique_id   = _unique_id_counter++;
     const std::string         _unique_name = fmt::format("multi_adder#{}", _unique_id);
 
 protected:
-    using setting_map                             = std::map<std::string, int, std::less<>>;
-    std::string                        _name      = "multi_adder";
-    std::string                        _type_name = "multi_adder";
-    grg::property_map                  _meta_information; /// used to store non-graph-processing information like UI block position etc.
-    bool                               _input_tags_present  = false;
-    bool                               _output_tags_changed = false;
-    std::vector<grg::property_map>     _tags_at_input;
-    std::vector<grg::property_map>     _tags_at_output;
-    std::unique_ptr<grg::SettingsBase> _settings = std::make_unique<grg::BasicSettings<HierBlock<T>>>(*this);
+    using setting_map                            = std::map<std::string, int, std::less<>>;
+    std::string                       _name      = "multi_adder";
+    std::string                       _type_name = "multi_adder";
+    gr::property_map                  _meta_information; /// used to store non-graph-processing information like UI block position etc.
+    bool                              _input_tags_present  = false;
+    bool                              _output_tags_changed = false;
+    std::vector<gr::property_map>     _tags_at_input;
+    std::vector<gr::property_map>     _tags_at_output;
+    std::unique_ptr<gr::SettingsBase> _settings = std::make_unique<gr::BasicSettings<HierBlock<T>>>(*this);
 
-    using in_port_t                              = grg::PortIn<T>;
+    using in_port_t                             = gr::PortIn<T>;
 
-    grg::scheduler::Simple<> _scheduler;
+    gr::scheduler::Simple<> _scheduler;
 
-    grg::Graph
+    gr::Graph
     make_graph() {
-        grg::Graph graph;
-        auto      &adder_block       = graph.emplaceBlock<adder<double>>({ { "name", "adder" } });
-        auto      &left_scale_block  = graph.emplaceBlock<scale<double>>();
-        auto      &right_scale_block = graph.emplaceBlock<scale<double>>();
+        gr::Graph graph;
+        auto     &adder_block       = graph.emplaceBlock<adder<double>>({ { "name", "adder" } });
+        auto     &left_scale_block  = graph.emplaceBlock<scale<double>>();
+        auto     &right_scale_block = graph.emplaceBlock<scale<double>>();
 
-        std::ignore                  = graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block);
-        std::ignore                  = graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block);
+        assert(gr::ConnectionResult::SUCCESS == graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block));
+        assert(gr::ConnectionResult::SUCCESS == graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block));
 
-        _dynamic_input_ports.emplace_back(grg::inputPort<0>(&left_scale_block), grg::DynamicPort::non_owned_reference_tag{});
-        _dynamic_input_ports.emplace_back(grg::inputPort<0>(&right_scale_block), grg::DynamicPort::non_owned_reference_tag{});
-        _dynamic_output_ports.emplace_back(grg::outputPort<0>(&adder_block), grg::DynamicPort::non_owned_reference_tag{});
+        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0>(&left_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0>(&right_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicOutputPorts.emplace_back(gr::DynamicPort(gr::outputPort<0>(&adder_block), gr::DynamicPort::non_owned_reference_tag{}));
 
-        _DynamicPorts_loaded = true;
+        _dynamicPortsLoaded = true;
         return graph;
     }
 
@@ -96,7 +94,7 @@ public:
         return 0UL;
     }
 
-    grg::work::Result
+    gr::work::Result
     work(std::size_t requested_work) override {
         _scheduler.runAndWait();
         return { requested_work, requested_work, gr::work::Status::DONE };
@@ -110,17 +108,17 @@ public:
     void
     setName(std::string /*name*/) noexcept override {}
 
-    [[nodiscard]] grg::property_map &
+    [[nodiscard]] gr::property_map &
     metaInformation() noexcept override {
         return _meta_information;
     }
 
-    [[nodiscard]] const grg::property_map &
+    [[nodiscard]] const gr::property_map &
     metaInformation() const override {
         return _meta_information;
     }
 
-    [[nodiscard]] grg::SettingsBase &
+    [[nodiscard]] gr::SettingsBase &
     settings() const override {
         return *_settings;
     }
@@ -135,13 +133,13 @@ template<typename T>
 std::atomic_size_t HierBlock<T>::_unique_id_counter = 0;
 
 template<typename T>
-struct fixed_source : public grg::Block<fixed_source<T>> {
-    grg::PortOut<T, grg::RequiredSamples<1, 1024>> out;
-    std::size_t                                    remaining_events_count;
+struct fixed_source : public gr::Block<fixed_source<T>> {
+    gr::PortOut<T, gr::RequiredSamples<1, 1024>> out;
+    std::size_t                                  remaining_events_count;
 
-    T                                              value = 1;
+    T                                            value = 1;
 
-    grg::work::Result
+    gr::work::Result
     work(std::size_t requested_work) {
         if (remaining_events_count != 0) {
             using namespace gr::literals;
@@ -156,10 +154,10 @@ struct fixed_source : public grg::Block<fixed_source<T>> {
             }
 
             value += 1;
-            return { requested_work, 1UL, grg::work::Status::OK };
+            return { requested_work, 1UL, gr::work::Status::OK };
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            return { requested_work, 1UL, grg::work::Status::DONE };
+            return { requested_work, 1UL, gr::work::Status::DONE };
         }
     }
 };
@@ -167,9 +165,9 @@ struct fixed_source : public grg::Block<fixed_source<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fixed_source<T>), out, remaining_events_count);
 
 template<typename T>
-struct cout_sink : public grg::Block<cout_sink<T>> {
-    grg::PortIn<T, grg::RequiredSamples<1, 1024>> in;
-    std::size_t                                   remaining = 0;
+struct cout_sink : public gr::Block<cout_sink<T>> {
+    gr::PortIn<T, gr::RequiredSamples<1, 1024>> in;
+    std::size_t                                 remaining = 0;
 
     void
     processOne(T value) {
@@ -182,19 +180,19 @@ struct cout_sink : public grg::Block<cout_sink<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), in, remaining);
 
-grg::Graph
+gr::Graph
 make_graph(std::size_t events_count) {
-    grg::Graph graph;
+    gr::Graph graph;
 
-    auto      &source_leftBlock  = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
-    auto      &source_rightBlock = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
-    auto      &sink              = graph.emplaceBlock<cout_sink<double>>({ { "remaining", events_count } });
+    auto     &source_leftBlock  = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
+    auto     &source_rightBlock = graph.emplaceBlock<fixed_source<double>>({ { "remaining_events_count", events_count } });
+    auto     &sink              = graph.emplaceBlock<cout_sink<double>>({ { "remaining", events_count } });
 
-    auto      &hier              = graph.addBlock(std::make_unique<HierBlock<double>>());
+    auto     &hier              = graph.addBlock(std::make_unique<HierBlock<double>>());
 
-    graph.dynamic_connect(source_leftBlock, 0, hier, 0);
-    graph.dynamic_connect(source_rightBlock, 0, hier, 1);
-    graph.dynamic_connect(hier, 0, sink, 0);
+    graph.connect(source_leftBlock, 0, hier, 0);
+    graph.connect(source_rightBlock, 0, hier, 1);
+    graph.connect(hier, 0, sink, 0);
 
     return graph;
 }
@@ -203,7 +201,7 @@ int
 main() {
     auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
 
-    grg::scheduler::Simple scheduler(make_graph(10), thread_pool);
+    gr::scheduler::Simple scheduler(make_graph(10), thread_pool);
 
     scheduler.runAndWait();
 }

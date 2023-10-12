@@ -299,11 +299,13 @@ struct simdize_impl<std::tuple<>, N> {
 template<tuple_like Tup, std::size_t N>
     requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
 struct simdize_impl<Tup, N> {
-    static inline constexpr std::size_t size = N > 0 ? N : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr {
-        return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... });
-    }(std::make_index_sequence<std::tuple_size_v<Tup>>());
+    static inline constexpr std::size_t size
+            = N > 0 ? N
+                    : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr { return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... }); }
 
-    using type                               = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
+                      (std::make_index_sequence<std::tuple_size_v<Tup>>());
+
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
         return {};
     }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
@@ -327,12 +329,23 @@ template<fixed_string Name, typename PortList>
 consteval int
 indexForName() {
     auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
-        constexpr int n_matches = ((PortList::template at<Ids>::static_name() == Name) + ...);
+        auto static_name_for_index = []<std::size_t Id> {
+            using Port = typename PortList::template at<Id>;
+            if constexpr (requires(Port port) {
+                              { port.static_name() };
+                          }) {
+                return Port::Name;
+            } else {
+                return Port::value_type::Name;
+            }
+        };
+
+        constexpr int n_matches = ((static_name_for_index.template operator()<Ids>() == Name) + ...);
         static_assert(n_matches <= 1, "Multiple ports with that name were found. The name must be unique. You can "
                                       "still use a port index instead.");
         static_assert(n_matches == 1, "No port with the given name exists.");
         int result = -1;
-        ((PortList::template at<Ids>::static_name() == Name ? (result = Ids) : 0), ...);
+        ((static_name_for_index.template operator()<Ids>() == Name ? (result = Ids) : 0), ...);
         return result;
     };
     return helper(std::make_index_sequence<PortList::size>());
@@ -441,9 +454,7 @@ auto
 tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
-            return function(std::get<I>(tuple), std::get<I>(tuples)...);
-        }(std::integral_constant<std::size_t, Idx>{})...);
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
@@ -452,9 +463,7 @@ auto
 tuple_transform_enumerated(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) {
-            return function(I, std::get<I>(tuple), std::get<I>(tuples)...);
-        }(std::integral_constant<std::size_t, Idx>{})...);
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(I, std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
     }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 

@@ -115,6 +115,7 @@ gr::Graph
 get_graph_linear(tracer &trace) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
+    using namespace boost::ut;
 
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
@@ -124,9 +125,9 @@ get_graph_linear(tracer &trace) {
     auto &scale_block2 = flow.emplaceBlock<scale<int, 4>>(trace, "mult2");
     auto &sink         = flow.emplaceBlock<expect_sink<int, 100000>>(trace, "out", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 8 * count); });
 
-    std::ignore        = flow.connect<"scaled">(scale_block2).to<"in">(sink);
-    std::ignore        = flow.connect<"scaled">(scale_block1).to<"original">(scale_block2);
-    std::ignore        = flow.connect<"out">(source1).to<"original">(scale_block1);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block2).to<"in">(sink)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block1).to<"original">(scale_block2)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale_block1)));
 
     return flow;
 }
@@ -135,6 +136,7 @@ gr::Graph
 get_graph_parallel(tracer &trace) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
+    using namespace boost::ut;
 
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
@@ -147,12 +149,12 @@ get_graph_parallel(tracer &trace) {
     auto &scale_block2b = flow.emplaceBlock<scale<int, 5>>(trace, "mult2b");
     auto &sink_b        = flow.emplaceBlock<expect_sink<int, 100000>>(trace, "outb", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == 15 * count); });
 
-    std::ignore         = flow.connect<"scaled">(scale_block1a).to<"original">(scale_block2a);
-    std::ignore         = flow.connect<"scaled">(scale_block1b).to<"original">(scale_block2b);
-    std::ignore         = flow.connect<"scaled">(scale_block2b).to<"in">(sink_b);
-    std::ignore         = flow.connect<"out">(source1).to<"original">(scale_block1a);
-    std::ignore         = flow.connect<"scaled">(scale_block2a).to<"in">(sink_a);
-    std::ignore         = flow.connect<"out">(source1).to<"original">(scale_block1b);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block1a).to<"original">(scale_block2a)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block1b).to<"original">(scale_block2b)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block2b).to<"in">(sink_b)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale_block1a)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block2a).to<"in">(sink_a)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale_block1b)));
 
     return flow;
 }
@@ -177,6 +179,7 @@ gr::Graph
 get_graph_scaled_sum(tracer &trace) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
+    using namespace boost::ut;
 
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
@@ -188,10 +191,10 @@ get_graph_scaled_sum(tracer &trace) {
     auto &add_block   = flow.emplaceBlock<adder<int>>(trace, "add");
     auto &sink        = flow.emplaceBlock<expect_sink<int, 100000>>(trace, "out", [](std::uint64_t count, std::uint64_t data) { boost::ut::expect(boost::ut::that % data == (2 * count) + count); });
 
-    std::ignore       = flow.connect<"out">(source1).to<"original">(scale_block);
-    std::ignore       = flow.connect<"scaled">(scale_block).to<"addend0">(add_block);
-    std::ignore       = flow.connect<"out">(source2).to<"addend1">(add_block);
-    std::ignore       = flow.connect<"sum">(add_block).to<"in">(sink);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale_block)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale_block).to<"addend0">(add_block)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source2).to<"addend1">(add_block)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(add_block).to<"in">(sink)));
 
     return flow;
 }

@@ -59,9 +59,24 @@ member_to_named_port_helper() {
     // Collections of ports don't get names inside the type as
     // the ports inside are dynamically created
     if constexpr (is_port_descriptor_v<Descriptor>) {
-        return static_cast<typename Descriptor::value_type::template with_name<fixed_string(refl::descriptor::get_name(Descriptor()).data)> *>(nullptr);
+        return static_cast<typename Descriptor::value_type::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor> *>(nullptr);
     } else if constexpr (is_port_collection_descriptor_v<Descriptor>) {
-        return static_cast<typename Descriptor::value_type *>(nullptr);
+        if constexpr (gr::meta::is_std_array_type<typename Descriptor::value_type>()) {
+            auto value_type_updater = []<template<typename, auto> typename Template, typename Arg, auto Size>(Template<Arg, Size> *) {
+                return static_cast< //
+                        Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>, Size> *>(nullptr);
+            };
+            return value_type_updater(static_cast<typename Descriptor::value_type *>(nullptr));
+        } else {
+            auto value_type_updater = []<template<typename...> typename Template, typename Arg, typename... Args>(Template<Arg, Args...> *) {
+                // This type is not going to be used for a variable, it is just meant to be
+                // a compile-time hint of what the port collection looks like.
+                // We're ignoring the Args... because they might depend on the
+                // main type (for example, allocator in a vector)
+                return static_cast<Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>> *>(nullptr);
+            };
+            return value_type_updater(static_cast<typename Descriptor::value_type *>(nullptr));
+        }
     } else {
         return static_cast<void *>(nullptr);
     }
@@ -191,8 +206,7 @@ can_processOne_invoke_test(auto &node, const auto &input, std::index_sequence<Is
 template<typename T>
 struct exact_argument_type {
     template<std::same_as<T> U>
-    constexpr
-    operator U() const noexcept;
+    constexpr operator U() const noexcept;
 };
 
 template<std::size_t... Is>

@@ -158,7 +158,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
         auto src = parseBlock_port(connection[0], connection[1]);
         auto dst = parseBlock_port(connection[2], connection[3]);
 
-        testGraph.dynamic_connect(*src.block_it->second, src.port, *dst.block_it->second, dst.port);
+        testGraph.connect(*src.block_it->second, src.port, *dst.block_it->second, dst.port);
     }
 
     return testGraph;
@@ -215,8 +215,8 @@ save_grc(const gr::Graph &testGraph) {
             auto            write_edge = [&](const auto &edge) {
                 out << YAML::Flow;
                 detail::YamlSeq seq(out);
-                out << edge.src_block().name().data() << std::to_string(edge.src_port_index());
-                out << edge.dst_block().name().data() << std::to_string(edge.dst_port_index());
+                out << edge.sourceBlock().name().data() << std::to_string(edge.sourcePortIndex());
+                out << edge.destinationBlock().name().data() << std::to_string(edge.destinationPortIndex());
             };
 
             testGraph.forEachEdge(write_edge);

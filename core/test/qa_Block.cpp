@@ -118,8 +118,8 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
     if (data.out_port_min >= 0) int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
 
-    std::ignore = flow.connect<"out">(source).to<"in">(int_dec_block);
-    auto sched  = scheduler(std::move(flow), thread_pool);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
+    auto sched = scheduler(std::move(flow), thread_pool);
     sched.runAndWait();
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -146,8 +146,8 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
     if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
 
-    std::ignore = flow.connect<"out">(source).to<"in">(int_dec_block);
-    auto sched  = scheduler(std::move(flow), thread_pool);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
+    auto sched = scheduler(std::move(flow), thread_pool);
     sched.runAndWait();
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();

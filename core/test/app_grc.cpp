@@ -81,7 +81,9 @@ main(int argc, char *argv[]) {
 
         [[maybe_unused]] auto collect_edges = [](grg::Graph &graph) {
             std::set<std::string> result;
-            graph.forEachEdge([&](const auto &edge) { result.insert(fmt::format("{}#{} - {}#{}", edge.src_block().name(), edge.src_port_index(), edge.dst_block().name(), edge.dst_port_index())); });
+            graph.forEachEdge([&](const auto &edge) {
+                result.insert(fmt::format("{}#{} - {}#{}", edge.sourceBlock().name(), edge.sourcePortIndex(), edge.destinationBlock().name(), edge.destinationPortIndex()));
+            });
             return result;
         };
 

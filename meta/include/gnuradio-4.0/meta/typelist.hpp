@@ -275,53 +275,52 @@ template<template<typename> typename Predicate, typename DefaultType, typename H
 struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
     : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
 
-template<std::size_t Index, typename ... Ts>
+template<std::size_t Index, typename... Ts>
 struct at_impl;
 
-template<typename T0, typename ...Ts>
+template<typename T0, typename... Ts>
 struct at_impl<0, T0, Ts...> {
     using type = T0;
 };
 
-template<typename T0, typename T1, typename ...Ts>
+template<typename T0, typename T1, typename... Ts>
 struct at_impl<1, T0, T1, Ts...> {
     using type = T1;
 };
 
-template<typename T0, typename T1, typename T2, typename ...Ts>
+template<typename T0, typename T1, typename T2, typename... Ts>
 struct at_impl<2, T0, T1, T2, Ts...> {
     using type = T2;
 };
 
-template<typename T0, typename T1, typename T2, typename T3, typename ...Ts>
+template<typename T0, typename T1, typename T2, typename T3, typename... Ts>
 struct at_impl<3, T0, T1, T2, T3, Ts...> {
     using type = T3;
 };
 
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename...Ts>
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename... Ts>
 struct at_impl<4, T0, T1, T2, T3, T4, Ts...> {
     using type = T4;
 };
 
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename...Ts>
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename... Ts>
 struct at_impl<5, T0, T1, T2, T3, T4, T5, Ts...> {
     using type = T5;
 };
 
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename...Ts>
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename... Ts>
 struct at_impl<6, T0, T1, T2, T3, T4, T5, T6, Ts...> {
     using type = T6;
 };
 
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...Ts>
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
 struct at_impl<7, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> {
     using type = T7;
 };
 
-template<std::size_t Index, typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...Ts>
-    requires (Index >= 8)
-struct at_impl<Index, T0, T1, T2, T3, T4, T5, T6, T7, Ts...>: at_impl<Index - 8, Ts...> {
-};
+template<std::size_t Index, typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
+    requires(Index >= 8)
+struct at_impl<Index, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> : at_impl<Index - 8, Ts...> {};
 
 } // namespace detail
 
@@ -339,16 +338,16 @@ struct typelist {
     template<template<typename...> class Other>
     using apply = Other<Ts...>;
 
-    template<class F, std::size_t... Is>
+    template<class F, std::size_t... Is, typename... LeadingArguments>
     static constexpr void
-    apply_impl(F &&f, std::index_sequence<Is...>) {
-        (f(std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
+    apply_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
+        (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
     }
 
-    template<class F>
+    template<class F, typename... LeadingArguments>
     static constexpr void
-    apply_func(F &&f) {
-        apply_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{});
+    apply_func(F &&f, LeadingArguments &&...args) {
+        apply_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
     }
 
     template<std::size_t I>
@@ -368,7 +367,8 @@ struct typelist {
 
     template<typename F, typename Tup>
         requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
-    static constexpr auto construct(Tup &&args_tuple) {
+    static constexpr auto
+    construct(Tup &&args_tuple) {
         return std::apply([]<typename... Args>(Args &&...args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
     }
 
@@ -414,7 +414,8 @@ struct typelist {
     using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
 
     template<typename Needle>
-    static constexpr std::size_t index_of() {
+    static constexpr std::size_t
+    index_of() {
         std::size_t result = static_cast<std::size_t>(-1);
         gr::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
             if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
