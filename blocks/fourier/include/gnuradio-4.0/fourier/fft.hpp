@@ -9,7 +9,6 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
-#include <gnuradio-4.0/algorithm/fourier/fft_types.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 
@@ -17,8 +16,18 @@ namespace gr::blocks::fft {
 
 using namespace gr;
 
-template<typename T, typename U = DataSet<float>, typename FourierAlgorithm = gr::algorithm::FFT<gr::algorithm::FFTInDataType<T, typename U::value_type>>>
-    requires(gr::algorithm::ComplexType<T> || std::floating_point<T> || std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>)
+template<typename T>
+struct OutputDataSet {
+    using type = DataSet<T>;
+};
+
+template<gr::meta::complex_like T>
+struct OutputDataSet<T> {
+    using type = DataSet<typename T::value_type>;
+};
+
+template<typename T, typename U = OutputDataSet<T>::type, template<typename, typename> typename FourierAlgorithm = gr::algorithm::FFT>
+    requires((gr::meta::complex_like<T> || std::floating_point<T>) && (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>) )
 struct FFT : public Block<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>, Doc<R""(
 @brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
@@ -79,21 +88,23 @@ On the choice of window (mathematically aka. apodisation) functions
 @tparam FourierAlgorithm the specific algorithm used to perform the Fourier Transform (can be DFT, FFT, FFTW).
 )"">> {
     using value_type  = U::value_type;
-    using InDataType  = gr::algorithm::FFTInDataType<T, value_type>;
-    using OutDataType = gr::algorithm::FFTOutDataType<value_type>;
+    using InDataType  = std::conditional_t<gr::meta::complex_like<T>, std::complex<value_type>, value_type>;
+    using OutDataType = std::complex<value_type>;
 
-    PortIn<T>                   in;
-    PortOut<U>                  out;
+    PortIn<T>                                                 in;
+    PortOut<U>                                                out;
 
-    FourierAlgorithm            _fftImpl;
-    gr::algorithm::window::Type _windowType = gr::algorithm::window::Type::Hann;
-    std::vector<value_type>     _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
+    FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl;
+    gr::algorithm::window::Type                               _windowType = gr::algorithm::window::Type::Hann;
+    std::vector<value_type>                                   _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
 
     // settings
-    const std::string                                                                algorithm = gr::meta::type_name<FourierAlgorithm>();
+    const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
     Annotated<std::uint32_t, "FFT size", Doc<"FFT size">>                            fftSize{ 1024U };
     Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(gr::algorithm::window::to_string(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
+    Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              outputInDeg{ false };
+    Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrapPhase{ false };
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
@@ -101,10 +112,11 @@ On the choice of window (mathematically aka. apodisation) functions
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
 
     // semi-private caching vectors (need to be public for unit-test) -> TODO: move to FFT implementations, casting from T -> U::value_type should be done there
-    std::vector<InDataType>  _inData            = std::vector<InDataType>(fftSize, 0);
-    std::vector<OutDataType> _outData           = std::vector<OutDataType>(gr::algorithm::ComplexType<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
-    std::vector<value_type>  _magnitudeSpectrum = std::vector<value_type>(_outData.size(), 0);
-    std::vector<value_type>  _phaseSpectrum     = std::vector<value_type>(_outData.size(), 0);
+    std::vector<InDataType>  _inData             = std::vector<InDataType>(fftSize, 0);
+    std::vector<OutDataType> _outData            = std::vector<OutDataType>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
+    std::vector<value_type>  _magnitudeSpectrum  = std::vector<value_type>(_outData.size(), 0);
+    std::vector<value_type>  _phaseSpectrum      = std::vector<value_type>(_outData.size(), 0);
+    constexpr static bool    computeHalfSpectrum = gr::meta::complex_like<T>;
 
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map &newSettings) noexcept {
@@ -124,7 +136,6 @@ On the choice of window (mathematically aka. apodisation) functions
 
         // N.B. this should become part of the Fourier transform implementation
         _inData.resize(fftSize, 0);
-        constexpr bool computeHalfSpectrum = gr::algorithm::ComplexType<T>;
         _outData.resize(computeHalfSpectrum ? newSize : (1U + newSize / 2), 0);
         _magnitudeSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
         _phaseSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
@@ -140,7 +151,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
         // apply window function
         for (std::size_t i = 0U; i < fftSize; i++) {
-            if constexpr (gr::algorithm::ComplexType<T>) {
+            if constexpr (gr::meta::complex_like<T>) {
                 _inData[i].real(_inData[i].real() * _window[i]);
                 _inData[i].imag(_inData[i].imag() * _window[i]);
             } else {
@@ -148,15 +159,13 @@ On the choice of window (mathematically aka. apodisation) functions
             }
         }
 
-        _outData = _fftImpl.computeFFT(_inData);
+        _outData           = _fftImpl.compute(_inData);
+        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum,
+                                                                          algorithm::fft::ConfigMagnitude{ .computeHalfSpectrum = computeHalfSpectrum, .outputInDb = outputInDb });
+        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum,
+                                                                      algorithm::fft::ConfigPhase{ .computeHalfSpectrum = computeHalfSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase });
 
-        gr::algorithm::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, fftSize, outputInDb);
-        gr::algorithm::computePhaseSpectrum(_outData, _phaseSpectrum);
-        if constexpr (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>) {
-            output[0] = createDataset();
-        } else {
-            static_assert(!std::is_same_v<U, DataSet<float>> && "FFT output type not (yet) implemented");
-        }
+        output[0]          = createDataset();
 
         return work::Status::OK;
     }
@@ -178,12 +187,12 @@ On the choice of window (mathematically aka. apodisation) functions
 
         ds.signal_values.resize(dim * N);
         auto const freqWidth = static_cast<value_type>(sample_rate) / static_cast<value_type>(fftSize);
-        if constexpr (gr::algorithm::ComplexType<T>) {
+        if constexpr (gr::meta::complex_like<T>) {
             auto const freqOffset = static_cast<value_type>(N / 2) * freqWidth;
             std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values),
                                    [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
         } else {
-            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth](const auto i) { return static_cast<T>(i) * freqWidth; });
+            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth](const auto i) { return static_cast<value_type>(i) * freqWidth; });
         }
         std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(N)), [](const auto &c) { return c.real(); });
         std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(2U * N)), [](const auto &c) { return c.imag(); });
@@ -205,6 +214,8 @@ On the choice of window (mathematically aka. apodisation) functions
                                   { "fft_size", fftSize },
                                   { "window", window },
                                   { "output_in_db", outputInDb },
+                                  { "output_in_deg", outputInDeg },
+                                  { "unwrap_phase", unwrapPhase },
                                   { "numerator", this->numerator },
                                   { "denominator", this->denominator },
                                   { "stride", this->stride } } };
@@ -215,7 +226,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
 } // namespace gr::blocks::fft
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename U, typename FourierAlgoImpl), (gr::blocks::fft::FFT<T, U, FourierAlgoImpl>), //
-                                    in, out, algorithm, fftSize, window, outputInDb, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename U, template<typename, typename> typename FourierAlgoImpl), (gr::blocks::fft::FFT<T, U, FourierAlgoImpl>), //
+                                    in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
 #endif // GNURADIO_FFT_HPP
