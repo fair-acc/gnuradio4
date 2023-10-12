@@ -506,8 +506,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
         auto     &cpy  = testGraph.emplaceBlock<copy<float>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, &test::source<float>::out).to<"in">(cpy)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(cpy).to(sink, &test::sink<float>::in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(cpy)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(cpy).to<"in">(sink)));
 
         gr::scheduler::Simple sched{ std::move(testGraph) };
 
@@ -527,7 +527,7 @@ inline const boost::ut::suite _runtime_tests = [] {
             if (i == 0) {
                 expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));
             } else {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(*cpy[i - 1], &copy::out).to(*cpy[i], &copy::in)));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*cpy[i - 1]).to<"in">(*cpy[i])));
             }
         }
 

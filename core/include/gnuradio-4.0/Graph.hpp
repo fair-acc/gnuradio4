@@ -37,11 +37,17 @@ using namespace gr::literals;
 
 class BlockModel {
 protected:
-    using DynamicPorts                         = std::vector<gr::DynamicPort>;
-    bool                  _DynamicPorts_loaded = false;
-    std::function<void()> _DynamicPorts_loader;
-    DynamicPorts          _dynamic_input_ports;
-    DynamicPorts          _dynamic_output_ports;
+    struct NamedPortCollection {
+        std::string                  name;
+        std::vector<gr::DynamicPort> ports;
+    };
+
+    using DynamicPortOrCollection             = std::variant<gr::DynamicPort, NamedPortCollection>;
+    using DynamicPorts                        = std::vector<DynamicPortOrCollection>;
+    bool                  _dynamicPortsLoaded = false;
+    std::function<void()> _dynamicPortsLoader;
+    DynamicPorts          _dynamicInputPorts;
+    DynamicPorts          _dynamicOutputPorts;
 
     BlockModel() = default;
 
@@ -57,31 +63,113 @@ public:
 
     void
     initDynamicPorts() const {
-        if (!_DynamicPorts_loaded) _DynamicPorts_loader();
+        if (!_dynamicPortsLoaded) _dynamicPortsLoader();
     }
 
-    gr::DynamicPort &
-    dynamicInputPort(std::size_t index) { // TODO: do we need the 'dynamic' prefix here?
+    [[nodiscard]] gr::DynamicPort &
+    dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
         initDynamicPorts();
-        return _dynamic_input_ports.at(index);
+        if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                throw std::invalid_argument("Need to specify the index in the port collection");
+            } else {
+                return portCollection->ports[subIndex];
+            }
+
+        } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                return *port;
+            } else {
+                throw std::invalid_argument("Specified sub-index for a normal port");
+            }
+        }
+
+        throw std::logic_error("Variant construction failed");
     }
 
-    gr::DynamicPort &
-    dynamicOutputPort(std::size_t index) { // TODO: do we need the 'dynamic' prefix here?
+    [[nodiscard]] gr::DynamicPort &
+    dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
         initDynamicPorts();
-        return _dynamic_output_ports.at(index);
+        if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                throw std::invalid_argument("Need to specify the index in the port collection");
+            } else {
+                return portCollection->ports[subIndex];
+            }
+
+        } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                return *port;
+            } else {
+                throw std::invalid_argument("Specified sub-index for a normal port");
+            }
+        }
+
+        throw std::logic_error("Variant construction failed");
     }
 
-    [[nodiscard]] auto
-    dynamicInputPortsSize() const { // TODO: return collection and rely on 'size()' of underlying collection
+    [[nodiscard]] std::size_t
+    dynamicInputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
         initDynamicPorts();
-        return _dynamic_input_ports.size();
+        if (parentIndex == meta::invalid_index) {
+            return _dynamicInputPorts.size();
+        } else {
+            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(parentIndex))) {
+                return portCollection->ports.size();
+            } else {
+                return meta::invalid_index;
+            }
+        }
     }
 
-    [[nodiscard]] auto
-    dynamicOutputPortsSize() const { // TODO: return collection and rely on 'size()' of underlying collection
+    [[nodiscard]] std::size_t
+    dynamicOutputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
         initDynamicPorts();
-        return _dynamic_output_ports.size();
+        if (parentIndex == meta::invalid_index) {
+            return _dynamicOutputPorts.size();
+        } else {
+            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(parentIndex))) {
+                return portCollection->ports.size();
+            } else {
+                return meta::invalid_index;
+            }
+        }
+    }
+
+    std::size_t
+    dynamicInputPortIndex(std::string_view name) const {
+        initDynamicPorts();
+        for (std::size_t i = 0; i < _dynamicInputPorts.size(); ++i) {
+            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(i))) {
+                if (portCollection->name == name) {
+                    return i;
+                }
+            } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(i))) {
+                if (port->name == name) {
+                    return i;
+                }
+            }
+        }
+
+        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+    }
+
+    std::size_t
+    dynamicOutputPortIndex(std::string_view name) const {
+        initDynamicPorts();
+        for (std::size_t i = 0; i < _dynamicOutputPorts.size(); ++i) {
+            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(i))) {
+                if (portCollection->name == name) {
+                    return i;
+                }
+            } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(i))) {
+                if (port->name == name) {
+                    return i;
+                }
+            }
+        }
+
+        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
     }
 
     virtual ~BlockModel() = default;
@@ -199,36 +287,53 @@ private:
 
     void
     createDynamicPortsLoader() {
-        _DynamicPorts_loader = [this] {
-            if (_DynamicPorts_loaded) return;
+        _dynamicPortsLoader = [this] {
+            if (_dynamicPortsLoaded) return;
 
-            using TBlock       = std::remove_cvref_t<decltype(blockRef())>;
+            using Node        = std::remove_cvref_t<decltype(blockRef())>;
 
-            auto register_port = []<typename PortOrCollection>(PortOrCollection &port_or_collection, auto &where) {
-                auto process_port = [&where]<typename Port>(Port &port) { where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{})); };
+            auto registerPort = [&](auto &where, [[maybe_unused]] auto direction, [[maybe_unused]] auto index, auto &&t) {
+                auto processPort = []<typename Port>(auto &where_, Port &port) -> auto & {
+                    where_.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
+                    return where_.back();
+                };
 
-                if constexpr (traits::port::is_port_v<PortOrCollection>) {
-                    process_port(port_or_collection);
-
+                using CurrentPortType = std::remove_cvref_t<decltype(t)>;
+                if constexpr (traits::port::is_port_v<CurrentPortType>) {
+                    using PortDescriptor = typename CurrentPortType::ReflDescriptor;
+                    if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
+                        auto &port = (blockRef().*(PortDescriptor::pointer));
+                        processPort(where, port);
+                    } else {
+                        // We can also have ports defined as template parameters
+                        if constexpr (decltype(direction)::value == PortDirection::INPUT) {
+                            processPort(where, gr::inputPort<decltype(index)::value>(&blockRef()));
+                        } else {
+                            processPort(where, gr::outputPort<decltype(index)::value>(&blockRef()));
+                        }
+                    }
                 } else {
-                    for (auto &port : port_or_collection) {
-                        process_port(port);
+                    using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
+                    if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
+                        auto               &collection = (blockRef().*(PortCollectionDescriptor::pointer));
+                        NamedPortCollection result;
+                        result.name = refl::descriptor::get_name(PortCollectionDescriptor()).data;
+                        for (auto &port : collection) {
+                            processPort(result.ports, port);
+                        }
+                        where.push_back(std::move(result));
+                    } else {
+                        static_assert(meta::always_false<PortCollectionDescriptor>, "Port collections are only supported for member variables");
                     }
                 }
             };
+            traits::block::input_ports<Node>::template apply_func(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
+            traits::block::output_ports<Node>::template apply_func(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
 
-            constexpr std::size_t input_port_count = gr::traits::block::template input_port_types<TBlock>::size;
-            [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
-                (register_port(gr::inputPort<Is>(&blockRef()), this->_dynamic_input_ports), ...);
-            }(std::make_index_sequence<input_port_count>());
-
-            constexpr std::size_t output_port_count = gr::traits::block::template output_port_types<TBlock>::size;
-            [this, register_port]<std::size_t... Is>(std::index_sequence<Is...>) {
-                (register_port(gr::outputPort<Is>(&blockRef()), this->_dynamic_output_ports), ...);
-            }(std::make_index_sequence<output_port_count>());
-
+            constexpr std::size_t input_port_count  = gr::traits::block::template input_port_types<Node>::size;
+            constexpr std::size_t output_port_count = gr::traits::block::template output_port_types<Node>::size;
             static_assert(input_port_count + output_port_count > 0);
-            _DynamicPorts_loaded = true;
+            _dynamicPortsLoaded = true;
         };
     }
 
@@ -330,11 +435,11 @@ class edge {
 public: // TODO: consider making this private and to use accessors (that can be safely used by users)
     using PortDirection::INPUT;
     using PortDirection::OUTPUT;
-    BlockModel  *_src_block;
-    BlockModel  *_dst_block;
-    std::size_t  _src_port_index;
-    std::size_t  _dst_port_index;
-    std::size_t  _min_buffer_size;
+    BlockModel  *_sourceBlock;
+    BlockModel  *_destinationBlock;
+    std::size_t  _sourcePortIndex;
+    std::size_t  _destinationPortIndex;
+    std::size_t  _minBufferSize;
     std::int32_t _weight;
     std::string  _name; // custom edge name
     bool         _connected;
@@ -354,27 +459,33 @@ public:
     operator=(edge &&) noexcept
             = default;
 
-    edge(BlockModel *src_block, std::size_t src_port_index, BlockModel *dst_block, std::size_t dst_port_index, std::size_t min_buffer_size, std::int32_t weight, std::string_view name)
-        : _src_block(src_block), _dst_block(dst_block), _src_port_index(src_port_index), _dst_port_index(dst_port_index), _min_buffer_size(min_buffer_size), _weight(weight), _name(name) {}
+    edge(BlockModel *sourceBlock, std::size_t sourcePortIndex, BlockModel *destinationBlock, std::size_t destinationPortIndex, std::size_t minBufferSize, std::int32_t weight, std::string_view name)
+        : _sourceBlock(sourceBlock)
+        , _destinationBlock(destinationBlock)
+        , _sourcePortIndex(sourcePortIndex)
+        , _destinationPortIndex(destinationPortIndex)
+        , _minBufferSize(minBufferSize)
+        , _weight(weight)
+        , _name(name) {}
 
     [[nodiscard]] constexpr const BlockModel &
-    src_block() const noexcept {
-        return *_src_block;
+    sourceBlock() const noexcept {
+        return *_sourceBlock;
     }
 
     [[nodiscard]] constexpr const BlockModel &
-    dst_block() const noexcept {
-        return *_dst_block;
+    destinationBlock() const noexcept {
+        return *_destinationBlock;
     }
 
     [[nodiscard]] constexpr std::size_t
-    src_port_index() const noexcept {
-        return _src_port_index;
+    sourcePortIndex() const noexcept {
+        return _sourcePortIndex;
     }
 
     [[nodiscard]] constexpr std::size_t
-    dst_port_index() const noexcept {
-        return _dst_port_index;
+    destinationPortIndex() const noexcept {
+        return _destinationPortIndex;
     }
 
     [[nodiscard]] constexpr std::string_view
@@ -383,8 +494,8 @@ public:
     }
 
     [[nodiscard]] constexpr std::size_t
-    min_buffer_size() const noexcept {
-        return _min_buffer_size;
+    minBufferSize() const noexcept {
+        return _minBufferSize;
     }
 
     [[nodiscard]] constexpr std::int32_t
@@ -404,7 +515,7 @@ struct Graph {
             "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
 
 private:
-    std::vector<std::function<ConnectionResult(Graph &)>> _connection_definitions;
+    std::vector<std::function<ConnectionResult(Graph &)>> _connectionDefinitions;
     std::vector<std::unique_ptr<BlockModel>>              _blocks;
     std::vector<edge>                                     _edges;
 
@@ -414,53 +525,60 @@ private:
         static_assert(!std::is_pointer_v<std::remove_cvref_t<TBlock>>);
         auto it = [&, this] {
             if constexpr (std::is_same_v<TBlock, BlockModel>) {
-                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto &node) { return node.get() == &what; });
+                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto &block) { return block.get() == &what; });
             } else {
-                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto &node) { return node->raw() == &what; });
+                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto &block) { return block->raw() == &what; });
             }
         }();
 
-        if (it == _blocks.end()) throw std::runtime_error(fmt::format("No such node in this graph"));
+        if (it == _blocks.end()) throw std::runtime_error(fmt::format("No such block in this graph"));
         return *it;
     }
 
-    template<typename TBlock>
-    [[nodiscard]] DynamicPort &
-    dynamicOutputPort(TBlock &node, std::size_t index) {
-        return findBlock(node)->dynamicOutputPort(index);
-    }
-
-    template<typename TBlock>
-    [[nodiscard]] DynamicPort &
-    dynamicInputPort(TBlock &node, std::size_t index) {
-        return findBlock(node)->dynamicInputPort(index);
-    }
-
-    template<std::size_t src_port_index, std::size_t dst_port_index, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
+    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Source, typename SourcePort,
+             typename Destination, typename DestinationPort>
     [[nodiscard]] ConnectionResult
-    connectImpl(Source &src_block_raw, SourcePort &source_port, Destination &dst_block_raw, DestinationPort &destination_port, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
-                std::string_view name = "unnamed edge") {
-        static_assert(std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>, "The source port type needs to match the sink port type");
-
-        if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registered_block) { return registered_block->raw() == std::addressof(src_block_raw); })
-            || !std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registered_block) { return registered_block->raw() == std::addressof(dst_block_raw); })) {
-            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", src_block_raw.name, src_port_index, dst_block_raw.name, dst_port_index));
+    connectImpl(Source &sourceNodeRaw, SourcePort &source_port_or_collection, Destination &destinationNodeRaw, DestinationPort &destinationPort_or_collection, std::size_t minBufferSize = 65536,
+                std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+        if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(sourceNodeRaw); })
+            || !std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(destinationNodeRaw); })) {
+            throw std::runtime_error(
+                    fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", sourceNodeRaw.name, sourcePortIndex, destinationNodeRaw.name, destinationPortIndex));
         }
 
-        auto result = source_port.connect(destination_port);
+        auto *sourcePort = [&] {
+            if constexpr (traits::port::is_port_v<SourcePort>) {
+                return &source_port_or_collection;
+            } else {
+                return &source_port_or_collection[sourcePortSubIndex];
+            }
+        }();
+
+        auto *destinationPort = [&] {
+            if constexpr (traits::port::is_port_v<DestinationPort>) {
+                return &destinationPort_or_collection;
+            } else {
+                return &destinationPort_or_collection[destinationPortSubIndex];
+            }
+        }();
+
+        static_assert(std::is_same_v<typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>,
+                      "The source port type needs to match the sink port type");
+
+        auto result = sourcePort->connect(*destinationPort);
         if (result == ConnectionResult::SUCCESS) {
-            auto *src_block = findBlock(src_block_raw).get();
-            auto *dst_block = findBlock(dst_block_raw).get();
-            _edges.emplace_back(src_block, src_port_index, dst_block, src_port_index, min_buffer_size, weight, name);
+            auto *sourceNode      = findBlock(sourceNodeRaw).get();
+            auto *destinationNode = findBlock(destinationNodeRaw).get();
+            _edges.emplace_back(sourceNode, sourcePortIndex, destinationNode, sourcePortIndex, minBufferSize, weight, name);
         }
 
         return result;
     }
 
-    // Just a dummy class that stores the graph and the source node and port
+    // Just a dummy class that stores the graph and the source block and port
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
-    template<typename Source, typename Port, std::size_t src_port_index = 1_UZ>
+    template<typename Source, typename Port, std::size_t sourcePortIndex = 1_UZ, std::size_t sourcePortSubIndex = meta::invalid_index>
     struct SourceConnector {
         Graph  &self;
         Source &source;
@@ -468,49 +586,63 @@ private:
 
         SourceConnector(Graph &_self, Source &_source, Port &_port) : self(_self), source(_source), port(_port) {}
 
+        static_assert(traits::port::is_port_v<Port> || (sourcePortSubIndex != meta::invalid_index),
+                      "When we have a collection of ports, we need to have an index to access the desired port in the collection");
+
     private:
-        template<typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
-        [[nodiscard]] constexpr auto
-        to(Destination &destination, DestinationPort &destination_port) {
-            // Not overly efficient as the node doesn't know the graph it belongs to,
+        template<typename Destination, typename DestinationPort, std::size_t destinationPortIndex = meta::invalid_index, std::size_t destinationPortSubIndex = meta::invalid_index>
+        [[nodiscard]] constexpr ConnectionResult
+        to(Destination &destination, DestinationPort &destinationPort) {
+            // Not overly efficient as the block doesn't know the graph it belongs to,
             // but this is not a frequent operation and the check is important.
             auto is_block_known = [this](const auto &query_block) {
                 return std::any_of(self._blocks.cbegin(), self._blocks.cend(), [&query_block](const auto &known_block) { return known_block->raw() == std::addressof(query_block); });
             };
             if (!is_block_known(source) || !is_block_known(destination)) {
-                throw fmt::format("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
+                fmt::print("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
+                return ConnectionResult::FAILED;
             }
-            self._connection_definitions.push_back([source_ = &source, source_port = &port, destination = &destination, destination_port = &destination_port](Graph &graph) {
-                return graph.connectImpl<src_port_index, dst_port_index>(*source_, *source_port, *destination, *destination_port);
+            self._connectionDefinitions.push_back([source = &source, source_port = &port, destination = &destination, destinationPort = &destinationPort](Graph &graph) {
+                return graph.connectImpl<sourcePortIndex, sourcePortSubIndex, destinationPortIndex, destinationPortSubIndex>(*source, *source_port, *destination, *destinationPort);
             });
             return ConnectionResult::SUCCESS;
         }
 
     public:
-        template<typename Destination, typename DestinationPort, std::size_t dst_port_index = meta::invalid_index>
-        [[nodiscard]] constexpr auto
-        to(Destination &destination, DestinationPort Destination::*member_ptr) {
-            return to<Destination, DestinationPort, dst_port_index>(destination, std::invoke(member_ptr, destination));
+        // connect using the port index
+
+        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
+        [[nodiscard, deprecated("For internal use only, the the with the port name should be used")]] auto
+        to(Destination &destination) {
+            auto &destinationPort = inputPort<destinationPortIndex>(&destination);
+            return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
         }
 
-        template<std::size_t dst_port_index, typename Destination>
-        [[nodiscard]] constexpr auto
+        template<std::size_t destinationPortIndex, typename Destination>
+        [[nodiscard, deprecated("For internal use only, the the with the port name should be used")]] auto
         to(Destination &destination) {
-            auto &destination_port = inputPort<dst_port_index>(&destination);
-            return to<Destination, std::remove_cvref_t<decltype(destination_port)>, dst_port_index>(destination, destination_port);
+            return to<destinationPortIndex, meta::invalid_index, Destination>(destination);
         }
 
-        template<fixed_string dst_port_name, typename Destination>
+        // connect using the port name
+
+        template<fixed_string destinationPortName, std::size_t destinationPortSubIndex, typename Destination>
         [[nodiscard]] constexpr auto
         to(Destination &destination) {
-            using destination_input_ports        = typename traits::block::input_ports<Destination>;
-            constexpr std::size_t dst_port_index = meta::indexForName<dst_port_name, destination_input_ports>();
-            if constexpr (dst_port_index == meta::invalid_index) {
-                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination node">, Destination, meta::message_type<dst_port_name>,
+            using destination_input_ports              = typename traits::block::input_ports<Destination>;
+            constexpr std::size_t destinationPortIndex = meta::indexForName<destinationPortName, destination_input_ports>();
+            if constexpr (destinationPortIndex == meta::invalid_index) {
+                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination block">, Destination, meta::message_type<destinationPortName>,
                                   meta::message_type<"These are the known names:">, traits::block::input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports>
                         port_not_found_error{};
             }
-            return to<dst_port_index, Destination>(destination);
+            return to<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
+        }
+
+        template<fixed_string destinationPortName, typename Destination>
+        [[nodiscard]] constexpr auto
+        to(Destination &destination) {
+            return to<destinationPortName, meta::invalid_index, Destination>(destination);
         }
 
         SourceConnector(const SourceConnector &) = delete;
@@ -522,18 +654,6 @@ private:
         operator=(SourceConnector &&)
                 = delete;
     };
-
-    template<std::size_t src_port_index, typename Source>
-    friend auto
-    connect(Source &source);
-
-    template<fixed_string src_port_name, typename Source>
-    friend auto
-    connect(Source &source);
-
-    template<typename Source, typename Port>
-    friend auto
-    connect(Source &source, Port Source::*member_ptr);
 
 public:
     Graph(Graph &)  = delete;
@@ -591,54 +711,85 @@ public:
         return *raw_ref;
     }
 
-    template<std::size_t src_port_index, typename Source>
-    [[nodiscard]] auto
+    // connect using the port index
+
+    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
+    [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
     connect(Source &source) {
-        auto &port = outputPort<src_port_index>(&source);
-        return Graph::SourceConnector<Source, std::remove_cvref_t<decltype(port)>, src_port_index>(*this, source, port);
+        auto &port_or_collection = outputPort<sourcePortIndex>(&source);
+        return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
     }
 
-    template<fixed_string src_port_name, typename Source>
+    template<std::size_t sourcePortIndex, typename Source>
+    [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
+    connect(Source &source) {
+        return connect<sourcePortIndex, meta::invalid_index, Source>(source);
+    }
+
+    // connect using the port name
+
+    template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard]] auto
     connect(Source &source) {
-        using source_output_ports            = typename traits::block::output_ports<Source>;
-        constexpr std::size_t src_port_index = meta::indexForName<src_port_name, source_output_ports>();
-        if constexpr (src_port_index == meta::invalid_index) {
-            meta::print_types<meta::message_type<"There is no output port with the specified name in this source node">, Source, meta::message_type<src_port_name>,
+        using source_output_ports             = typename traits::block::output_ports<Source>;
+        constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
+        if constexpr (sourcePortIndex == meta::invalid_index) {
+            meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>,
                               meta::message_type<"These are the known names:">, traits::block::output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports>
                     port_not_found_error{};
         }
-        return connect<src_port_index, Source>(source);
+        return connect<sourcePortIndex, sourcePortSubIndex, Source>(source);
     }
 
-    template<typename Source, typename Port>
+    template<fixed_string sourcePortName, typename Source>
     [[nodiscard]] auto
-    connect(Source &source, Port Source::*member_ptr) {
-        return Graph::SourceConnector<Source, Port>(*this, source, std::invoke(member_ptr, source));
+    connect(Source &source) {
+        return connect<sourcePortName, meta::invalid_index, Source>(source);
+    }
+
+    template<typename T>
+    struct PortIndexDefinition {
+        T           topLevel;
+        std::size_t subIndex;
+
+        PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
+    };
+
+    template<typename Source, typename Destination>
+        requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
+    ConnectionResult
+    connect(Source &sourceBlockRaw, PortIndexDefinition<std::size_t> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::size_t> destinationPortDefinition,
+            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+        auto result = findBlock(sourceBlockRaw)
+                              ->dynamicOutputPort(sourcePortDefinition.topLevel, sourcePortDefinition.subIndex)
+                              .connect(findBlock(destinationBlockRaw)->dynamicInputPort(destinationPortDefinition.topLevel, destinationPortDefinition.subIndex));
+        if (result == ConnectionResult::SUCCESS) {
+            auto *sourceBlock      = findBlock(sourceBlockRaw).get();
+            auto *destinationBlock = findBlock(destinationBlockRaw).get();
+            _edges.emplace_back(sourceBlock, sourcePortDefinition.topLevel, destinationBlock, destinationPortDefinition.topLevel, minBufferSize, weight, name);
+        }
+        return result;
     }
 
     template<typename Source, typename Destination>
         requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult
-    dynamic_connect(Source &src_block_raw, std::size_t src_port_index, Destination &dst_block_raw, std::size_t dst_port_index, std::size_t min_buffer_size = 65536, std::int32_t weight = 0,
-                    std::string_view name = "unnamed edge") {
-        auto result = dynamicOutputPort(src_block_raw, src_port_index).connect(dynamicInputPort(dst_block_raw, dst_port_index));
-        if (result == ConnectionResult::SUCCESS) {
-            auto *src_block = findBlock(src_block_raw).get();
-            auto *dst_block = findBlock(dst_block_raw).get();
-            _edges.emplace_back(src_block, src_port_index, dst_block, src_port_index, min_buffer_size, weight, name);
+    connect(Source &sourceBlockRaw, PortIndexDefinition<std::string> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::string> destinationPortDefinition,
+            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+        auto sourcePortIndex      = this->findBlock(sourceBlockRaw)->dynamicOutputPortIndex(sourcePortDefinition.topLevel);
+        auto destinationPortIndex = this->findBlock(destinationBlockRaw)->dynamicInputPortIndex(destinationPortDefinition.topLevel);
+        return connect(sourceBlockRaw, { sourcePortIndex, sourcePortDefinition.subIndex }, destinationBlockRaw, { destinationPortIndex, destinationPortDefinition.subIndex }, minBufferSize, weight,
+                       name);
+    }
+
+    bool
+    performConnections() {
+        auto result = std::all_of(_connectionDefinitions.begin(), _connectionDefinitions.end(),
+                                  [this](auto &connection_definition) { return connection_definition(*this) == ConnectionResult::SUCCESS; });
+        if (result) {
+            _connectionDefinitions.clear();
         }
         return result;
-    }
-
-    const std::vector<std::function<ConnectionResult(Graph &)>> &
-    connections() {
-        return _connection_definitions;
-    }
-
-    void
-    clearConnections() {
-        _connection_definitions.clear();
     }
 
     template<typename F> // TODO: F must be constraint by a descriptive concept
@@ -781,7 +932,7 @@ public:
 
     constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
-    // if the left node (source) implements available_samples (a customization point), then pass the call through
+    // if the left block (source) implements available_samples (a customization point), then pass the call through
     friend constexpr std::size_t
     available_samples(const MergedGraph &self) noexcept
         requires requires(const Left &l) {
@@ -832,7 +983,7 @@ public:
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
         if constexpr (traits::block::output_port_types<Left>::size == 1) {
-            // only the result from the right node needs to be returned
+            // only the result from the right block needs to be returned
             return apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
                                                                                                 apply_left<traits::block::input_port_types<Left>::size()>(offset, std::forward_as_tuple(
                                                                                                                                                                           std::forward<Ts>(inputs)...)));

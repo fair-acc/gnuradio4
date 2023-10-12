@@ -26,6 +26,8 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
 };
 
 static_assert(gr::BlockLike<fixed_source<int>>);
+static_assert(gr::traits::block::input_ports<fixed_source<int>>::size() == 0);
+static_assert(gr::traits::block::output_ports<fixed_source<int>>::size() == 1);
 
 template<typename T>
 struct cout_sink : public gr::Block<cout_sink<T>, gr::PortInNamed<T, "in">> {
@@ -66,10 +68,10 @@ main() {
     for (std::size_t i = 0; i < sources_count; ++i) {
         auto &source = testGraph.emplaceBlock<fixed_source<double>>();
         sources.push_back(&source);
-        testGraph.dynamic_connect(source, 0, adder, sources.size() - 1);
+        testGraph.connect(source, 0, adder, sources.size() - 1);
     }
 
-    testGraph.dynamic_connect(adder, 0, sink, 0);
+    testGraph.connect(adder, 0, sink, 0);
 
     for (std::size_t i = 0; i < events_count; ++i) {
         for (auto *source : sources) {

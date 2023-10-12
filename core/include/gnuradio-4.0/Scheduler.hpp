@@ -94,9 +94,8 @@ public:
         if (_state != IDLE) {
             return;
         }
-        auto result = std::all_of(_graph.connections().begin(), _graph.connections().end(), [this](auto &connection_definition) { return connection_definition(_graph) == ConnectionResult::SUCCESS; });
+        const auto result = _graph.performConnections();
         if (result) {
-            _graph.clearConnections();
             _state = INITIALISED;
         } else {
             _state = ERROR;
@@ -305,9 +304,9 @@ public:
         // compute the adjacency list
         std::set<block_t> block_reached;
         for (auto &e : this->_graph.edges()) {
-            _adjacency_list[e._src_block].push_back(e._dst_block);
-            _source_blocks.push_back(e._src_block);
-            block_reached.insert(e._dst_block);
+            _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
+            _source_blocks.push_back(e._sourceBlock);
+            block_reached.insert(e._destinationBlock);
         }
         _source_blocks.erase(std::remove_if(_source_blocks.begin(), _source_blocks.end(), [&block_reached](auto currentBlock) { return block_reached.contains(currentBlock); }), _source_blocks.end());
         // traverse graph

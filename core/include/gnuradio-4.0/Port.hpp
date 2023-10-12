@@ -202,8 +202,8 @@ struct Async {};
  */
 template<typename T, fixed_string portName, PortType portType, PortDirection portDirection, typename... Attributes>
 struct Port {
-    template<fixed_string NewName>
-    using with_name = Port<T, NewName, portType, portDirection, Attributes...>;
+    template<fixed_string newName, typename ReflDescriptor>
+    using with_name_and_descriptor = Port<T, newName, portType, portDirection, ReflDescriptor, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
 
@@ -213,6 +213,7 @@ struct Port {
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
     using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
+    using ReflDescriptor    = AttributeTypeList::template find_or_default<refl::trait::is_descriptor, std::false_type>;
 
     // constexpr members:
     static constexpr PortDirection kDirection = portDirection;
@@ -514,37 +515,37 @@ namespace detail {
 template<typename T, auto>
 using just_t = T;
 
-template<typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Arguments, std::size_t... Is>
-consteval gr::meta::typelist<just_t<Port<T, baseName + meta::make_fixed_string<Is>(), portType, portDirection, Arguments...>, Is>...>
+template<typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Attributes, std::size_t... Is>
+consteval gr::meta::typelist<just_t<Port<T, baseName + meta::make_fixed_string<Is>(), portType, portDirection, Attributes...>, Is>...>
 repeated_ports_impl(std::index_sequence<Is...>) {
     return {};
 }
 } // namespace detail
 
-template<std::size_t count, typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Arguments>
-using repeated_ports = decltype(detail::repeated_ports_impl<T, baseName, portType, portDirection, Arguments...>(std::make_index_sequence<count>()));
+template<std::size_t count, typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Attributes>
+using repeated_ports = decltype(detail::repeated_ports_impl<T, baseName, portType, portDirection, Attributes...>(std::make_index_sequence<count>()));
 
 static_assert(repeated_ports<3, float, "out", PortType::STREAM, PortDirection::OUTPUT, Optional>::at<0>::Name == fixed_string("out0"));
 static_assert(repeated_ports<3, float, "out", PortType::STREAM, PortDirection::OUTPUT, Optional>::at<1>::Name == fixed_string("out1"));
 static_assert(repeated_ports<3, float, "out", PortType::STREAM, PortDirection::OUTPUT, Optional>::at<2>::Name == fixed_string("out2"));
 
-template<typename T, typename... Arguments>
-using PortIn = Port<T, "", PortType::STREAM, PortDirection::INPUT, Arguments...>;
-template<typename T, typename... Arguments>
-using PortOut = Port<T, "", PortType::STREAM, PortDirection::OUTPUT, Arguments...>;
-template<typename... Arguments>
-using MsgPortIn = Port<property_map, "", PortType::MESSAGE, PortDirection::INPUT, Arguments...>;
-template<typename... Arguments>
-using MsgPortOut = Port<property_map, "", PortType::MESSAGE, PortDirection::OUTPUT, Arguments...>;
+template<typename T, typename... Attributes>
+using PortIn = Port<T, "", PortType::STREAM, PortDirection::INPUT, Attributes...>;
+template<typename T, typename... Attributes>
+using PortOut = Port<T, "", PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+template<typename... Attributes>
+using MsgPortIn = Port<property_map, "", PortType::MESSAGE, PortDirection::INPUT, Attributes...>;
+template<typename... Attributes>
+using MsgPortOut = Port<property_map, "", PortType::MESSAGE, PortDirection::OUTPUT, Attributes...>;
 
-template<typename T, fixed_string PortName, typename... Arguments>
-using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, Arguments...>;
-template<typename T, fixed_string PortName, typename... Arguments>
-using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Arguments...>;
-template<fixed_string PortName, typename... Arguments>
-using MsgPortInNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::INPUT, Arguments...>;
-template<fixed_string PortName, typename... Arguments>
-using MsgPortOutNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::OUTPUT, Arguments...>;
+template<typename T, fixed_string PortName, typename... Attributes>
+using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
+template<typename T, fixed_string PortName, typename... Attributes>
+using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+template<fixed_string PortName, typename... Attributes>
+using MsgPortInNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
+template<fixed_string PortName, typename... Attributes>
+using MsgPortOutNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
 
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
@@ -558,8 +559,8 @@ static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>>::Domain, CPU>);
 static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>, GPU>::Domain, GPU>);
 
 static_assert(MsgPortOutNamed<"out_msg">::static_name() == fixed_string("out_msg"));
-static_assert(!(MsgPortOutNamed<"out_msg">::with_name<"out_message">::static_name() == fixed_string("out_msg")));
-static_assert(MsgPortOutNamed<"out_msg">::with_name<"out_message">::static_name() == fixed_string("out_message"));
+static_assert(!(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message", std::false_type>::static_name() == fixed_string("out_msg")));
+static_assert(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message", std::false_type>::static_name() == fixed_string("out_message"));
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime

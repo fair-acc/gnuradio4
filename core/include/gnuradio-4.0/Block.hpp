@@ -480,6 +480,33 @@ public:
     init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
         progress     = std::move(progress_);
         ioThreadPool = std::move(ioThreadPool_);
+
+        // Set names of port member variables
+        // TODO: Refactor the library not to assign names to ports. The
+        // block and the graph are the only things that need the port name
+        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto &&t) {
+            using CurrentPortType = std::remove_cvref_t<decltype(t)>;
+            if constexpr (traits::port::is_port_v<CurrentPortType>) {
+                using PortDescriptor = typename CurrentPortType::ReflDescriptor;
+                if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
+                    auto &port = (self().*(PortDescriptor::pointer));
+                    port.name  = CurrentPortType::Name;
+                }
+            } else {
+                using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
+                if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
+                    auto       &collection     = (self().*(PortCollectionDescriptor::pointer));
+                    std::string collectionName = refl::descriptor::get_name(PortCollectionDescriptor()).data;
+                    for (auto &port : collection) {
+                        port.name = collectionName;
+                    }
+                }
+            }
+        };
+        traits::block::input_ports<Derived>::template apply_func(setPortName);
+        traits::block::output_ports<Derived>::template apply_func(setPortName);
+
+        // Handle settings
         if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
             std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](Tag &tag) {
                 for (const auto &[key, value] : forward_parameters) {
@@ -659,7 +686,7 @@ public:
     // transition to C++23's deducing this later
     template<typename Self>
     bool
-    consume_readers(Self &self, std::size_t available_values_count) {
+    consumeReaders(Self &self, std::size_t available_values_count) {
         bool success = true;
         if constexpr (traits::block::input_ports<Derived>::size > 0) {
             std::apply(
@@ -980,7 +1007,7 @@ protected:
                         n_samples_to_consume = stride.value - stride_counter;
                         stride_counter       = 0;
                     }
-                    const bool success = consume_readers(self(), n_samples_to_consume);
+                    const bool success = consumeReaders(self(), n_samples_to_consume);
                     forward_tags();
                     return { requested_work, n_samples_to_consume, success ? work::Status::OK : work::Status::ERROR };
                 }
@@ -1037,7 +1064,7 @@ protected:
             }(std::make_index_sequence<traits::block::input_ports<Derived>::size>(), std::make_index_sequence<traits::block::output_ports<Derived>::size>());
 
             write_to_outputs(ports_status.out_samples, writers_tuple);
-            const bool success = consume_readers(self(), n_samples_to_consume);
+            const bool success = consumeReaders(self(), n_samples_to_consume);
             forward_tags();
             return { requested_work, ports_status.in_samples, success ? ret : work::Status::ERROR };
 
@@ -1078,7 +1105,7 @@ protected:
 
             write_to_outputs(ports_status.out_samples, writers_tuple);
 
-            const bool success = consume_readers(self(), n_samples_to_consume);
+            const bool success = consumeReaders(self(), n_samples_to_consume);
 
 #ifdef _DEBUG
             if (!success) {

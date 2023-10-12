@@ -87,29 +87,29 @@ protected:
     std::unique_ptr<gr::SettingsBase> _settings = std::make_unique<gr::BasicSettings<multi_adder<T>>>(*this);
 
     void
-    apply_input_count() {
+    applyInputCount() {
         if (_input_ports.size() == static_cast<std::size_t>(input_port_count)) return;
 
         _input_ports.resize(static_cast<std::size_t>(input_port_count));
 
-        _dynamic_input_ports.clear();
+        _dynamicInputPorts.clear();
         for (auto &input_port : _input_ports) {
-            _dynamic_input_ports.emplace_back(input_port, gr::DynamicPort::non_owned_reference_tag{});
+            _dynamicInputPorts.emplace_back(gr::DynamicPort(input_port, gr::DynamicPort::non_owned_reference_tag{}));
         }
-        if (_dynamic_output_ports.empty()) {
-            _dynamic_output_ports.emplace_back(_output_port, gr::DynamicPort::non_owned_reference_tag{});
+        if (_dynamicOutputPorts.empty()) {
+            _dynamicOutputPorts.emplace_back(gr::DynamicPort(_output_port, gr::DynamicPort::non_owned_reference_tag{}));
         }
-        _DynamicPorts_loaded = true;
+        _dynamicPortsLoaded = true;
     }
 
 public:
-    explicit multi_adder(int input_ports_size) : input_port_count(input_ports_size) { apply_input_count(); };
+    explicit multi_adder(int input_ports_size) : input_port_count(input_ports_size) { applyInputCount(); };
 
     ~multi_adder() override = default;
 
     void
     settingsChanged(const gr::property_map & /*old_setting*/, const gr::property_map & /*new_setting*/) noexcept {
-        apply_input_count();
+        applyInputCount();
     }
 
     void

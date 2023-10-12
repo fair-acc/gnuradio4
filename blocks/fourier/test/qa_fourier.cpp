@@ -281,18 +281,17 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         gr::Graph flow1;
         auto     &source1  = flow1.emplaceBlock<CountSource<double>>();
         auto     &fftBlock = flow1.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
-        std::ignore        = flow1.connect<"out">(source1).to<"in">(fftBlock);
-        auto sched1        = Scheduler(std::move(flow1), threadPool);
+        expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
+        auto sched1 = Scheduler(std::move(flow1), threadPool);
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
             gr::Graph flow2;
             auto     &source2 = flow2.emplaceBlock<CountSource<double>>();
             auto     &fft2    = flow2.emplaceBlock<FFT<double>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
-            std::ignore       = flow2.connect<"out">(source2).to<"in">(fft2);
-            auto sched2       = Scheduler(std::move(flow2), threadPool);
+            expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
+            auto sched2 = Scheduler(std::move(flow2), threadPool);
             sched2.runAndWait();
-            expect(approx(source2.count, source2.nSamples, 1e-4));
         }
         sched1.runAndWait();
         expect(approx(source1.count, source1.nSamples, 1e-4));
