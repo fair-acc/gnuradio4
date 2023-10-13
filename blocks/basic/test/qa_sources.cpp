@@ -55,7 +55,7 @@ const boost::ut::suite TagTests = [] {
         expect(eq(static_cast<std::uint32_t>(sink1.n_samples_produced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1.n_samples_produced, n_samples);
         expect(eq(static_cast<std::uint32_t>(sink2.n_samples_produced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2.n_samples_produced, n_samples);
 
-        if (std::getenv("DISABLE_SENSITIVE_TESTS") != nullptr) {
+        if (std::getenv("DISABLE_SENSITIVE_TESTS") == nullptr) {
             expect(approx(sink1.effective_sample_rate(), sample_rate, 500.f))
                     << fmt::format("sink1: effective sample rate {} vs {} +- {} does not match", sink1.effective_sample_rate(), sample_rate, 500.f);
             expect(approx(sink2.effective_sample_rate(), sample_rate, 500.f))
