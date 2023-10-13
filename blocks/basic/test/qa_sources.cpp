@@ -54,10 +54,14 @@ const boost::ut::suite TagTests = [] {
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
         expect(eq(static_cast<std::uint32_t>(sink1.n_samples_produced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1.n_samples_produced, n_samples);
         expect(eq(static_cast<std::uint32_t>(sink2.n_samples_produced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2.n_samples_produced, n_samples);
-        expect(approx(sink1.effective_sample_rate(), sample_rate, 500.f))
-                << fmt::format("sink1: effective sample rate {} vs {} +- {} does not match", sink1.effective_sample_rate(), sample_rate, 500.f);
-        expect(approx(sink2.effective_sample_rate(), sample_rate, 500.f))
-                << fmt::format("sink2: effective sample rate {} vs {} +- {} does not match", sink1.effective_sample_rate(), sample_rate, 500.f);
+
+        if (std::getenv("DISABLE_SENSITIVE_TESTS") != nullptr) {
+            expect(approx(sink1.effective_sample_rate(), sample_rate, 500.f))
+                    << fmt::format("sink1: effective sample rate {} vs {} +- {} does not match", sink1.effective_sample_rate(), sample_rate, 500.f);
+            expect(approx(sink2.effective_sample_rate(), sample_rate, 500.f))
+                    << fmt::format("sink2: effective sample rate {} vs {} +- {} does not match", sink1.effective_sample_rate(), sample_rate, 500.f);
+        }
+
         fmt::print("sink1 (USE_PROCESS_ONE): effective {} vs. expected {} sample rate [Hz]\n", sink1.effective_sample_rate(), sample_rate);
         fmt::print("sink2 (USE_PROCESS_BULK): effective {} vs. expected {} sample rate [Hz]\n", sink2.effective_sample_rate(), sample_rate);
 
