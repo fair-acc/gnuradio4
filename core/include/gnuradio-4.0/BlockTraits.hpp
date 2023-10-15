@@ -7,6 +7,7 @@
 #include "PortTraits.hpp"
 #include "reflection.hpp"
 
+#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
 #include <vir/simd.h>
 
 namespace gr::work {
