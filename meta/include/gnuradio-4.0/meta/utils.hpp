@@ -12,6 +12,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
 #include <vir/simd.h>
 
 #include "typelist.hpp"

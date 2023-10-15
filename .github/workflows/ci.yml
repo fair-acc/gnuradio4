@@ -76,9 +76,9 @@ jobs:
           git clone --depth=1 https://github.com/emscripten-core/emsdk.git
           cd emsdk
           # Download and install emscripten.
-          ./emsdk install 3.1.43 # 07/2023 (latest = 3.1.46 -> 09/2023)
+          ./emsdk install 3.1.44 # (latest = 3.1.47 -> 21/10/2023)
           # Make "active" for the current user. (writes .emscripten file)
-          ./emsdk activate 3.1.43
+          ./emsdk activate 3.1.44
 
       - name: Install sonar-scanner and build-wrapper
         if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
