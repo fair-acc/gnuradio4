@@ -153,13 +153,13 @@ if (ENABLE_TESTING AND UNIX AND NOT APPLE)
                 NAME coverage
                 EXECUTABLE ctest
                 EXECUTABLE_ARGS "--output-on-failure"
-                DEPENDENCIES qa_buffer qa_data_sink qa_DynamicPort qa_DynamicBlock qa_HierBlock qa_filter qa_Settings qa_Tags qa_Scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_DataSink qa_DynamicPort qa_DynamicBlock qa_HierBlock qa_filter qa_Settings qa_Tags qa_Scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*")
         setup_target_for_coverage_gcovr_html(
                 NAME coverage_html
                 EXECUTABLE ctest
                 EXECUTABLE_ARGS "--output-on-failure"
-                DEPENDENCIES qa_buffer qa_data_sink qa_DynamicPort qa_DynamicBlock qa_HierBlock qa_filter qa_Settings qa_Tags qa_Scheduler qa_thread_pool qa_thread_affinity
+                DEPENDENCIES qa_buffer qa_DataSink qa_DynamicPort qa_DynamicBlock qa_HierBlock qa_filter qa_Settings qa_Tags qa_Scheduler qa_thread_pool qa_thread_affinity
                 EXCLUDE "$CMAKE_BUILD_DIR/*")
     endif ()
     message("Building Tests and benchmarks.")
