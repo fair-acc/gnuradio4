@@ -82,7 +82,7 @@ jobs:
 
       - name: Install sonar-scanner and build-wrapper
         if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
-        uses: SonarSource/sonarcloud-github-c-cpp@v1
+        uses: SonarSource/sonarcloud-github-c-cpp@v2
 
       - name: Configure CMake
         if: matrix.configurations.compiler != 'emscripten'
