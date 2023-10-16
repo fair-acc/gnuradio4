@@ -25,13 +25,13 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 template<typename T>
 struct fmt::formatter<std::complex<T>> {
     template<typename ParseContext>
-    auto
+    constexpr auto
     parse(ParseContext &ctx) {
         return std::begin(ctx);
     }
 
     template<typename FormatContext>
-    auto
+    constexpr auto
     format(const std::complex<T> value, FormatContext &ctx) const {
         return fmt::format_to(ctx.out(), "({}+{}i)", value.real(), value.imag());
     }
