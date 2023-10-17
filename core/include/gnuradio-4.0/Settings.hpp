@@ -10,7 +10,6 @@
 #include <variant>
 
 #include "annotated.hpp"
-#include "Block.hpp"
 #include "BlockTraits.hpp"
 #include "reflection.hpp"
 #include "Tag.hpp"

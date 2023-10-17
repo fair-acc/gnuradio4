@@ -5,8 +5,7 @@
 
 #include <vir/simd.h>
 
-// #include <gnuradio-4.0/BlockTraits.hpp> // TODO: fix header recursion (if this is enabled instead of the next one)
-#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
