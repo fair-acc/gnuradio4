@@ -8,7 +8,6 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "annotated.hpp"
-#include "Block.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
 #include "Tag.hpp"
