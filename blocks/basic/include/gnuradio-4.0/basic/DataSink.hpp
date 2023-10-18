@@ -45,8 +45,8 @@ concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable
  *
  * @code
  * auto matcher = [](const auto &tag) {
- *     const auto is_trigger = ...check if tag is trigger...;
- *     return is_trigger ? TriggerMatchResult::Matching : TriggerMatchResult::Ignore;
+ *     const auto isTrigger = ...check if tag is trigger...;
+ *     return isTrigger ? TriggerMatchResult::Matching : TriggerMatchResult::Ignore;
  * };
  * @endcode
  *
@@ -63,8 +63,8 @@ concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable
  * @code
  * // matcher observing three possible tag values, "green", "yellow", "red".
  * // starting a dataset when seeing "green", stopping on "red", starting a new dataset on "yellow"
- * struct color_matcher {
- *     matcher_result operator()(const Tag &tag) {
+ * struct ColorMatcher {
+ *     TriggerMatcherResult operator()(const Tag &tag) {
  *         if (tag == green || tag == yellow) {
  *             return TriggerMatchResult::Matching;
  *         }
@@ -135,7 +135,7 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<typename DataSink<T>::poller>
+    std::shared_ptr<typename DataSink<T>::Poller>
     getStreamingPoller(const DataSinkQuery &query, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{ _mutex };
         auto            sink = findSink<T>(query);
@@ -321,7 +321,7 @@ public:
 
     PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>>           in;
 
-    struct poller {
+    struct Poller {
         // TODO consider whether reusing port<T> here makes sense
         gr::CircularBuffer<T>             buffer       = gr::CircularBuffer<T>(_listener_buffer_size);
         decltype(buffer.new_reader())     reader       = buffer.new_reader();
@@ -398,11 +398,11 @@ public:
         }
     }
 
-    std::shared_ptr<poller>
+    std::shared_ptr<Poller>
     getStreamingPoller(BlockingMode blockMode = BlockingMode::Blocking) {
         std::lock_guard lg(_listener_mutex);
         const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<poller>();
+        auto            handler = std::make_shared<Poller>();
         addListener(std::make_unique<ContinuousListener<gr::meta::null_type>>(handler, block, *this), block);
         return handler;
     }
@@ -629,14 +629,14 @@ private:
         std::vector<Tag> tag_buffer;
 
         // polling-only
-        std::weak_ptr<poller> polling_handler = {};
+        std::weak_ptr<Poller> polling_handler = {};
 
         Callback              callback;
 
         template<typename CallbackFW>
         explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW &&c, const DataSink<T> &parent) : parent_sink(parent), buffer(maxChunkSize), callback{ std::forward<CallbackFW>(c) } {}
 
-        explicit ContinuousListener(std::shared_ptr<poller> poller, bool doBlock, const DataSink<T> &parent) : parent_sink(parent), block(doBlock), polling_handler{ std::move(poller) } {}
+        explicit ContinuousListener(std::shared_ptr<Poller> poller, bool doBlock, const DataSink<T> &parent) : parent_sink(parent), block(doBlock), polling_handler{ std::move(poller) } {}
 
         inline void
         callCallback(std::span<const T> data, std::span<const Tag> tags) {
@@ -741,7 +741,7 @@ private:
         }
     };
 
-    struct pending_window {
+    struct PendingWindow {
         DataSet<T>  dataset;
         std::size_t pending_post_samples = 0;
     };
@@ -754,7 +754,7 @@ private:
 
         DataSet<T>                   dataset_template;
         M                            trigger_matcher = {};
-        std::deque<pending_window>   pending_trigger_windows; // triggers that still didn't receive all their data
+        std::deque<PendingWindow>    pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<DataSetPoller> polling_handler = {};
 
         Callback                     callback;
@@ -932,7 +932,7 @@ private:
         }
     };
 
-    struct pending_snapshot {
+    struct PendingSnapshot {
         property_map tag_data;
         std::size_t  delay           = 0;
         std::size_t  pending_samples = 0;
@@ -945,7 +945,7 @@ private:
         std::size_t                  sample_delay = 0;
         DataSet<T>                   dataset_template;
         M                            trigger_matcher = {};
-        std::deque<pending_snapshot> pending;
+        std::deque<PendingSnapshot>  pending;
         std::weak_ptr<DataSetPoller> polling_handler = {};
         Callback                     callback;
 
@@ -997,7 +997,7 @@ private:
         void
         process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0 && trigger_matcher({ 0, *tagData0 }) == TriggerMatchResult::Matching) {
-                auto new_pending = pending_snapshot{ *tagData0, sample_delay, sample_delay };
+                auto new_pending = PendingSnapshot{ *tagData0, sample_delay, sample_delay };
                 // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased; TODO unless we adapt them in applySampleRate, see there)
                 auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });
                 pending.insert(rit.base(), std::move(new_pending));
