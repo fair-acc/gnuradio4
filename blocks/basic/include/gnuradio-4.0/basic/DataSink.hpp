@@ -335,16 +335,16 @@ public:
 
         template<typename Handler>
         [[nodiscard]] bool
-        process(Handler fnc) {
-            const auto available = reader.available();
-            if (available == 0) {
+        process(Handler fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
+            const auto nProcess = std::min(reader.available(), requested);
+            if (nProcess == 0) {
                 return false;
             }
 
-            const auto readData = reader.get(available);
+            const auto readData = reader.get(nProcess);
             if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
                 const auto tags         = tag_reader.get();
-                const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + available)](const auto &tag) { return tag.index < until; });
+                const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto &tag) { return tag.index < until; });
                 auto       relevantTags = std::vector<Tag>(tags.begin(), it);
                 for (auto &t : relevantTags) {
                     t.index -= static_cast<int64_t>(samples_read);
@@ -356,8 +356,8 @@ public:
                 fnc(readData);
             }
 
-            std::ignore = reader.consume(available);
-            samples_read += available;
+            std::ignore = reader.consume(nProcess);
+            samples_read += nProcess;
             return true;
         }
     };
@@ -371,15 +371,15 @@ public:
         std::atomic<std::size_t>       drop_count = 0;
 
         [[nodiscard]] bool
-        process(std::invocable<std::span<DataSet<T>>> auto fnc) {
-            const auto available = reader.available();
-            if (available == 0) {
+        process(std::invocable<std::span<DataSet<T>>> auto fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
+            const auto nProcess = std::min(reader.available(), requested);
+            if (nProcess == 0) {
                 return false;
             }
 
-            const auto readData = reader.get(available);
+            const auto readData = reader.get(nProcess);
             fnc(readData);
-            std::ignore = reader.consume(available);
+            std::ignore = reader.consume(nProcess);
             return true;
         }
     };
