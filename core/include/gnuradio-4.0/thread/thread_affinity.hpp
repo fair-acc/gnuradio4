@@ -96,7 +96,7 @@ getPid() {
     return getpid();
 }
 #else
-int
+inline int
 getPid() {
     return 0;
 }
