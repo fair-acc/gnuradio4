@@ -1,8 +1,10 @@
 #ifndef GNURADIO_BLOCK_HPP
 #define GNURADIO_BLOCK_HPP
 
-#include <fmt/format.h>
 #include <map>
+#include <limits>
+
+#include <fmt/format.h>
 
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -16,11 +18,6 @@
 #include "annotated.hpp" // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include "reflection.hpp"
 #include "Settings.hpp"
-
-#ifdef FMT_FORMAT_H_
-#include <fmt/core.h>
-#include <limits>
-#endif
 
 namespace gr {
 
@@ -1284,8 +1281,6 @@ struct RegisterBlock {
 
 } // namespace gr
 
-#ifdef FMT_FORMAT_H_
-
 template<>
 struct fmt::formatter<gr::work::Status> {
     static constexpr auto
@@ -1326,7 +1321,5 @@ struct fmt::formatter<gr::work::Result> {
         return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
     }
 };
-
-#endif // FMT_FORMAT_H_
 
 #endif // include guard

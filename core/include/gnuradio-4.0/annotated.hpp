@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <fmt/format.h>
+
 #include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr {
@@ -348,11 +350,6 @@ using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
 template<typename... Ts>
 struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
 
-#ifdef FMT_FORMAT_H_
-
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
 struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
     using Type = std::remove_const_t<T>;
@@ -380,7 +377,5 @@ operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &
     return os << fmt::format("{}", v.value);
 }
 } // namespace gr
-
-#endif // FMT_FORMAT_H_
 
 #endif // GNURADIO_ANNOTATED_HPP

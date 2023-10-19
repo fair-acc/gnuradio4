@@ -9,6 +9,8 @@
 #include <ranges>
 #include <vector>
 
+#include <fmt/format.h>
+
 namespace gr {
 
 #ifndef forceinline
@@ -179,7 +181,6 @@ removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequence
 
 } // namespace gr
 
-#ifdef FMT_FORMAT_H_
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 
@@ -204,7 +205,5 @@ operator<<(std::ostream &os, const Sequence &v) {
     return os << fmt::format("{}", v.value());
 }
 } // namespace gr
-
-#endif // FMT_FORMAT_H_
 
 #endif // GNURADIO_SEQUENCE_HPP
