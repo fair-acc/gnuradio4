@@ -405,6 +405,9 @@ protected:
 
         auto adjust_for_input_port = [&ps = ports_status]<PortLike Port>(Port &port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                if (!port.isConnected()) {
+                    return;
+                }
                 ps.has_sync_input_ports          = true;
                 ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
                 ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
