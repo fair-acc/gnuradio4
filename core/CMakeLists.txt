@@ -1,5 +1,5 @@
 add_library(gnuradio-core INTERFACE)
-target_include_directories(gnuradio-core INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/> $<INSTALL_INTERFACE:include/>)
+target_include_directories(gnuradio-core INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/src> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include> $<INSTALL_INTERFACE:include/>)
 target_link_libraries(gnuradio-core INTERFACE gnuradio-options gnuradio-meta refl-cpp::refl-cpp pmtv vir)
 
 # configure a header file to pass the CMake settings to the source code
