@@ -867,7 +867,7 @@ publish_tag(PortLike auto &port, const property_map &tag_data, std::size_t tag_o
 
 constexpr std::size_t
 samples_to_next_tag(const PortLike auto &port) {
-    if (port.tagReader().available() == 0) [[likely]] {
+    if (!port.isConnected() || port.tagReader().available() == 0) [[likely]] {
         return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
     }
 
@@ -887,7 +887,7 @@ samples_to_next_tag(const PortLike auto &port) {
 
 constexpr std::size_t
 samples_to_eos_tag(const PortLike auto &port) {
-    if (port.tagReader().available() == 0) [[likely]] {
+    if (!port.isConnected() || port.tagReader().available() == 0) [[likely]] {
         return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
     }
     const auto tags    = port.tagReader().get();
