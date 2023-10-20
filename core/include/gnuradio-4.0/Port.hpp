@@ -327,6 +327,11 @@ public:
 
     ~Port() = default;
 
+    [[nodiscard]] constexpr bool
+    isConnected() const noexcept {
+        return _connected;
+    }
+
     [[nodiscard]] constexpr static PortType
     type() noexcept {
         return portType;
