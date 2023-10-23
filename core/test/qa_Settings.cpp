@@ -9,6 +9,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -21,21 +22,6 @@ using namespace std::string_literals;
 template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
-
-template<typename T>
-struct fmt::formatter<std::complex<T>> {
-    template<typename ParseContext>
-    constexpr auto
-    parse(ParseContext &ctx) {
-        return std::begin(ctx);
-    }
-
-    template<typename FormatContext>
-    constexpr auto
-    format(const std::complex<T> value, FormatContext &ctx) const {
-        return fmt::format_to(ctx.out(), "({}+{}i)", value.real(), value.imag());
-    }
-};
 
 namespace gr::setting_test {
 

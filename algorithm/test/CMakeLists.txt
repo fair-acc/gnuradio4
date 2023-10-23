@@ -1,6 +1,8 @@
 add_ut_test(qa_algorithm_fourier)
+add_ut_test(qa_FilterTool)
 add_ut_test(qa_ImChart)
 target_link_libraries(qa_algorithm_fourier PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_FilterTool PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_ImChart PRIVATE gnuradio-algorithm)
 
 add_executable(example_ImChart example_ImChart.cpp)
