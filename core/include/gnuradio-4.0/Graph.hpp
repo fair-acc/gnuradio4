@@ -431,18 +431,26 @@ public:
     }
 };
 
+template<typename T>
+struct PortIndexDefinition {
+    T           topLevel;
+    std::size_t subIndex;
+
+    constexpr PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
+};
+
 class edge {
 public: // TODO: consider making this private and to use accessors (that can be safely used by users)
     using PortDirection::INPUT;
     using PortDirection::OUTPUT;
-    BlockModel  *_sourceBlock;
-    BlockModel  *_destinationBlock;
-    std::size_t  _sourcePortIndex;
-    std::size_t  _destinationPortIndex;
-    std::size_t  _minBufferSize;
-    std::int32_t _weight;
-    std::string  _name; // custom edge name
-    bool         _connected;
+    BlockModel                      *_sourceBlock;
+    BlockModel                      *_destinationBlock;
+    PortIndexDefinition<std::size_t> _sourcePortDefinition;
+    PortIndexDefinition<std::size_t> _destinationPortDefinition;
+    std::size_t                      _minBufferSize;
+    std::int32_t                     _weight;
+    std::string                      _name; // custom edge name
+    bool                             _connected;
 
 public:
     edge()             = delete;
@@ -459,11 +467,12 @@ public:
     operator=(edge &&) noexcept
             = default;
 
-    edge(BlockModel *sourceBlock, std::size_t sourcePortIndex, BlockModel *destinationBlock, std::size_t destinationPortIndex, std::size_t minBufferSize, std::int32_t weight, std::string_view name)
+    edge(BlockModel *sourceBlock, PortIndexDefinition<std::size_t> sourcePortDefinition, BlockModel *destinationBlock, PortIndexDefinition<std::size_t> destinationPortDefinition,
+         std::size_t minBufferSize, std::int32_t weight, std::string_view name)
         : _sourceBlock(sourceBlock)
         , _destinationBlock(destinationBlock)
-        , _sourcePortIndex(sourcePortIndex)
-        , _destinationPortIndex(destinationPortIndex)
+        , _sourcePortDefinition(sourcePortDefinition)
+        , _destinationPortDefinition(destinationPortDefinition)
         , _minBufferSize(minBufferSize)
         , _weight(weight)
         , _name(name) {}
@@ -478,14 +487,14 @@ public:
         return *_destinationBlock;
     }
 
-    [[nodiscard]] constexpr std::size_t
-    sourcePortIndex() const noexcept {
-        return _sourcePortIndex;
+    [[nodiscard]] constexpr PortIndexDefinition<std::size_t>
+    sourcePortDefinition() const noexcept {
+        return _sourcePortDefinition;
     }
 
-    [[nodiscard]] constexpr std::size_t
-    destinationPortIndex() const noexcept {
-        return _destinationPortIndex;
+    [[nodiscard]] constexpr PortIndexDefinition<std::size_t>
+    destinationPortDefinition() const noexcept {
+        return _destinationPortDefinition;
     }
 
     [[nodiscard]] constexpr std::string_view
@@ -569,7 +578,7 @@ private:
         if (result == ConnectionResult::SUCCESS) {
             auto *sourceNode      = findBlock(sourceNodeRaw).get();
             auto *destinationNode = findBlock(destinationNodeRaw).get();
-            _edges.emplace_back(sourceNode, sourcePortIndex, destinationNode, sourcePortIndex, minBufferSize, weight, name);
+            _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{ sourcePortIndex, sourcePortSubIndex }, destinationNode, PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, name);
         }
 
         return result;
@@ -747,14 +756,6 @@ public:
         return connect<sourcePortName, meta::invalid_index, Source>(source);
     }
 
-    template<typename T>
-    struct PortIndexDefinition {
-        T           topLevel;
-        std::size_t subIndex;
-
-        PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
-    };
-
     template<typename Source, typename Destination>
         requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult
@@ -766,7 +767,7 @@ public:
         if (result == ConnectionResult::SUCCESS) {
             auto *sourceBlock      = findBlock(sourceBlockRaw).get();
             auto *destinationBlock = findBlock(destinationBlockRaw).get();
-            _edges.emplace_back(sourceBlock, sourcePortDefinition.topLevel, destinationBlock, destinationPortDefinition.topLevel, minBufferSize, weight, name);
+            _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, name);
         }
         return result;
     }

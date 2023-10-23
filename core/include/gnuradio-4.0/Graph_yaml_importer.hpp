@@ -52,6 +52,16 @@ struct YamlSeq {
         fun();
     }
 };
+
+inline std::size_t parseIndex(std::string_view str) {
+    std::size_t index{};
+    auto [_, src_ec] = std::from_chars(str.begin(), str.end(), index);
+    if (src_ec != std::errc()) {
+        throw fmt::format("Unable to parse the index");
+    }
+    return index;
+}
+
 } // namespace detail
 
 inline gr::Graph
@@ -130,35 +140,42 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
     }
 
     for (const auto &connection : tree["connections"]) {
-        assert(connection.size() == 4);
+        if (connection.size() != 4) {
+            throw fmt::format("Unable to parse connection ({} instead of 4 elements)", connection.size());
+        }
 
-        auto parseBlock_port = [&](const auto &block_field, const auto &port_field) {
-            auto block_name = block_field.template as<std::string>();
-            auto port_str   = port_field.template as<std::string>();
-            auto node       = createdBlocks.find(block_name);
+        auto parseBlock_port = [&](const auto &blockField, const auto &portField) {
+            auto blockName = blockField.template as<std::string>();
+            auto node      = createdBlocks.find(blockName);
             if (node == createdBlocks.end()) {
-                throw fmt::format("Unknown node");
-            }
-            std::size_t port{};
-            {
-                auto [_, src_ec] = std::from_chars(port_str.data(), port_str.data() + port_str.size(), port);
-                if (src_ec != std::errc()) {
-                    throw fmt::format("Unable to parse the port index");
-                }
+                throw fmt::format("Unknown node '{}'", blockName);
             }
 
             struct result {
                 decltype(node) block_it;
-                std::size_t    port;
+                PortIndexDefinition<std::size_t> port_definition;
             };
 
-            return result{ node, port };
+            if (portField.IsSequence()) {
+                if (portField.size() != 2) {
+                    throw fmt::format("Port definition has invalid length ({} instead of 2)", portField.size());
+                }
+                const auto indexStr    = portField[0].template as<std::string>();
+                const auto subIndexStr = portField[1].template as<std::string>();
+                return result{ node, { detail::parseIndex(indexStr), detail::parseIndex(subIndexStr) } };
+            } else {
+                const auto indexStr = portField.template as<std::string>();
+                return result{ node, { detail::parseIndex(indexStr) } };
+            }
         };
 
-        auto src = parseBlock_port(connection[0], connection[1]);
-        auto dst = parseBlock_port(connection[2], connection[3]);
+        if (connection.size() == 4) {
+            auto src = parseBlock_port(connection[0], connection[1]);
+            auto dst = parseBlock_port(connection[2], connection[3]);
+            testGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
+        } else {
 
-        testGraph.connect(*src.block_it->second, src.port, *dst.block_it->second, dst.port);
+        }
     }
 
     return testGraph;
@@ -215,8 +232,24 @@ save_grc(const gr::Graph &testGraph) {
             auto            write_edge = [&](const auto &edge) {
                 out << YAML::Flow;
                 detail::YamlSeq seq(out);
-                out << edge.sourceBlock().name().data() << std::to_string(edge.sourcePortIndex());
-                out << edge.destinationBlock().name().data() << std::to_string(edge.destinationPortIndex());
+                out << edge.sourceBlock().name().data();
+                const auto sourcePort = edge.sourcePortDefinition();
+                if (sourcePort.subIndex == meta::invalid_index) {
+                    out << sourcePort.topLevel;
+                } else {
+                    detail::YamlSeq seqPort(out);
+                    out << std::to_string(sourcePort.topLevel);
+                    out << std::to_string(sourcePort.subIndex);
+                }
+                out << edge.destinationBlock().name().data();
+                const auto destinationPort = edge.destinationPortDefinition();
+                if (destinationPort.subIndex == meta::invalid_index) {
+                    out << destinationPort.topLevel;
+                } else {
+                    detail::YamlSeq seqPort(out);
+                    out << std::to_string(destinationPort.topLevel);
+                    out << std::to_string(destinationPort.subIndex);
+                }
             };
 
             testGraph.forEachEdge(write_edge);
