@@ -13,12 +13,44 @@
 
 namespace grg = gr;
 
+template<typename T>
+struct ArraySource : public grg::Block<ArraySource<T>> {
+    std::array<grg::PortOut<T>, 2> outA;
+    std::array<grg::PortOut<T>, 2> outB;
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(ArraySource, outA, outB);
+
+template<typename T>
+struct ArraySink : public grg::Block<ArraySink<T>> {
+    std::array<grg::PortIn<T>, 2> inA;
+    std::array<grg::PortIn<T>, 2> inB;
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB);
+
 struct test_context {
     test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
     grg::BlockRegistry registry;
     grg::plugin_loader loader;
 };
+
+namespace {
+    auto collectBlocks(const grg::Graph &graph) {
+        std::set<std::string> result;
+        graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
+        return result;
+    };
+
+    auto collectEdges(const grg::Graph &graph) {
+        std::set<std::string> result;
+        graph.forEachEdge([&](const auto &edge) {
+            result.insert(fmt::format("{}#{}#{} - {}#{}#{}", edge.sourceBlock().name(), edge.sourcePortDefinition().topLevel, edge.sourcePortDefinition().subIndex, edge.destinationBlock().name(), edge.destinationPortDefinition().topLevel, edge.destinationPortDefinition().subIndex));
+        });
+        return result;
+    };
+}
 
 int
 main(int argc, char *argv[]) {
@@ -71,22 +103,33 @@ main(int argc, char *argv[]) {
 
         auto                  graph_2            = grg::load_grc(context.loader, graph_saved_source);
 
-        [[maybe_unused]] auto collectBlocks      = [](grg::Graph &graph) {
-            std::set<std::string> result;
-            graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
-            return result;
-        };
+        assert(collectBlocks(graph_1) == collectBlocks(graph_2));
+        assert(collectEdges(graph_1) == collectEdges(graph_2));
+    }
+
+    // Test that connections involving port collections are handled correctly
+    {
+        using namespace gr;
+        registerBuiltinBlocks(&context.registry);
+        GP_REGISTER_NODE_RUNTIME(&context.registry, ArraySource, double);
+        GP_REGISTER_NODE_RUNTIME(&context.registry, ArraySink, double);
+
+        gr::Graph graph_1;
+        auto &arraySink    = graph_1.emplaceBlock<ArraySink<double>>();
+        auto &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
+        auto &arraySource1 = graph_1.emplaceBlock<ArraySource<double>>();
+
+        graph_1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink);
+        graph_1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink);
+        graph_1.connect<"outB", 0>(arraySource0).to<"inA", 0>(arraySink);
+        graph_1.connect<"outB", 1>(arraySource1).to<"inA", 1>(arraySink);
+
+        assert(graph_1.performConnections());
+
+        const auto graph_1_saved = grg::save_grc(graph_1);
+        const auto graph_2       = grg::load_grc(context.loader, graph_1_saved);
 
         assert(collectBlocks(graph_1) == collectBlocks(graph_2));
-
-        [[maybe_unused]] auto collect_edges = [](grg::Graph &graph) {
-            std::set<std::string> result;
-            graph.forEachEdge([&](const auto &edge) {
-                result.insert(fmt::format("{}#{} - {}#{}", edge.sourceBlock().name(), edge.sourcePortIndex(), edge.destinationBlock().name(), edge.destinationPortIndex()));
-            });
-            return result;
-        };
-
-        assert(collect_edges(graph_1) == collect_edges(graph_2));
+        assert(collectEdges(graph_1) == collectEdges(graph_2));
     }
 }
