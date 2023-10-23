@@ -77,7 +77,7 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
     case Hamming: {
         // formula: w(n) = 0.54 - 0.46 * cos((2 * pi * n) / (N - 1))
         // reference: Hamming, R. W. (1977). Digital filters. Prentice-Hall.
-        const T a = pi2 / static_cast<T>(n);
+        const T a = pi2 / static_cast<T>(n - 1);
         std::ranges::transform(std::views::iota(0UL, n), container.begin(), [a](const auto i) { return static_cast<T>(0.53836) - static_cast<T>(0.46164) * std::cos(a * static_cast<T>(i)); });
         return;
     }

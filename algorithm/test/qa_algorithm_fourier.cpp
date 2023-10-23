@@ -193,7 +193,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
     "window pre-computed array tests"_test = []<typename T>() { // this tests regression w.r.t. changed implementations
         // Expected value for size 8
         std::array RectangularRef{ 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f };
-        std::array HammingRef{ 0.07672f, 0.2119312255f, 0.53836f, 0.8647887745f, 1.0f, 0.8647887745f, 0.53836f, 0.2119312255f };
+        std::array HammingRef{ 0.07672f, 0.25053218f, 0.64108455f, 0.9542833f, 0.95428324f, 0.6410846f, 0.25053206f, 0.07672f };
         std::array HannRef{ 0.f, 0.1882550991f, 0.611260467f, 0.950484434f, 0.950484434f, 0.611260467f, 0.1882550991f, 0.f };
         std::array BlackmanRef{ 0.f, 0.09045342435f, 0.4591829575f, 0.9203636181f, 0.9203636181f, 0.4591829575f, 0.09045342435f, 0.f };
         std::array BlackmanHarrisRef{ 0.00006f, 0.03339172348f, 0.3328335043f, 0.8893697722f, 0.8893697722f, 0.3328335043f, 0.03339172348f, 0.00006f };
