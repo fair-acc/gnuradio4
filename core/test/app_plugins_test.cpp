@@ -16,8 +16,8 @@ using namespace gr::literals;
 
 namespace grg = gr;
 
-struct test_context {
-    explicit test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
+struct TestContext {
+    explicit TestContext(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
     grg::BlockRegistry registry;
     grg::plugin_loader loader;
@@ -44,7 +44,7 @@ main(int argc, char *argv[]) {
         }
     }
 
-    test_context context(std::move(paths));
+    TestContext context(std::move(paths));
     registerBuiltinBlocks(&context.registry);
 
     fmt::print("PluginLoaderTests\n");

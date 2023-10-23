@@ -439,7 +439,7 @@ struct PortIndexDefinition {
     constexpr PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
 };
 
-class edge {
+class Edge {
 public: // TODO: consider making this private and to use accessors (that can be safely used by users)
     using PortDirection::INPUT;
     using PortDirection::OUTPUT;
@@ -453,21 +453,21 @@ public: // TODO: consider making this private and to use accessors (that can be 
     bool                             _connected;
 
 public:
-    edge()             = delete;
+    Edge()             = delete;
 
-    edge(const edge &) = delete;
+    Edge(const Edge &) = delete;
 
-    edge &
-    operator=(const edge &)
+    Edge &
+    operator=(const Edge &)
             = delete;
 
-    edge(edge &&) noexcept = default;
+    Edge(Edge &&) noexcept = default;
 
-    edge &
-    operator=(edge &&) noexcept
+    Edge &
+    operator=(Edge &&) noexcept
             = default;
 
-    edge(BlockModel *sourceBlock, PortIndexDefinition<std::size_t> sourcePortDefinition, BlockModel *destinationBlock, PortIndexDefinition<std::size_t> destinationPortDefinition,
+    Edge(BlockModel *sourceBlock, PortIndexDefinition<std::size_t> sourcePortDefinition, BlockModel *destinationBlock, PortIndexDefinition<std::size_t> destinationPortDefinition,
          std::size_t minBufferSize, std::int32_t weight, std::string_view name)
         : _sourceBlock(sourceBlock)
         , _destinationBlock(destinationBlock)
@@ -526,7 +526,7 @@ struct Graph {
 private:
     std::vector<std::function<ConnectionResult(Graph &)>> _connectionDefinitions;
     std::vector<std::unique_ptr<BlockModel>>              _blocks;
-    std::vector<edge>                                     _edges;
+    std::vector<Edge>                                     _edges;
 
     template<typename TBlock>
     std::unique_ptr<BlockModel> &
@@ -687,7 +687,7 @@ public:
     /**
      * @return a list of all edges in this graph connecting blocks
      */
-    [[nodiscard]] std::span<edge>
+    [[nodiscard]] std::span<Edge>
     edges() noexcept {
         return { _edges };
     }
