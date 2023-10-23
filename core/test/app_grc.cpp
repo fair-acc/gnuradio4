@@ -11,39 +11,37 @@
 #include <build_configure.hpp>
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 
-namespace grg = gr;
-
 template<typename T>
-struct ArraySource : public grg::Block<ArraySource<T>> {
-    std::array<grg::PortOut<T>, 2> outA;
-    std::array<grg::PortOut<T>, 2> outB;
+struct ArraySource : public gr::Block<ArraySource<T>> {
+    std::array<gr::PortOut<T>, 2> outA;
+    std::array<gr::PortOut<T>, 2> outB;
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySource, outA, outB);
 
 template<typename T>
-struct ArraySink : public grg::Block<ArraySink<T>> {
-    std::array<grg::PortIn<T>, 2> inA;
-    std::array<grg::PortIn<T>, 2> inB;
+struct ArraySink : public gr::Block<ArraySink<T>> {
+    std::array<gr::PortIn<T>, 2> inA;
+    std::array<gr::PortIn<T>, 2> inB;
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB);
 
-struct test_context {
-    test_context(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
+struct TestContext {
+    TestContext(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
-    grg::BlockRegistry registry;
-    grg::plugin_loader loader;
+    gr::BlockRegistry registry;
+    gr::plugin_loader loader;
 };
 
 namespace {
-    auto collectBlocks(const grg::Graph &graph) {
+    auto collectBlocks(const gr::Graph &graph) {
         std::set<std::string> result;
         graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
         return result;
     };
 
-    auto collectEdges(const grg::Graph &graph) {
+    auto collectEdges(const gr::Graph &graph) {
         std::set<std::string> result;
         graph.forEachEdge([&](const auto &edge) {
             result.insert(fmt::format("{}#{}#{} - {}#{}#{}", edge.sourceBlock().name(), edge.sourcePortDefinition().topLevel, edge.sourcePortDefinition().subIndex, edge.destinationBlock().name(), edge.destinationPortDefinition().topLevel, edge.destinationPortDefinition().subIndex));
@@ -70,7 +68,7 @@ main(int argc, char *argv[]) {
         return buffer.str();
     };
 
-    test_context context(std::move(paths));
+    TestContext context(std::move(paths));
 
     // Test the basic graph loading and storing
     {
@@ -79,8 +77,8 @@ main(int argc, char *argv[]) {
 
         auto graph_source          = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
-        auto graph                 = grg::load_grc(context.loader, graph_source);
-        auto graph_saved_source    = grg::save_grc(graph);
+        auto graph                 = gr::load_grc(context.loader, graph_source);
+        auto graph_saved_source    = gr::save_grc(graph);
 
         auto graph_expected_source = read_file(TESTS_SOURCE_PATH "/grc/test.grc.expected");
         assert(graph_saved_source + "\n"
@@ -98,10 +96,10 @@ main(int argc, char *argv[]) {
 
         auto                  graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
-        auto                  graph_1            = grg::load_grc(context.loader, graph_source);
-        auto                  graph_saved_source = grg::save_grc(graph_1);
+        auto                  graph_1            = gr::load_grc(context.loader, graph_source);
+        auto                  graph_saved_source = gr::save_grc(graph_1);
 
-        auto                  graph_2            = grg::load_grc(context.loader, graph_saved_source);
+        auto                  graph_2            = gr::load_grc(context.loader, graph_saved_source);
 
         assert(collectBlocks(graph_1) == collectBlocks(graph_2));
         assert(collectEdges(graph_1) == collectEdges(graph_2));
@@ -126,8 +124,8 @@ main(int argc, char *argv[]) {
 
         assert(graph_1.performConnections());
 
-        const auto graph_1_saved = grg::save_grc(graph_1);
-        const auto graph_2       = grg::load_grc(context.loader, graph_1_saved);
+        const auto graph_1_saved = gr::save_grc(graph_1);
+        const auto graph_2       = gr::load_grc(context.loader, graph_1_saved);
 
         assert(collectBlocks(graph_1) == collectBlocks(graph_2));
         assert(collectEdges(graph_1) == collectEdges(graph_2));

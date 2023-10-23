@@ -21,16 +21,16 @@ using namespace gr::literals;
 
 namespace grg = gr;
 
-struct test_context {
+struct TestContext {
     grg::BlockRegistry registry;
     grg::plugin_loader loader;
 
-    test_context() : loader(&registry, std::vector<std::filesystem::path>{ "test/plugins", "plugins" }) {}
+    TestContext() : loader(&registry, std::vector<std::filesystem::path>{ "test/plugins", "plugins" }) {}
 };
 
-test_context &
+TestContext &
 context() {
-    static test_context instance;
+    static TestContext instance;
     return instance;
 }
 
