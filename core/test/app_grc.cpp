@@ -21,11 +21,17 @@ ENABLE_REFLECTION_FOR_TEMPLATE(ArraySource, outA, outB);
 
 template<typename T>
 struct ArraySink : public gr::Block<ArraySink<T>> {
-    std::array<gr::PortIn<T>, 2> inA;
-    std::array<gr::PortIn<T>, 2> inB;
+    std::array<gr::PortIn<T>, 2>                                     inA;
+    std::array<gr::PortIn<T>, 2>                                     inB;
+    gr::Annotated<bool, "bool setting">                              bool_setting = false;
+    gr::Annotated<std::string, "String setting">                     string_setting;
+    gr::Annotated<std::vector<bool>, "Bool vector setting">          bool_vector;
+    gr::Annotated<std::vector<std::string>, "String vector setting"> string_vector;
+    gr::Annotated<std::vector<double>, "Double vector setting">      double_vector;
+    gr::Annotated<std::vector<int16_t>, "int16_t vector setting">    int16_vector;
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB);
+ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB, bool_setting, string_setting, bool_vector, string_vector, double_vector, int16_vector);
 
 struct TestContext {
     TestContext(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
@@ -35,20 +41,23 @@ struct TestContext {
 };
 
 namespace {
-    auto collectBlocks(const gr::Graph &graph) {
-        std::set<std::string> result;
-        graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
-        return result;
-    };
+auto
+collectBlocks(const gr::Graph &graph) {
+    std::set<std::string> result;
+    graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
+    return result;
+};
 
-    auto collectEdges(const gr::Graph &graph) {
-        std::set<std::string> result;
-        graph.forEachEdge([&](const auto &edge) {
-            result.insert(fmt::format("{}#{}#{} - {}#{}#{}", edge.sourceBlock().name(), edge.sourcePortDefinition().topLevel, edge.sourcePortDefinition().subIndex, edge.destinationBlock().name(), edge.destinationPortDefinition().topLevel, edge.destinationPortDefinition().subIndex));
-        });
-        return result;
-    };
-}
+auto
+collectEdges(const gr::Graph &graph) {
+    std::set<std::string> result;
+    graph.forEachEdge([&](const auto &edge) {
+        result.insert(fmt::format("{}#{}#{} - {}#{}#{}", edge.sourceBlock().name(), edge.sourcePortDefinition().topLevel, edge.sourcePortDefinition().subIndex, edge.destinationBlock().name(),
+                                  edge.destinationPortDefinition().topLevel, edge.destinationPortDefinition().subIndex));
+    });
+    return result;
+};
+} // namespace
 
 int
 main(int argc, char *argv[]) {
@@ -94,12 +103,12 @@ main(int argc, char *argv[]) {
         using namespace gr;
         registerBuiltinBlocks(&context.registry);
 
-        auto                  graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
+        auto graph_source       = read_file(TESTS_SOURCE_PATH "/grc/test.grc");
 
-        auto                  graph_1            = gr::load_grc(context.loader, graph_source);
-        auto                  graph_saved_source = gr::save_grc(graph_1);
+        auto graph_1            = gr::load_grc(context.loader, graph_source);
+        auto graph_saved_source = gr::save_grc(graph_1);
 
-        auto                  graph_2            = gr::load_grc(context.loader, graph_saved_source);
+        auto graph_2            = gr::load_grc(context.loader, graph_saved_source);
 
         assert(collectBlocks(graph_1) == collectBlocks(graph_2));
         assert(collectEdges(graph_1) == collectEdges(graph_2));
@@ -113,9 +122,9 @@ main(int argc, char *argv[]) {
         GP_REGISTER_NODE_RUNTIME(&context.registry, ArraySink, double);
 
         gr::Graph graph_1;
-        auto &arraySink    = graph_1.emplaceBlock<ArraySink<double>>();
-        auto &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
-        auto &arraySource1 = graph_1.emplaceBlock<ArraySource<double>>();
+        auto     &arraySink    = graph_1.emplaceBlock<ArraySink<double>>();
+        auto     &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
+        auto     &arraySource1 = graph_1.emplaceBlock<ArraySource<double>>();
 
         graph_1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink);
         graph_1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink);
@@ -126,6 +135,42 @@ main(int argc, char *argv[]) {
 
         const auto graph_1_saved = gr::save_grc(graph_1);
         const auto graph_2       = gr::load_grc(context.loader, graph_1_saved);
+
+        assert(collectBlocks(graph_1) == collectBlocks(graph_2));
+        assert(collectEdges(graph_1) == collectEdges(graph_2));
+    }
+
+    // Test settings serialization
+    {
+        using namespace gr;
+        registerBuiltinBlocks(&context.registry);
+        GP_REGISTER_NODE_RUNTIME(&context.registry, ArraySink, double);
+
+        gr::Graph  graph_1;
+        const auto expectedString       = std::string("abc");
+        const auto expectedBool         = true;
+        const auto expectedStringVector = std::vector<std::string>{ "a", "b", "c" };
+        const auto expectedBoolVector   = std::vector<bool>{ true, false, true };
+        const auto expectedDoubleVector = std::vector<double>{ 1., 2., 3. };
+        const auto expectedInt16Vector  = std::vector<int16_t>{ 1, 2, 3 };
+        auto      &arraySink            = graph_1.emplaceBlock<ArraySink<double>>({ { "bool_setting", expectedBool },
+                                                                                    { "string_setting", expectedString },
+                                                                                    { "bool_vector", expectedBoolVector },
+                                                                                    { "string_vector", expectedStringVector },
+                                                                                    { "double_vector", expectedDoubleVector },
+                                                                                    { "int16_vector", expectedInt16Vector } });
+
+        const auto graph_1_saved        = gr::save_grc(graph_1);
+        const auto graph_2              = gr::load_grc(context.loader, graph_1_saved);
+        graph_2.forEachBlock([&](const auto &node) {
+            const auto settings = node.settings().get();
+            assert(std::get<bool>(settings.at("bool_setting")) == expectedBool);
+            assert(std::get<std::string>(settings.at("string_setting")) == expectedString);
+            assert(std::get<std::vector<bool>>(settings.at("bool_vector")) == expectedBoolVector);
+            assert(std::get<std::vector<std::string>>(settings.at("string_vector")) == expectedStringVector);
+            assert(std::get<std::vector<double>>(settings.at("double_vector")) == expectedDoubleVector);
+            assert(std::get<std::vector<int16_t>>(settings.at("int16_vector")) == expectedInt16Vector);
+        });
 
         assert(collectBlocks(graph_1) == collectBlocks(graph_2));
         assert(collectEdges(graph_1) == collectEdges(graph_2));
