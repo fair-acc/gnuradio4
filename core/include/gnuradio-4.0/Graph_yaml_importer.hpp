@@ -15,28 +15,20 @@
 namespace gr {
 
 namespace detail {
-struct YamlMap {
-    YAML::Emitter &out;
 
-    YamlMap(YAML::Emitter &out_) : out(out_) { out << YAML::BeginMap; }
-
-    ~YamlMap() { out << YAML::EndMap; }
-
-    template<typename T>
-    void
-    write(const std::string_view &key, const T &value) {
-        out << YAML::Key << key.data();
-        out << YAML::Value << value;
+template<typename T>
+inline auto
+toYamlString(const T &value) {
+    if constexpr (std::is_same_v<std::string, std::remove_cvref_t<T>>) {
+        return value;
+    } else if constexpr (std::is_same_v<bool, std::remove_cvref_t<T>>) {
+        return value ? "true" : "false";
+    } else if constexpr (requires { std::to_string(value); }) {
+        return std::to_string(value);
+    } else {
+        return "";
     }
-
-    template<typename F>
-    void
-    write_fn(const std::string_view &key, F &&fun) {
-        out << YAML::Key << key.data();
-        out << YAML::Value;
-        fun();
-    }
-};
+}
 
 struct YamlSeq {
     YAML::Emitter &out;
@@ -49,6 +41,37 @@ struct YamlSeq {
         requires std::is_invocable_v<F>
     void
     write_fn(const char * /*key*/, F &&fun) {
+        fun();
+    }
+};
+
+struct YamlMap {
+    YAML::Emitter &out;
+
+    YamlMap(YAML::Emitter &out_) : out(out_) { out << YAML::BeginMap; }
+
+    ~YamlMap() { out << YAML::EndMap; }
+
+    template<typename T>
+    void
+    write(const std::string_view &key, const std::vector<T> &value) {
+        out << YAML::Key << key.data();
+        YamlSeq seq(out);
+        for (const auto &elem : value) out << YAML::Value << toYamlString(elem);
+    }
+
+    template<typename T>
+    void
+    write(const std::string_view &key, const T &value) {
+        out << YAML::Key << key.data();
+        out << YAML::Value << toYamlString(value);
+    }
+
+    template<typename F>
+    void
+    write_fn(const std::string_view &key, F &&fun) {
+        out << YAML::Key << key.data();
+        out << YAML::Value;
         fun();
     }
 };
@@ -98,14 +121,19 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
 
                     // This is a known property of this node
                     auto try_type = [&]<typename T>() {
-                        if (it->second.index() != variant_type_list::index_of<T>()) {
-                            return false;
+                        if (it->second.index() == variant_type_list::index_of<T>()) {
+                            const auto &value   = grc_value.template as<T>();
+                            new_properties[key] = value;
+                            return true;
                         }
 
-                        const auto &value   = grc_value.template as<T>();
-                        new_properties[key] = value;
+                        if (it->second.index() == variant_type_list::index_of<std::vector<T>>()) {
+                            const auto &value   = grc_value.template as<std::vector<T>>();
+                            new_properties[key] = value;
+                            return true;
+                        }
 
-                        return true;
+                        return false;
                     };
 
                     // clang-format off
@@ -117,6 +145,9 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
                     try_type.operator()<std::uint16_t>() ||
                     try_type.operator()<std::uint32_t>() ||
                     try_type.operator()<std::uint64_t>() ||
+                    try_type.operator()<bool>() ||
+                    try_type.operator()<float>() ||
+                    try_type.operator()<double>() ||
                     try_type.operator()<std::string>() ||
                     [&] {
                         // Fallback to string, and non-defined property
@@ -203,18 +234,8 @@ save_grc(const gr::Graph &testGraph) {
                     map.write_fn("parameters", [&]() {
                         detail::YamlMap parameters(out);
                         auto            write_map = [&](const auto &local_map) {
-                            for (const auto &settings_pair : local_map) {
-                                std::visit(
-                                        [&]<typename T>(const T &value) {
-                                            if constexpr (std::is_same_v<std::string, std::remove_cvref_t<T>>) {
-                                                parameters.write(settings_pair.first, value);
-                                            } else if constexpr (requires { std::to_string(value); }) {
-                                                parameters.write(settings_pair.first, std::to_string(value));
-                                            } else {
-                                                // not supported
-                                            }
-                                        },
-                                        settings_pair.second);
+                            for (const auto &[settingsKey, settingsValue] : local_map) {
+                                std::visit([&]<typename T>(const T &value) { parameters.write(settingsKey, value); }, settingsValue);
                             }
                         };
 
