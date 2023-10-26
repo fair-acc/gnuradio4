@@ -369,27 +369,28 @@ concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nes
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
 template<typename TDerived, std::size_t I>
-concept processBulk_requires_ith_output_as_span = requires(TDerived                                                                                                                       &d,
-                                                           typename meta::transform_types<detail::dummy_input_span, traits::block::input_port_types<TDerived>>::template apply<std::tuple> inputs,
-                                                           typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
-                                                                                                traits::block::output_port_types<TDerived>>::template apply<std::tuple>
-                                                                   outputs,
-                                                           typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
-                                                                                                traits::block::output_port_types<TDerived>>::template apply<std::tuple>
-                                                                   bad_outputs) {
-    {
-        []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
-                                                        std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
-            return {};
-        }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>())
-    } -> std::same_as<work::Status>;
-    not requires {
-        []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
-                                                        std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
-            return {};
-        }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>());
-    };
-};
+concept processBulk_requires_ith_output_as_span
+        = can_processBulk<TDerived>
+       && requires(TDerived &d, typename meta::transform_types<detail::dummy_input_span, traits::block::input_port_types<TDerived>>::template apply<std::tuple> inputs,
+                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
+                                                        traits::block::output_port_types<TDerived>>::template apply<std::tuple>
+                           outputs,
+                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
+                                                        traits::block::output_port_types<TDerived>>::template apply<std::tuple>
+                           bad_outputs) {
+              {
+                  []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
+                                                                  std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
+                      return {};
+                  }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>())
+              } -> std::same_as<work::Status>;
+              not requires {
+                  []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
+                                                                  std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
+                      return {};
+                  }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>());
+              };
+          };
 
 } // namespace gr::traits::block
 
