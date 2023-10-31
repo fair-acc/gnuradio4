@@ -57,6 +57,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 // TODO: Unify blocks with static and dynamic ports
 //  - Port to gr::block
 //  - use Block::set_name instead of returning an empty name
+// TODO: Inherit from Block class when create new block.
 template<typename T>
 class multi_adder : public gr::BlockModel {
     static std::atomic_size_t _unique_id_counter;
@@ -112,6 +113,21 @@ public:
 
     void
     init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
+
+    void
+    start() override {}
+
+    void
+    stop() override {}
+
+    void
+    pause() override {}
+
+    void
+    resume() override {}
+
+    void
+    reset() override {}
 
     [[nodiscard]] std::string_view
     name() const override {

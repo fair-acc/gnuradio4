@@ -72,6 +72,21 @@ public:
     void
     init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
 
+    void
+    start() override {}
+
+    void
+    stop() override {}
+
+    void
+    pause() override {}
+
+    void
+    resume() override {}
+
+    void
+    reset() override {}
+
     [[nodiscard]] std::string_view
     name() const override {
         return _unique_name;
@@ -215,7 +230,7 @@ main() {
 
     gr::scheduler::Simple scheduler(make_graph(10), thread_pool);
 
-    // TODO: BLOCK This line is commented because of failing tests
+    // TODO: This line is commented because of failing tests
     // TODO: HierBlock as it is implemented now does not support tag handling and can not be used with new DONE mechanism via EOS tag
     // TODO: Review HierBlock implementation
     // scheduler.runAndWait();

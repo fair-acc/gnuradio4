@@ -1,6 +1,8 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <magic_enum.hpp>
+#include <magic_enum_utility.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -269,11 +271,41 @@ struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
     gr::PortOut<T> out{};
 
     int process_one_count{};
+    int start_count{};
+    int stop_count{};
+    int reset_count{};
+    int pause_count{};
+    int resume_count{};
 
-    [[nodiscard]] constexpr auto
-    processOne(float a) noexcept {
+    [[nodiscard]] constexpr T
+    processOne(T a) noexcept {
         process_one_count++;
         return a;
+    }
+
+    void
+    start() {
+        start_count++;
+    }
+
+    void
+    stop() {
+        stop_count++;
+    }
+
+    void
+    reset() {
+        reset_count++;
+    }
+
+    void
+    pause() {
+        pause_count++;
+    }
+
+    void
+    resume() {
+        resume_count++;
     }
 };
 
@@ -438,9 +470,17 @@ const boost::ut::suite SchedulerTests = [] {
 
         auto sched = scheduler{ std::move(flow), threadPool };
         sched.runAndWait();
+        sched.reset();
 
         expect(eq(lifecycleSource.n_samples_produced, lifecycleSource.n_samples_max)) << "Source n_samples_produced != n_samples_max";
         expect(eq(lifecycleBlock.process_one_count, lifecycleSource.n_samples_max)) << "process_one_count != n_samples_produced";
+
+        expect(eq(lifecycleBlock.process_one_count, lifecycleSource.n_samples_produced));
+        expect(eq(lifecycleBlock.start_count, 1));
+        expect(eq(lifecycleBlock.stop_count, 1));
+        expect(eq(lifecycleBlock.pause_count, 0));
+        expect(eq(lifecycleBlock.resume_count, 0));
+        expect(eq(lifecycleBlock.reset_count, 1));
     };
 };
 
