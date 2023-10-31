@@ -291,6 +291,19 @@ static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
  *     * case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
  *     * case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
  * <ul>
+ *
+ * In addition derived classes can optionally implement any subset of the lifecycle methods ( `start()`, `stop()`, `reset()`, `pause()`, `resume()`).
+ * The Scheduler invokes these methods on each Block instance, if they are implemented, just before invoking its corresponding method of the same name.
+ * @code
+ * struct userBlock : public Block<userBlock> {
+ * void start() {...} // Implement any startup logic required for the block within this method.
+ * void stop() {...} // Use this method for handling any clean-up procedures.
+ * void pause() {...} // Implement logic to temporarily halt the block's operation, maintaining its current state.
+ * void resume() {...} // This method should contain logic to restart operations after a pause, continuing from the same state as when it was paused.
+ * void reset() {...} // Reset the block's state to defaults in this method.
+ * };
+ * @endcode
+ *
  * @tparam Derived the user-defined block CRTP: https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
@@ -476,7 +489,12 @@ public:
         : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
-        stop();
+        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
+        ioThreadShallRun.notify_all();
+        // wait for done
+        for (auto running = ioThreadRunning.load(); running > 0; running = ioThreadRunning.load()) {
+            ioThreadRunning.wait(running);
+        }
     }
 
     void
@@ -522,16 +540,6 @@ public:
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
         state = LifeCycleState::INITIALISED;
-    }
-
-    void
-    stop() {
-        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
-        ioThreadShallRun.notify_all();
-        // wait for done
-        for (auto running = ioThreadRunning.load(); running > 0; running = ioThreadRunning.load()) {
-            ioThreadRunning.wait(running);
-        }
     }
 
     template<gr::meta::array_or_vector_type Container>
