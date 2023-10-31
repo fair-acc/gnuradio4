@@ -7,8 +7,13 @@
 #include "PortTraits.hpp"
 #include "reflection.hpp"
 
-#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wpedantic"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <vir/simd.h>
+#include <vir/simdize.h>
+#pragma GCC diagnostic pop
 
 namespace gr::work {
 enum class Status;
@@ -215,7 +220,19 @@ auto
 can_processOne_with_offset_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
 
 template<typename TBlock>
-using simd_return_type_of_can_processOne = meta::simdize<return_type<TBlock>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<TBlock>>>>;
+struct simd_return_type_of_can_processOne {
+    using type = vir::simdize<return_type<TBlock>, vir::simdize<input_port_types_tuple<TBlock>>::size()>;
+};
+
+template<typename TBlock>
+    requires std::is_void_v<return_type<TBlock>>
+struct simd_return_type_of_can_processOne<TBlock> {
+    using type = void;
+};
+
+template<typename TBlock>
+using simd_return_type_of_can_processOne_t
+        = typename simd_return_type_of_can_processOne<TBlock>::type;
 } // namespace detail
 
 /* A node "can process simd" if its `processOne` function takes at least one argument and all
@@ -232,12 +249,14 @@ concept can_processOne_simd =
 #if DISABLE_SIMD
         false;
 #else
-        traits::block::input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::block::input_port_types<TBlock>::size() > 0 and requires(TBlock &node, const meta::simdize<input_port_types_tuple<TBlock>> &input_simds) {
-            {
-                detail::can_processOne_invoke_test(node, input_simds, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>())
-            } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
-        };
+        traits::block::input_ports<TBlock>::template all_of<port::is_port> // checks we don't have port collections inside
+        and traits::block::input_port_types<TBlock>::size() > 0
+        and requires(TBlock &node, const vir::simdize<input_port_types_tuple<TBlock>> &input_simds) {
+                {
+                    detail::can_processOne_invoke_test(
+                            node, input_simds, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>())
+                } -> std::same_as<detail::simd_return_type_of_can_processOne_t<TBlock>>;
+            };
 #endif
 
 template<typename TBlock>
@@ -245,12 +264,14 @@ concept can_processOne_simd_with_offset =
 #if DISABLE_SIMD
         false;
 #else
-        traits::block::input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::block::input_port_types<TBlock>::size() > 0 && requires(TBlock &node, const meta::simdize<input_port_types_tuple<TBlock>> &input_simds) {
-            {
-                detail::can_processOne_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>())
-            } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
-        };
+        traits::block::input_ports<TBlock>::template all_of<port::is_port> // checks we don't have port collections inside
+        and traits::block::input_port_types<TBlock>::size() > 0
+        and requires(TBlock &node, const vir::simdize<input_port_types_tuple<TBlock>> &input_simds) {
+                {
+                    detail::can_processOne_with_offset_invoke_test(
+                            node, input_simds, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>())
+                } -> std::same_as<detail::simd_return_type_of_can_processOne_t<TBlock>>;
+            };
 #endif
 
 template<typename TBlock>

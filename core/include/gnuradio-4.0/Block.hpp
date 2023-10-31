@@ -28,19 +28,20 @@ using gr::meta::fixed_string;
 
 template<typename F>
 constexpr void
-simd_epilogue(auto width, F &&fun) {
-    static_assert(std::has_single_bit(+width));
-    auto w2 = std::integral_constant<std::size_t, width / 2>{};
-    if constexpr (w2 > 0) {
-        fun(w2);
-        simd_epilogue(w2, std::forward<F>(fun));
+simd_epilogue(auto kWidth, F &&fun) {
+    using namespace vir::literals;
+    static_assert(std::has_single_bit(unsigned(kWidth)));
+    auto kHalfWidth = kWidth / 2_cw;
+    if constexpr (kHalfWidth > 0) {
+        fun(kHalfWidth);
+        simd_epilogue(kHalfWidth, std::forward<F>(fun));
     }
 }
 
 template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
 constexpr auto
 simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto offset, auto &&fun, Flag f = {}) {
-    using Tup = meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
+    using Tup = vir::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...);
     }(std::make_index_sequence<sizeof...(Ts)>());
@@ -1069,26 +1070,47 @@ protected:
             if (ports_status.in_samples != ports_status.out_samples)
                 throw std::runtime_error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", ports_status.in_samples, ports_status.out_samples));
             // handle processOne(...)
-            using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
-            using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
-
-            std::integral_constant<std::size_t, (meta::simdize_size_v<input_simd_types> == 0 ? std::size_t(stdx::simd_abi::max_fixed_size<double>)
-                                                                                             : std::min(std::size_t(stdx::simd_abi::max_fixed_size<double>), meta::simdize_size_v<input_simd_types> * 4))>
-                    width{};
-
-            if constexpr ((kIsSinkBlock or meta::simdize_size_v<output_simd_types> != 0) and ((kIsSourceBlock and requires(Derived &d) {
-                                                                                                  { d.processOne_simd(width) };
-                                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) {
+            static constexpr std::size_t kMaxWidth = stdx::simd_abi::max_fixed_size<double>;
+            // A block determines it's simd::size() via its input types. However, a source block doesn't have any input
+            // types and therefore wouldn't be able to produce simd output on processOne calls. To overcome this
+            // limitation, a source block can implement `processOne_simd(vir::constexpr_value auto width)` instead of
+            // `processOne()` and then return simd objects with simd::size() == width.
+            constexpr bool kIsSimdSourceBlock
+                    = kIsSourceBlock and requires(Derived &d) { d.processOne_simd(vir::cw<kMaxWidth>); };
+            if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
                 // SIMD loop
+                const auto kWidth = [] {
+                    if constexpr (kIsSourceBlock) {
+                        return vir::cw<kMaxWidth>;
+                    } else {
+                        using input_simd_types = vir::simdize<typename TInputTypes::template apply<std::tuple>>;
+                        return vir::cw<std::min(kMaxWidth, input_simd_types::size() * 4_UZ)>;
+                    }
+                }();
+
                 std::size_t i = 0;
-                for (; i + width <= ports_status.in_samples; i += width) {
-                    const auto &results = simdize_tuple_load_and_apply(width, input_spans, i, [&](const auto &...input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
-                    meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
+                for (; i + kWidth <= ports_status.in_samples; i += kWidth) {
+                    const auto &results = simdize_tuple_load_and_apply(
+                            kWidth, input_spans, i, [&](const auto &...input_simds) {
+                                return invoke_processOne_simd(i, kWidth, input_simds...);
+                            });
+                    meta::tuple_for_each(
+                            [i](auto &output_range, const auto &result) {
+                                result.copy_to(output_range.data() + i, stdx::element_aligned);
+                            },
+                            writers_tuple, results);
                 }
-                simd_epilogue(width, [&](auto w) {
+                simd_epilogue(kWidth, [&](auto w) {
                     if (i + w <= ports_status.in_samples) {
-                        const auto results = simdize_tuple_load_and_apply(w, input_spans, i, [&](auto &&...input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
-                        meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writers_tuple, results);
+                        const auto results = simdize_tuple_load_and_apply(
+                                w, input_spans, i, [&](auto &&...input_simds) {
+                                    return invoke_processOne_simd(i, w, input_simds...);
+                                });
+                        meta::tuple_for_each(
+                                [i](auto &output_range, auto &result) {
+                                    result.copy_to(output_range.data() + i, stdx::element_aligned);
+                                },
+                                writers_tuple, results);
                         i += w;
                     }
                 });
