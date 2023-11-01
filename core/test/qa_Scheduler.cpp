@@ -440,6 +440,16 @@ const boost::ut::suite SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 10u);
     };
 
+    "SimpleScheduler_scaled_sum_multi_threaded_default_thread_pool"_test = [] {
+        using scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        // construct an example graph and get an adjacency list for it
+        tracer trace{};
+        auto   sched = scheduler{ get_graph_scaled_sum(trace) };
+        sched.runAndWait();
+        auto t = trace.get_vec();
+        expect(boost::ut::that % t.size() >= 10u);
+    };
+
     "BreadthFirstScheduler_scaled_sum_multi_threaded"_test = [&thread_pool] {
         using scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         tracer trace{};
