@@ -111,6 +111,75 @@ public:
     }
 };
 
+template<typename T>
+struct ForeverSource : public gr::Block<ForeverSource<T>> {
+    gr::PortOut<T> out;
+    std::size_t    _produced = 0;
+
+    ~ForeverSource() { boost::ut::expect(boost::ut::that % _produced > 0); }
+
+    gr::work::Status
+    processBulk(gr::PublishableSpan auto &output) noexcept {
+        _produced += output.size();
+        output.publish(output.size());
+        return gr::work::Status::OK;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(ForeverSource, out)
+
+template<typename T>
+struct DummySink : public gr::Block<DummySink<T>> {
+    gr::PortIn<T> in;
+    std::size_t   _count = 0;
+
+    ~DummySink() { boost::ut::expect(boost::ut::that % _count > 0); }
+
+    [[nodiscard]] gr::work::Status
+    processBulk(std::span<const T> input) noexcept {
+        _count += input.size();
+        return gr::work::Status::OK;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(DummySink, in)
+
+template<typename T>
+struct DelayedSource : public gr::Block<DelayedSource<T>> {
+    using clock = std::chrono::system_clock;
+    gr::PortOut<T> out;
+
+    uint32_t                         n_samples = 100;
+    uint32_t                         delay_ms  = 300;
+    std::size_t                      _produced = 0;
+    std::optional<clock::time_point> _first_request;
+    bool                             _waiting = true;
+
+    gr::work::Status
+    processBulk(gr::PublishableSpan auto &output) noexcept {
+        using enum gr::work::Status;
+        if (!_first_request) {
+            _first_request = clock::now();
+            output.publish(0);
+            return OK;
+        }
+        if (_waiting) {
+            const auto now = clock::now();
+            if (now - *_first_request < std::chrono::milliseconds(delay_ms)) {
+                output.publish(0);
+                return OK;
+            }
+            _waiting = false;
+        }
+        auto n = std::min(output.size(), static_cast<std::size_t>(n_samples) - _produced);
+        output.publish(n);
+        _produced += n;
+        return n > 0 ? OK : DONE;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(DelayedSource, out, n_samples, delay_ms)
+
 gr::Graph
 get_graph_linear(tracer &trace) {
     using gr::PortDirection::INPUT;
@@ -199,6 +268,33 @@ get_graph_scaled_sum(tracer &trace) {
     return flow;
 }
 
+gr::Graph
+get_graph_with_delayed_source(tracer &trace) {
+    using namespace boost::ut;
+
+    constexpr uint32_t kSamples = 100;
+    constexpr uint32_t kDelayMs = 300;
+
+    gr::Graph flow;
+    auto     &source = flow.emplaceBlock<DelayedSource<int>>({ { "n_samples", kSamples }, { "delay_ms", kDelayMs } });
+    auto     &sink   = flow.emplaceBlock<expect_sink<int, kSamples>>(trace, "out", [kSamples](std::uint64_t, std::uint64_t) {});
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
+
+    return flow;
+}
+
+gr::Graph
+get_graph_with_forever_running_source() {
+    using namespace boost::ut;
+
+    gr::Graph flow;
+    auto     &source = flow.emplaceBlock<ForeverSource<int>>();
+    auto     &sink   = flow.emplaceBlock<DummySink<int>>();
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
+
+    return flow;
+}
+
 template<typename TBlock>
 void
 checkBlockNames(const std::vector<TBlock> &joblist, std::set<std::string> set) {
@@ -211,7 +307,7 @@ checkBlockNames(const std::vector<TBlock> &joblist, std::set<std::string> set) {
 const boost::ut::suite SchedulerTests = [] {
     using namespace boost::ut;
     using namespace gr;
-    auto thread_pool              = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+    auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     "SimpleScheduler_linear"_test = [&thread_pool] {
         using scheduler = gr::scheduler::Simple<>;
@@ -355,6 +451,66 @@ const boost::ut::suite SchedulerTests = [] {
         sched.runAndWait();
         auto t = trace.get_vec();
         expect(boost::ut::that % t.size() >= 10u);
+    };
+
+    "SimpleScheduler_multi_threaded_time_boxed"_test = [&thread_pool] {
+        using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        auto sched      = Scheduler{ get_graph_with_forever_running_source(), thread_pool };
+        sched.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        sched.stop();
+    };
+
+    "SimpleScheduler_multi_threaded_time_boxed_default_thread_pool"_test = [] {
+        using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        auto sched      = Scheduler{ get_graph_with_forever_running_source() };
+        sched.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        sched.stop();
+    };
+
+    "BreadthFirst_multi_threaded_time_boxed"_test = [&thread_pool] {
+        using Scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        auto sched      = Scheduler{ get_graph_with_forever_running_source(), thread_pool };
+        sched.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        sched.stop();
+    };
+
+    "BreadthFirst_multi_threaded_time_boxed_default_thread_pool"_test = [] {
+        using Scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        auto sched      = Scheduler{ get_graph_with_forever_running_source() };
+        sched.start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        sched.stop();
+    };
+
+    "SimpleScheduler_delayed_source"_test = [&thread_pool] {
+        using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        tracer trace{};
+        auto   sched = Scheduler{ get_graph_with_delayed_source(trace), thread_pool };
+        sched.runAndWait();
+    };
+
+    "SimpleScheduler_delayed_source_default_thread_pool"_test = [] {
+        using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        tracer trace{};
+        auto   sched = Scheduler{ get_graph_with_delayed_source(trace) };
+        sched.runAndWait();
+    };
+
+    "BreadthFirst_delayed_source"_test = [&thread_pool] {
+        using Scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        tracer trace{};
+        auto   sched = Scheduler{ get_graph_with_delayed_source(trace), thread_pool };
+        sched.runAndWait();
+    };
+
+    "BreadthFirst_delayed_source_default_thread_pool"_test = [] {
+        using Scheduler = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
+        tracer trace{};
+        auto   sched = Scheduler{ get_graph_with_delayed_source(trace) };
+        sched.runAndWait();
     };
 };
 

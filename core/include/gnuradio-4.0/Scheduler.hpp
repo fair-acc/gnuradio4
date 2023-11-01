@@ -138,10 +138,10 @@ public:
 
     void
     poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
-        auto    &profiler_handler = _profiler.forThisThread();
+        auto &profiler_handler = _profiler.forThisThread();
 
-        uint32_t done             = 0;
-        uint32_t progress_count   = 0;
+        uint32_t done           = 0;
+        uint32_t progress_count = 0;
         while (done < n_batches && !_stop_requested) {
             auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
             bool something_happened = work().status == work::Status::OK;
@@ -272,6 +272,7 @@ public:
                 this->_state = STOPPED;
             }
         } else if (executionPolicy == multiThreaded) {
+            this->_state = RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
@@ -410,6 +411,7 @@ public:
             }
             this->_state = STOPPED;
         } else if (executionPolicy == multiThreaded) {
+            this->_state = RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
