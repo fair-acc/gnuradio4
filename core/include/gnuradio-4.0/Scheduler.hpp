@@ -140,8 +140,9 @@ public:
     poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
         auto &profiler_handler = _profiler.forThisThread();
 
-        uint32_t done           = 0;
-        uint32_t progress_count = 0;
+        uint32_t done                = 0;
+        uint32_t progress_count      = 0;
+        uint32_t done_progress_count = 0; // the value of count when the done counter was increased
         while (done < n_batches && !_stop_requested) {
             auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
             bool something_happened = work().status == work::Status::OK;
@@ -150,9 +151,9 @@ public:
             if (something_happened) { // something happened in this thread => increase progress and reset done count
                 do {
                     progress_local = _progress.load();
-                    progress_count = static_cast<std::uint32_t>((progress_local >> 32) & ((1ULL << 32) - 1));
+                    progress_count = static_cast<std::uint32_t>(((progress_local >> 32) & ((1ULL << 32) - 1)) + 1);
                     done           = static_cast<std::uint32_t>(progress_local & ((1ULL << 32) - 1));
-                    progress_new   = (progress_count + 1ULL) << 32;
+                    progress_new   = (progress_count + 0ULL) << 32;
                 } while (!_progress.compare_exchange_strong(progress_local, progress_new));
                 _progress.notify_all();
             } else { // nothing happened on this thread
@@ -161,11 +162,11 @@ public:
                     progress_local = _progress.load();
                     progress_count = static_cast<std::uint32_t>((progress_local >> 32) & ((1ULL << 32) - 1));
                     done           = static_cast<std::uint32_t>(progress_local & ((1ULL << 32) - 1));
-                    if (progress_count == progress_count_old) { // nothing happened => increase done count
-                        progress_new = ((progress_count + 0ULL) << 32) + done + 1;
-                    } else { // something happened in another thread => keep progress and done count and rerun this task without waiting
-                        progress_new = ((progress_count + 0ULL) << 32) + done;
+                    if (progress_count == progress_count_old && progress_count != done_progress_count) {
+                        ++done;
+                        done_progress_count = progress_count;
                     }
+                    progress_new = ((progress_count + 0ULL) << 32) + done;
                 } while (!_progress.compare_exchange_strong(progress_local, progress_new));
                 _progress.notify_all();
                 if (progress_count == progress_count_old && done < n_batches) {
