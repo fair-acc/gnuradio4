@@ -125,12 +125,9 @@ public:
     void
     unregisterSink(DataSink<T> *sink) {
         std::lock_guard lg{ _mutex };
-        std::erase_if(_sinks, [sink](const std::any &v) {
-            try {
-                return std::any_cast<DataSink<T> *>(v) == sink;
-            } catch (...) {
-                return false;
-            }
+        std::erase_if(_sinks, [sink](const std::any &v) -> bool {
+            auto ptr = std::any_cast<DataSink<T> *>(v);
+            return ptr && ptr == sink;
         });
     }
 
@@ -224,7 +221,7 @@ private:
     findSink(const DataSinkQuery &query) {
         auto matches = [&query](const std::any &v) {
             try {
-                auto       sink              = std::any_cast<DataSink<T> *>(v);
+                const auto sink              = std::any_cast<DataSink<T> *>(v);
                 const auto sinkNameMatches   = !query._sink_name || *query._sink_name == sink->name;
                 const auto signalNameMatches = !query._signal_name || *query._signal_name == sink->signal_name;
                 return sinkNameMatches && signalNameMatches;
@@ -241,31 +238,6 @@ private:
         return std::any_cast<DataSink<T> *>(*it);
     }
 };
-
-namespace detail {
-template<typename T>
-inline bool
-copy_span(std::span<const T> src, std::span<T> dst) {
-    assert(src.size() <= dst.size());
-    if (src.size() > dst.size()) {
-        return false;
-    }
-    std::copy(src.begin(), src.end(), dst.begin());
-    return true;
-}
-
-template<typename T>
-inline std::optional<T>
-get(const property_map &m, const std::string_view &key) {
-    const auto it = m.find(std::string(key));
-    if (it == m.end()) {
-        return {};
-    }
-
-    return std::get<T>(it->second);
-}
-
-} // namespace detail
 
 /**
  * @brief generic data sink for exporting arbitrary-typed streams to non-GR C++ APIs.
@@ -500,7 +472,7 @@ public:
             if (_history) {
                 // store potential pre-samples for triggers at the beginning of the next chunk
                 const auto toWrite = std::min(inData.size(), _history->capacity());
-                _history->push_back_bulk(inData.last(toWrite));
+                _history->push_back_bulk(inData.last(toWrite).begin(), inData.last(toWrite).end());
             }
         }
 
@@ -510,58 +482,45 @@ public:
 private:
     bool
     applySignalInfo(const property_map &properties) {
-        try {
-            const auto rate_ = detail::get<float>(properties, tag::SAMPLE_RATE.key());
-            const auto name_ = detail::get<std::string>(properties, tag::SIGNAL_NAME.key());
-            const auto unit_ = detail::get<std::string>(properties, tag::SIGNAL_UNIT.key());
-            const auto min_  = detail::get<T>(properties, tag::SIGNAL_MIN.key());
-            const auto max_  = detail::get<T>(properties, tag::SIGNAL_MAX.key());
+        auto getProperty = [&properties]<typename U>(const property_map &m, const std::string_view &key, U && /* needed to help clang's ADL */) -> std::optional<U> {
+            const auto it = m.find(std::string(key));
+            if (it == m.end()) {
+                return std::nullopt;
+            }
+            try {
+                return std::get<U>(it->second);
+            } catch (const std::bad_variant_access &) {
+                return std::nullopt;
+            }
+        };
 
-            // commit
-            if (rate_) {
-                sample_rate = *rate_;
-            }
-            if (name_) {
-                signal_name = *name_;
-            }
-            if (unit_) {
-                signal_unit = *unit_;
-            }
-            if (min_) {
-                signal_min = *min_;
-            }
-            if (max_) {
-                signal_max = *max_;
-            }
-
-            // forward to listeners
-            if (rate_ || name_ || unit_ || min_ || max_) {
-                const auto      dstempl = makeDataSetTemplate();
-
-                std::lock_guard lg{ _listener_mutex };
-                for (auto &l : _listeners) {
-                    if (rate_) {
-                        l->applySampleRate(sample_rate);
-                    }
-                    if (name_ || unit_ || min_ || max_) {
-                        l->setDataSetTemplate(dstempl);
-                    }
-                }
-            }
-            return name_ || unit_ || min_ || max_;
-        } catch (const std::bad_variant_access &) {
-            // TODO log?
+        const auto rate_ = getProperty(properties, tag::SAMPLE_RATE.key(), float{});
+        const auto name_ = getProperty(properties, tag::SIGNAL_NAME.key(), std::string());
+        const auto unit_ = getProperty(properties, tag::SIGNAL_UNIT.key(), std::string());
+        const auto min_  = getProperty(properties, tag::SIGNAL_MIN.key(), T{});
+        const auto max_  = getProperty(properties, tag::SIGNAL_MAX.key(), T{});
+        if (!rate_ && !name_ && !unit_ && !min_ && !max_) {
             return false;
         }
-    }
 
-    DataSet<T>
-    makeDataSetTemplate() const {
-        DataSet<T> dstempl;
-        dstempl.signal_names  = { signal_name };
-        dstempl.signal_units  = { signal_unit };
-        dstempl.signal_ranges = { { signal_min, signal_max } };
-        return dstempl;
+        sample_rate = rate_.value_or(sample_rate);
+        signal_name = name_.value_or(signal_name);
+        signal_unit = unit_.value_or(signal_unit);
+        signal_min  = min_.value_or(signal_min);
+        signal_max  = max_.value_or(signal_max);
+
+        // forward to listeners
+        for (auto &listener : _listeners) {
+            std::lock_guard lg{ _listener_mutex };
+            if (rate_) {
+                listener->applySampleRate(sample_rate);
+            }
+            if (name_ || unit_ || min_ || max_) {
+                listener->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { signal_min, signal_max } } });
+            }
+        }
+
+        return name_ && unit_ && min_ && max_;
     }
 
     void
@@ -585,7 +544,7 @@ private:
 
     void
     addListener(std::unique_ptr<AbstractListener> &&l, bool block) {
-        l->setDataSetTemplate(makeDataSetTemplate());
+        l->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { signal_min, signal_max } } });
         l->applySampleRate(sample_rate);
         if (block) {
             _listeners.push_back(std::move(l));
@@ -645,9 +604,9 @@ private:
         inline void
         callCallback(std::span<const T> data, std::span<const Tag> tags) {
             if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T> &>) {
-                callback(std::move(data), std::move(tags), parent_sink);
+                callback(std::move(data), tags, parent_sink);
             } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>) {
-                callback(std::move(data), std::move(tags));
+                callback(std::move(data), tags);
             } else {
                 callback(std::move(data));
             }
@@ -655,16 +614,14 @@ private:
 
         void
         process(std::span<const T>, std::span<const T> data, std::optional<property_map> tagData0) override {
-            using namespace gr::detail;
-
             if constexpr (hasCallback) {
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
                     const auto n = std::min(data.size(), buffer.size() - buffer_fill);
-                    detail::copy_span(data.first(n), std::span(buffer).subspan(buffer_fill, n));
+                    std::ranges::copy(data.first(n), buffer.begin() + buffer_fill);
                     if constexpr (callbackTakesTags) {
                         if (tagData0) {
-                            tag_buffer.push_back({ static_cast<Tag::signed_index_type>(buffer_fill), *tagData0 });
+                            tag_buffer.emplace_back(static_cast<Tag::signed_index_type>(buffer_fill), *tagData0);
                             tagData0.reset();
                         }
                     }
@@ -684,7 +641,7 @@ private:
                     if constexpr (callbackTakesTags) {
                         std::vector<Tag> tags;
                         if (tagData0) {
-                            tags.push_back({ 0, std::move(*tagData0) });
+                            tags.emplace_back(0, std::move(*tagData0));
                             tagData0.reset();
                         }
                         callCallback(data.first(buffer.size()), std::span(tags));
@@ -697,11 +654,11 @@ private:
 
                 // write remaining data to the buffer
                 if (!data.empty()) {
-                    detail::copy_span(data, std::span(buffer).first(data.size()));
+                    std::ranges::copy(data, buffer.begin());
                     buffer_fill = data.size();
                     if constexpr (callbackTakesTags) {
                         if (tagData0) {
-                            tag_buffer.push_back({ 0, std::move(*tagData0) });
+                            tag_buffer.emplace_back(0, std::move(*tagData0));
                         }
                     }
                 }
@@ -721,7 +678,7 @@ private:
                         tw.publish(1);
                     }
                     auto writeData = poller->writer.reserve_output_range(toWrite);
-                    detail::copy_span(data.first(toWrite), std::span(writeData));
+                    std::ranges::copy(data | std::views::take(toWrite), writeData.begin());
                     writeData.publish(writeData.size());
                 }
                 poller->drop_count += data.size() - toWrite;
@@ -808,8 +765,8 @@ private:
                 DataSet<T> dataset = dataset_template;
                 dataset.signal_values.reserve(preSamples + postSamples); // TODO maybe make the circ. buffer smaller but preallocate these
 
-                const auto preSampleView = history.last(std::min(preSamples, history.size()));
-                dataset.signal_values.insert(dataset.signal_values.end(), preSampleView.begin(), preSampleView.end());
+                const auto preSampleView = history.subspan(0UZ, std::min(preSamples, history.size()));
+                dataset.signal_values.insert(dataset.signal_values.end(), preSampleView.rbegin(), preSampleView.rend());
 
                 dataset.timing_events = { { { static_cast<Tag::signed_index_type>(preSampleView.size()), *tagData0 } } };
                 pending_trigger_windows.push_back({ .dataset = std::move(dataset), .pending_post_samples = postSamples });
