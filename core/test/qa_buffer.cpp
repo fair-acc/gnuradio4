@@ -6,6 +6,7 @@
 #include <boost/ut.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/BufferSkeleton.hpp>
@@ -535,10 +536,10 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb.size(), capacity));
 
         expect(eq(hb[0], static_cast<int>(capacity + 1))) << "access the last/actual sample";
-        expect(eq(hb[-1], static_cast<int>(capacity))) << "access the previous sample";
+        expect(eq(hb[1], static_cast<int>(capacity))) << "access the previous sample";
 
         expect(eq(hb.at(0), static_cast<int>(capacity + 1))) << "checked access the last/actual sample";
-        expect(eq(hb.at(-1), static_cast<int>(capacity))) << "checked access the previous sample";
+        expect(eq(hb.at(1), static_cast<int>(capacity))) << "checked access the previous sample";
     } | std::vector<std::size_t>{ 5, 3, 10 };
 
     "history_buffer - range tests"_test = [] {
@@ -552,23 +553,23 @@ const boost::ut::suite HistoryBufferTest = [] {
             return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end());
         };
 
-        expect(equal(hb.get_span(0, 3), std::vector{ 4, 5, 6 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(0, 3), ", "));
-        expect(equal(hb.get_span(-1, 3), std::vector{ 3, 4, 5 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(1, 3), ", "));
+        expect(equal(hb.get_span(0, 3), std::vector{ 6, 5, 4 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(0, 3), ", "));
+        expect(equal(hb.get_span(1, 3), std::vector{ 5, 4, 3 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(1, 3), ", "));
 
-        expect(equal(hb.get_span(0), std::vector{ 2, 3, 4, 5, 6 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(0), ", "));
-        expect(equal(hb.get_span(-1), std::vector{ 2, 3, 4, 5 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(1), ", "));
+        expect(equal(hb.get_span(0), std::vector{ 6, 5, 4, 3, 2 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(0), ", "));
+        expect(equal(hb.get_span(1), std::vector{ 5, 4, 3, 2 })) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(1), ", "));
 
         std::vector<int> forward_bracket;
-        for (int64_t i = 1 - static_cast<int64_t>(hb.size()); i <= 0; i++) {
+        for (std::size_t i = 0; i < hb.size(); i++) {
             forward_bracket.push_back(hb[i]);
         }
-        expect(equal(forward_bracket, std::vector{ 2, 3, 4, 5, 6 })) << fmt::format("failed - got [{}]", fmt::join(forward_bracket, ", "));
+        expect(equal(forward_bracket, std::vector{ 6, 5, 4, 3, 2 })) << fmt::format("failed - got [{}]", fmt::join(forward_bracket, ", "));
 
         std::vector<int> forward(hb.begin(), hb.end());
-        expect(equal(forward, std::vector{ 2, 3, 4, 5, 6 })) << fmt::format("failed - got [{}]", fmt::join(forward, ", "));
+        expect(equal(forward, std::vector{ 6, 5, 4, 3, 2 })) << fmt::format("failed - got [{}]", fmt::join(forward, ", "));
 
         std::vector<int> reverse(hb.rbegin(), hb.rend());
-        expect(equal(reverse, std::vector{ 6, 5, 4, 3, 2 })) << fmt::format("failed - got [{}]", fmt::join(reverse, ", "));
+        expect(equal(reverse, std::vector{ 2, 3, 4, 5, 6 })) << fmt::format("failed - got [{}]", fmt::join(reverse, ", "));
 
         expect(equal(std::vector(hb.cbegin(), hb.cend()), std::vector(hb.begin(), hb.end()))) << "const non-const iterator equivalency";
         expect(equal(std::vector(hb.crbegin(), hb.crend()), std::vector(hb.rbegin(), hb.rend()))) << "const non-const iterator equivalency";
@@ -588,8 +589,8 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb_one.size(), 1u));
         expect(eq(hb_one[0], 42));
 
-        expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(1); })) << "throws for index > 0";
-        expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(-2); })) << "throws for index > 0";
+        expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(2); })) << "throws for index > size";
+        expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(-1); })) << "throws for negative index";
 
         // Push more elements than buffer size
         HistoryBuffer<int> hb_overflow(5);
@@ -608,6 +609,10 @@ const boost::ut::suite HistoryBufferTest = [] {
         }
         expect(eq(hb_double.capacity(), 5u));
         expect(eq(hb_double.size(), 5u));
+
+        static_assert(!std::is_const_v<std::remove_pointer_t<decltype(hb_double.data())>>, "is non-const");
+        const auto &const_buffer = hb_double;
+        static_assert(std::is_const_v<std::remove_pointer_t<decltype(const_buffer.data())>>, "is const");
     };
 };
 

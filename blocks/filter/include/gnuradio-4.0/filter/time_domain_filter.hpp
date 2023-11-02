@@ -32,7 +32,7 @@ H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
     constexpr T
     processOne(T input) noexcept {
         inputHistory.push_back(input);
-        return std::inner_product(b.begin(), b.end(), inputHistory.rbegin(), static_cast<T>(0));
+        return std::inner_product(b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0));
     }
 };
 
@@ -73,27 +73,27 @@ a are the feedback coefficients
             // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
             //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]
             inputHistory.push_back(input);
-            const T output = std::inner_product(b.begin(), b.end(), inputHistory.rbegin(), static_cast<T>(0))       // feed-forward path
-                           - std::inner_product(a.begin() + 1, a.end(), outputHistory.rbegin(), static_cast<T>(0)); // feedback path
+            const T output = std::inner_product(b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0))       // feed-forward path
+                           - std::inner_product(a.cbegin() + 1, a.cend(), outputHistory.cbegin(), static_cast<T>(0)); // feedback path
             outputHistory.push_back(output);
             return output;
         } else if constexpr (form == IIRForm::DF_II) {
             // w[n] = x[n] - a[1] * w[n-1] - a[2] * w[n-2] - ... - a[M] * w[n-M]
             // y[n] =        b[0] * w[n]   + b[1] * w[n-1] + ... + b[N] * w[n-N]
-            const T w = input - std::inner_product(a.begin() + 1, a.end(), inputHistory.rbegin(), T{ 0 });
+            const T w = input - std::inner_product(a.cbegin() + 1, a.cend(), inputHistory.cbegin(), T{ 0 });
             inputHistory.push_back(w);
-            return std::inner_product(b.begin(), b.end(), inputHistory.rbegin(), T{ 0 });
+            return std::inner_product(b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 });
         } else if constexpr (form == IIRForm::DF_I_TRANSPOSED) {
             // w_1[n] = x[n] - a[1] * w_2[n-1] - a[2] * w_2[n-2] - ... - a[M] * w_2[n-M]
             // y[n]   = b[0] * w_2[n] + b[1] * w_2[n-1] + ... + b[N] * w_2[n-N]
-            T v0 = input - std::inner_product(a.begin() + 1, a.end(), outputHistory.rbegin(), static_cast<T>(0));
+            T v0 = input - std::inner_product(a.cbegin() + 1, a.cend(), outputHistory.cbegin(), static_cast<T>(0));
             outputHistory.push_back(v0);
-            return std::inner_product(b.begin(), b.end(), outputHistory.rbegin(), static_cast<T>(0));
+            return std::inner_product(b.cbegin(), b.cend(), outputHistory.cbegin(), static_cast<T>(0));
         } else if constexpr (form == IIRForm::DF_II_TRANSPOSED) {
             // y[n] = b_0*f[n] + \sum_(k=1)^N(b_k*f[n−k] − a_k*y[n−k])
             const T output = b[0] * input                                                                         //
-                           + std::inner_product(b.begin() + 1, b.end(), inputHistory.rbegin(), static_cast<T>(0)) //
-                           - std::inner_product(a.begin() + 1, a.end(), outputHistory.rbegin(), static_cast<T>(0));
+                           + std::inner_product(b.cbegin() + 1, b.cend(), inputHistory.cbegin(), static_cast<T>(0)) //
+                           - std::inner_product(a.cbegin() + 1, a.cend(), outputHistory.cbegin(), static_cast<T>(0));
 
             inputHistory.push_back(input);
             outputHistory.push_back(output);
