@@ -191,6 +191,10 @@ public:
                     const profiling::Options &profiling_options = {})
         : SchedulerBase<TProfiler>(std::move(graph), thread_pool, profiling_options) {}
 
+    bool isProcessing() const requires (executionPolicy == multiThreaded) {
+        return this->_running_threads.load() > 0;
+    }
+
     void
     init() {
         SchedulerBase<TProfiler>::init();
@@ -294,6 +298,10 @@ public:
     explicit BreadthFirst(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
                           const profiling::Options &profiling_options = {})
         : SchedulerBase<TProfiler>(std::move(graph), thread_pool, profiling_options) {}
+
+    bool isProcessing() const requires (executionPolicy == multiThreaded) {
+        return this->_running_threads.load() > 0;
+    }
 
     void
     init() {
