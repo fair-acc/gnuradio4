@@ -1,4 +1,4 @@
-#Contributing to OpenCMW
+#Contributing to GNU Radio
 :+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
 
 The following is a set of guidelines for contributing. These are mostly guidelines, not rules. Use your best judgement, and feel free to propose changes to this document in a pull request.
@@ -9,7 +9,7 @@ For bugs, issues, or other discussion, please log a new issue in the GitHub repo
 GitHub supports [markdown](https://help.github.com/categories/writing-on-github/), so when filing bugs make sure you check the formatting before clicking submit.
 
 ## Other discussions
-For general "how-to" and guidance questions about using OpenCMW to build and run applications, please have a look at the various
+For general "how-to" and guidance questions about using GNU Radio to build and run applications, please have a look at the various
 examples or if you cannot find anything that fits your use-case use GitHub's discussions forum.
 
 ## Contributing code and content
@@ -20,7 +20,7 @@ We welcome all forms of contributions from the community. Please read the follow
    If not, then please open an issue on GitHub describing the proposed feature. We want to make sure any feature work goes smoothly. 
    We're happy to work with you to determine if it fits the current project direction and make sure no one else is already working on it.
 
- - For any work related to setting up build, test, and CI for OpenCMW on GitHub, or for small patches or bug fixes, please open an issue
+ - For any work related to setting up build, test, and CI for GNU Radio on GitHub, or for small patches or bug fixes, please open an issue
    for tracking purposes, but we generally don't need a discussion prior to opening a PR.
 
 ### Development process
@@ -39,7 +39,7 @@ Please be sure to follow the usual process for submitting PRs:
 We reserve the right to close PRs that are not making progress. Closed PRs can be reopened again later and work can resume.
 
 ### Contributor License Agreement
-By contributing your code to OpenCMW you grant us a non-exclusive,
+By contributing your code to GNU Radio you grant us a non-exclusive,
 irrevocable, worldwide, royalty-free, sublicenseable, transferable
 license under all of Your relevant intellectual property rights
 (including copyright, patent, and any other rights), to use, copy,
@@ -70,5 +70,5 @@ ANY WARRANTIES OR CONDITIONS OF TITLE, NON-INFRINGEMENT,
 MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 
 ## Code of Conduct
-To ensure an inclusive community, contributors and users in the OpenCMW
+To ensure an inclusive community, contributors and users in the GNU Radio
 community should follow the [code of conduct](./CODE_OF_CONDUCT.md).
