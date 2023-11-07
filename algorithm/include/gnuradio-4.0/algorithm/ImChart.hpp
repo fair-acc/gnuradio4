@@ -12,6 +12,8 @@
 #include <vector>
 
 #include <fmt/format.h> // TODO: remove for fmt::print until std::format and std::print is available in gcc & emscripten
+#include <magic_enum.hpp>
+#include <magic_enum_utility.hpp>
 
 #include "gnuradio-4.0/meta/utils.hpp"
 #include <bitset>
@@ -43,22 +45,12 @@ public:
 
     [[nodiscard]] constexpr static Type
     next(Type colour) noexcept {
-        for (std::size_t i = 0UZ; i < Colors.size(); ++i) {
-            if (Colors[i].first == colour) {
-                return Colors[(i + 1UZ) % Colors.size()].first;
-            }
-        }
-        return Type::Default; // Fallback, should not happen if Colors array is correctly defined.
+        return magic_enum::enum_next_value_circular(colour);
     }
 
     [[nodiscard]] constexpr static Type
     prev(Type colour) noexcept {
-        for (std::size_t i = 0; i < Colors.size(); ++i) {
-            if (Colors[i].first == colour) {
-                return Colors[(i + Colors.size() - 1UZ) % Colors.size()].first;
-            }
-        }
-        return Type::Default; // Fallback, should not happen if Colors array is correctly defined.
+        return magic_enum::enum_prev_value_circular(colour);
     }
 
 private:
@@ -127,7 +119,7 @@ optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
     std::size_t segmentSize = validDivisorIt != preferredDivisors.end() ? (reducedAxisWidth < 10 ? *validDivisorIt : (reducedAxisWidth / *validDivisorIt))
                                                                         : reducedAxisWidth; // default -> [0, reducedAxisWidth]
 
-    auto        tickRange   = std::views::iota(0UZ, axisWidth) | std::views::filter([=](auto i) { return i % segmentSize == 0; });
+    auto tickRange = std::views::iota(0UZ, axisWidth) | std::views::filter([=](auto i) { return i % segmentSize == 0; });
     return { tickRange.begin(), tickRange.end() };
 }
 
@@ -217,18 +209,18 @@ struct ImChart {
     static_assert(static_cast<std::size_t>(std::ranges::distance(kBars)) >= kCellWidth * kCellHeight, "bar definitions must be >= kCellWidth * kCellHeight");
     constexpr static std::array<const char *, 9> kMarker{ "X", "O", "★", "+", "❖", "◎", "○", "■", "□" };
 
-    constexpr static Color::Type                 kFirstColor{ Color::Type::Blue }; // we like blue
-    std::vector<std::vector<std::string>>        _screen;
+    constexpr static Color::Type          kFirstColor{ Color::Type::Blue }; // we like blue
+    std::vector<std::vector<std::string>> _screen;
     // _brailleArray is the 2x4 (kCellWidth k CellHeight) oversampled data array that is used
     // to in turn compute the required braille and bar characters that are inserted into the _screen array
     // first byte : stores values
     // second byte: stores bitmask which data set (max: 8) is involved in the screen character
     std::vector<std::vector<uint16_t>> _brailleArray;
 
-    Color::Type                        _lastColor = kFirstColor;
-    std::size_t                        _n_datasets{ 0UZ };
-    std::vector<std::string>           _datasets{};
-    std::source_location               _location;
+    Color::Type              _lastColor = kFirstColor;
+    std::size_t              _n_datasets{ 0UZ };
+    std::vector<std::string> _datasets{};
+    std::source_location     _location;
 
 public:
     std::string axis_name_x = "x-axis []";
@@ -474,8 +466,8 @@ public:
             }
             _screen[horAxisPosY][tickPos] = relTickScreenPos == 0 ? "┌" : ((tickPos + 1) >= _screen_width) ? "┐" : "┬"; // NOSONAR
 
-            const std::string rawLabel    = axis_min_x < 0 ? fmt::format("{:+G}", tickValue) : fmt::format("{:G}", tickValue);
-            const std::string label       = fmt::format("{:.{}}", rawLabel, maxHorLabelWidth);
+            const std::string rawLabel = axis_min_x < 0 ? fmt::format("{:+G}", tickValue) : fmt::format("{:G}", tickValue);
+            const std::string label    = fmt::format("{:.{}}", rawLabel, maxHorLabelWidth);
 
             // Calculate the start and end positions for the label to be centred around tickPos and clamp to ensure they're within screen bounds
             const std::size_t start_pos = std::clamp((tickPos >= label.size() / 2) ? tickPos - label.size() / 2 : 0, 0UZ, _screen_width - label.size());
@@ -495,8 +487,8 @@ public:
             }
             _screen[tickPos][verAxisPosX] = relTickScreenPos == 0 ? "┘" : (tickPos < _screen_height) ? "┤" : (axis_max_y == 0) ? "┬" : "┐"; // NOSONAR
 
-            const std::string rawLabel    = axis_min_y < 0 ? fmt::format("{:+G}", tickValue) : fmt::format("{:G}", tickValue);
-            const std::string label       = fmt::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
+            const std::string rawLabel = axis_min_y < 0 ? fmt::format("{:+G}", tickValue) : fmt::format("{:G}", tickValue);
+            const std::string label    = fmt::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
 
             // Calculate the starting position for the label ensuring it's within bounds.
             const std::size_t label_start_pos = (verAxisPosX > label.size() + 1UZ) ? verAxisPosX - label.size() - 1UZ : 0UZ;
@@ -535,7 +527,7 @@ public:
         const std::size_t cursorY = _screen_height - 1LU; // legend position on last row
         std::size_t       cursorX = getVerticalAxisPositionX() + 2LU;
 
-        auto              colour  = kFirstColor;
+        auto colour = kFirstColor;
         for (const auto &datasetName : _datasets) {
             if (datasetName.empty()) {
                 continue;
