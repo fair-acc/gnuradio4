@@ -91,8 +91,8 @@ On the choice of window (mathematically aka. apodisation) functions
     using InDataType  = std::conditional_t<gr::meta::complex_like<T>, std::complex<value_type>, value_type>;
     using OutDataType = std::complex<value_type>;
 
-    PortIn<T>                                                 in;
-    PortOut<U>                                                out;
+    PortIn<T>  in;
+    PortOut<U> out;
 
     FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl;
     gr::algorithm::window::Type                               _windowType = gr::algorithm::window::Type::Hann;
@@ -101,7 +101,7 @@ On the choice of window (mathematically aka. apodisation) functions
     // settings
     const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
     Annotated<std::uint32_t, "FFT size", Doc<"FFT size">>                            fftSize{ 1024U };
-    Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(gr::algorithm::window::to_string(_windowType));
+    Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(magic_enum::enum_name(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
     Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              outputInDeg{ false };
     Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrapPhase{ false };
@@ -131,7 +131,7 @@ On the choice of window (mathematically aka. apodisation) functions
         this->denominator         = newSize;
         _window.resize(newSize, 0);
 
-        _windowType = gr::algorithm::window::parse(window);
+        _windowType = magic_enum::enum_cast<gr::algorithm::window::Type>(window, magic_enum::case_insensitive).value_or(_windowType);
         gr::algorithm::window::create(_window, _windowType);
 
         // N.B. this should become part of the Fourier transform implementation
@@ -165,7 +165,7 @@ On the choice of window (mathematically aka. apodisation) functions
         _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum,
                                                                       algorithm::fft::ConfigPhase{ .computeHalfSpectrum = computeHalfSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase });
 
-        output[0]          = createDataset();
+        output[0] = createDataset();
 
         return work::Status::OK;
     }
@@ -177,13 +177,13 @@ On the choice of window (mathematically aka. apodisation) functions
         const std::size_t N{ _magnitudeSpectrum.size() };
         const std::size_t dim = 5;
 
-        ds.axis_names         = { "Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase" };
-        ds.axis_units         = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
-        ds.extents            = { dim, static_cast<int32_t>(N) };
-        ds.layout             = gr::LayoutRight{};
-        ds.signal_names       = { signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name),
-                                  fmt::format("Phase({})", signal_name) };
-        ds.signal_units       = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
+        ds.axis_names   = { "Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase" };
+        ds.axis_units   = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
+        ds.extents      = { dim, static_cast<int32_t>(N) };
+        ds.layout       = gr::LayoutRight{};
+        ds.signal_names = { signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name),
+                            fmt::format("Phase({})", signal_name) };
+        ds.signal_units = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
 
         ds.signal_values.resize(dim * N);
         auto const freqWidth = static_cast<value_type>(sample_rate) / static_cast<value_type>(fftSize);

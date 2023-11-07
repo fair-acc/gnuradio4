@@ -74,10 +74,10 @@ equalDataset(const gr::blocks::fft::FFT<T, gr::DataSet<U>> &fftBlock, const gr::
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
-    const U    tolerance = U(0.0001);
+    const U tolerance = U(0.0001);
 
-    const auto N         = fftBlock._magnitudeSpectrum.size();
-    auto const freq      = static_cast<U>(sample_rate) / static_cast<U>(fftBlock.fftSize);
+    const auto N    = fftBlock._magnitudeSpectrum.size();
+    auto const freq = static_cast<U>(sample_rate) / static_cast<U>(fftBlock.fftSize);
     expect(ge(ds1.signal_values.size(), N)) << fmt::format("<{}> DataSet signal length {} vs. magnitude size {}", type_name<T>(), ds1.signal_values.size(), N);
     if (N == fftBlock.fftSize) { // complex input
         expect(approx(ds1.signal_values[0], -(static_cast<U>(N) / U(2.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
@@ -190,12 +190,12 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         FFT<InType, OutType> fftBlock{};
 
         using value_type = OutType::value_type;
-        constexpr value_type    tolerance{ value_type(0.00001) };
+        constexpr value_type tolerance{ value_type(0.00001) };
 
         constexpr std::uint32_t N{ 8 };
-        for (const auto &window : gr::algorithm::window::TypeList) {
+        for (const auto &[window, windowName] : magic_enum::enum_entries<gr::algorithm::window::Type>()) {
             std::ignore = fftBlock.settings().set({ { "fftSize", N } });
-            std::ignore = fftBlock.settings().set({ { "window", std::string(gr::algorithm::window::to_string(window)) } });
+            std::ignore = fftBlock.settings().set({ { "window", std::string(windowName) } });
             std::ignore = fftBlock.settings().applyStagedParameters();
 
             std::vector<InType> signal(N);
@@ -213,7 +213,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
 
             expect(eq(fftBlock.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
             expect(eq(fftBlock._window.size(), N)) << fmt::format("<{}> equal window vector size", type_name<T>());
-            expect(eq(fftBlock.window.value, gr::algorithm::window::to_string(window))) << fmt::format("<{}> equal window function", type_name<T>());
+            expect(eq(fftBlock.window.value, magic_enum::enum_name(window))) << fmt::format("<{}> equal window function", type_name<T>());
 
             std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(window, N);
             for (std::size_t i = 0; i < N; i++) {

@@ -11,6 +11,8 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <magic_enum.hpp>
+#include <magic_enum_utility.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -22,53 +24,16 @@ namespace gr::algorithm::window {
  */
 enum class Type : int { None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser };
 using enum Type;
-inline static constexpr std::array<Type, 12>     TypeList{ None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser };
 inline static constexpr gr::meta::fixed_string TypeNames = "[None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser]";
-
-constexpr std::string_view
-to_string(Type window) noexcept {
-    switch (window) {
-    case None: return "None";
-    case Rectangular: return "Rectangular";
-    case Hamming: return "Hamming";
-    case Hann: return "Hann";
-    case HannExp: return "HannExp";
-    case Blackman: return "Blackman";
-    case Nuttall: return "Nuttall";
-    case BlackmanHarris: return "BlackmanHarris";
-    case BlackmanNuttall: return "BlackmanNuttall";
-    case FlatTop: return "FlatTop";
-    case Exponential: return "Exponential";
-    case Kaiser: return "Kaiser";
-    default: return "Unknown";
-    }
-}
-
-constexpr Type
-parse(std::string_view name) {
-    constexpr auto toLower = [](std::string_view sv) {
-        std::string lowerStr(sv);
-        std::ranges::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
-        return lowerStr;
-    };
-
-    for (const auto &type : TypeList) {
-        if (toLower(to_string(type)) == toLower(name)) {
-            return type;
-        }
-    }
-
-    throw std::invalid_argument(fmt::format("unknown window type '{}'", name));
-}
 
 namespace detail {
 template<typename T>
     requires std::is_floating_point_v<T>
 constexpr T
 bessel_i0(const T x) noexcept {
-    T       sum    = 1;
-    T       term   = 1;
-    int     k      = 1;
+    T   sum  = 1;
+    T   term = 1;
+    int k    = 1;
 
     const T x_half = x / 2;
 

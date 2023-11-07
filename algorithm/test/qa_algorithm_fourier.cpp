@@ -79,7 +79,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             // real input, different in-out precision
             TestTypes<double, std::complex<float>, FFT>, TestTypes<double, std::complex<float>, FFTw>, TestTypes<double, std::complex<float>, FFT>, TestTypes<double, std::complex<float>, FFTw>>;
 
-    using AllTypesToTest      = decltype(std::tuple_cat(std::declval<ComplexTypesToTest>(), std::declval<RealTypesToTest>()));
+    using AllTypesToTest = decltype(std::tuple_cat(std::declval<ComplexTypesToTest>(), std::declval<RealTypesToTest>()));
 
     "FFT algo sin tests"_test = []<typename T>() {
         typename T::AlgoType fftAlgo{};
@@ -148,8 +148,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
                 expectedPeakAmplitude = 1.;
             }
 
-            auto       fftResult         = fftAlgo.compute(signal);
-            auto       magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult);
+            auto fftResult         = fftAlgo.compute(signal);
+            auto magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(fftResult);
 
             const auto peakIndex{ static_cast<std::size_t>(std::distance(magnitudeSpectrum.begin(), std::ranges::max_element(magnitudeSpectrum))) };
             const auto peakAmplitude{ magnitudeSpectrum[peakIndex] };
@@ -180,7 +180,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
     "FFTW wisdom import/export tests"_test = []() {
         gr::algorithm::FFTw<double, std::complex<double>> fftw1{};
 
-        std::string                                       wisdomString1 = fftw1.exportWisdomToString();
+        std::string wisdomString1 = fftw1.exportWisdomToString();
         fftw1.forgetWisdom();
         int importOk = fftw1.importWisdomFromString(wisdomString1);
         expect(eq(importOk, 1)) << "Wisdom import from string.";
@@ -236,9 +236,9 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         expect(eq(create<T>(Kaiser, 0).size(), 0u)) << fmt::format("<{}> zero size Kaiser vectors", type_name<T>());
     } | std::tuple<float, double>();
 
-    "basic window tests"_test = [](gr::algorithm::window::Type window) {
+    "basic window tests"_test = [](auto &val) {
+        const auto &[window, windowName] = val;
         using enum gr::algorithm::window::Type;
-        expect(gr::algorithm::window::parse(gr::algorithm::window::to_string(window)) == window) << fmt::format("window {} parse(to_string) identity\n", gr::algorithm::window::to_string(window));
 
         const auto w = create(window, 1024U);
         expect(eq(w.size(), 1024U));
@@ -247,12 +247,12 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             return; // min max out of [0, 1] by design and/or numerical corner cases
         }
         const auto [min, max] = std::ranges::minmax_element(w);
-        expect(ge(*min, 0.f)) << fmt::format("window {} min value\n", gr::algorithm::window::to_string(window));
-        expect(le(*max, 1.f)) << fmt::format("window {} max value\n", gr::algorithm::window::to_string(window));
-    } | gr::algorithm::window::TypeList;
+        expect(ge(*min, 0.f)) << fmt::format("window {} min value\n", windowName);
+        expect(le(*max, 1.f)) << fmt::format("window {} max value\n", windowName);
+    } | magic_enum::enum_entries<gr::algorithm::window::Type>();
 
     "window corner cases"_test = []<typename T>() {
-        expect(throws<std::invalid_argument>([] { std::ignore = gr::algorithm::window::parse("UnknownWindow"); })) << "invalid window name";
+        static_assert(not magic_enum::enum_cast<gr::algorithm::window::Type>("UnknownWindow", magic_enum::case_insensitive).has_value());
         expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 1); })) << "invalid Kaiser window size";
         expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 2, -1.f); })) << "invalid Kaiser window beta";
     } | std::tuple<float, double>();
