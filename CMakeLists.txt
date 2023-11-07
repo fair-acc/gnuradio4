@@ -14,6 +14,11 @@ if (NOT DEFINED GR_TOPLEVEL_PROJECT)
     endif ()
 endif ()
 
+set(CMAKE_EXT_DEP_WARNING_GUARD "")
+if(DISABLE_EXTERNAL_DEPS_WARNINGS) # enable warnings for external dependencies
+    set(CMAKE_EXT_DEP_WARNING_GUARD SYSTEM)
+endif()
+
 if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
     # -Og is a much more reasonable default for debugging. Also enable gdb extensions.
     set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb" CACHE INTERNAL
@@ -82,17 +87,18 @@ if (EMSCRIPTEN)
     )
 endif ()
 
+# include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
+add_library(refl-cpp INTERFACE)
+target_include_directories(refl-cpp ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/refl-cpp/)
+
+add_library(magic_enum INTERFACE)
+target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+
 include(FetchContent)
 FetchContent_Declare(
         fmt
         GIT_REPOSITORY https://github.com/fmtlib/fmt.git
         GIT_TAG 10.1.1
-)
-
-FetchContent_Declare(
-        refl-cpp
-        GIT_REPOSITORY https://github.com/veselink1/refl-cpp.git
-        GIT_TAG 27fbd7d2e6d86bc135b87beef6b5f7ce53afd4fc # v0.12.3+4 11/2022
 )
 
 FetchContent_Declare(
@@ -119,7 +125,7 @@ FetchContent_Declare(
         GIT_TAG v0.2.0
 )
 
-FetchContent_MakeAvailable(fmt refl-cpp pmt ut yaml-cpp vir-simd)
+FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd)
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
