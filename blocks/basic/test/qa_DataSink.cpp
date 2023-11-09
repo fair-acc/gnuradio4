@@ -362,10 +362,18 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(received, receivedTags);
         });
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        {
+            gr::scheduler::Simple sched{ std::move(testGraph) };
+            sched.runAndWait();
 
-        sink.stop(); // TODO the scheduler should call this
+            sink.stop(); // TODO the scheduler should call this
+
+            const auto pollerAfterStop = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
+            expect(pollerAfterStop->finished.load());
+        }
+
+        const auto pollerAfterDestruction = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
+        expect(!pollerAfterDestruction);
 
         std::vector<float> expected(kSamples);
         std::iota(expected.begin(), expected.end(), 0.0);

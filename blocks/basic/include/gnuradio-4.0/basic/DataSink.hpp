@@ -308,6 +308,7 @@ class DataSink : public Block<DataSink<T>> {
 
     static constexpr std::size_t                  _listener_buffer_size = 65536;
     std::deque<std::unique_ptr<AbstractListener>> _listeners;
+    bool                                          _listeners_finished = false;
     std::mutex                                    _listener_mutex;
     std::optional<gr::HistoryBuffer<T>>           _history;
     bool                                          _has_signal_info_from_settings = false;
@@ -400,9 +401,10 @@ public:
 
     std::shared_ptr<Poller>
     getStreamingPoller(BlockingMode blockMode = BlockingMode::Blocking) {
+        const auto block   = blockMode == BlockingMode::Blocking;
+        auto       handler = std::make_shared<Poller>();
         std::lock_guard lg(_listener_mutex);
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<Poller>();
+        handler->finished  = _listeners_finished;
         addListener(std::make_unique<ContinuousListener<gr::meta::null_type>>(handler, block, *this), block);
         return handler;
     }
@@ -410,9 +412,10 @@ public:
     template<TriggerMatcher M>
     std::shared_ptr<DataSetPoller>
     getTriggerPoller(M &&matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<DataSetPoller>();
+        const auto block   = blockMode == BlockingMode::Blocking;
+        auto       handler = std::make_shared<DataSetPoller>();
         std::lock_guard lg(_listener_mutex);
+        handler->finished  = _listeners_finished;
         addListener(std::make_unique<TriggerListener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, preSamples, postSamples, block), block);
         ensureHistorySize(preSamples);
         return handler;
@@ -472,6 +475,7 @@ public:
         for (auto &listener : _listeners) {
             listener->stop();
         }
+        _listeners_finished = true;
     }
 
     [[nodiscard]] work::Status
