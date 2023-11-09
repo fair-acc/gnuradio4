@@ -88,11 +88,15 @@ if (EMSCRIPTEN)
 endif ()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
-add_library(refl-cpp INTERFACE)
-target_include_directories(refl-cpp ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/refl-cpp/)
+if (NOT(TARGET refl-cpp))
+    add_library(refl-cpp INTERFACE)
+    target_include_directories(refl-cpp ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/refl-cpp/)
+endif ()
 
-add_library(magic_enum INTERFACE)
-target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+if (NOT(TARGET magic_enum))
+    add_library(magic_enum INTERFACE)
+    target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+endif ()
 
 include(FetchContent)
 FetchContent_Declare(
