@@ -42,7 +42,7 @@ add_ut_test(qa_port_array)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
 
-if (NOT (EMSCRIPTEN OR (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")))
+if (NOT EMSCRIPTEN)
     add_subdirectory(plugins)
 
     add_executable(qa_plugins_test qa_plugins_test.cpp)
@@ -52,6 +52,8 @@ if (NOT (EMSCRIPTEN OR (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")))
 
     add_app_test(app_plugins_test app_plugins_test.cpp)
 
-    add_app_test(app_grc)
+    add_executable(app_grc app_grc.cpp)
+    setup_test_no_asan(app_grc)
+
     target_link_libraries(app_grc PRIVATE yaml-cpp::yaml-cpp gr-basic gr-testing)
 endif ()

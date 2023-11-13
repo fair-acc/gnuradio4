@@ -178,18 +178,17 @@ public:
     }
 
     std::unique_ptr<gr::BlockModel>
-    instantiate(std::string name, std::string_view type, const property_map &params = {}) {
+    instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
         // Try to create a node from the global registry
         if (auto result = _global_registry->createBlock(name, type, params)) {
             return result;
         }
-
-        auto it = _handler_for_name.find(name);
+        auto it = _handler_for_name.find(std::string(name)); // TODO avoid std::string here
         if (it == _handler_for_name.end()) return {};
 
         auto &handler = it->second;
 
-        return handler->createBlock(std::move(name), type, params);
+        return handler->createBlock(name, type, params);
     }
 
     template<typename Graph, typename... InstantiateArgs>
