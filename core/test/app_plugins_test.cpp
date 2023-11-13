@@ -86,12 +86,12 @@ main(int argc, char *argv[]) {
     auto block_sink_load             = context.loader.instantiate(names::cout_sink, "double", block_sink_params);
 
     assert(block_sink_load);
-    auto &block_sink                    = testGraph.addBlock(std::move(block_sink_load));
+    auto &block_sink = testGraph.addBlock(std::move(block_sink_load));
 
-    auto  connection_1 [[maybe_unused]] = testGraph.connect(block_source, 0, block_multiply_1, 0);
-    auto  connection_2 [[maybe_unused]] = testGraph.connect(block_multiply_1, 0, block_multiply_2, 0);
-    auto  connection_3 [[maybe_unused]] = testGraph.connect(block_multiply_2, 0, block_counter, 0);
-    auto  connection_4 [[maybe_unused]] = testGraph.connect(block_counter, 0, block_sink, 0);
+    auto connection_1 [[maybe_unused]] = testGraph.connect(block_source, 0, block_multiply_1, 0);
+    auto connection_2 [[maybe_unused]] = testGraph.connect(block_multiply_1, 0, block_multiply_2, 0);
+    auto connection_3 [[maybe_unused]] = testGraph.connect(block_multiply_2, 0, block_counter, 0);
+    auto connection_4 [[maybe_unused]] = testGraph.connect(block_counter, 0, block_sink, 0);
 
     assert(connection_1 == grg::ConnectionResult::SUCCESS);
     assert(connection_2 == grg::ConnectionResult::SUCCESS);
