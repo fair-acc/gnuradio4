@@ -52,8 +52,7 @@ if (NOT EMSCRIPTEN)
 
     add_app_test(app_plugins_test app_plugins_test.cpp)
 
-    add_executable(app_grc app_grc.cpp)
-    setup_test_no_asan(app_grc)
-
-    target_link_libraries(app_grc PRIVATE yaml-cpp::yaml-cpp gr-basic gr-testing)
+    add_executable(qa_grc qa_grc.cpp)
+    setup_test_no_asan(qa_grc)
+    target_link_libraries(qa_grc PRIVATE yaml-cpp::yaml-cpp)
 endif ()
