@@ -68,9 +68,9 @@ readFile(const auto &path) {
 
 using namespace boost::ut;
 
-namespace gr::app_grc_test {
+namespace gr::qa_grc_test {
 
-const boost::ut::suite AppGrcTests = [] {
+const boost::ut::suite GrcTests = [] {
     static TestContext context = [] {
         TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
         registerBuiltinBlocks(&ctx.registry);
@@ -87,8 +87,8 @@ const boost::ut::suite AppGrcTests = [] {
         auto graph_saved_source = gr::save_grc(graph);
 
         auto graph_expected_source = readFile(TESTS_SOURCE_PATH "/grc/test.grc.expected");
-        expect(graph_saved_source + "\n"
-               == graph_expected_source); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
+        expect(eq(graph_saved_source + "\n",
+               graph_expected_source)); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
 
         gr::scheduler::Simple scheduler(std::move(graph));
         scheduler.runAndWait();
@@ -104,8 +104,8 @@ const boost::ut::suite AppGrcTests = [] {
             auto graph_1            = gr::load_grc(context.loader, graph_source);
             auto graph_saved_source = gr::save_grc(graph_1);
             auto graph_2            = gr::load_grc(context.loader, graph_saved_source);
-            expect(collectBlocks(graph_1) == collectBlocks(graph_2));
-            expect(collectEdges(graph_1) == collectEdges(graph_2));
+            expect(eq(collectBlocks(graph_1), collectBlocks(graph_2)));
+            expect(eq(collectEdges(graph_1), collectEdges(graph_2)));
         } catch (const std::string &e) {
             fmt::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -130,8 +130,8 @@ const boost::ut::suite AppGrcTests = [] {
         const auto graph_1_saved = gr::save_grc(graph_1);
         const auto graph_2       = gr::load_grc(context.loader, graph_1_saved);
 
-        expect(collectBlocks(graph_1) == collectBlocks(graph_2));
-        expect(collectEdges(graph_1) == collectEdges(graph_2));
+        expect(eq(collectBlocks(graph_1), collectBlocks(graph_2)));
+        expect(eq(collectEdges(graph_1), collectEdges(graph_2)));
     };
 
     "Settings serialization"_test = [] {
@@ -155,20 +155,20 @@ const boost::ut::suite AppGrcTests = [] {
         const auto graph_2       = gr::load_grc(context.loader, graph_1_saved);
         graph_2.forEachBlock([&](const auto &node) {
             const auto settings = node.settings().get();
-            expect(std::get<bool>(settings.at("bool_setting")) == expectedBool);
-            expect(std::get<std::string>(settings.at("string_setting")) == expectedString);
-            expect(std::get<std::vector<bool>>(settings.at("bool_vector")) == expectedBoolVector);
-            expect(std::get<std::vector<std::string>>(settings.at("string_vector")) == expectedStringVector);
-            expect(std::get<std::vector<double>>(settings.at("double_vector")) == expectedDoubleVector);
-            expect(std::get<std::vector<int16_t>>(settings.at("int16_vector")) == expectedInt16Vector);
+            expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
+            expect(eq(std::get<std::string>(settings.at("string_setting")), expectedString));
+            expect(eq(std::get<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
+            expect(eq(std::get<std::vector<std::string>>(settings.at("string_vector")), expectedStringVector));
+            expect(eq(std::get<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
+            expect(eq(std::get<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
         });
 
-        expect(collectBlocks(graph_1) == collectBlocks(graph_2));
-        expect(collectEdges(graph_1) == collectEdges(graph_2));
+        expect(eq(collectBlocks(graph_1), collectBlocks(graph_2)));
+        expect(eq(collectEdges(graph_1), collectEdges(graph_2)));
     };
 };
 
-} // namespace gr::app_grc_test
+} // namespace gr::qa_grc_test
 
 int
 main() { /* tests are statically executed */
