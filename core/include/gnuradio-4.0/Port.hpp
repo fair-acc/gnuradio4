@@ -653,7 +653,7 @@ private:
         }
 
     public:
-        wrapper()                = delete;
+        wrapper() = delete;
 
         wrapper(const wrapper &) = delete;
 
@@ -762,7 +762,7 @@ public:
 
     struct non_owned_reference_tag {};
 
-    constexpr DynamicPort()             = delete;
+    constexpr DynamicPort() = delete;
 
     DynamicPort(const DynamicPort &arg) = delete;
     DynamicPort &
@@ -868,9 +868,9 @@ samples_to_next_tag(const PortLike auto &port) {
     }
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-    const auto &tagData           = port.tagReader().get();
-    const auto &readPosition      = port.streamReader().position();
-    const auto  future_tags_begin = std::ranges::find_if(tagData, [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
+    const auto tagData           = port.tagReader().get();
+    const auto readPosition      = port.streamReader().position();
+    const auto future_tags_begin = std::ranges::find_if(tagData, [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
 
     if (future_tags_begin == tagData.begin()) {
         const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
@@ -879,6 +879,38 @@ samples_to_next_tag(const PortLike auto &port) {
     } else {
         return 0;
     }
+}
+
+constexpr std::size_t
+samples_to_eos_tag(const PortLike auto &port) {
+    if (port.tagReader().available() == 0) [[likely]] {
+        return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
+    }
+    const auto tags    = port.tagReader().get();
+    const auto readPos = port.streamReader().position();
+
+    // find the smallest index of EOS tag, if no EOS tag is present then index = std::numeric_limits<std::size_t>::max()
+    std::size_t result = std::numeric_limits<std::size_t>::max();
+    // TODO: 'const auto tag' without reference is a workaround for gcc compiler
+    //  by unknown reasons only copy works, reference leads to unvalidated tag.map.end() iterator
+    for (const auto tag : tags) {
+        bool containEOSTag{ false };
+        for (const auto &[key, value] : tag.map) {
+            if (key == gr::tag::END_OF_STREAM.key() && value == true) {
+                containEOSTag = true;
+                break;
+            }
+        }
+        if (containEOSTag) {
+            if (tag.index > readPos + 1) {
+                result = std::min(result, (readPos == -1) ? static_cast<std::size_t>(tag.index) : static_cast<std::size_t>(tag.index - readPos - 1));
+            } else {
+                result = 0;
+                break; // we can break, 0 is the minimum
+            }
+        }
+    }
+    return result;
 }
 
 } // namespace gr

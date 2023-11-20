@@ -88,7 +88,7 @@ const boost::ut::suite GrcTests = [] {
 
         auto graph_expected_source = readFile(TESTS_SOURCE_PATH "/grc/test.grc.expected");
         expect(eq(graph_saved_source + "\n",
-               graph_expected_source)); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
+                  graph_expected_source)); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
 
         gr::scheduler::Simple scheduler(std::move(graph));
         scheduler.runAndWait();

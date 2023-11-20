@@ -90,15 +90,12 @@ struct Source : public Block<Source<T>> {
         gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<std::size_t>(n_tag_offset));
     }
 
-    constexpr std::make_signed_t<std::size_t>
-    available_samples(const Source & /*self*/) noexcept {
-        const auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
-        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
-    }
-
     [[nodiscard]] constexpr T
     processOne() noexcept {
         n_samples_produced++;
+        if (n_samples_produced >= n_samples_max) {
+            this->requestStop();
+        }
         T x{};
         return x;
     }
@@ -106,7 +103,7 @@ struct Source : public Block<Source<T>> {
 
 // optional shortening
 template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
-using A            = Annotated<T, description, Arguments...>;
+using A = Annotated<T, description, Arguments...>;
 
 using TestBlockDoc = Doc<R""(
 some test doc documentation
@@ -216,7 +213,7 @@ struct Sink : public Block<Sink<T>> {
                 assert(std::holds_alternative<std::int32_t>(value));
                 n_samples_max = std::get<std::int32_t>(value);
                 last_tag_position        = in.streamReader().position();
-                this->forward_tags(); // clears further notifications and forward tags to output ports
+                this->forwardTags(); // clears further notifications and forward tags to output ports
             }
         }
         */

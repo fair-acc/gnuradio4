@@ -15,12 +15,10 @@ using gr::thread_pool::BasicThreadPool;
 
 enum ExecutionPolicy { singleThreaded, multiThreaded };
 
-enum SchedulerState { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, SHUTTING_DOWN, ERROR };
-
 template<profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase {
 protected:
-    SchedulerState                      _state = IDLE;
+    LifeCycleState                      _state = LifeCycleState::IDLE;
     gr::Graph                           _graph;
     TProfiler                           _profiler;
     decltype(_profiler.forThisThread()) _profiler_handler;
@@ -34,13 +32,11 @@ public:
                            const profiling::Options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.forThisThread() }, _pool(std::move(thread_pool)) {}
 
-    ~SchedulerBase() {
-        stop();
-        _state = SHUTTING_DOWN;
-    }
+    ~SchedulerBase() { stop(); }
 
     void
     stop() {
+        using enum LifeCycleState;
         if (_state == STOPPED || _state == ERROR) {
             return;
         }
@@ -53,6 +49,7 @@ public:
 
     void
     pause() {
+        using enum LifeCycleState;
         if (_state == PAUSED || _state == ERROR) {
             return;
         }
@@ -65,6 +62,7 @@ public:
 
     void
     waitDone() {
+        using enum LifeCycleState;
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.waitDone");
         for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
             _running_threads.wait(running);
@@ -79,31 +77,32 @@ public:
     void
     requestStop() {
         _stop_requested = true;
-        _state          = REQUESTED_STOP;
+        _state          = LifeCycleState::REQUESTED_STOP;
     }
 
     void
     requestPause() {
         _stop_requested = true;
-        _state          = REQUESTED_PAUSE;
+        _state          = LifeCycleState::REQUESTED_PAUSE;
     }
 
     void
     init() {
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.init");
-        if (_state != IDLE) {
+        if (_state != LifeCycleState::IDLE) {
             return;
         }
         const auto result = _graph.performConnections();
         if (result) {
-            _state = INITIALISED;
+            _state = LifeCycleState::INITIALISED;
         } else {
-            _state = ERROR;
+            _state = LifeCycleState::ERROR;
         }
     }
 
     void
     reset() {
+        using enum LifeCycleState;
         // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
         switch (_state) {
         case IDLE: init(); break;
@@ -120,7 +119,6 @@ public:
             // });
             FMT_FALLTHROUGH;
         case PAUSED: _state = INITIALISED; break;
-        case SHUTTING_DOWN:
         case INITIALISED:
         case ERROR: break;
         }
@@ -138,13 +136,13 @@ public:
 
     void
     poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
-        auto &profiler_handler = _profiler.forThisThread();
-
-        uint32_t done           = 0;
-        uint32_t progress_count = 0;
+        auto    &profiler_handler = _profiler.forThisThread();
+        uint32_t done             = 0;
+        uint32_t progress_count   = 0;
         while (done < n_batches && !_stop_requested) {
-            auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
-            bool something_happened = work().status == work::Status::OK;
+            auto                   pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
+            const gr::work::Result workResult         = work();
+            bool                   something_happened = workResult.status == work::Status::OK;
             pe.finish();
             uint64_t progress_local = 0ULL;
             uint64_t progress_new   = 0ULL;
@@ -174,7 +172,6 @@ public:
                 }
             }
         } // while (done < n_batches)
-
         _running_threads.fetch_sub(1);
         _running_threads.notify_all();
     }
@@ -218,7 +215,7 @@ public:
         bool                  something_happened = false;
         std::size_t           performed_work     = 0_UZ;
         for (auto &currentBlock : blocks) {
-            auto result = currentBlock->work(requested_work);
+            gr::work::Result result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
             if (result.status == work::Status::ERROR) {
                 return { requested_work, performed_work, work::Status::ERROR };
@@ -247,6 +244,7 @@ public:
 
     void
     start() {
+        using enum LifeCycleState;
         switch (this->_state) {
         case IDLE: this->init(); break;
         case STOPPED: this->reset(); break;
@@ -255,7 +253,6 @@ public:
         case RUNNING:
         case REQUESTED_PAUSE:
         case REQUESTED_STOP:
-        case SHUTTING_DOWN:
         case ERROR: break;
         }
         if (this->_state != INITIALISED) {
@@ -263,8 +260,8 @@ public:
         }
         if constexpr (executionPolicy == singleThreaded) {
             this->_state = RUNNING;
-            work::Result result;
-            auto         blocklist = std::span{ this->_graph.blocks() };
+            work::Result                           result;
+            std::span<std::unique_ptr<BlockModel>> blocklist = std::span{ this->_graph.blocks() };
             do {
                 result = workOnce(blocklist);
             } while (result.status == work::Status::OK);
@@ -358,7 +355,7 @@ public:
         std::size_t           performed_work     = 0_UZ;
 
         for (auto &currentBlock : blocks) {
-            auto result = currentBlock->work(requested_work);
+            gr::work::Result result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
             if (result.status == work::Status::ERROR) {
                 return { requested_work, performed_work, work::Status::ERROR };
@@ -386,6 +383,7 @@ public:
 
     void
     start() {
+        using enum LifeCycleState;
         switch (this->_state) {
         case IDLE: this->init(); break;
         case STOPPED: this->reset(); break;
@@ -394,7 +392,6 @@ public:
         case RUNNING:
         case REQUESTED_PAUSE:
         case REQUESTED_STOP:
-        case SHUTTING_DOWN:
         case ERROR: break;
         }
         if (this->_state != INITIALISED) {

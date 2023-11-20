@@ -9,7 +9,7 @@
 namespace grg = gr;
 
 template<typename T>
-struct count_source : public grg::Block<count_source<T>> {
+struct CountSource : public grg::Block<CountSource<T>> {
     grg::PortOut<T> random;
 
     constexpr T
@@ -18,10 +18,10 @@ struct count_source : public grg::Block<count_source<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (count_source<T>), random);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), random);
 
 template<typename T>
-struct expect_sink : public grg::Block<expect_sink<T>> {
+struct ExpectSink : public grg::Block<ExpectSink<T>> {
     grg::PortIn<T> sink;
 
     void
@@ -30,7 +30,7 @@ struct expect_sink : public grg::Block<expect_sink<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (expect_sink<T>), sink);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (ExpectSink<T>), sink);
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 struct scale : public grg::Block<scale<T, Scale, R>> {
@@ -116,7 +116,7 @@ main() {
         std::array<int, 4> a = { 1, 2, 3, 4 };
         std::array<int, 4> b = { 10, 10, 10, 10 };
 
-        int                r = 0;
+        int r = 0;
         for (std::size_t i = 0; i < 4; ++i) {
             r += merged.processOne(i, a[i], b[i]);
         }
@@ -146,7 +146,7 @@ main() {
         std::array<int, 4> a = { 1, 2, 3, 4 };
         std::array<int, 4> b = { 10, 10, 10, 10 };
 
-        int                r = 0;
+        int r = 0;
         for (std::size_t i = 0; i < 4; ++i) {
             r += merged.processOne(i, a[i], b[i]);
         }
@@ -172,14 +172,14 @@ main() {
     { auto delayed = delay<int, 2>{}; }
 
     {
-        auto random = count_source<int>{};
+        auto random = CountSource<int>{};
 
-        auto merged = mergeByIndex<0, 0>(std::move(random), expect_sink<int>());
+        auto merged = mergeByIndex<0, 0>(std::move(random), ExpectSink<int>());
         merged.processOne(0);
     }
 
     {
-        auto random = count_source<int>{};
+        auto random = CountSource<int>{};
 
         auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
         merged.processOne(0);

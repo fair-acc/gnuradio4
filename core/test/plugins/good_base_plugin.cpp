@@ -47,16 +47,18 @@ public:
 template<typename T>
 class fixed_source : public grg::Block<fixed_source<T>, grg::PortOutNamed<T, "out">> {
 public:
-    std::size_t event_count = -1_UZ; // infinite count by default
-
-    fixed_source() {}
-
-    T value = 1;
+    std::size_t event_count = std::numeric_limits<std::size_t>::max();
+    T           value       = 1;
 
     grg::work::Result
     work(std::size_t requested_work) {
+        if (this->state == gr::LifeCycleState::STOPPED) {
+            return { requested_work, 0_UZ, gr::work::Status::DONE };
+        }
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
+            this->state = gr::LifeCycleState::STOPPED;
+            this->publishEOSTag(std::size_t(0));
             return { requested_work, 0_UZ, grg::work::Status::DONE };
         }
 
@@ -67,7 +69,7 @@ public:
         data.publish(1_UZ);
 
         value += 1;
-        if (event_count == -1_UZ) {
+        if (event_count == std::numeric_limits<std::size_t>::max()) {
             return { requested_work, 1_UZ, grg::work::Status::OK };
         }
 
