@@ -194,8 +194,10 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample dela
 inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
 inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE, SIGNAL_NAME, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT, RESET_DEFAULTS, STORE_DEFAULTS };
+inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE,  SIGNAL_NAME,    SIGNAL_UNIT, SIGNAL_MIN,     SIGNAL_MAX,     TRIGGER_NAME,
+                                             TRIGGER_TIME, TRIGGER_OFFSET, CONTEXT,     RESET_DEFAULTS, STORE_DEFAULTS, END_OF_STREAM };
 } // namespace tag
 
 } // namespace gr

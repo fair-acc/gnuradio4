@@ -81,6 +81,10 @@ public:
 
     gr::work::Result
     work(std::size_t requested_work) {
+        // check if STOPPED and return immediately
+        if (this->state == gr::LifeCycleState::STOPPED) {
+            return { requested_work, 0_UZ, gr::work::Status::DONE };
+        }
         if (_counter < count) {
             _counter++;
             auto &writer = outputPort<"value">(this).streamWriter();
@@ -90,6 +94,8 @@ public:
 
             return { requested_work, 1_UZ, gr::work::Status::OK };
         } else {
+            this->state = gr::LifeCycleState::STOPPED; // change the state to STOPPED
+            this->publishEOSTag(0);                    // publish END_OF_STREAM tag with 0 offset
             return { requested_work, 0_UZ, gr::work::Status::DONE };
         }
     }
@@ -206,7 +212,7 @@ const boost::ut::suite PortApiTests = [] {
         BufferWriter auto &writer = output_port.writer();
         IN<float, "in0">   input_port;
 
-        auto               source = std::make_shared<dynamicBlock>("source");
+        auto source = std::make_shared<dynamicBlock>("source");
         source->add_port(output_port);
         source->add_port(OUT<float, "out1">());
         expect(eq(source->dynamic_output_ports().size(), 2U));

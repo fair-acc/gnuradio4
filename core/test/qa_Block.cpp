@@ -67,15 +67,13 @@ struct CountSource : public gr::Block<CountSource<T>> {
     int            count{ 0 };
     int            n_samples{ 1024 };
 
-    constexpr std::make_signed_t<std::size_t>
-    available_samples(const CountSource & /*d*/) noexcept {
-        const auto ret = n_samples - count;
-        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
-    }
-
     constexpr T
     processOne() {
-        return static_cast<T>(count++);
+        count++;
+        if (count >= n_samples) {
+            this->requestStop();
+        }
+        return static_cast<T>(count - 1); // -1 to start from 0
     }
 };
 
@@ -84,8 +82,8 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr:
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
-    ProcessStatus  status{};
-    bool           write_to_vector{ false };
+    ProcessStatus status{};
+    bool          write_to_vector{ false };
 
     gr::work::Status
     processBulk(std::span<const T> input, std::span<T> output) noexcept {
@@ -109,8 +107,8 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
-    auto     &source          = flow.emplaceBlock<CountSource<int>>();
-    source.n_samples          = static_cast<int>(data.n_samples);
+    auto     &source = flow.emplaceBlock<CountSource<int>>();
+    source.n_samples = static_cast<int>(data.n_samples);
 
     auto &int_dec_block       = flow.emplaceBlock<IntDecBlock<int>>();
     int_dec_block.numerator   = data.numerator;
@@ -134,9 +132,9 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
 
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
-    gr::Graph  flow;
-    auto      &source             = flow.emplaceBlock<CountSource<int>>();
-    source.n_samples              = static_cast<int>(data.n_samples);
+    gr::Graph flow;
+    auto     &source = flow.emplaceBlock<CountSource<int>>();
+    source.n_samples = static_cast<int>(data.n_samples);
 
     auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>();
     int_dec_block.write_to_vector = write_to_vector;
@@ -164,7 +162,7 @@ const boost::ut::suite _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
-    auto thread_pool       = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+    auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     "ResamplingRatio"_test = [] {
         static_assert(gr::ResamplingRatio<>::kNumerator == 1LU);

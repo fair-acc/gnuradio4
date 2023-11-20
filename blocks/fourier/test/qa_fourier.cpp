@@ -25,15 +25,13 @@ struct CountSource : public gr::Block<CountSource<T>> {
     int            count{ 0 };
     int            nSamples{ 1024 };
 
-    constexpr std::make_signed_t<std::size_t>
-    available_samples(const CountSource & /*d*/) noexcept {
-        const auto ret = nSamples - count;
-        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
-    }
-
     constexpr T
     processOne() {
-        return static_cast<T>(count++);
+        count++;
+        if (count >= nSamples) {
+            this->requestStop();
+        }
+        return static_cast<T>(count - 1); // -1 to start from 0
     }
 };
 

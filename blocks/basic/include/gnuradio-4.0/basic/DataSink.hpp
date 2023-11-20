@@ -292,7 +292,7 @@ public:
     Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
     Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
 
-    PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>>           in;
+    PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>> in;
 
     struct Poller {
         // TODO consider whether reusing port<T> here makes sense
@@ -336,12 +336,12 @@ public:
     };
 
     struct DataSetPoller {
-        gr::CircularBuffer<DataSet<T>> buffer     = gr::CircularBuffer<DataSet<T>>(_listener_buffer_size);
-        decltype(buffer.new_reader())  reader     = buffer.new_reader();
-        decltype(buffer.new_writer())  writer     = buffer.new_writer();
+        gr::CircularBuffer<DataSet<T>> buffer = gr::CircularBuffer<DataSet<T>>(_listener_buffer_size);
+        decltype(buffer.new_reader())  reader = buffer.new_reader();
+        decltype(buffer.new_writer())  writer = buffer.new_writer();
 
-        std::atomic<bool>              finished   = false;
-        std::atomic<std::size_t>       drop_count = 0;
+        std::atomic<bool>        finished   = false;
+        std::atomic<std::size_t> drop_count = 0;
 
         [[nodiscard]] bool
         process(std::invocable<std::span<DataSet<T>>> auto fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
@@ -373,10 +373,10 @@ public:
 
     std::shared_ptr<Poller>
     getStreamingPoller(BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto block   = blockMode == BlockingMode::Blocking;
-        auto       handler = std::make_shared<Poller>();
+        const auto      block   = blockMode == BlockingMode::Blocking;
+        auto            handler = std::make_shared<Poller>();
         std::lock_guard lg(_listener_mutex);
-        handler->finished  = _listeners_finished;
+        handler->finished = _listeners_finished;
         addListener(std::make_unique<ContinuousListener<gr::meta::null_type>>(handler, block, *this), block);
         return handler;
     }
@@ -384,10 +384,10 @@ public:
     template<TriggerMatcher M>
     std::shared_ptr<DataSetPoller>
     getTriggerPoller(M &&matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto block   = blockMode == BlockingMode::Blocking;
-        auto       handler = std::make_shared<DataSetPoller>();
+        const auto      block   = blockMode == BlockingMode::Blocking;
+        auto            handler = std::make_shared<DataSetPoller>();
         std::lock_guard lg(_listener_mutex);
-        handler->finished  = _listeners_finished;
+        handler->finished = _listeners_finished;
         addListener(std::make_unique<TriggerListener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, preSamples, postSamples, block), block);
         ensureHistorySize(preSamples);
         return handler;
@@ -475,7 +475,6 @@ public:
                 _history->push_back_bulk(inData.last(toWrite).begin(), inData.last(toWrite).end());
             }
         }
-
         return work::Status::OK;
     }
 
@@ -554,7 +553,7 @@ private:
     }
 
     struct AbstractListener {
-        bool expired                = false;
+        bool expired = false;
 
         virtual ~AbstractListener() = default;
 
@@ -594,7 +593,7 @@ private:
         // polling-only
         std::weak_ptr<Poller> polling_handler = {};
 
-        Callback              callback;
+        Callback callback;
 
         template<typename CallbackFW>
         explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW &&c, const DataSink<T> &parent) : parent_sink(parent), buffer(maxChunkSize), callback{ std::forward<CallbackFW>(c) } {}
@@ -709,16 +708,16 @@ private:
 
     template<typename Callback, TriggerMatcher M>
     struct TriggerListener : public AbstractListener {
-        bool                         block       = false;
-        std::size_t                  preSamples  = 0;
-        std::size_t                  postSamples = 0;
+        bool        block       = false;
+        std::size_t preSamples  = 0;
+        std::size_t postSamples = 0;
 
         DataSet<T>                   dataset_template;
         M                            trigger_matcher = {};
         std::deque<PendingWindow>    pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<DataSetPoller> polling_handler = {};
 
-        Callback                     callback;
+        Callback callback;
 
         template<TriggerMatcher Matcher>
         explicit TriggerListener(Matcher &&matcher, std::shared_ptr<DataSetPoller> handler, std::size_t pre, std::size_t post, bool doBlock)
