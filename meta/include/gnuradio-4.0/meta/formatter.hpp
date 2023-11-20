@@ -4,6 +4,8 @@
 #include <complex>
 #include <fmt/format.h>
 
+#include "UncertainValue.hpp"
+
 template<typename T>
 struct fmt::formatter<std::complex<T>> {
     char presentation = 'g'; // default format
@@ -58,6 +60,23 @@ struct fmt::formatter<std::complex<T>> {
                 return fmt::format_to(ctx.out(), "{:g}", value.real());
             }
             return fmt::format_to(ctx.out(), "({:g}{:+g}i)", value.real(), imag);
+        }
+    }
+};
+
+// simplified formatter for UncertainValue
+template<gr::meta::arithmetic_or_complex_like T>
+struct fmt::formatter<gr::meta::UncertainValue<T>> {
+    template<typename ParseContext>
+    constexpr auto parse(ParseContext &ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    constexpr auto
+    format(const gr::meta::UncertainValue<T>&  value, FormatContext &ctx) const {
+        if constexpr (gr::meta::complex_like<T>) {
+            return fmt::format_to(ctx.out(), "({} ± {})", value.value, value.uncertainty);
+        } else {
+            return fmt::format_to(ctx.out(), "({:G} ± {:G})", value.value, value.uncertainty);
         }
     }
 };
