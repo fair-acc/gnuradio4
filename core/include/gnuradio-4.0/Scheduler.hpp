@@ -138,15 +138,16 @@ public:
 
     void
     poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
-        auto    &profiler_handler = _profiler.forThisThread();
+        auto &profiler_handler = _profiler.forThisThread();
 
-        uint32_t done             = 0;
-        uint32_t progress_count   = 0;
+        uint32_t done           = 0;
+        uint32_t progress_count = 0;
         while (done < n_batches && !_stop_requested) {
             auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
             bool something_happened = work().status == work::Status::OK;
             pe.finish();
-            uint64_t progress_local, progress_new;
+            uint64_t progress_local = 0ULL;
+            uint64_t progress_new   = 0ULL;
             if (something_happened) { // something happened in this thread => increase progress and reset done count
                 do {
                     progress_local = _progress.load();
@@ -168,11 +169,12 @@ public:
                     }
                 } while (!_progress.compare_exchange_strong(progress_local, progress_new));
                 _progress.notify_all();
-                if (progress_count == progress_count_old && done < n_batches) {
+                if (progress_count == progress_count_old && done + 1 < n_batches) {
                     _progress.wait(progress_new);
                 }
             }
         } // while (done < n_batches)
+
         _running_threads.fetch_sub(1);
         _running_threads.notify_all();
     }
