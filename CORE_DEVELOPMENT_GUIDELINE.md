@@ -6,7 +6,7 @@ influencing both the system's architecture and its progression. Just as a garden
 and community require ongoing care. Our goal is to foster a sustainable environment where GNU Radio and its creators can flourish, 
 ensuring our systems are not only functional and efficient but also inviting and maintainable over the long term. Our core goals are:
   * **Core-Goal №1: Software must be fit-for-purpose and remain easily adaptable to changing requirements.**
-    * specifically for GNU Radio: we want to write Software-Defined-Radios (SDRs) that can be easily adapted to new functions (e.g. protocols, schemes, ...) on the same hardware.
+    * specifically for GNU Radio: we want to write Software-Defined-Radio (SDR) applications that can be easily adapted to new functions (e.g. protocols, schemes, ...) on the same hardware.
   * **Core-Goal №2: be a friendly, empathetic and helpful person in writing software for other users**
   * **Core-Goal №3: write 'lean' and 'clean' software that follows established best-practise standards**
 
@@ -21,7 +21,7 @@ This document lays out the definitions and some of the more specific details in 
       * Be concise in problem descriptions, avoid unrelated topics, and provide a minimum viable example ([MVP](https://en.wikipedia.org/wiki/Minimum_viable_product)) 
       * Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GNU Radio helpers are volunteers.
       * Use the [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md)  for easier code readability and problem recognition.
-    * Optionally: take a bit of your time to learn basic C++. It's worth the investment, it's efficient, simpler than before, and fun. Recommended resources: 
+    * Optionally: take a bit of your time to improve basic C++ or learn modern C++ coding practices. It's worth the investment, it's efficient, simpler than before, and fun. Recommended resources: 
       * Lecture series (choose based on style and preference **!!selection & curation needed!!**):
          * [The Cherno: C++ Course (free)](https://www.youtube.com/playlist?list=PLlrATfBNZ98dudnM48yfGUldqGD0S4FFb)
          * [Codedamn: From Novice to Expert: Mastering C++ Programming (free)](https://codedamn.com/learn/cpp-language)
@@ -34,7 +34,7 @@ This document lays out the definitions and some of the more specific details in 
         * [CppCon](https://cppcon.org/)'s ['Back to Basic' Track](https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB) and [Slides](https://github.com/CppCon/CppCon2023).
         * YouTube Channels: [C++ Weekly](https://www.youtube.com/@cppweekly), [The Cherno](https://www.youtube.com/@TheCherno), [Casey Muratori's channel](https://www.youtube.com/@MollyRocket)
 [//]: # (    * if you do not plan to make your code public you could stop here, otherwise you may continue.)
-  * **Application Class 1**: *eveloping Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:*
+  * **Application Class 1**: *Developing Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:*
     * As above, plus:
         * Familiarise with the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for safe syntax in modern C++.
         * Optionally, learn 'lean' and 'clean' coding principles outlined below.
@@ -243,7 +243,7 @@ checker to your e-mails ... they are free and easy to use ... just use them.*
      while avoiding an excessive number of minor, hard-to-manage functions.
 
 4. **The one C++ Standard**:
-   - Use the latest C++ standard, considering the common denominator supported by CI's stable versions of GCC, Clang, and Emscripten.
+   - Use the latest C++ standard adopted by the project, considering the common denominator supported by CI's stable versions of GCC, Clang, and Emscripten.
    - Capitalise on the Standard Template Library (STL, (std)libc++). Opt for `<algorithm>`, `<numeric>`, `<ranges>`, etc., over custom solutions.
    - Favour `concepts` over `static_assert` for broader compile-time checks.
 
