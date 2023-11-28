@@ -13,42 +13,13 @@ ensuring our systems are not only functional and efficient but also inviting and
 This document lays out the definitions and some of the more specific details in the hope to be both educative but also to create a common understanding of core developments goals we strive for.
 
 ### Target Audience
- We distinguish four application classes:
+ We distinguish four application classes, which help determine the amount of rigor necessary in coding practice:
   * **Application Class 0**: *For those tinkering with GR and writing private user code:*
-    * Choose your style, conventions, rules, and guidelines that fit you best.
-    * As a *recommendation* when seeking for help to get better support and high-quality feedback:
-      * Check tutorials and examples for existing solutions.
-      * Be concise in problem descriptions, avoid unrelated topics, and provide a minimum viable example ([MVP](https://en.wikipedia.org/wiki/Minimum_viable_product)) 
-      * Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GNU Radio helpers are volunteers.
-      * Use the [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md)  for easier code readability and problem recognition.
-    * Optionally: take a bit of your time to improve basic C++ or learn modern C++ coding practices. It's worth the investment, it's efficient, simpler than before, and fun. Recommended resources: 
-      * Lecture series (choose based on style and preference **!!selection & curation needed!!**):
-         * [The Cherno: C++ Course (free)](https://www.youtube.com/playlist?list=PLlrATfBNZ98dudnM48yfGUldqGD0S4FFb)
-         * [Codedamn: From Novice to Expert: Mastering C++ Programming (free)](https://codedamn.com/learn/cpp-language)
-         * [Udemy: The C++20 Masterclass: From Fundamentals to Advanced (paid)](https://www.udemy.com/course/the-modern-cpp-20-masterclass/)
-         * [Kate Gregory: C++20 Fundamentals (paid)](https://www.pluralsight.com/courses/cplusplus-20-fundamentals)
-         * [Udemy: Beginning C++ Programming - From Beginner to Beyond (paid)](https://www.udemy.com/course/beginning-c-plus-plus-programming/)
-         * [Codecademy: Learn C++ (paid)](https://www.codecademy.com/learn/learn-c-plus-plus)
-         * [The Great Courses: Introduction to C++: Programming Concepts and Applications (paid)](https://www.thegreatcourses.com/courses/introduction-to-c-plus-plus-programming-concepts-and-applications)
-      * Building upon that: 
-        * [CppCon](https://cppcon.org/)'s ['Back to Basic' Track](https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB) and [Slides](https://github.com/CppCon/CppCon2023).
-        * YouTube Channels: [C++ Weekly](https://www.youtube.com/@cppweekly), [The Cherno](https://www.youtube.com/@TheCherno), [Casey Muratori's channel](https://www.youtube.com/@MollyRocket)
-[//]: # (    * if you do not plan to make your code public you could stop here, otherwise you may continue.)
   * **Application Class 1**: *Developing Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:*
-    * As above, plus:
-        * Familiarise with the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for safe syntax in modern C++.
-        * Optionally, learn 'lean' and 'clean' coding principles outlined below.
   * **Application Class 2**: *Developing for GNU Radio Core BlockLib with long-term maintenance support interest (more than 2-3 years):*
-    * Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md), [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md), [Contribution Guidelines](CONTRIBUTING.md) and [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) 
-    * Before starting developing a new block, check with the existing BlockLib consult core maintainers via the GH [issue tracker](./issues), and
-      1. that there isn't already an existing implementation of the feature that you need, or 
-      2. that could be achieved through combining existing blocks (GR 4.0 compile-time merging capabilities offer these for free), and 
-      3. pick a template or existing block that you like and/or is closest to what you want to achieve, and
-      4.where to place the new functionality/implementation in the BlockLib.
-    * Ensure that your code **passes all CI tests** (e.g. through opening a 'draft pull-request'), that it does not generate extra compiler warning, and uses the provided '**clang-format**' definition.  
   * **Application Class 3**: *Developing new features in the GNU Radio Core:*
-    * This document is intended for maintainers, users that want to contribute to the core BlockLib, new Schedulers, or new features to the GNU Radio Core.
-    * These guidelines are a bit more formalised to promote sustainable coding practice and long-term maintainability of the project and require a bit of experience with modern C++.
+
+More detail about this application classes can be seen in the graphic below and shown [here](#target-application-classes)
   
 ```mermaid
 graph TD
@@ -147,6 +118,9 @@ CR-.->|write better code|CM("this document is for you")
 
 DR-.->|write better code|CM
 ```
+
+* This document is intended for maintainers, users that want to contribute to the core BlockLib, new Schedulers, or new features to the GNU Radio Core.
+* These guidelines are a bit more formalised to promote sustainable coding practice and long-term maintainability of the project and require a bit of experience with modern C++.
 
 ### Introduction
 Central to these guidelines are these fundamental questions: : **What constitutes 'lean' and 'clean' code, and how can we quantify and optimise it?** 
@@ -300,6 +274,44 @@ checker to your e-mails ... they are free and easy to use ... just use them.*
   * <a id="8">[8]</a> Sean Parent, *"Inheritance Is The Base Class of Evil"*, GoingNative 2013 Event, 23 Sept 2013, ([talk 25"](https://www.youtube.com/watch?v=bIhUE5uUFOA))
 
 ## Appendix
+
+### Target Application Classes
+
+  * **Application Class 0**: *For those tinkering with GR and writing private user code:*
+    * Choose your style, conventions, rules, and guidelines that fit you best.
+    * As a *recommendation* when seeking for help to get better support and high-quality feedback:
+      * Check tutorials and examples for existing solutions.
+      * Be concise in problem descriptions, avoid unrelated topics, and provide a minimum viable example ([MVP](https://en.wikipedia.org/wiki/Minimum_viable_product)) 
+      * Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GNU Radio helpers are volunteers.
+      * Use the [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md)  for easier code readability and problem recognition.
+    * Optionally: take a bit of your time to improve basic C++ or learn modern C++ coding practices. It's worth the investment, it's efficient, simpler than before, and fun. Recommended resources: 
+      * Lecture series (choose based on style and preference **!!selection & curation needed!!**):
+         * [The Cherno: C++ Course (free)](https://www.youtube.com/playlist?list=PLlrATfBNZ98dudnM48yfGUldqGD0S4FFb)
+         * [Codedamn: From Novice to Expert: Mastering C++ Programming (free)](https://codedamn.com/learn/cpp-language)
+         * [Udemy: The C++20 Masterclass: From Fundamentals to Advanced (paid)](https://www.udemy.com/course/the-modern-cpp-20-masterclass/)
+         * [Kate Gregory: C++20 Fundamentals (paid)](https://www.pluralsight.com/courses/cplusplus-20-fundamentals)
+         * [Udemy: Beginning C++ Programming - From Beginner to Beyond (paid)](https://www.udemy.com/course/beginning-c-plus-plus-programming/)
+         * [Codecademy: Learn C++ (paid)](https://www.codecademy.com/learn/learn-c-plus-plus)
+         * [The Great Courses: Introduction to C++: Programming Concepts and Applications (paid)](https://www.thegreatcourses.com/courses/introduction-to-c-plus-plus-programming-concepts-and-applications)
+      * Building upon that: 
+        * [CppCon](https://cppcon.org/)'s ['Back to Basic' Track](https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB) and [Slides](https://github.com/CppCon/CppCon2023).
+        * YouTube Channels: [C++ Weekly](https://www.youtube.com/@cppweekly), [The Cherno](https://www.youtube.com/@TheCherno), [Casey Muratori's channel](https://www.youtube.com/@MollyRocket)
+[//]: # (    * if you do not plan to make your code public you could stop here, otherwise you may continue.)
+  * **Application Class 1**: *Developing Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:*
+    * As above, plus:
+        * Familiarise with the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for safe syntax in modern C++.
+        * Optionally, learn 'lean' and 'clean' coding principles outlined below.
+  * **Application Class 2**: *Developing for GNU Radio Core BlockLib with long-term maintenance support interest (more than 2-3 years):*
+    * Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md), [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md), [Contribution Guidelines](CONTRIBUTING.md) and [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) 
+    * Before starting developing a new block, check with the existing BlockLib consult core maintainers via the GH [issue tracker](./issues), and
+      1. that there isn't already an existing implementation of the feature that you need, or 
+      2. that could be achieved through combining existing blocks (GR 4.0 compile-time merging capabilities offer these for free), and 
+      3. pick a template or existing block that you like and/or is closest to what you want to achieve, and
+      4.where to place the new functionality/implementation in the BlockLib.
+    * Ensure that your code **passes all CI tests** (e.g. through opening a 'draft pull-request'), that it does not generate extra compiler warning, and uses the provided '**clang-format**' definition.  
+  * **Application Class 3**: *Developing new features in the GNU Radio Core:*
+    * This document is intended for maintainers, users that want to contribute to the core BlockLib, new Schedulers, or new features to the GNU Radio Core.
+    * These guidelines are a bit more formalised to promote sustainable coding practice and long-term maintainability of the project and require a bit of experience with modern C++.
 
 ### 'Lean Management' TL;DR Summary:
 
