@@ -1,4 +1,4 @@
-#Contributing to GNU Radio
+# Contributing to GNU Radio
 :+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
 
 The following is a set of guidelines for contributing. These are mostly guidelines, not rules. Use your best judgement, and feel free to propose changes to this document in a pull request.
