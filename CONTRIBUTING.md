@@ -28,8 +28,7 @@ Please be sure to follow the usual process for submitting PRs:
 
  - Fork the repository
  - Make sure it compiles w/o errors against the current release 'main' branch:
-    - 'main' (active) code-compatibility level: JDK11, to Java 11 language features (this may change in the future)
- - Write and add a descriptive/meaningful JUnit test-case
+ - Write and add a descriptive/meaningful unit-test-case
  - apply the default code formatter (to minimise future refactoring) 
  - Please check against common sanitizers, the CI/CD pipeline, or similar other QA code checker (N.B. other/further code improvements are welcome)
  - Create a pull request 
