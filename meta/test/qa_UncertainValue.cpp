@@ -76,6 +76,20 @@ const boost::ut::suite uncertainValue = [] {
         expect(eq(2.5, a.uncertainty)); // Assuming appropriate uncertainty calculation
     };
 
+    "operator+(UncertainValue&)"_test = [] {
+        constexpr UncertainValue<double> orig{ -4.0, -0.5 };
+        UncertainValue<double> inverted = +orig;
+
+        expect(eq(inverted.value, 4.0));
+        expect(eq(inverted.uncertainty, 0.5));
+
+        constexpr UncertainValue<std::complex<double>> corig{ -4.0, -0.5 };
+        constexpr UncertainValue<std::complex<double>> cinverted = +corig;
+
+        expect(eq(cinverted.value, corig.value)); // N.B. does not modify complex values
+        expect(eq(cinverted.uncertainty, corig.uncertainty));
+    };
+
     "subtraction UncertainValue - UncertainValue"_test = [] {
         constexpr UncertainValue<double> a{ 20.0, 3.0 };
         constexpr UncertainValue<double> b{ 10.0, 4.0 };
@@ -116,6 +130,14 @@ const boost::ut::suite uncertainValue = [] {
         a -= b;
         expect(eq((a0 - b).value, a.value));
         expect(eq((a0 - b).uncertainty, a.uncertainty)); // Assuming appropriate uncertainty calculation
+    };
+
+    "operator-(UncertainValue&)"_test = [] {
+        constexpr UncertainValue<double> orig{ 4.0, 0.5 };
+        constexpr UncertainValue<double> inverted = -orig;
+
+        expect(eq(inverted.value, -orig.value));
+        expect(eq(inverted.uncertainty, orig.uncertainty));
     };
 
     "multiplication UncertainValue * UncertainValue"_test = [] {

@@ -34,7 +34,7 @@ concept arithmetic_or_complex_like = std::is_arithmetic_v<T> || meta::complex_li
 template<arithmetic_or_complex_like T>
 struct UncertainValue {
     using value_type = T;
-    //using T2 = typename std::conditional_t<std::is_arithmetic_v<T>, T, typename T::value_type>; // TODO: fix later for handling symmetric errors for std::complex
+    // using T2 = typename std::conditional_t<std::is_arithmetic_v<T>, T, typename T::value_type>; // TODO: fix later for handling symmetric errors for std::complex
 
     T value       = static_cast<T>(0); /// mean value
     T uncertainty = static_cast<T>(0); /// uncorrelated standard deviation (TODO: make T2)
@@ -60,7 +60,9 @@ struct UncertainValue {
         return *this;
     }
 
-    auto operator<=>(UncertainValue const&) const = default;
+    auto
+    operator<=>(UncertainValue const &) const
+            = default;
 };
 
 template<typename T>
@@ -87,12 +89,12 @@ using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
 /********************** some basic math operation definitions *********************************/
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-    requires (UncertainValueLike<T> || UncertainValueLike<U>) // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
+    requires(UncertainValueLike<T> || UncertainValueLike<U>) // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
 [[nodiscard]] inline constexpr auto
 operator+(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value + rhs.value);
-        if constexpr  (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
             // we are dealing with complex numbers -> use the standard uncorrelated calculation.
             ResultType newUncertainty = { std::hypot(std::real(lhs.uncertainty), std::real(rhs.uncertainty)), std::hypot(std::imag(lhs.uncertainty), std::imag(rhs.uncertainty)) };
             return UncertainValue<ResultType>{ lhs.value + rhs.value, newUncertainty };
@@ -117,13 +119,23 @@ operator+=(T &lhs, const U &rhs) noexcept {
     return lhs;
 }
 
+template<UncertainValueLike T, typename ValueTypeT = UncertainValueType_t<T>>
+inline constexpr T
+operator+(const T &val) {
+    if (meta::complex_like<ValueTypeT>) {
+        return val;
+    } else {
+        return { std::abs(val.value), std::abs(val.uncertainty) };
+    }
+}
+
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
     requires UncertainValueLike<T> || UncertainValueLike<U> // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
 [[nodiscard]] inline constexpr auto
 operator-(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value - rhs.value);
-        if constexpr  (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
             // we are dealing with complex numbers -> use the standard uncorrelated calculation.
             ResultType newUncertainty = { std::hypot(std::real(lhs.uncertainty), std::real(rhs.uncertainty)), std::hypot(std::imag(lhs.uncertainty), std::imag(rhs.uncertainty)) };
             return UncertainValue<ResultType>{ lhs.value - rhs.value, newUncertainty };
@@ -147,13 +159,19 @@ operator-=(T &lhs, const U &rhs) noexcept {
     return lhs;
 }
 
+template<UncertainValueLike T>
+inline constexpr T
+operator-(const T &val) {
+    return { -val.value, val.uncertainty };
+}
+
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
     requires UncertainValueLike<T> || UncertainValueLike<U> // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
 [[nodiscard]] inline constexpr auto
 operator*(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value * rhs.value);
-        if constexpr  (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
             // we are dealing with complex numbers -> use standard uncorrelated calculation
             ResultType newUncertainty = { std::hypot(std::real(lhs.value) * std::real(rhs.uncertainty), std::real(rhs.value) * std::real(lhs.uncertainty)),
                                           std::hypot(std::imag(lhs.value) * std::imag(rhs.uncertainty), std::imag(rhs.value) * std::imag(lhs.uncertainty)) };
@@ -185,13 +203,13 @@ template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, 
 operator/(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value * rhs.value);
-        if constexpr  (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
             // we are dealing with complex numbers -> use standard uncorrelated calculation
             ResultType newUncertainty;
             if constexpr (std::is_arithmetic_v<ValueTypeT> && meta::complex_like<ValueTypeU>) {
                 // LHS is real, RHS is complex
                 newUncertainty = { std::sqrt(std::pow(lhs.uncertainty / std::real(rhs.value), 2)), std::sqrt(std::pow(std::imag(rhs.uncertainty) * lhs.value / std::norm(rhs.value), 2)) };
-            } else if constexpr  (meta::complex_like<ValueTypeT> && std::is_arithmetic_v<ValueTypeU>) {
+            } else if constexpr (meta::complex_like<ValueTypeT> && std::is_arithmetic_v<ValueTypeU>) {
                 // LHS is complex, RHS is real
                 newUncertainty = { std::hypot(std::real(lhs.uncertainty) / rhs.value, rhs.uncertainty * std::real(lhs.value) / std::pow(rhs.value, 2)),
                                    std::sqrt(std::pow(std::imag(lhs.uncertainty) / rhs.value, 2)) };
@@ -223,7 +241,7 @@ operator/=(T &lhs, const U &rhs) noexcept {
     return lhs;
 }
 
-} // namespace gr::meta
+} // namespace gr
 
 namespace std { // std:: basic math overloads
 
