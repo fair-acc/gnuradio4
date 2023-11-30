@@ -24,7 +24,7 @@ approx(const TLhs &lhs, const TRhs &rhs, const TEpsilon &epsilon) {
 const boost::ut::suite uncertainValue = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
-    using namespace gr::meta;
+    using namespace gr;
     using test::detail::approx;
 
     if (std::getenv("DISABLE_SENSITIVE_TESTS") == nullptr) {
@@ -667,7 +667,7 @@ const boost::ut::suite uncertainValue = [] {
 const boost::ut::suite uncertainValueTrigonometric = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
-    using namespace gr::meta;
+    using namespace gr;
     using test::detail::approx;
     using std::numbers::pi;
 
@@ -723,7 +723,7 @@ const boost::ut::suite uncertainValueTrigonometric = [] {
 const boost::ut::suite uncertainValueExpTests = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
-    using namespace gr::meta;
+    using namespace gr;
     using test::detail::approx;
     using std::numbers::pi;
 

@@ -46,8 +46,8 @@ const boost::ut::suite complexFormatter = [] {
 const boost::ut::suite uncertainValueFormatter = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
-    using UncertainDouble = gr::meta::UncertainValue<double>;
-    using UncertainComplex = gr::meta::UncertainValue<std::complex<double>>;
+    using UncertainDouble = gr::UncertainValue<double>;
+    using UncertainComplex = gr::UncertainValue<std::complex<double>>;
 
     "fmt::formatter<gr::meta::UncertainValue<T>>"_test = [] {
         // Test with UncertainValue<double>
