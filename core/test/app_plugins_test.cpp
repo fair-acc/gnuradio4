@@ -12,7 +12,6 @@
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 
 using namespace std::chrono_literals;
-using namespace gr::literals;
 
 namespace grg = gr;
 
@@ -82,7 +81,7 @@ main(int argc, char *argv[]) {
     //
     const std::size_t repeats = 100;
     gr::property_map  block_sink_params;
-    block_sink_params["total_count"] = 100_UZ;
+    block_sink_params["total_count"] = 100UZ;
     auto block_sink_load             = context.loader.instantiate(names::cout_sink, "double", block_sink_params);
 
     assert(block_sink_load);

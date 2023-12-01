@@ -8,7 +8,6 @@
 #include <unordered_set>
 #include <vector>
 
-using namespace gr::literals;
 using namespace std::string_literals;
 
 template<typename T>
@@ -36,11 +35,11 @@ struct RepeatedSource : public gr::Block<RepeatedSource<T>> {
         if (remaining_events_count != 0) {
             auto &port   = gr::outputPort<0>(this);
             auto &writer = port.streamWriter();
-            auto  data   = writer.reserve_output_range(1_UZ);
+            auto  data   = writer.reserve_output_range(1UZ);
 
-            auto  value  = values[values_next];
-            data[0]      = value;
-            data.publish(1_UZ);
+            auto value = values[values_next];
+            data[0]    = value;
+            data.publish(1UZ);
 
             remaining_events_count--;
             if (remaining_events_count == 0) {
@@ -61,8 +60,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE(RepeatedSource, identifier, remaining_events_coun
 
 template<typename T>
 struct ValidatorSink : public gr::Block<ValidatorSink<T>> {
-    std::uint32_t                  identifier = 0;
-    gr::PortIn<T>                  in;
+    std::uint32_t identifier = 0;
+    gr::PortIn<T> in;
 
     std::vector<T>                 expected_values;
     std::vector<T>::const_iterator expected_values_next;
@@ -123,7 +122,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
             auto *inputReader  = ins[channelIndex];
             auto *outputWriter = outs[channelIndex];
 
-            auto  available    = std::min(inputReader->available(), outputWriter->available());
+            auto available = std::min(inputReader->available(), outputWriter->available());
             if (available == 0) return gr::work::Status::DONE;
 
             auto inputSpan  = inputReader->get(available);
@@ -146,55 +145,55 @@ void
 execute_selector_test() {
     using namespace boost::ut;
 
-    using TestNode                                      = ArrayPortsNode<double>;
+    using TestNode = ArrayPortsNode<double>;
 
-    const std::uint32_t                     value_count = 5;
+    const std::uint32_t value_count = 5;
 
     gr::Graph                               graph;
     std::array<RepeatedSource<double> *, 4> sources;
     std::array<ValidatorSink<double> *, 4>  sinks;
 
-    auto                                   *testNode = std::addressof(graph.emplaceBlock<TestNode>());
+    auto *testNode = std::addressof(graph.emplaceBlock<TestNode>());
 
-    sources[0]                                       = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
-                                                                                                                   { "identifier", 0U },                      //
-                                                                                                                   { "values", std::vector{ 0.0 } } }));
-    sources[1]                                       = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
-                                                                                                                   { "identifier", 1U },                      //
-                                                                                                                   { "values", std::vector{ 1.0 } } }));
-    sources[2]                                       = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
-                                                                                                                   { "identifier", 2U },                      //
-                                                                                                                   { "values", std::vector{ 2.0 } } }));
-    sources[3]                                       = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
-                                                                                                                   { "identifier", 3U },                      //
-                                                                                                                   { "values", std::vector{ 3.0 } } }));
+    sources[0] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
+                                                                             { "identifier", 0U },                      //
+                                                                             { "values", std::vector{ 0.0 } } }));
+    sources[1] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
+                                                                             { "identifier", 1U },                      //
+                                                                             { "values", std::vector{ 1.0 } } }));
+    sources[2] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
+                                                                             { "identifier", 2U },                      //
+                                                                             { "values", std::vector{ 2.0 } } }));
+    sources[3] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "remaining_events_count", value_count }, //
+                                                                             { "identifier", 3U },                      //
+                                                                             { "values", std::vector{ 3.0 } } }));
 
-    sinks[0]                                         = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 0U },
-                                                                                                                  { "expected_values", std::vector{
+    sinks[0] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 0U },
+                                                                          { "expected_values", std::vector{
                                                                                                        0.0,
                                                                                                        0.0,
                                                                                                        0.0,
                                                                                                        0.0,
                                                                                                        0.0,
                                                                                                } } }));
-    sinks[1]                                         = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 1U }, //
-                                                                                                                  { "expected_values", std::vector{
+    sinks[1] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 1U }, //
+                                                                          { "expected_values", std::vector{
                                                                                                        1.0,
                                                                                                        1.0,
                                                                                                        1.0,
                                                                                                        1.0,
                                                                                                        1.0,
                                                                                                } } }));
-    sinks[2]                                         = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 2U }, //
-                                                                                                                  { "expected_values", std::vector{
+    sinks[2] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 2U }, //
+                                                                          { "expected_values", std::vector{
                                                                                                        2.0,
                                                                                                        2.0,
                                                                                                        2.0,
                                                                                                        2.0,
                                                                                                        2.0,
                                                                                                } } }));
-    sinks[3]                                         = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 3U }, //
-                                                                                                                  { "expected_values", std::vector{
+    sinks[3] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "identifier", 3U }, //
+                                                                          { "expected_values", std::vector{
                                                                                                        3.0,
                                                                                                        3.0,
                                                                                                        3.0,
@@ -202,14 +201,14 @@ execute_selector_test() {
                                                                                                        3.0,
                                                                                                } } }));
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"inputs", 0_UZ>(*testNode)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<0_UZ, 1_UZ>(*testNode)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<0_UZ, 2_UZ>(*testNode)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"inputs", 0UZ>(*testNode)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<0UZ, 1UZ>(*testNode)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<0UZ, 2UZ>(*testNode)));
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[3], "out"s, *testNode, { "inputs", 3 })));
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"outputs", 0_UZ>(*testNode).to<"in">(*sinks[0])));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<0 /*"outputs"*/, 1_UZ>(*testNode).to<"in">(*sinks[1])));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<0 /* outputs */, 2_UZ>(*testNode).to<"in">(*sinks[2])));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"outputs", 0UZ>(*testNode).to<"in">(*sinks[0])));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<0 /*"outputs"*/, 1UZ>(*testNode).to<"in">(*sinks[1])));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<0 /* outputs */, 2UZ>(*testNode).to<"in">(*sinks[2])));
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, { "outputs", 3 }, *sinks[3], "in"s)));
 
     expect(graph.performConnections());

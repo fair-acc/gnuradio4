@@ -13,15 +13,14 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
 
     gr::work::Result
     work(std::size_t requested_work) {
-        using namespace gr::literals;
         auto &port   = gr::outputPort<0>(this);
         auto &writer = port.streamWriter();
-        auto  data   = writer.reserve_output_range(1_UZ);
+        auto  data   = writer.reserve_output_range(1UZ);
         data[0]      = value;
-        data.publish(1_UZ);
+        data.publish(1UZ);
 
         value += 1;
-        return { requested_work, 1_UZ, gr::work::Status::OK };
+        return { requested_work, 1UZ, gr::work::Status::OK };
     }
 };
 
@@ -51,7 +50,7 @@ main() {
     constexpr const std::size_t sources_count = 10;
     constexpr const std::size_t events_count  = 5;
 
-    gr::Graph                   testGraph;
+    gr::Graph testGraph;
 
     // Adder has sources_count inputs in total, but let's create
     // sources_count / 2 inputs on construction, and change the number

@@ -19,7 +19,6 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 namespace grg = gr;
 
 using namespace std::string_literals;
-using namespace gr::literals;
 
 #ifdef ENABLE_DYNAMIC_PORTS
 class dynamicBlock : public grg::node<dynamicBlock> {
@@ -73,7 +72,7 @@ public:
 static_assert(gr::BlockLike<cout_sink<float>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
-template<typename T, T val, std::size_t count = 10_UZ>
+template<typename T, T val, std::size_t count = 10UZ>
 class repeater_source : public grg::Block<repeater_source<T, val>> {
 public:
     grg::PortOut<T> value;
@@ -83,7 +82,7 @@ public:
     work(std::size_t requested_work) {
         // check if STOPPED and return immediately
         if (this->state == gr::LifeCycleState::STOPPED) {
-            return { requested_work, 0_UZ, gr::work::Status::DONE };
+            return { requested_work, 0UZ, gr::work::Status::DONE };
         }
         if (_counter < count) {
             _counter++;
@@ -92,11 +91,11 @@ public:
             data[0]      = val;
             data.publish(1);
 
-            return { requested_work, 1_UZ, gr::work::Status::OK };
+            return { requested_work, 1UZ, gr::work::Status::OK };
         } else {
             this->state = gr::LifeCycleState::STOPPED; // change the state to STOPPED
             this->publishEOSTag(0);                    // publish END_OF_STREAM tag with 0 offset
-            return { requested_work, 0_UZ, gr::work::Status::DONE };
+            return { requested_work, 0UZ, gr::work::Status::DONE };
         }
     }
 };
@@ -145,16 +144,16 @@ const boost::ut::suite PortApiTests = [] {
         PortOut<float>     output_port;
         BufferWriter auto &writer = output_port.streamWriter();
         // BufferWriter auto                                             &tagWriter = output_port.tagWriter();
-        expect(ge(writer.available(), 32_UZ));
+        expect(ge(writer.available(), 32UZ));
 
         using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
         PortIn<float, ExplicitUnlimitedSize> input_port;
         const BufferReader auto             &reader = input_port.streamReader();
-        expect(eq(reader.available(), 0_UZ));
+        expect(eq(reader.available(), 0UZ));
         auto buffers = output_port.buffer();
         input_port.setBuffer(buffers.streamBuffer, buffers.tagBufferType);
 
-        expect(eq(buffers.streamBuffer.n_readers(), 1_UZ));
+        expect(eq(buffers.streamBuffer.n_readers(), 1UZ));
 
         int  offset = 1;
         auto lambda = [&offset](auto &w) {
@@ -163,7 +162,7 @@ const boost::ut::suite PortApiTests = [] {
             offset += static_cast<int>(w.size());
         };
 
-        expect(writer.try_publish(lambda, 32_UZ));
+        expect(writer.try_publish(lambda, 32UZ));
     };
 
     "RuntimePortApi"_test = [] {
@@ -176,7 +175,7 @@ const boost::ut::suite PortApiTests = [] {
         port_list.emplace_back(out, DynamicPort::non_owned_reference_tag{});
         port_list.emplace_back(in, DynamicPort::non_owned_reference_tag{});
 
-        expect(eq(port_list.size(), 2_UZ));
+        expect(eq(port_list.size(), 2UZ));
     };
 
     "ConnectionApi"_test = [] {

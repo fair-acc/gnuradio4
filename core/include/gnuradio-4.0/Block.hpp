@@ -23,8 +23,6 @@
 
 namespace gr {
 
-using namespace gr::literals;
-
 namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
@@ -203,7 +201,7 @@ static_assert(ConsumableSpan<traits::block::detail::dummy_input_span<float>>);
 
 template<typename T>
 concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
-                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0_UZ); };
+                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0UZ); };
 
 static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
 
@@ -307,27 +305,27 @@ struct Block : protected std::tuple<Arguments...> {
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
     using block_template_parameters  = meta::typelist<Arguments...>;
     using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
-    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1_UZ, 1_UZ, true>>;
-    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0_UZ, true>>;
+    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UZ, 1UZ, true>>;
+    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UZ, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
-    alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0_UZ };
+    alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0UZ };
     alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadShallRun{ false };
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
-            "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+            "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
     //
     using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1_UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
     using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::size_t, std::size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride         = StrideControl::kStride;
-    std::size_t                                                                                                         stride_counter = 0_UZ;
+    std::size_t                                                                                                         stride_counter = 0UZ;
     const std::size_t                                                                                                   unique_id      = _unique_id_counter++;
     const std::string                                                                                                   unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                                 name        = gr::meta::type_name<Derived>();
@@ -663,7 +661,7 @@ public:
             static_assert(!kIsSourceBlock, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
-            if (numerator != 1_UZ || denominator != 1_UZ) {
+            if (numerator != 1UZ || denominator != 1UZ) {
                 throw std::runtime_error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
         }
@@ -671,7 +669,7 @@ public:
         if constexpr (StrideControl::kEnabled) {
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
-            if (stride != 0_UZ) {
+            if (stride != 0UZ) {
                 throw std::runtime_error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
             }
         }
@@ -819,7 +817,7 @@ public:
                         if (!input_port.tagReader().available()) {
                             return;
                         }
-                        const auto tags           = input_port.tagReader().get(1_UZ);
+                        const auto tags           = input_port.tagReader().get(1UZ);
                         const auto readPos        = input_port.streamReader().position();
                         const auto tag_stream_pos = tags[0].index - 1 - readPos;
                         if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
@@ -830,7 +828,7 @@ public:
                                     merged_tag_map.insert_or_assign(key, value);
                                 }
                             }
-                            std::ignore = input_port.tagReader().consume(1_UZ);
+                            std::ignore = input_port.tagReader().consume(1UZ);
                         }
                     }
                 },
@@ -864,7 +862,7 @@ public:
 
     constexpr work::Status
     doResampling() {
-        if (numerator != 1_UZ || denominator != 1_UZ) {
+        if (numerator != 1UZ || denominator != 1UZ) {
             // TODO: this ill-defined checks can be done only once after parameters were changed
             const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
             bool         is_ill_defined = (denominator > ports_status.in_max_samples) || (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples))
@@ -978,7 +976,7 @@ protected:
         constexpr bool kIsSinkBlock   = TOutputTypes::size == 0;
 
         if (state == LifeCycleState::STOPPED) {
-            return { requested_work, 0_UZ, work::Status::DONE };
+            return { requested_work, 0UZ, work::Status::DONE };
         }
 
         // TODO: these checks can be moved to setting changed
@@ -997,17 +995,17 @@ protected:
                 std::size_t                           max_buffer        = ports_status.out_available;
                 const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
                 if (available_samples < 0 && max_buffer > 0) {
-                    return { requested_work, 0_UZ, work::Status::DONE };
+                    return { requested_work, 0UZ, work::Status::DONE };
                 }
                 if (available_samples == 0) {
-                    return { requested_work, 0_UZ, work::Status::OK };
+                    return { requested_work, 0UZ, work::Status::OK };
                 }
                 std::size_t samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
                 if (!ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
+                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (samples_to_process == 0) {
-                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
+                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
@@ -1018,13 +1016,13 @@ protected:
                 // the (source) node wants to determine the number of samples to process
                 std::size_t samples_to_process = available_samples(self());
                 if (samples_to_process == 0) {
-                    return { requested_work, 0_UZ, work::Status::OK };
+                    return { requested_work, 0UZ, work::Status::OK };
                 }
                 if (!ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
+                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
                 }
                 if (!ports_status.spaceAvailableOnOutputPorts(samples_to_process)) {
-                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
+                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samples_to_process, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
@@ -1042,7 +1040,7 @@ protected:
                 // derive value from output buffer size
                 std::size_t samplesToProcess = std::min(ports_status.out_available, ports_status.out_max_samples);
                 if (!ports_status.enoughSamplesForOutputPorts(samplesToProcess)) {
-                    return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
+                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
                 }
                 ports_status.in_samples  = std::min(samplesToProcess, requested_work);
                 ports_status.out_samples = ports_status.in_samples;
@@ -1057,7 +1055,7 @@ protected:
                 updateInputAndOutputTags();
                 updateOutputTagsWithSettingParametersIfNeeded();
                 forwardTags();
-                return { requested_work, 0_UZ, work::Status::DONE };
+                return { requested_work, 0UZ, work::Status::DONE };
             }
 
             if constexpr (Resampling::kEnabled) {
@@ -1071,22 +1069,22 @@ protected:
                         forwardTags();
                         //  EOS is not at 0 position and thus not read by updateInputAndOutputTags(), we need to publish new EOS
                         publishEOSTag(0);
-                        return { requested_work, 0_UZ, work::Status::DONE };
+                        return { requested_work, 0UZ, work::Status::DONE };
                     }
-                    return { requested_work, 0_UZ, rasamplingStatus };
+                    return { requested_work, 0UZ, rasamplingStatus };
                 }
             }
 
             if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
-                return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
+                return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
 
             // TODO: special case for portsStatus.in_samples == 0 ?
             if (!ports_status.enoughSamplesForOutputPorts(ports_status.out_samples)) {
-                return { requested_work, 0_UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
+                return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
             if (!ports_status.spaceAvailableOnOutputPorts(ports_status.out_samples)) {
-                return { requested_work, 0_UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
+                return { requested_work, 0UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
             }
         }
 
@@ -1109,7 +1107,7 @@ protected:
 
         std::size_t nSamplesToConsume = ports_status.in_samples; // default stride == 0
         if constexpr (StrideControl::kEnabled) {
-            if (stride != 0_UZ) {
+            if (stride != 0UZ) {
                 const bool firstTimeStride = stride_counter == 0;
                 if (firstTimeStride) {
                     // sample processing are done as usual, portsStatus.in_samples samples will be processed
@@ -1227,7 +1225,7 @@ protected:
         //        else {
         //            static_assert(gr::meta::always_false<Derived>, "neither processBulk(...) nor processOne(...) implemented");
         //        }
-        return { requested_work, 0_UZ, work::Status::ERROR };
+        return { requested_work, 0UZ, work::Status::ERROR };
     } // end: work_return_t work_internal() noexcept { ..}
 
 public:
@@ -1309,7 +1307,7 @@ public:
 };
 
 template<typename Derived, typename... Arguments>
-inline std::atomic_size_t Block<Derived, Arguments...>::_unique_id_counter{ 0_UZ };
+inline std::atomic_size_t Block<Derived, Arguments...>::_unique_id_counter{ 0UZ };
 } // namespace gr
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, unique_name, name, meta_information);

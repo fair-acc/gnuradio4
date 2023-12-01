@@ -213,7 +213,7 @@ public:
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
-        std::size_t           performed_work     = 0_UZ;
+        std::size_t           performed_work     = 0UZ;
         for (auto &currentBlock : blocks) {
             gr::work::Result result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
@@ -227,7 +227,7 @@ public:
             if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
                 std::vector<std::size_t> available_input_samples(20);
                 std::ignore = currentBlock->availableInputSamples(available_input_samples);
-                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
+                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0UZ) > 0UZ;
             }
         }
         return { requested_work, performed_work, something_happened ? work::Status::OK : work::Status::DONE };
@@ -352,7 +352,7 @@ public:
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
-        std::size_t           performed_work     = 0_UZ;
+        std::size_t           performed_work     = 0UZ;
 
         for (auto &currentBlock : blocks) {
             gr::work::Result result = currentBlock->work(requested_work);
@@ -368,7 +368,7 @@ public:
             if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
                 std::vector<std::size_t> available_input_samples(20);
                 std::ignore = currentBlock->availableInputSamples(available_input_samples);
-                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0_UZ) > 0_UZ;
+                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0UZ) > 0UZ;
             }
         }
 

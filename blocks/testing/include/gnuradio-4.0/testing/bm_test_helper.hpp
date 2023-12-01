@@ -13,11 +13,9 @@ inline constexpr std::size_t N_MAX = std::numeric_limits<std::size_t>::max();
 
 namespace test {
 
-using namespace gr::literals;
+inline static std::size_t n_samples_produced = 0UZ;
 
-inline static std::size_t n_samples_produced = 0_UZ;
-
-template<typename T, std::size_t min = 0_UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
+template<typename T, std::size_t min = 0UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
 class source : public gr::Block<source<T, min, count>> {
 public:
     uint64_t       _n_samples_max;
@@ -61,8 +59,8 @@ public:
 
             if constexpr (use_bulk_operation) {
                 std::size_t n_write = std::clamp(n_to_publish, 0UL, std::min(writer.available(), port.max_buffer_size()));
-                if (n_write == 0_UZ) {
-                    return { requested_work, 0_UZ, gr::work::Status::INSUFFICIENT_INPUT_ITEMS };
+                if (n_write == 0UZ) {
+                    return { requested_work, 0UZ, gr::work::Status::INSUFFICIENT_INPUT_ITEMS };
                 }
 
                 writer.publish( //
@@ -74,22 +72,22 @@ public:
                         n_write);
             } else {
                 auto [data, token] = writer.get(1);
-                if (data.size() == 0_UZ) {
-                    return { requested_work, 0_UZ, gr::work::Status::ERROR };
+                if (data.size() == 0UZ) {
+                    return { requested_work, 0UZ, gr::work::Status::ERROR };
                 }
                 data[0] = processOne();
                 writer.publish(token, 1);
             }
-            return { requested_work, 1_UZ, gr::work::Status::OK };
+            return { requested_work, 1UZ, gr::work::Status::OK };
         } else {
-            return { requested_work, 0_UZ, gr::work::Status::DONE };
+            return { requested_work, 0UZ, gr::work::Status::DONE };
         }
     }
 };
 
-inline static std::size_t n_samples_consumed = 0_UZ;
+inline static std::size_t n_samples_consumed = 0UZ;
 
-template<typename T, std::size_t N_MIN = 1_UZ, std::size_t N_MAX = N_MAX>
+template<typename T, std::size_t N_MIN = 1UZ, std::size_t N_MAX = N_MAX>
 struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     gr::PortIn<T, gr::RequiredSamples<N_MIN, N_MAX>> in;
     std::size_t                                      should_receive_n_samples = 0;

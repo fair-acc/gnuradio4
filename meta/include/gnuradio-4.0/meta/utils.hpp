@@ -27,18 +27,7 @@
 #define DISABLE_SIMD 0
 #endif
 
-namespace gr::literals {
-// C++23 has literal suffixes for std::size_t, but we are not
-// in C++23 just yet
-constexpr std::size_t
-operator"" _UZ(unsigned long long n) {
-    return static_cast<std::size_t>(n);
-}
-} // namespace gr::literals
-
 namespace gr::meta {
-
-using namespace gr::literals;
 
 struct null_type {};
 
@@ -181,7 +170,7 @@ struct message_type {};
 template<class... T>
 constexpr bool always_false = false;
 
-constexpr std::size_t invalid_index = -1_UZ;
+constexpr std::size_t invalid_index = -1UZ;
 
 #if HAVE_SOURCE_LOCATION
 [[gnu::always_inline]] inline void

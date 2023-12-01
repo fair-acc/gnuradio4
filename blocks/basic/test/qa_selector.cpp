@@ -10,8 +10,6 @@
 
 #include <gnuradio-4.0/basic/selector.hpp>
 
-using namespace gr::literals;
-
 template<typename T>
 struct repeated_source : public gr::Block<repeated_source<T>> {
     std::uint32_t                  identifier = 0;
@@ -19,7 +17,7 @@ struct repeated_source : public gr::Block<repeated_source<T>> {
     std::vector<T>                 values;
     std::vector<T>::const_iterator values_next;
 
-    gr::PortOut<T>                 out;
+    gr::PortOut<T> out;
 
     void
     settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
@@ -35,13 +33,12 @@ struct repeated_source : public gr::Block<repeated_source<T>> {
         }
 
         if (remaining_events_count != 0) {
-            using namespace gr::literals;
             auto &port   = gr::outputPort<0>(this);
             auto &writer = port.streamWriter();
-            auto  data   = writer.reserve_output_range(1_UZ);
+            auto  data   = writer.reserve_output_range(1UZ);
 
-            data[0]      = *values_next;
-            data.publish(1_UZ);
+            data[0] = *values_next;
+            data.publish(1UZ);
 
             remaining_events_count--;
             if (remaining_events_count == 0) {
@@ -62,8 +59,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (repeated_source<T>), identifi
 
 template<typename T>
 struct validator_sink : public gr::Block<validator_sink<T>> {
-    std::uint32_t                  identifier = 0;
-    gr::PortIn<T>                  in;
+    std::uint32_t identifier = 0;
+    gr::PortIn<T> in;
 
     std::vector<T>                 expected_values;
     std::vector<T>::const_iterator expected_values_next;
@@ -130,16 +127,16 @@ void
 execute_selector_test(test_definition definition) {
     using namespace boost::ut;
 
-    const std::uint32_t                    sources_count = definition.input_values.size();
-    const std::uint32_t                    sinks_count   = definition.output_values.size();
+    const std::uint32_t sources_count = definition.input_values.size();
+    const std::uint32_t sinks_count   = definition.output_values.size();
 
     gr::Graph                              graph;
     std::vector<repeated_source<double> *> sources;
     std::vector<validator_sink<double> *>  sinks;
     gr::basic::Selector<double>           *selector;
 
-    std::vector<std::uint32_t>             mapIn(definition.mapping.size());
-    std::vector<std::uint32_t>             mapOut(definition.mapping.size());
+    std::vector<std::uint32_t> mapIn(definition.mapping.size());
+    std::vector<std::uint32_t> mapOut(definition.mapping.size());
     std::ranges::transform(definition.mapping, mapIn.begin(), [](auto &p) { return p.first; });
     std::ranges::transform(definition.mapping, mapOut.begin(), [](auto &p) { return p.second; });
 
