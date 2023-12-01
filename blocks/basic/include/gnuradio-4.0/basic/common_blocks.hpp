@@ -10,8 +10,6 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 
-using namespace gr::literals;
-
 template<typename T>
 class builtin_multiply : public gr::Block<builtin_multiply<T>> {
     T _factor = static_cast<T>(1.0f);
@@ -42,8 +40,8 @@ class builtin_counter : public gr::Block<builtin_counter<T>> {
 public:
     static std::size_t s_event_count;
 
-    gr::PortIn<T>      in;
-    gr::PortOut<T>     out;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
 
     [[nodiscard]] constexpr auto
     processOne(T a) const noexcept {
@@ -132,12 +130,12 @@ public:
 
     [[nodiscard]] constexpr std::size_t
     availableInputSamples(std::vector<std::size_t> &) const noexcept override {
-        return 0_UZ;
+        return 0UZ;
     }
 
     [[nodiscard]] constexpr std::size_t
     availableOutputSamples(std::vector<std::size_t> &) const noexcept override {
-        return 0_UZ;
+        return 0UZ;
     }
 
     // TODO: integrate with Block::work
@@ -153,7 +151,7 @@ public:
         }
 
         if (available_samples == 0) {
-            return { requested_work, 0_UZ, gr::work::Status::OK };
+            return { requested_work, 0UZ, gr::work::Status::OK };
         }
 
         std::vector<std::span<const double>> readers;

@@ -92,7 +92,7 @@ ClockSource Documentation -- add here
     work::Status
     processBulk(PublishableSpan auto &output) noexcept {
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
-            output.publish(0_UZ);
+            output.publish(0UZ);
             return work::Status::DONE;
         }
 
@@ -102,7 +102,7 @@ ClockSource Documentation -- add here
         }
         const auto writableSamples = static_cast<std::uint32_t>(output.size());
         if (writableSamples < chunk_size) {
-            output.publish(0_UZ);
+            output.publish(0UZ);
             return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 

@@ -9,7 +9,6 @@ GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
 
-using namespace gr::literals;
 namespace grg = gr;
 
 template<typename T>
@@ -29,7 +28,7 @@ read_total_count(const gr::property_map &params) {
 template<typename T>
 class cout_sink : public grg::Block<cout_sink<T>, grg::PortInNamed<T, "in">> {
 public:
-    std::size_t total_count = -1_UZ;
+    std::size_t total_count = -1UZ;
 
     cout_sink() {}
 
@@ -53,28 +52,28 @@ public:
     grg::work::Result
     work(std::size_t requested_work) {
         if (this->state == gr::LifeCycleState::STOPPED) {
-            return { requested_work, 0_UZ, gr::work::Status::DONE };
+            return { requested_work, 0UZ, gr::work::Status::DONE };
         }
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
             this->state = gr::LifeCycleState::STOPPED;
             this->publishEOSTag(std::size_t(0));
-            return { requested_work, 0_UZ, grg::work::Status::DONE };
+            return { requested_work, 0UZ, grg::work::Status::DONE };
         }
 
         auto &port   = gr::outputPort<0>(this);
         auto &writer = port.streamWriter();
-        auto  data   = writer.reserve_output_range(1_UZ);
+        auto  data   = writer.reserve_output_range(1UZ);
         data[0]      = value;
-        data.publish(1_UZ);
+        data.publish(1UZ);
 
         value += 1;
         if (event_count == std::numeric_limits<std::size_t>::max()) {
-            return { requested_work, 1_UZ, grg::work::Status::OK };
+            return { requested_work, 1UZ, grg::work::Status::OK };
         }
 
         event_count--;
-        return { requested_work, 1_UZ, grg::work::Status::OK };
+        return { requested_work, 1UZ, grg::work::Status::OK };
     }
 };
 } // namespace good

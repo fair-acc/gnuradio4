@@ -60,7 +60,7 @@ struct Source : public Block<Source<T>> {
 
         if (nSamples == -1) {
             this->requestStop();
-            output.publish(0_UZ);
+            output.publish(0UZ);
             return work::Status::DONE;
         }
         if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
@@ -239,7 +239,6 @@ const boost::ut::suite DataSinkTests = [] {
     using namespace gr;
     using namespace gr::basic;
     using namespace gr::basic::data_sink_test;
-    using namespace gr::literals;
     using namespace std::string_literals;
 
     "callback continuous mode"_test = [] {
@@ -267,7 +266,7 @@ const boost::ut::suite DataSinkTests = [] {
             if (chunksSeen1 < 201) {
                 expect(eq(buffer.size(), kChunkSize));
             } else {
-                expect(eq(buffer.size(), 5_UZ));
+                expect(eq(buffer.size(), 5UZ));
             }
         };
 
@@ -296,7 +295,7 @@ const boost::ut::suite DataSinkTests = [] {
             if (chunksSeen2 < 201) {
                 expect(eq(buffer.size(), kChunkSize));
             } else {
-                expect(eq(buffer.size(), 5_UZ));
+                expect(eq(buffer.size(), 5UZ));
             }
         };
 
@@ -315,8 +314,8 @@ const boost::ut::suite DataSinkTests = [] {
         sink.stop(); // TODO the scheduler should call this
 
         auto lg = std::lock_guard{ m2 };
-        expect(eq(chunksSeen1.load(), 201_UZ));
-        expect(eq(chunksSeen2, 201_UZ));
+        expect(eq(chunksSeen1.load(), 201UZ));
+        expect(eq(chunksSeen2, 201UZ));
         expect(eq(samplesSeen1.load(), static_cast<std::size_t>(kSamples)));
         expect(eq(samplesSeen2, static_cast<std::size_t>(kSamples)));
         expect(eq(indexesMatch(receivedTags, srcTags), true)) << fmt::format("{} != {}", formatList(receivedTags), formatList(srcTags));
@@ -391,12 +390,12 @@ const boost::ut::suite DataSinkTests = [] {
         const auto &[received2, receivedTags] = runner2.get();
         expect(eq(received1.size(), expected.size()));
         expect(eq(received1, expected));
-        expect(eq(pollerDataOnly->drop_count.load(), 0_UZ));
+        expect(eq(pollerDataOnly->drop_count.load(), 0UZ));
         expect(eq(received2.size(), expected.size()));
         expect(eq(received2, expected));
         expect(eq(receivedTags.size(), tags.size()));
         expect(eq(indexesMatch(receivedTags, tags), true)) << fmt::format("{} != {}", formatList(receivedTags), formatList(tags));
-        expect(eq(pollerWithTags->drop_count.load(), 0_UZ));
+        expect(eq(pollerWithTags->drop_count.load(), 0UZ));
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
@@ -454,11 +453,11 @@ const boost::ut::suite DataSinkTests = [] {
         const auto &[receivedData, receivedTags] = polling.get();
         const auto expected_tags                 = { tags[0], tags[2] }; // triggers-only
 
-        expect(eq(receivedData.size(), 10_UZ));
+        expect(eq(receivedData.size(), 10UZ));
         expect(eq(receivedData, std::vector<int32_t>{ 2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001 }));
         expect(eq(receivedTags.size(), expected_tags.size()));
 
-        expect(eq(poller->drop_count.load(), 0_UZ));
+        expect(eq(poller->drop_count.load(), 0UZ));
     };
 
     "blocking snapshot mode"_test = [] {
@@ -527,7 +526,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto receivedData = poller_result.get();
         expect(eq(receivedDataCb, receivedData));
         expect(eq(receivedData, std::vector<int32_t>{ 8000, 185000 }));
-        expect(eq(poller->drop_count.load(), 0_UZ));
+        expect(eq(poller->drop_count.load(), 0UZ));
     };
 
     "blocking multiplexed mode"_test = [] {

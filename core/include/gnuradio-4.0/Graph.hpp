@@ -33,8 +33,6 @@
 
 namespace gr {
 
-using namespace gr::literals;
-
 class BlockModel {
 protected:
     struct NamedPortCollection {
@@ -256,7 +254,7 @@ public:
 };
 
 namespace detail {
-template <typename T, typename... Ts>
+template<typename T, typename... Ts>
 constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
 }
 
@@ -290,7 +288,7 @@ private:
         _dynamicPortsLoader = [this] {
             if (_dynamicPortsLoaded) return;
 
-            using Node        = std::remove_cvref_t<decltype(blockRef())>;
+            using Node = std::remove_cvref_t<decltype(blockRef())>;
 
             auto registerPort = [&](auto &where, [[maybe_unused]] auto direction, [[maybe_unused]] auto index, auto &&t) {
                 auto processPort = []<typename Port>(auto &where_, Port &port) -> auto & {
@@ -358,7 +356,7 @@ public:
     }
 
     template<typename... Args>
-        requires (!detail::contains_type<BlockWrapper, std::decay_t<Args>...> && sizeof...(Args) > 1)
+        requires(!detail::contains_type<BlockWrapper, std::decay_t<Args>...> && sizeof...(Args) > 1)
     explicit BlockWrapper(Args &&...args) : _block{ std::forward<Args>(args)... } {
         createDynamicPortsLoader();
     }
@@ -453,7 +451,7 @@ public: // TODO: consider making this private and to use accessors (that can be 
     bool                             _connected;
 
 public:
-    Edge()             = delete;
+    Edge() = delete;
 
     Edge(const Edge &) = delete;
 
@@ -521,7 +519,7 @@ public:
 struct Graph {
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
-            "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+            "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
 
 private:
     std::vector<std::function<ConnectionResult(Graph &)>> _connectionDefinitions;
@@ -578,7 +576,8 @@ private:
         if (result == ConnectionResult::SUCCESS) {
             auto *sourceNode      = findBlock(sourceNodeRaw).get();
             auto *destinationNode = findBlock(destinationNodeRaw).get();
-            _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{ sourcePortIndex, sourcePortSubIndex }, destinationNode, PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, name);
+            _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{ sourcePortIndex, sourcePortSubIndex }, destinationNode,
+                                PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, name);
         }
 
         return result;
@@ -587,7 +586,7 @@ private:
     // Just a dummy class that stores the graph and the source block and port
     // to be able to split the connection into two separate calls
     // connect(source) and .to(destination)
-    template<typename Source, typename Port, std::size_t sourcePortIndex = 1_UZ, std::size_t sourcePortSubIndex = meta::invalid_index>
+    template<typename Source, typename Port, std::size_t sourcePortIndex = 1UZ, std::size_t sourcePortSubIndex = meta::invalid_index>
     struct SourceConnector {
         Graph  &self;
         Source &source;
@@ -1021,7 +1020,7 @@ public:
 };
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_counter{ 0_UZ };
+inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_counter{ 0UZ };
 
 /**
  * This methods can merge simple blocks that are defined via a single `auto processOne(..)` producing a

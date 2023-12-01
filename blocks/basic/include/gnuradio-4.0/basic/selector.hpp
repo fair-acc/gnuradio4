@@ -115,7 +115,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
                 const std::vector<output_writer_t *> &outs) {
         if (_internalMapping.empty()) {
             if (backPressure) {
-                std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(0_UZ); });
+                std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(0UZ); });
             } else {
                 // make the implicit consume all available behaviour explicit
                 std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(input->available()); });
@@ -191,7 +191,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
             if (used_inputs.contains(src_port)) continue;
 
             if (backPressure) {
-                std::ignore = ins[src_port]->consume(0_UZ);
+                std::ignore = ins[src_port]->consume(0UZ);
 
             } else {
                 // make the implicit consume all available behaviour explicit

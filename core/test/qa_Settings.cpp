@@ -381,7 +381,7 @@ const boost::ut::suite SettingsTests = [] {
 
     "run-time type-erased node setter/getter"_test = [] {
         auto progress     = std::make_shared<gr::Sequence>();
-        auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2_UZ, std::numeric_limits<uint32_t>::max());
+        auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
         //
         auto wrapped1 = BlockWrapper<TestBlock<float>>();
         wrapped1.init(progress, ioThreadPool);

@@ -15,7 +15,6 @@
 namespace gr {
 
 using gr::meta::fixed_string;
-using namespace gr::literals;
 
 #ifndef PMT_SUPPORTED_TYPE // // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
 #define PMT_SUPPORTED_TYPE
@@ -305,7 +304,7 @@ public:
     operator=(const Port &)
             = delete;
 
-    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0_UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
+    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
         : name(std::move(port_name)), priority{ priority_ }, min_samples(min_samples_), max_samples(max_samples_) {
         static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
     }
@@ -848,7 +847,7 @@ publish_tag(PortLike auto &port, property_map &&tag_data, std::size_t tag_offset
                 tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
                 tag_output[0].map   = std::move(data);
             },
-            1_UZ);
+            1UZ);
 }
 
 constexpr void
@@ -858,7 +857,7 @@ publish_tag(PortLike auto &port, const property_map &tag_data, std::size_t tag_o
                 tag_output[0].index = port.streamWriter().position() + tag_offset;
                 tag_output[0].map   = tag_data;
             },
-            1_UZ);
+            1UZ);
 }
 
 constexpr std::size_t
@@ -874,7 +873,7 @@ samples_to_next_tag(const PortLike auto &port) {
 
     if (future_tags_begin == tagData.begin()) {
         const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
-        const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1_UZ);
+        const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1UZ);
         return n_samples_until_next_tag;
     } else {
         return 0;
