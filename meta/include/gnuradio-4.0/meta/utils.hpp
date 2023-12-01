@@ -30,7 +30,10 @@
 namespace gr::literals {
 // C++23 has literal suffixes for std::size_t, but we are not
 // in C++23 just yet
-constexpr std::size_t operator"" _UZ(unsigned long long n) { return static_cast<std::size_t>(n); }
+constexpr std::size_t
+operator"" _UZ(unsigned long long n) {
+    return static_cast<std::size_t>(n);
+}
 } // namespace gr::literals
 
 namespace gr::meta {
@@ -47,7 +50,7 @@ struct fixed_string {
     constexpr static std::size_t N            = SIZE;
     CharT                        _data[N + 1] = {};
 
-    constexpr fixed_string()                  = default;
+    constexpr fixed_string() = default;
 
     constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
         if constexpr (N != 0)
@@ -64,9 +67,15 @@ struct fixed_string {
         return N == 0;
     }
 
-    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return { _data, N }; }
+    [[nodiscard]] constexpr explicit
+    operator std::string_view() const noexcept {
+        return { _data, N };
+    }
 
-    [[nodiscard]] explicit operator std::string() const noexcept { return { _data, N }; }
+    [[nodiscard]] explicit
+    operator std::string() const noexcept {
+        return { _data, N };
+    }
 
     [[nodiscard]] operator const char *() const noexcept { return _data; }
 
@@ -170,7 +179,7 @@ template<fixed_string val>
 struct message_type {};
 
 template<class... T>
-constexpr bool        always_false  = false;
+constexpr bool always_false = false;
 
 constexpr std::size_t invalid_index = -1_UZ;
 
@@ -239,7 +248,7 @@ concept array_type = is_std_array_type<std::remove_cv_t<T>>::value;
 template<typename T, typename V = void>
 concept array_or_vector_type = (vector_type<T> || array_type<T>) &&(std::same_as<V, void> || std::same_as<typename T::value_type, V>);
 
-namespace stdx               = vir::stdx;
+namespace stdx = vir::stdx;
 
 template<typename V, typename T = void>
 concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
@@ -481,6 +490,30 @@ static inline constexpr const std::size_t kCacheLine = std::hardware_destructive
 #else
 static inline constexpr const std::size_t kCacheLine = 64;
 #endif
+
+namespace detail {
+
+template<typename T>
+concept HasValueType = requires { typename T::value_type; };
+
+template<typename T, typename = void>
+struct fundamental_base_value_type {
+    using type = T;
+};
+
+template<HasValueType T>
+struct fundamental_base_value_type<T> {
+    using type = typename fundamental_base_value_type<typename T::value_type>::type;
+};
+
+} // namespace detail
+
+template<typename T>
+using fundamental_base_value_type_t = typename detail::fundamental_base_value_type<T>::type;
+
+static_assert(std::is_same_v<fundamental_base_value_type_t<int>, int>);
+static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<float>>, float>);
+static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<std::complex<double>>>, double>);
 
 } // namespace gr::meta
 

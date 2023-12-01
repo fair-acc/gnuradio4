@@ -34,10 +34,9 @@ concept arithmetic_or_complex_like = std::is_arithmetic_v<T> || meta::complex_li
 template<arithmetic_or_complex_like T>
 struct UncertainValue {
     using value_type = T;
-    // using T2 = typename std::conditional_t<std::is_arithmetic_v<T>, T, typename T::value_type>; // TODO: fix later for handling symmetric errors for std::complex
 
     T value       = static_cast<T>(0); /// mean value
-    T uncertainty = static_cast<T>(0); /// uncorrelated standard deviation (TODO: make T2)
+    T uncertainty = static_cast<T>(0); /// uncorrelated standard deviation
 
     // Default constructor
     constexpr UncertainValue() noexcept = default;
@@ -89,7 +88,7 @@ using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
 /********************** some basic math operation definitions *********************************/
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-    requires(UncertainValueLike<T> || UncertainValueLike<U>) // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
+    requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
 [[nodiscard]] inline constexpr auto
 operator+(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
@@ -130,7 +129,7 @@ operator+(const T &val) {
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-    requires UncertainValueLike<T> || UncertainValueLike<U> // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
+    requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
 [[nodiscard]] inline constexpr auto
 operator-(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
@@ -166,7 +165,7 @@ operator-(const T &val) {
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-    requires UncertainValueLike<T> || UncertainValueLike<U> // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
+    requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
 [[nodiscard]] inline constexpr auto
 operator*(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
@@ -198,7 +197,7 @@ operator*=(T &lhs, const U &rhs) noexcept {
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-    requires UncertainValueLike<T> || UncertainValueLike<U> // TODO: && std::is_same_v<ValueTypeT, ValueTypeU>
+    requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
 [[nodiscard]] inline constexpr auto
 operator/(const T &lhs, const U &rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
@@ -243,13 +242,12 @@ operator/=(T &lhs, const U &rhs) noexcept {
 
 } // namespace gr
 
-namespace std { // std:: basic math overloads
+namespace std { // std:: basic math overloads for user-specified types
 
-// TODO: check with Matthias whether overloading std math functions with user-defined types is acceptable or not
-
-template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_t<T>>
+template<gr::UncertainValueLike T, std::floating_point U, typename ValueTypeT = gr::UncertainValueType_t<T>>
+    requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> || std::integral<U>
 [[nodiscard]] inline constexpr T
-pow(const T &base, std::floating_point auto exponent) noexcept {
+pow(const T &base, U exponent) noexcept {
     if (base.value == 0.0) [[unlikely]] {
         if (exponent == 0) [[unlikely]] {
             return T{ 1, 0 };
@@ -268,10 +266,9 @@ pow(const T &base, std::floating_point auto exponent) noexcept {
 }
 
 template<gr::UncertainValueLike T, gr::UncertainValueLike U, typename ValueTypeT = gr::UncertainValueType_t<T>, typename ValueTypeU = gr::UncertainValueType_t<T>>
+    requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr::meta::fundamental_base_value_type_t<ValueTypeU>>
 [[nodiscard]] inline constexpr T
 pow(const T &base, const U &exponent) noexcept {
-    static_assert(std::is_same_v<ValueTypeT, ValueTypeU>, "base and exponent must be of the same type");
-
     if (base.value == 0.0) [[unlikely]] {
         if (exponent.value == static_cast<ValueTypeU>(0)) [[unlikely]] {
             return T{ 1, 0 };
