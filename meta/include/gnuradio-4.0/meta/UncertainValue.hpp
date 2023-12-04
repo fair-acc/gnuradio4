@@ -121,7 +121,7 @@ operator+=(T &lhs, const U &rhs) noexcept {
 template<UncertainValueLike T, typename ValueTypeT = UncertainValueType_t<T>>
 inline constexpr T
 operator+(const T &val) {
-    if (meta::complex_like<ValueTypeT>) {
+    if constexpr (meta::complex_like<ValueTypeT>) {
         return val;
     } else {
         return { std::abs(val.value), std::abs(val.uncertainty) };
