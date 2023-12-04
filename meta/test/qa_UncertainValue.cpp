@@ -78,7 +78,7 @@ const boost::ut::suite uncertainValue = [] {
 
     "operator+(UncertainValue&)"_test = [] {
         constexpr UncertainValue<double> orig{ -4.0, -0.5 };
-        UncertainValue<double> inverted = +orig;
+        UncertainValue<double>           inverted = +orig;
 
         expect(eq(inverted.value, 4.0));
         expect(eq(inverted.uncertainty, 0.5));
@@ -457,51 +457,51 @@ const boost::ut::suite uncertainValue = [] {
 
     "std::pow(UncertainValue<arithmetic>, arithmetic)"_test = [] {
         using Un = UncertainValue<double>;
-        expect(eq(4.0, (std::pow(Un{ 2.0, 1.0 }, 2.0)).value));
-        expect(eq(4.0, (std::pow(Un{ 2.0, 1.0 }, 2.0)).uncertainty));
+        expect(eq(4.0, (gr::math::pow(Un{ 2.0, 1.0 }, 2.0)).value));
+        expect(eq(4.0, (gr::math::pow(Un{ 2.0, 1.0 }, 2.0)).uncertainty));
 
-        expect(eq(0.0, (std::pow(Un{ 0.0, 1.0 }, 2.0)).value));
-        expect(eq(0.0, (std::pow(Un{ 0.0, 1.0 }, 2.0)).uncertainty));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 1.0 }, 2.0)).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 1.0 }, 2.0)).uncertainty));
 
-        expect(eq(1.0, (std::pow(Un{ 3.0, 1.0 }, 0.0)).value));
-        expect(eq(0.0, (std::pow(Un{ 3.0, 1.0 }, 0.0)).uncertainty));
+        expect(eq(1.0, (gr::math::pow(Un{ 3.0, 1.0 }, 0.0)).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 3.0, 1.0 }, 0.0)).uncertainty));
 
-        expect(eq(1.0, (std::pow(Un{ 0.0, 1.0 }, 0.0)).value));
-        expect(eq(0.0, (std::pow(Un{ 0.0, 1.0 }, 0.0)).uncertainty));
+        expect(eq(1.0, (gr::math::pow(Un{ 0.0, 1.0 }, 0.0)).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 1.0 }, 0.0)).uncertainty));
     };
 
-    "std::pow(UncertainValue<arithmetic>, UncertainValue<arithmetic>)"_test = [] {
+    "gr::math::pow(UncertainValue<arithmetic>, UncertainValue<arithmetic>)"_test = [] {
         using Un = UncertainValue<double>;
         using std::numbers::e;
 
-        expect(eq(e * e, (std::pow(Un{ e, e * 2.0 }, Un{ 2.0, 3.0 })).value));
-        expect(approx(e * e * 5.0, (std::pow(Un{ e, e * 2.0 }, Un{ 2.0, 3.0 })).uncertainty, 1e-3));
+        expect(eq(e * e, (gr::math::pow(Un{ e, e * 2.0 }, Un{ 2.0, 3.0 })).value));
+        expect(approx(e * e * 5.0, (gr::math::pow(Un{ e, e * 2.0 }, Un{ 2.0, 3.0 })).uncertainty, 1e-3));
 
         // reproduce previous special case of uncertain value + arithmetic, here via setting uncertainty of exponent to 0
-        expect(eq(4.0, (std::pow(Un{ 2.0, 1.0 }, Un{ 2.0, 0.0 })).value));
-        expect(eq(4.0, (std::pow(Un{ 2.0, 1.0 }, Un{ 2.0, 0.0 })).uncertainty));
+        expect(eq(4.0, (gr::math::pow(Un{ 2.0, 1.0 }, Un{ 2.0, 0.0 })).value));
+        expect(eq(4.0, (gr::math::pow(Un{ 2.0, 1.0 }, Un{ 2.0, 0.0 })).uncertainty));
 
-        expect(eq(0.0, (std::pow(Un{ 0.0, 1.0 }, Un{ 2.0, 0.0 })).value));
-        expect(eq(0.0, (std::pow(Un{ 0.0, 1.0 }, Un{ 2.0, 0.0 })).uncertainty));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 1.0 }, Un{ 2.0, 0.0 })).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 1.0 }, Un{ 2.0, 0.0 })).uncertainty));
 
-        expect(eq(1.0, (std::pow(Un{ 3.0, 1.0 }, Un{ 0.0, 0.0 })).value));
-        expect(eq(0.0, (std::pow(Un{ 3.0, 1.0 }, Un{ 0.0, 0.0 })).uncertainty));
+        expect(eq(1.0, (gr::math::pow(Un{ 3.0, 1.0 }, Un{ 0.0, 0.0 })).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 3.0, 1.0 }, Un{ 0.0, 0.0 })).uncertainty));
 
-        expect(eq(1.0, (std::pow(Un{ 0.0, 1.0 }, Un{ 0.0, 0.0 })).value));
-        expect(eq(0.0, (std::pow(Un{ 0.0, 1.0 }, Un{ 0.0, 0.0 })).uncertainty));
+        expect(eq(1.0, (gr::math::pow(Un{ 0.0, 1.0 }, Un{ 0.0, 0.0 })).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 1.0 }, Un{ 0.0, 0.0 })).uncertainty));
 
-        expect(eq(0.0, (std::pow(Un{ 0.0, 0.1 }, Un{ 2.0, 0.1 })).value));
-        expect(eq(0.0, (std::pow(Un{ 0.0, 0.1 }, Un{ 2.0, 0.1 })).uncertainty));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 0.1 }, Un{ 2.0, 0.1 })).value));
+        expect(eq(0.0, (gr::math::pow(Un{ 0.0, 0.1 }, Un{ 2.0, 0.1 })).uncertainty));
     };
 
-    "std::pow(UncertainValue<std::complex<double>, arithmetic)"_test = [] {
+    "gr::math::pow(UncertainValue<std::complex<double>, arithmetic)"_test = [] {
         using ComplexUncertain = UncertainValue<std::complex<double>>;
 
         {
             ComplexUncertain base{ { std::sqrt(2.0), std::sqrt(2.0) }, 0.1 + 0.1i };
             double           exponent = 2.0;
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::pow(base.value, exponent), result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.4, 0.4 }, result.uncertainty, 1e-6));
         }
@@ -510,7 +510,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ 0.0 + 0.0i, 0.1 + 0.1i };
             double           exponent = 2.0;
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(0.0 + 0.0i, result.value, 1e-9));
             expect(approx(0.0 + 0.0i, result.uncertainty, 1e-9));
         }
@@ -519,7 +519,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ 1.0 + 2.0i, 0.1 + 0.1i };
             double           exponent = 0.0;
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(1.0 + 0.0i, result.value, 1e-9));
             expect(approx(0.0 + 0.0i, result.uncertainty, 1e-9));
         }
@@ -528,13 +528,13 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ 0.0, 0.1 + 0.1i };
             double           exponent = 0.0;
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(1.0 + 0.0i, result.value, 1e-9));
             expect(approx(0.0 + 0.0i, result.uncertainty, 1e-9));
         }
     };
 
-    "std::pow(UncertainValue<std::complex<double>, UncertainValue<arithmetic>)"_test = [] {
+    "gr::math::pow(UncertainValue<std::complex<double>, UncertainValue<arithmetic>)"_test = [] {
         using ComplexUncertain = UncertainValue<std::complex<double>>;
         using Un               = UncertainValue<double>;
 
@@ -542,7 +542,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { std::sqrt(2.0), std::sqrt(2.0) }, 0.1 + 0.1i };
             Un               exponent = { 2.0, 0.0 };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::pow(base.value, exponent.value), result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.565685, 0 }, result.uncertainty, 1e-6)); // calculated with Wolfram
         }
@@ -551,7 +551,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { std::sqrt(2.0), std::sqrt(2.0) }, 0.1 + 0.1i };
             ComplexUncertain exponent = { { 2.0 }, { 0.0 } };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::pow(base.value, exponent.value), result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.565685, 0.0 }, result.uncertainty, 1e-6)); // calculated with Wolfram
         }
@@ -560,7 +560,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { std::sqrt(2.0), std::sqrt(2.0) }, 0.1 + 0.1i };
             Un               exponent = { 2.0, 0.1 };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::pow(base.value, exponent.value), result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.703966, 0.0 }, result.uncertainty, 1e-3)); // calculated with Wolfram
         }
@@ -569,7 +569,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { std::sqrt(2.0), std::sqrt(2.0) }, 0.1 + 0.1i };
             ComplexUncertain exponent{ { 2.0 }, 0.1 + 0.1i };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::pow(base.value, exponent.value), result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.81923, 0.0 }, result.uncertainty, 1e-3)); // calculated with Wolfram
         }
@@ -578,7 +578,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { 0.0, 0.0 }, { 0.1, 0.1 } };
             Un               exponent = { 2.0, 0.0 };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::complex<double>{ 0.0, 0.0 }, result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.0, 0.0 }, result.uncertainty, 1e-9));
         }
@@ -587,7 +587,7 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { 1.0, 2.0 }, { 0.1, 0.1 } };
             Un               exponent = { 0.0, 0.0 };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::complex<double>{ 1.0, 0.0 }, result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.0, 0.0 }, result.uncertainty, 1e-9));
         }
@@ -596,43 +596,43 @@ const boost::ut::suite uncertainValue = [] {
             ComplexUncertain base{ { 0.0 }, { 0.1, 0.1 } };
             Un               exponent = { 0.0, 0.0 };
 
-            auto result = std::pow(base, exponent);
+            gr::UncertainValueLike auto result = gr::math::pow(base, exponent);
             expect(approx(std::complex<double>{ 1.0, 0.0 }, result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.0, 0.0 }, result.uncertainty, 1e-9));
         }
     };
 
-    "std::sqrt(UncertainValue<double>)"_test = [] {
+    "gr::math::sqrt(UncertainValue<double>)"_test = [] {
         using UncertainDouble = UncertainValue<double>;
 
         {
-            UncertainDouble value{ 4.0, 0.2 }; // sqrt(4) = 2, uncertainty should be 0.2 / (2*2) = 0.05
-            auto            result = std::sqrt(value);
+            UncertainDouble             value{ 4.0, 0.2 }; // sqrt(4) = 2, uncertainty should be 0.2 / (2*2) = 0.05
+            gr::UncertainValueLike auto result = gr::math::sqrt(value);
             expect(approx(2.0, result.value, 1e-9));
             expect(approx(0.05, result.uncertainty, 1e-9));
         }
 
         {
-            UncertainDouble value{ 0.0, 0.1 }; // sqrt(0) = 0, uncertainty should be 0
-            auto            result = std::sqrt(value);
+            UncertainDouble             value{ 0.0, 0.1 }; // sqrt(0) = 0, uncertainty should be 0
+            gr::UncertainValueLike auto result = gr::math::sqrt(value);
             expect(approx(0.0, result.value, 1e-9));
             expect(approx(0.0, result.uncertainty, 1e-9));
         }
     };
 
-    "std::sqrt(UncertainValue<std::complex<double>>)"_test = [] {
+    "gr::math::sqrt(UncertainValue<std::complex<double>>)"_test = [] {
         using ComplexUncertain = UncertainValue<std::complex<double>>;
 
         {
-            ComplexUncertain value{ { 4.0, 4.0 }, { 0.2, 0.2 } }; // sqrt(4+4i)
-            auto             result = std::sqrt(value);
+            ComplexUncertain            value{ { 4.0, 4.0 }, { 0.2, 0.2 } }; // sqrt(4+4i)
+            gr::UncertainValueLike auto result = gr::math::sqrt(value);
             expect(approx(std::sqrt(value.value), result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.0420448, 0.0420448 }, result.uncertainty, 1e-3));
         }
 
         {
-            ComplexUncertain value{ { 0.0, 0.0 }, { 0.1, 0.1 } }; // sqrt(0+0i)
-            auto             result = std::sqrt(value);
+            ComplexUncertain            value{ { 0.0, 0.0 }, { 0.1, 0.1 } }; // sqrt(0+0i)
+            gr::UncertainValueLike auto result = gr::math::sqrt(value);
             expect(approx(std::complex<double>{ 0.0, 0.0 }, result.value, 1e-9));
             expect(approx(std::complex<double>{ 0.0, 0.0 }, result.uncertainty, 1e-9));
         }
@@ -693,48 +693,48 @@ const boost::ut::suite uncertainValueTrigonometric = [] {
     using test::detail::approx;
     using std::numbers::pi;
 
-    "sin(UncertainValue<…>)"_test = [] {
+    "gr::math::sin(UncertainValue<…>)"_test = [] {
         {
-            UncertainValue<double> x{ pi / 6, 0.01 }; // 30 degrees
-            auto                   result = std::sin(x);
+            UncertainValue<double>      x{ pi / 6, 0.01 }; // 30 degrees
+            gr::UncertainValueLike auto result = gr::math::sin(x);
             expect(approx(0.5, result.value, 1e-6)) << "sin(π/6)";
             expect(approx(0.01 * std::cos(pi / 6), result.uncertainty, 1e-6)) << "Uncertainty in sin(π/6)";
         }
 
         {
-            UncertainValue<double> x{ pi / 3, 0.1 }; // 60 degrees
-            auto                   result = std::sin(x);
+            UncertainValue<double>      x{ pi / 3, 0.1 }; // 60 degrees
+            gr::UncertainValueLike auto result = gr::math::sin(x);
             expect(approx(std::sqrt(3) / 2, result.value, 1e-6)) << "sin(π/3)";
             expect(approx(0.1 * std::cos(pi / 3), result.uncertainty, 1e-6)) << "Uncertainty in sin(π/3)";
         }
 
         {
             UncertainValue<std::complex<double>> x{ 1.0 + 2.0i, 0.1 + 0.2i };
-            auto                                 result = std::sin(x);
+            gr::UncertainValueLike auto          result = gr::math::sin(x);
 
             expect(approx(std::sin(x.value), result.value, 1e-6));
             expect(approx(std::complex<double>{ 0.81994, 0 }, result.uncertainty, 1e-6)); // TODO check
         }
     };
 
-    "cos(UncertainValue<…>)"_test = [] {
+    "gr::math::cos(UncertainValue<…>)"_test = [] {
         {
-            UncertainValue<double> x{ pi / 3, 0.01 }; // 60 degrees
-            auto                   result = std::cos(x);
+            UncertainValue<double>      x{ pi / 3, 0.01 }; // 60 degrees
+            gr::UncertainValueLike auto result = gr::math::cos(x);
             expect(approx(0.5, result.value, 1e-6)) << "cos(π/3)";
             expect(approx(0.01 * std::sin(pi / 3), result.uncertainty, 1e-6)) << "Uncertainty in cos(π/3)";
         }
 
         {
-            UncertainValue<double> x{ pi / 6, 0.1 }; // 30 degrees
-            auto                   result = std::cos(x);
+            UncertainValue<double>      x{ pi / 6, 0.1 }; // 30 degrees
+            gr::UncertainValueLike auto result = gr::math::cos(x);
             expect(approx(std::sqrt(3) / 2, result.value, 1e-6)) << "cos(π/6)";
             expect(approx(0.1 * std::sin(pi / 6), result.uncertainty, 1e-6)) << "Uncertainty in cos(π/6)";
         }
 
         {
             UncertainValue<std::complex<double>> x{ 1.0 + 1.0i, 0.1 + 0.1i };
-            auto                                 result = std::cos(x);
+            gr::UncertainValueLike auto          result = gr::math::cos(x);
 
             expect(approx(std::cos(x.value), result.value, 1e-6));
             expect(approx(std::complex<double>{ 0.20441, 0 }, result.uncertainty, 1e-6)); // TODO check
@@ -749,20 +749,20 @@ const boost::ut::suite uncertainValueExpTests = [] {
     using test::detail::approx;
     using std::numbers::pi;
 
-    "exp(UncertainValue<arithmetic>)"_test = [] {
-        UncertainValue<double> x{ 2.0, 0.1 }; // x = 2.0 ± 0.1
-        auto                   result              = std::exp(x);
-        auto                   expectedValue       = std::exp(x.value);
-        auto                   expectedUncertainty = std::exp(x.value) * x.uncertainty; // d(exp(x))/dx = exp(x)
+    "gr::math::exp(UncertainValue<arithmetic>)"_test = [] {
+        UncertainValue<double>      x{ 2.0, 0.1 }; // x = 2.0 ± 0.1
+        gr::UncertainValueLike auto result              = gr::math::exp(x);
+        auto                        expectedValue       = std::exp(x.value);
+        auto                        expectedUncertainty = std::exp(x.value) * x.uncertainty; // d(exp(x))/dx = exp(x)
 
         expect(approx(expectedValue, result.value, 1e-6)) << "Value of exp(2.0)";
         expect(approx(expectedUncertainty, result.uncertainty, 1e-6)) << "Uncertainty in exp(2.0)";
     };
 
-    "exp(UncertainValue<complex>)"_test = [] {
+    "gr::math::exp(UncertainValue<complex>)"_test = [] {
         {
             UncertainValue<std::complex<double>> x{ { 1.0, 2.0 }, { 0.1, 0.1 } }; // x = (1.0 + 2.0i) ± (0.1 + 0.1i)
-            auto                                 result = std::exp(x);
+            gr::UncertainValueLike auto          result = gr::math::exp(x);
             //            auto                                 expectedUncertainty = std::complex<double>{
             //                std::hypot(std::exp(x.value.real()) * std::cos(x.value.imag()) * x.uncertainty.real(), std::exp(x.value.real()) * std::sin(x.value.imag()) * x.uncertainty.imag()),
             //                std::hypot(std::exp(x.value.real()) * std::sin(x.value.imag()) * x.uncertainty.real(), std::exp(x.value.real()) * std::cos(x.value.imag()) * x.uncertainty.imag())
@@ -775,8 +775,8 @@ const boost::ut::suite uncertainValueExpTests = [] {
             using std::numbers::pi;
             UncertainValue<std::complex<double>> x{ { 0.0, 0 * pi / 2 }, { 0.1, 0.1 } }; // x = i * pi / 2 ± (0.1 + 0.1i)
 
-            expect(approx(std::exp(x.value), std::exp(x).value, 1e-6));
-            expect(approx(std::sin(UncertainValue<std::complex<double>>{ { pi / 2 }, { 0.1, 0.1 } }).value, std::exp(x).value, 1e-6));
+            expect(approx(std::exp(x.value), gr::math::exp(x).value, 1e-6));
+            expect(approx(gr::math::sin(UncertainValue<std::complex<double>>{ { pi / 2 }, { 0.1, 0.1 } }).value, gr::math::exp(x).value, 1e-6));
             // expect(approx(std::sin(UncertainValue<std::complex<double>>{ { pi / 2 }, { 0.1, 0.1 } }).uncertainty, std::exp(x).uncertainty, 1e-6)); // TODO: check if uncertainties are propagated as
             // absolute (real-valued only) or retain their complex nature)
         }

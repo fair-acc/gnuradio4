@@ -242,7 +242,7 @@ operator/=(T &lhs, const U &rhs) noexcept {
 
 } // namespace gr
 
-namespace std { // std:: basic math overloads for user-specified types
+namespace gr::math {
 
 template<gr::UncertainValueLike T, std::floating_point U, typename ValueTypeT = gr::UncertainValueType_t<T>>
     requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> || std::integral<U>
@@ -289,7 +289,7 @@ pow(const T &base, const U &exponent) noexcept {
 template<gr::UncertainValueLike T>
 [[nodiscard]] inline constexpr T
 sqrt(const T &value) noexcept {
-    return std::pow(value, 0.5);
+    return gr::math::pow(value, 0.5);
 }
 
 template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_t<T>>
@@ -308,12 +308,12 @@ template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_
 [[nodiscard]] inline constexpr T
 exp(const T &x) noexcept {
     if constexpr (gr::meta::complex_like<ValueTypeT>) {
-        return std::pow(gr::UncertainValue<ValueTypeT>{ std::numbers::e_v<typename ValueTypeT::value_type>, static_cast<ValueTypeT>(0) }, x);
+        return gr::math::pow(gr::UncertainValue<ValueTypeT>{ std::numbers::e_v<typename ValueTypeT::value_type>, static_cast<ValueTypeT>(0) }, x);
     } else {
-        return std::pow(gr::UncertainValue<ValueTypeT>{ std::numbers::e_v<ValueTypeT>, static_cast<ValueTypeT>(0) }, x);
+        return gr::math::pow(gr::UncertainValue<ValueTypeT>{ std::numbers::e_v<ValueTypeT>, static_cast<ValueTypeT>(0) }, x);
     }
 }
 
-} // namespace std
+} // namespace gr::math
 
 #endif // GNURADIO_UNCERTAINVALUE_HPP
