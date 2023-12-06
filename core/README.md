@@ -58,6 +58,7 @@ Ports in this framework are designed to interconnect blocks in a graph, similar 
 template has several parameters that define its behaviour, including the type of data it handles (`T`), its
 name (`PortName`), type (`PortType`), direction (`PortDirection` <-> input/output), and optional list of `Arguments`
 that may constrain the port behaviour on the `Block` or `Scheduler` level::
+
 ```cpp
 class template<typename T, fixed_string PortName, port_type_t PortType, port_direction_t PortDirection, typename... Arguments>
 struct Port { /* ... */ };
@@ -126,6 +127,7 @@ struct user_defined_block : Block<user_defined_block> {
 };
 ENABLE_REFLECTION(user_defined_block, in, out);
 ```
+
 The macro `ENABLE_REFLECTION` since it relies on a template specialisation needs to be declared on the global scope.
 As an alternative block definition that does not require the 'ENABLE_REFLECTION' macro and that also supports arbitrary
 types through templating the input 'T' and return type 'R':
@@ -264,6 +266,68 @@ and local block-specific constraints as defined by the blocks' ports, e.g.
 
 * minimum & maximum number of samples required per processing iteration (<-> data chunk size)
 * priority of specific edge/connection
+
+#### Scheduler state diagram
+
+`LifeCycleState` enum represents possible states of the `Scheduler`.
+
+```cpp
+enum class LifeCycleState : char { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR };
+```
+
+The complete state diagram of the `Scheduler` is shown below.
+
+```mermaid
+stateDiagram-v2
+    classDef style1 font-weight:bold,stroke-width:2px
+    classDef style2 font-weight:regular,stroke-width:1px
+
+    [*] --> IDLE:::style1
+    REQUESTED_PAUSE --> REQUESTED_STOP: stop()
+    IDLE --> INITIALISED:::style1: init()
+    INITIALISED --> RUNNING:::style1: start()
+    RUNNING --> REQUESTED_STOP:::style2: stop()
+    RUNNING --> REQUESTED_PAUSE:::style2: pause()
+    REQUESTED_STOP --> STOPPED:::style1
+    REQUESTED_PAUSE --> PAUSED:::style1
+    STOPPED --> INITIALISED: reset()
+    PAUSED --> RUNNING: resume()
+    PAUSED --> REQUESTED_STOP: stop()
+    ERROR:::style1 --> INITIALISED: reset()
+    note left of ERROR
+            Can be reached from anywhere and anytime.
+     end note
+```
+
+All `Block`-derived classes can optionally implement any subset of the lifecycle
+methods ( `start()`, `stop()`, `reset()`, `pause()`, `resume()`).
+These methods are considered optional and can be implemented by block developers to get informed and handle state
+changes of the `Scheduler`. In addition `Block` contains `state` atomic variable (`LifeCycleState` enum) allowing to
+query the block's state.
+
+The following methods can be implemented:
+
+* `start()` This method is used to implement any startup logic required for the block. It is called when the block is
+  started.
+* `stop()` This method is used to handle any clean-up procedures when the block is stopped.
+* `pause()` This method is responsible for temporarily halting the block's operation while maintaining its current
+  state.
+* `resume()` When the block is resumed after a pause, the `resume()` method is called. It should contain logic to
+  restart operations from the same state as when it was paused.
+* `reset()` This method is used to clean-up and reset the block's state to defaults.
+
+These callback methods are assumed not to block for an extended period. Blocking operations should be avoided to ensure
+the block's responsiveness and real-time behavior.
+
+```cpp
+struct UserBlock : public Block<UserBlock> {
+    void start() {...}
+    void stop() {...}
+    void pause() {...}
+    void resume() {...}
+    void reset() {...}
+};
+```
 
 #### Collection of Ideas and known Scheduling Algorithms
 
