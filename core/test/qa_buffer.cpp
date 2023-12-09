@@ -187,7 +187,7 @@ const boost::ut::suite UserApiExamples = [] {
 
     "UserApi"_test = [] {
         using namespace gr;
-        Buffer auto       buffer = CircularBuffer<int32_t>(1024);
+        Buffer auto buffer = CircularBuffer<int32_t>(1024);
 
         BufferWriter auto writer = buffer.new_writer();
         { // source only write example
@@ -483,10 +483,10 @@ const boost::ut::suite NonPowerTwoTests = [] {
             expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0u) << "divisible by the memory page size";
         }
 
-        BufferWriter auto writer     = buffer.new_writer();
-        BufferReader auto reader     = buffer.new_reader();
+        BufferWriter auto writer = buffer.new_writer();
+        BufferReader auto reader = buffer.new_reader();
 
-        const auto        genSamples = [&buffer, &writer] {
+        const auto genSamples = [&buffer, &writer] {
             for (std::size_t i = 0; i < buffer.size() - 10; i++) { // write-only worker (source) mock-up
                 auto lambda = [](auto vectors) {
                     static int offset = 0;
@@ -524,10 +524,11 @@ const boost::ut::suite HistoryBufferTest = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    "history_buffer<double>"_test = [](const std::size_t &capacity) {
+    "HistoryBuffer<double>"_test = [](const std::size_t &capacity) {
         HistoryBuffer<int> hb(capacity);
+        const auto        &const_hb = hb; // tests const access
         expect(eq(hb.capacity(), capacity));
-        expect(eq(hb.size(), 0u));
+        expect(eq(hb.size(), 0UZ));
 
         for (std::size_t i = 1; i <= capacity + 1; ++i) {
             hb.push_back(static_cast<int>(i));
@@ -537,17 +538,21 @@ const boost::ut::suite HistoryBufferTest = [] {
 
         expect(eq(hb[0], static_cast<int>(capacity + 1))) << "access the last/actual sample";
         expect(eq(hb[1], static_cast<int>(capacity))) << "access the previous sample";
+        expect(eq(const_hb[0], static_cast<int>(capacity + 1))) << "const access the last/actual sample";
+        expect(eq(const_hb[1], static_cast<int>(capacity))) << "const access the previous sample";
 
         expect(eq(hb.at(0), static_cast<int>(capacity + 1))) << "checked access the last/actual sample";
         expect(eq(hb.at(1), static_cast<int>(capacity))) << "checked access the previous sample";
+        expect(eq(const_hb.at(0), static_cast<int>(capacity + 1))) << "checked const access the last/actual sample";
+        expect(eq(const_hb.at(1), static_cast<int>(capacity))) << "checked const access the previous sample";
     } | std::vector<std::size_t>{ 5, 3, 10 };
 
-    "history_buffer - range tests"_test = [] {
+    "HistoryBuffer - range tests"_test = [] {
         HistoryBuffer<int> hb(5);
         hb.push_back_bulk(std::array{ 1, 2, 3 });
         hb.push_back_bulk(std::vector{ 4, 5, 6 });
-        expect(eq(hb.capacity(), 5u));
-        expect(eq(hb.size(), 5u));
+        expect(eq(hb.capacity(), 5UZ));
+        expect(eq(hb.size(), 5UZ));
 
         auto equal = [](const auto &range1, const auto &range2) { // N.B. TODO replacement until libc++ fully supports ranges
             return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end());
@@ -575,22 +580,36 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(equal(std::vector(hb.crbegin(), hb.crend()), std::vector(hb.rbegin(), hb.rend()))) << "const non-const iterator equivalency";
     };
 
-    "history_buffer<T> edge cases"_test = [] {
+    "HistoryBuffer<T> constexpr sized"_test = [] {
+        HistoryBuffer<int, 5UZ> buffer5;
+        HistoryBuffer<int, 8UZ> buffer8;
+
+        for (std::size_t i = 0UZ; i <= buffer8.capacity(); ++i) {
+            buffer5.push_back(static_cast<int>(i));
+            buffer8.push_back(static_cast<int>(i));
+        }
+
+        expect(eq(buffer5[0], 8));
+        expect(eq(buffer8[0], 8));
+    };
+
+    "HistoryBuffer<T> edge cases"_test = [] {
         fmt::print("\n\ntesting edge cases:\n");
         expect(throws<std::out_of_range>([] { HistoryBuffer<int>(0); })) << "throws for 0 capacity";
 
         // Create a history buffer of size 1
         HistoryBuffer<int> hb_one(1);
-        expect(eq(hb_one.capacity(), 1u));
-        expect(eq(hb_one.size(), 0u));
+        const auto        &const_hb_one = hb_one; // tests const access
+        expect(eq(hb_one.capacity(), 1UZ));
+        expect(eq(hb_one.size(), 0UZ));
         hb_one.push_back(41);
         hb_one.push_back(42);
-        expect(eq(hb_one.capacity(), 1u));
-        expect(eq(hb_one.size(), 1u));
+        expect(eq(hb_one.capacity(), 1UZ));
+        expect(eq(hb_one.size(), 1UZ));
         expect(eq(hb_one[0], 42));
 
         expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(2); })) << "throws for index > size";
-        expect(throws<std::out_of_range>([&hb_one] { [[maybe_unused]] auto a = hb_one.at(-1); })) << "throws for negative index";
+        expect(throws<std::out_of_range>([&const_hb_one] { [[maybe_unused]] auto a = const_hb_one.at(2); })) << "throws for index > size";
 
         // Push more elements than buffer size
         HistoryBuffer<int> hb_overflow(5);
@@ -607,8 +626,20 @@ const boost::ut::suite HistoryBufferTest = [] {
         for (int i = 0; i < 10; ++i) {
             hb_double.push_back(i * 0.1);
         }
-        expect(eq(hb_double.capacity(), 5u));
-        expect(eq(hb_double.size(), 5u));
+        expect(eq(hb_double.capacity(), 5UZ));
+        expect(eq(hb_double.size(), 5UZ));
+
+        expect(nothrow([&hb_double] { hb_double.reset(); })) << "reset (default) does not throw";
+        expect(eq(hb_double.size(), 0UZ));
+        expect(std::all_of(hb_double.begin(), hb_double.end(), [](const auto &elem) { return elem == 0.0; }));
+        expect(nothrow([&hb_double] { hb_double.reset(2.0); })) << "reset (2.0) does not throw";
+        const auto &const_hb_double = hb_double; // tests const access
+        expect(std::all_of(const_hb_double.begin(), const_hb_double.end(), [](const auto &elem) { return elem == 2.0; }));
+
+        for (std::size_t i = 0UZ; i < hb_double.capacity(); ++i) {
+            expect(eq(2.0, hb_double.data()[i]));
+            expect(eq(2.0, const_hb_double.data()[i]));
+        }
 
         static_assert(!std::is_const_v<std::remove_pointer_t<decltype(hb_double.data())>>, "is non-const");
         const auto &const_buffer = hb_double;
