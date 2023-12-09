@@ -54,7 +54,7 @@ class HistoryBuffer {
     /**
      * @brief maps the logical index to the physical index in the buffer.
      */
-    constexpr inline std::size_t
+    [[nodiscard]] constexpr inline std::size_t
     map_index(std::size_t index) const noexcept {
         if constexpr (N == std::dynamic_extent) { // runtime checks
             if (std::has_single_bit(_capacity)) { // _capacity is a power of two
@@ -180,6 +180,13 @@ public:
     [[nodiscard]] auto
     begin() noexcept {
         return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position));
+    }
+
+    constexpr void
+    reset(T defaultValue = T()) {
+        _size           = 0UZ;
+        _write_position = 0UZ;
+        std::fill(_buffer.begin(), _buffer.end(), defaultValue);
     }
 
     [[nodiscard]] constexpr auto
