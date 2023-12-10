@@ -653,6 +653,18 @@ const boost::ut::suite uncertainValue = [] {
         expect(approx(value.uncertainty / sqrt(16), sum2.uncertainty, 1e-9));
     };
 
+    "basic IIR low-pass filter examples"_test = [] {
+        UncertainValue   ref{ 4.0, 1.0 };
+        constexpr double alpha = 0.05;
+
+        UncertainValue value{ 0.0, 1.0 };
+        for (std::size_t i = 0UZ; i < 1000UZ; i++) {
+            value = (1.0 - alpha) * value + alpha * ref;
+        }
+        expect(approx(4.0, value.value, 1e-6));
+        expect(approx(0.160, value.uncertainty, 1e-3));
+    };
+
     tag("visual") / "visual examples"_test = [] {
         // uncorrelated values
         UncertainValue uValueA{ 4.0, 2.0 };
