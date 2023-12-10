@@ -70,6 +70,28 @@ UncertainValue(T, T) -> UncertainValue<T>;
 template<typename T>
 concept UncertainValueLike = gr::meta::is_instantiation_of<T, UncertainValue>;
 
+template<typename T>
+    requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] inline constexpr auto
+value(const T &val) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        return val.value;
+    } else {
+        val;
+    }
+}
+
+template<typename T>
+    requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] inline constexpr auto
+uncertainty(const T &val) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        return val.uncertainty;
+    } else {
+        return T();
+    }
+}
+
 namespace detail {
 template<typename T>
 struct UncertainValueValueType {

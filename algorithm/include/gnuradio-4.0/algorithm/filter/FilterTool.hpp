@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 // this mocks the execution policy until Emscripten's libc++ does support this (Clang already does)
 #if defined(__EMSCRIPTEN__)
@@ -99,6 +100,112 @@ enum class Form {
     DF_II_TRANSPOSED
 };
 
+namespace detail {
+
+template<typename T, std::size_t bufferSize = std::dynamic_extent, typename TBaseType = meta::fundamental_base_value_type_t<T>>
+struct Section;
+
+template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+[[nodiscard]] inline constexpr T
+computeFilter(const T &input, Section<T, bufferSize> &section) noexcept {
+    const auto &a             = section.a;
+    const auto &b             = section.b;
+    auto       &inputHistory  = section.inputHistory;
+    auto       &outputHistory = section.outputHistory;
+    if constexpr (form == Form::DF_I) {
+        // y[n] = b[0]·x[n]   + b[1]·x[n-1] + … + b[N]·x[n-N]
+        //      - a[1]·y[n-1] - a[2]·y[n-2] - … - a[M]·y[n-M]
+        inputHistory.push_back(input);
+        T output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>())              // feed-forward path
+                 - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()); // feedback path
+        outputHistory.push_back(output);
+        return output;
+    } else if constexpr (form == Form::DF_II) {
+        // w[n] = x[n] - a[1]·w[n-1] - a[2]·w[n-2] - … - a[M]·w[n-M]
+        // y[n] =        b[0]·w[n]   + b[1]·w[n-1] + … + b[N]·w[n-N]
+        if (a.size() > 1) {
+            const T w = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+            inputHistory.push_back(w);
+            return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+        } else {
+            inputHistory.push_back(input);
+            return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+        }
+    } else if constexpr (form == Form::DF_I_TRANSPOSED) {
+        // w_1[n] = x[n] - a[1]·w_2[n-1] - a[2]·w_2[n-2] - … - a[M]·w_2[n-M]
+        // y[n]   = b[0]·w_2[n] + b[1]·w_2[n-1] + … + b[N]·w_2[n-N]
+        T v0 = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
+        outputHistory.push_back(v0);
+        return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), outputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+    } else if constexpr (form == Form::DF_II_TRANSPOSED) {
+        // y[n] = b_0·f[n] + \sum_(k=1)^N(b_k·f[n−k] − a_k·y[n−k])
+        T output = b[0] * input                                                                                                                                     //
+                 + std::transform_reduce(execPolicy, std::next(b.cbegin()), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()) //
+                 - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
+        inputHistory.push_back(input);
+        outputHistory.push_back(output);
+        return output;
+    } else {
+        static_assert(gr::meta::always_false<T>, "should not reach here");
+    }
+}
+
+template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+inline constexpr std::vector<T>
+computeImpulseResponse(Section<T, bufferSize> &section, std::size_t length) {
+    std::vector<T> impulseResponse(length, T(0));
+    T              input = T(1); // impulse response: first input is 1
+    for (std::size_t i = 0; i < length; ++i) {
+        impulseResponse[i] = computeFilter<T, bufferSize, form, execPolicy>(input, section);
+        input              = T(0); // subsequent inputs are 0
+    }
+    section.reset(T(0));
+    return impulseResponse;
+}
+
+template<arithmetic_or_complex_like T>
+inline constexpr std::vector<T>
+computeAutoCorrelation(const std::vector<T> &impulseResponse) {
+    const std::size_t length = impulseResponse.size();
+    std::vector<T>    autoCorrelation(length, T(0));
+    for (std::size_t lag = 0; lag < length; ++lag) {
+        for (std::size_t i = 0; i < length - lag; ++i) {
+            autoCorrelation[lag] += impulseResponse[i] * impulseResponse[i + lag];
+        }
+    }
+    return autoCorrelation;
+}
+
+template<typename T, std::size_t bufferSize, typename TBaseType>
+struct Section : public FilterCoefficients<TBaseType> {
+    // note: bufferSize as upper maximum, since most IIR filter sections will have to be much smaller (for numerical stability reasons)
+    HistoryBuffer<T, bufferSize> inputHistory{};
+    HistoryBuffer<T, bufferSize> outputHistory{};
+    std::vector<T>               autoCorrelation{}; // w.r.t. impulse response, computed for the combined feed-forward and -feedback filter length only
+
+    explicit Section(const FilterCoefficients<TBaseType> &section)
+        requires(bufferSize == std::dynamic_extent)
+        : FilterCoefficients<TBaseType>(section), inputHistory(section.b.size()), outputHistory(section.a.size()) {
+        auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
+        autoCorrelation      = computeAutoCorrelation(impulseResponse);
+    }
+
+    explicit Section(const FilterCoefficients<TBaseType> &section)
+        requires(bufferSize != std::dynamic_extent)
+        : FilterCoefficients<TBaseType>(section) {
+        auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
+        autoCorrelation      = computeAutoCorrelation(impulseResponse);
+    }
+
+    inline constexpr void
+    reset(T defaultValue = T()) {
+        inputHistory.reset(defaultValue);
+        outputHistory.reset(defaultValue);
+    }
+};
+
+} // namespace detail
+
 /**
  * @brief: Infinite-Impulse-Response (IIR) as well as Finite-Impulse-Response (FIR) filter based on a single or set of biquad filter coefficients.
  *
@@ -106,77 +213,146 @@ enum class Form {
  * Filter<double> myFilter(filterSections);
  * double outputSample = myFilter.processOne(inputSample);
  */
-template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
-struct Filter {
-    struct Section : public FilterCoefficients<T> {
-        // note: bufferSize as upper maximum, since most IIR filter sections will have to be much smaller (for numerical stability reasons)
-        HistoryBuffer<T, bufferSize> inputHistory{};
-        HistoryBuffer<T, bufferSize> outputHistory{};
+template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<meta::fundamental_base_value_type_t<T>> ? Form::DF_II : Form::DF_I,
+         auto execPolicy = std::execution::seq>
+struct Filter;
 
-        explicit Section(const FilterCoefficients<T> &section)
-            requires(bufferSize == std::dynamic_extent)
-            : FilterCoefficients<T>(section), inputHistory(section.b.size()), outputHistory(section.a.size()) {}
-
-        explicit Section(const FilterCoefficients<T> &section)
-            requires(bufferSize != std::dynamic_extent)
-            : FilterCoefficients<T>(section) {}
-    };
-
-    alignas(64UZ) std::vector<Section> _sections;
+template<typename T, std::size_t bufferSize, Form form, auto execPolicy>
+    requires(std::is_arithmetic_v<T>)
+struct Filter<T, bufferSize, form, execPolicy> {
+    using TBaseType = meta::fundamental_base_value_type_t<T>;
+    alignas(64UZ) std::vector<detail::Section<T, bufferSize>> _sectionsMeanValue;
 
 public:
     template<typename... TFilterCoefficients>
     explicit Filter(TFilterCoefficients &&...filterSections) noexcept {
-        std::vector<FilterCoefficients<T>> filterSections_{ std::forward<TFilterCoefficients>(filterSections)... };
-        _sections.reserve(filterSections_.size());
+        std::vector<FilterCoefficients<TBaseType>> filterSections_{ std::forward<TFilterCoefficients>(filterSections)... };
+        _sectionsMeanValue.reserve(filterSections_.size());
         for (const auto &section : filterSections_) {
-            _sections.emplace_back(section);
+            _sectionsMeanValue.emplace_back(section);
         }
     }
 
-    inline constexpr T
+    constexpr void
+    reset(T defaultValue = T()) {
+        std::for_each(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), [&defaultValue](auto &section) { section.reset(defaultValue); });
+    }
+
+    [[nodiscard]] inline constexpr T
     processOne(T inputSample) noexcept {
-        T output = inputSample;
-        for (auto &section : _sections) {
-            const T     input         = output; // input to this section is the output of the previous section
-            const auto &a             = section.a;
-            const auto &b             = section.b;
-            auto       &inputHistory  = section.inputHistory;
-            auto       &outputHistory = section.outputHistory;
-            if constexpr (form == Form::DF_I) {
-                // y[n] = b[0]·x[n]   + b[1]·x[n-1] + … + b[N]·x[n-N]
-                //      - a[1]·y[n-1] - a[2]·y[n-2] - … - a[M]·y[n-M]
-                inputHistory.push_back(input);
-                output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>())              // feed-forward path
-                       - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()); // feedback path
-                outputHistory.push_back(output);
-            } else if constexpr (form == Form::DF_II) {
-                // w[n] = x[n] - a[1]·w[n-1] - a[2]·w[n-2] - … - a[M]·w[n-M]
-                // y[n] =        b[0]·w[n]   + b[1]·w[n-1] + … + b[N]·w[n-N]
-                if (a.size() > 1) {
-                    const T w = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
-                    inputHistory.push_back(w);
-                    output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
-                } else {
-                    inputHistory.push_back(input);
-                    output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
-                }
-            } else if constexpr (form == Form::DF_I_TRANSPOSED) {
-                // w_1[n] = x[n] - a[1]·w_2[n-1] - a[2]·w_2[n-2] - … - a[M]·w_2[n-M]
-                // y[n]   = b[0]·w_2[n] + b[1]·w_2[n-1] + … + b[N]·w_2[n-N]
-                T v0 = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
-                outputHistory.push_back(v0);
-                output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), outputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
-            } else if constexpr (form == Form::DF_II_TRANSPOSED) {
-                // y[n] = b_0·f[n] + \sum_(k=1)^N(b_k·f[n−k] − a_k·y[n−k])
-                output = b[0] * input                                                                                                                                     //
-                       + std::transform_reduce(execPolicy, std::next(b.cbegin()), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()) //
-                       - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
-                inputHistory.push_back(input);
-                outputHistory.push_back(output);
+        return std::accumulate(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), inputSample,
+                               [](T acc, auto &section) { return detail::computeFilter<T, bufferSize, form, execPolicy>(acc, section); });
+    }
+};
+
+/**
+ * @brief: Infinite-Impulse-Response (IIR) as well as Finite-Impulse-Response (FIR) filter based on a single or set of biquad filter coefficients.
+ *
+ * This includes the computation of the propagation of uncertainty according to:
+ * (σ_y[0])² = ∑_{i=0}^{M} (b[i])²·(σ_x[i])² + ∑_{j=1}^{N} ∑_{k=1}^{N} a[j]·a[k]·R_{yy}[|j-k|]·σ_y[j]·σ_y[k]
+ * with R_{yy} being the auto-correlation function of the impulse response as an estimate of the covariance matrix.
+ *
+ * usage example:
+ * Filter<UncertainValue<double>> myFilter(filterSections);
+ * UncertainValue<double> outputSample = myFilter.processOne({inputSample, noise});
+ * double mean   = gr::value(outputSample);
+ * double stddev = gr::uncertainty(outputSample);
+ */
+template<typename T, std::size_t bufferSize, Form form, auto execPolicy>
+    requires(std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
+struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
+    using TBaseType = meta::fundamental_base_value_type_t<T>;
+    alignas(64UZ) std::vector<detail::Section<TBaseType, bufferSize>> _sectionsMeanValue;
+    alignas(64UZ) std::vector<detail::Section<TBaseType, bufferSize>> _sectionsSquareUncertaintyValue;
+
+    [[nodiscard]] inline constexpr TBaseType
+    propagateError(const TBaseType &inputUncertainty, detail::Section<TBaseType, bufferSize> &section) noexcept {
+        const auto &a                       = section.a;
+        const auto &b                       = section.b;
+        auto       &inputHistory            = section.inputHistory;
+        auto       &outputHistory           = section.outputHistory;
+        const auto &autocorrelationFunction = section.autoCorrelation;
+
+        // Feed-forward path (uncorrelated uncertainties)
+        inputHistory.push_back(inputUncertainty * inputUncertainty);
+        TBaseType feedForwardUncertainty = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<TBaseType>(0), //
+                                                                 std::plus<>(), [](TBaseType b, TBaseType sigma2) { return b * b * sigma2; });
+
+        if (a.size() <= 1 || autocorrelationFunction.empty()) {
+            outputHistory.push_back(feedForwardUncertainty);
+            return feedForwardUncertainty;
+        }
+
+        // Feedback path (correlated uncertainties)
+        TBaseType feedbackUncertainty = 0;
+        for (int j = 1; j < a.size(); ++j) {
+            for (int k = 1; k < a.size(); ++k) {
+                TBaseType correlationFactor = autocorrelationFunction[std::abs(j - k)]; // w/o causality (i.e. causality j - k < 0 -> autoC = 0.0), this is a conservative estimate, to be checked
+                feedbackUncertainty += a[j] * a[k] * correlationFactor * std::sqrt(outputHistory[j - 1]) * std::sqrt(outputHistory[k - 1]);
             }
         }
-        return output; // the output of the last section is the output of the filter
+
+        TBaseType totalUncertainty = feedForwardUncertainty + feedbackUncertainty;
+        outputHistory.push_back(totalUncertainty);
+        return totalUncertainty;
+    }
+
+public:
+    template<typename... TFilterCoefficients>
+    explicit Filter(TFilterCoefficients &&...filterSections) noexcept {
+        std::vector<FilterCoefficients<TBaseType>> filterSections_{ std::forward<TFilterCoefficients>(filterSections)... };
+        _sectionsMeanValue.reserve(filterSections_.size());
+        _sectionsSquareUncertaintyValue.reserve(filterSections_.size());
+        for (const auto &section : filterSections_) {
+            _sectionsMeanValue.emplace_back(section);
+            _sectionsSquareUncertaintyValue.emplace_back(section);
+        }
+    }
+
+    constexpr void
+    reset(UncertainValue<T> defaultValue = T()) {
+        std::for_each(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), [&defaultValue](auto &section) { section.reset(gr::value(defaultValue)); });
+        std::for_each(_sectionsSquareUncertaintyValue.begin(), _sectionsSquareUncertaintyValue.end(),
+                      [&defaultValue](auto &section) { section.reset(gr::uncertainty(defaultValue) * gr::uncertainty(defaultValue)); });
+    }
+
+    [[nodiscard]] inline constexpr UncertainValue<T>
+    processOne(UncertainValue<T> inputSample) noexcept {
+        TBaseType value       = std::accumulate(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), gr::value(inputSample),
+                                                [](TBaseType acc, auto &section) { return detail::computeFilter<TBaseType, bufferSize, form, execPolicy>(acc, section); });
+        TBaseType uncertainty = std::accumulate(_sectionsSquareUncertaintyValue.begin(), _sectionsSquareUncertaintyValue.end(), gr::uncertainty(inputSample),
+                                                [this](TBaseType acc, auto &section) { return propagateError(acc, section); });
+        return { value, std::sqrt(uncertainty) };
+    }
+};
+
+template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+struct ErrorPropagatingFilter {
+    using TBaseType = meta::fundamental_base_value_type_t<T>;
+
+    Filter<T, bufferSize, form, execPolicy>         filterMean;
+    Filter<TBaseType, bufferSize, form, execPolicy> filterSquared;
+
+    template<typename... TFilterCoefficients>
+    explicit ErrorPropagatingFilter(TFilterCoefficients &&...filterSections)
+        : filterMean(std::forward<TFilterCoefficients>(filterSections)...), filterSquared(std::forward<TFilterCoefficients>(filterSections)...) {}
+
+    constexpr void
+    reset(T defaultValue = T()) {
+        filterMean.reset(defaultValue);
+        filterSquared.reset(gr::value(defaultValue) * gr::value(defaultValue));
+    }
+
+    T
+    processOne(const T &inputSample) {
+        T         mean   = filterMean.processOne(inputSample);
+        TBaseType square = filterSquared.processOne(gr::value(inputSample) * gr::value(inputSample));
+
+        if constexpr (UncertainValueLike<T>) {
+            return { mean.value, std::sqrt(std::abs(square - gr::value(mean) * gr::value(mean)) + gr::uncertainty(mean) * gr::uncertainty(mean)) };
+        } else {
+            return { mean.value, std::sqrt(std::abs(square - mean * mean)) };
+        }
     }
 };
 
