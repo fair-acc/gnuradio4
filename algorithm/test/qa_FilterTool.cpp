@@ -319,7 +319,8 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             expect(approx(expectedGain, actualGain, 0.01)) << fmt::format("frequency: {} Hz, expected {} vs. actual gain {} differs", frequency, expectedGain, actualGain);
 #endif
         }
-    } | std::tuple{Filter<double, 32UZ, Form::DF_I>(), Filter<double, 32UZ, Form::DF_II>(), Filter<double, 32UZ, Form::DF_I_TRANSPOSED>(), Filter<double, 32UZ, Form::DF_II_TRANSPOSED>()};;
+    } | std::tuple{ Filter<double, 32UZ, Form::DF_I>(), Filter<double, 32UZ, Form::DF_II>(), Filter<double, 32UZ, Form::DF_I_TRANSPOSED>(), Filter<double, 32UZ, Form::DF_II_TRANSPOSED>() };
+    ;
 
     tag("visual") / "basic analog low-/high-/band-pass filter - frequency"_test = []() {
         using namespace gr::graphs;
@@ -410,6 +411,99 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
 
         chart.draw();
     };
+
+    tag("visual") / "basic FIR/IIR step-response with UncertainValue Propagation"_test = [](const bool useFIR) {
+        using namespace gr::filter::iir;
+        using namespace gr::filter::fir;
+        using enum gr::algorithm::window::Type;
+        const double     noiseFigure   = useFIR ? 2.5 : 5.0;
+        constexpr double fs            = 100.;
+        constexpr double xMin          = 0.0;
+        constexpr double xMax          = 2.01;
+        constexpr double stepPosition  = 0.25;
+        constexpr double stepAmplitude = 3.0;
+
+        std::vector<double> xValues(static_cast<std::size_t>((xMax - xMin) * fs));
+        std::vector<double> yValue(xValues.size());
+        for (std::size_t i = 0UZ; i < xValues.size(); ++i) {
+            xValues[i] = xMin + static_cast<double>(i) / fs;
+        }
+        std::transform(xValues.cbegin(), xValues.cend(), yValue.begin(), [](double t) { return t < stepPosition ? 0.0 : stepAmplitude; });
+
+        fmt::println("");
+        using Un = gr::UncertainValue<double>;
+        for (const auto &frequency : { 1.0, 2.0, 4.0 }) {
+            std::vector<FilterCoefficients<double>> digitalLowPass = useFIR ? std::vector{ fir::designFilter<double>(Type::LOWPASS, { .order = 1UZ, .fLow = frequency, .fs = fs }, Hamming) }
+                                                                            : iir::designFilter<double>(Type::LOWPASS, { .order = 2UZ, .fLow = frequency, .fs = fs }, BESSEL);
+            auto                                    filter         = ErrorPropagatingFilter<Un>(digitalLowPass);
+            filter.reset({ 0.0, noiseFigure });
+
+            std::vector<Un>     yFiltered(xValues.size());
+            std::vector<double> yMean(xValues.size());
+            std::vector<double> yMin(xValues.size());
+            std::vector<double> yMax(xValues.size());
+            std::transform(yValue.cbegin(), yValue.cend(), yFiltered.begin(), [&filter, &noiseFigure](double y) { return filter.processOne({ y, noiseFigure }); });
+            std::transform(yFiltered.cbegin(), yFiltered.cend(), yMean.begin(), [](Un val) { return gr::value(val); });
+            std::transform(yFiltered.cbegin(), yFiltered.cend(), yMin.begin(), [](Un val) { return gr::value(val) - gr::uncertainty(val); });
+            std::transform(yFiltered.cbegin(), yFiltered.cend(), yMax.begin(), [](Un val) { return gr::value(val) + gr::uncertainty(val); });
+
+            auto chart        = gr::graphs::ImChart<120, 18>({ { xMin, xMax }, { -1.0, +4.0 } });
+            chart.axis_name_x = "time [s]";
+            chart.axis_name_y = std::string(useFIR ? "FIR" : "IIR") + " filter amplitude [a.u.]";
+            chart.draw(xValues, yValue, "reference");
+
+            if (useFIR) {
+                chart._lastColor = gr::graphs::Color::next(chart._lastColor);
+            }
+            const auto colourSave = chart._lastColor;
+            chart.draw(xValues, yMin, "");
+            chart._lastColor = colourSave;
+            chart.draw(xValues, yMax, "");
+            chart._lastColor = colourSave;
+            chart.draw(xValues, yMean, fmt::format("LP@{}Hz - input {:.2} vs output {:.2} noise figure", frequency, noiseFigure, gr::uncertainty(yFiltered.back())));
+            chart.draw();
+            fmt::println("");
+        }
+    } | std::vector{ true, false };
+
+    "quantitative FIR/IIR step-response-pass with UncertainValue Propagation"_test = [](const bool useFIR) {
+        using namespace gr::filter::iir;
+        using namespace gr::filter::fir;
+        using enum gr::algorithm::window::Type;
+        const double     noiseFigure   = 5.0;
+        constexpr double fs            = 100.;
+        constexpr double flow          = 4.0;
+        constexpr double xMin          = 0.0;
+        constexpr double xMax          = 2.01;
+        constexpr double stepPosition  = 1.0;
+        constexpr double stepAmplitude = 3.0;
+
+        std::vector<double> xValues(static_cast<std::size_t>((xMax - xMin) * fs));
+        std::vector<double> yValue(xValues.size());
+        for (std::size_t i = 0UZ; i < xValues.size(); ++i) {
+            xValues[i] = xMin + static_cast<double>(i) / fs;
+        }
+        std::transform(xValues.cbegin(), xValues.cend(), yValue.begin(), [](double t) { return t < stepPosition ? 0.0 : stepAmplitude; });
+
+        using Un = gr::UncertainValue<double>;
+
+        std::vector<FilterCoefficients<double>> digitalLowPass = useFIR ? std::vector{ fir::designFilter<double>(Type::LOWPASS, { .order = 1UZ, .fLow = flow, .fs = fs }, Hamming) }
+                                                                        : iir::designFilter<double>(Type::LOWPASS, { .order = 2UZ, .fLow = flow, .fs = fs }, BESSEL);
+        auto                                    filter         = ErrorPropagatingFilter<Un>(digitalLowPass);
+        filter.reset({ 0.0, noiseFigure });
+
+        std::vector<Un> yFiltered(xValues.size());
+        std::transform(yValue.cbegin(), yValue.cend(), yFiltered.begin(), [&filter, &noiseFigure](double y) { return filter.processOne({ y, noiseFigure }); });
+
+        auto filterType = useFIR ? "FIR" : "IIR";
+        expect(approx(0.0, gr::value(yFiltered.front()), 0.001)) << fmt::format("{} - initial value", filterType);
+        expect(approx(stepAmplitude, gr::value(yFiltered.back()), 0.001)) << fmt::format("{} - last value", filterType);
+        const double_t Neff = fs / flow;
+        // FIR has a poorer noise rejection performance than IIR, thus the additional factor 1.5 relaxation.
+        const double_t expectedNoiseFigure = noiseFigure / std::sqrt(Neff) * (useFIR ? 1.5 : 1.0);
+        expect(le(gr::uncertainty(yFiltered[10]), expectedNoiseFigure)) << fmt::format("{} - initial value", filterType);
+        expect(le(gr::uncertainty(yFiltered.back()), expectedNoiseFigure)) << fmt::format("{} - last value", filterType);
+    } | std::vector{ true, false };
 };
 
 const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
@@ -625,7 +719,6 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
         phaseChart.draw();
     };
 
-#if not defined(__EMSCRIPTEN__) // TODO: check why Emscripten fails to compute using float (old libc++) while gcc/clang do work
     tag("benchmarks") / "filter benchmarks"_test = []<typename T>(T) {
         using namespace benchmark;
         using namespace gr::filter::iir;
@@ -652,6 +745,19 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             return actualGain;
         };
 
+        auto processSignalErrors = [](auto &filter, const std::vector<T> &yValues) -> T {
+            T          actualGain       = 0.0;
+            std::size_t processedSamples = 0UZ;
+            for (auto &yValue : yValues) {
+                gr::UncertainValue<T> filteredValue = filter.processOne(yValue);
+                processedSamples++;
+                if (processedSamples > yValues.size() / 2UZ) { // ignore initial transient
+                    actualGain = std::max(actualGain, std::abs(gr::value(filteredValue)));
+                }
+            }
+            return actualGain;
+        };
+
         {
             T                       actualGain = 0.0;
             gr::HistoryBuffer<T, 8> buffer;
@@ -668,31 +774,31 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             T    actualGain                                       = 0.0;
             auto filter                                           = Filter<T, 32UZ, Form::DF_I, std::execution::unseq>(digitalBandPass);
             "IIR DF_I exec::unseq"_benchmark.repeat<10>(nSamples) = [&processSignal, &actualGain, &filter, &yValues] { actualGain = processSignal(filter, yValues); };
-            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("IIR DF_I exec::unseq approx settling gain threshold for {}", gr::meta::type_name<T>());
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("IIR DF_I exec::unseq approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
         {
             T    actualGain                                     = 0.0;
             auto filter                                         = Filter<T, 32UZ, Form::DF_I, std::execution::par>(digitalBandPass);
             "IIR DF_I exec::par"_benchmark.repeat<10>(nSamples) = [&processSignal, &actualGain, &filter, &yValues] { actualGain = processSignal(filter, yValues); };
-            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("IIR DF_I exec::par approx settling gain threshold for {}", gr::meta::type_name<T>());
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("IIR DF_I exec::par approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
         {
             T    actualGain                                     = 0.0;
             auto filter                                         = Filter<T, 32UZ, Form::DF_I>(digitalBandPass);
             "IIR DF_I exec::seq"_benchmark.repeat<10>(nSamples) = [&processSignal, &actualGain, &filter, &yValues] { actualGain = processSignal(filter, yValues); };
-            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("IIR DF_I exec::sec approx settling gain threshold for {}", gr::meta::type_name<T>());
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("IIR DF_I exec::sec approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
         {
             T    actualGain                                      = 0.0;
             auto filter                                          = Filter<T, 32UZ, Form::DF_II>(digitalBandPass);
             "IIR DF_II exec::seq"_benchmark.repeat<10>(nSamples) = [&processSignal, &actualGain, &filter, &yValues] { actualGain = processSignal(filter, yValues); };
-            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("DF_II exec::seq approx settling gain threshold for {}", gr::meta::type_name<T>());
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("DF_II exec::seq approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
         {
             T    actualGain                                                 = 0.0;
             auto filter                                                     = Filter<T, 32UZ, Form::DF_I_TRANSPOSED>(digitalBandPass);
             "IIR DF_I_TRANSPOSED exec::seq "_benchmark.repeat<10>(nSamples) = [&processSignal, &actualGain, &filter, &yValues] { actualGain = processSignal(filter, yValues); };
-            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("DF_I_TRANSPOSED exec::seq approx settling gain threshold for {}", gr::meta::type_name<T>());
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("DF_I_TRANSPOSED exec::seq approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
 #if not defined(__EMSCRIPTEN__)
         {
@@ -707,11 +813,23 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             T    actualGain                              = 0.0;
             auto filter                                  = Filter<T>(digitalBandPassFir);
             "FIR default"_benchmark.repeat<10>(nSamples) = [&processSignal, &actualGain, &filter, &yValues] { actualGain = processSignal(filter, yValues); };
-            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("FIR approx settling gain threshold for {}", gr::meta::type_name<T>());
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("FIR approx settling gain threshold for {}", gr::meta::type_name<T>());
+        }
+        ::benchmark::results::add_separator();
+        {
+            T    actualGain                              = 0.0;
+            auto filter                                  = Filter<gr::UncertainValue<T>>(digitalBandPassFir);
+            "FIR w/ uncertainty"_benchmark.repeat<10>(nSamples) = [&processSignalErrors, &actualGain, &filter, &yValues] { actualGain = processSignalErrors(filter, yValues); };
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("FIR approx settling gain threshold for {}", gr::meta::type_name<T>());
+        }
+        {
+            T    actualGain                              = 0.0;
+            auto filter                                  = Filter<gr::UncertainValue<T>>(digitalBandPass);
+            "IIR w/ uncertainty"_benchmark.repeat<10>(nSamples) = [&processSignalErrors, &actualGain, &filter, &yValues] { actualGain = processSignalErrors(filter, yValues); };
+            expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("IIR approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
         ::benchmark::results::add_separator();
     } | std::tuple<double, float>{ 1.0, 1.0f };
-#endif
 };
 
 int
