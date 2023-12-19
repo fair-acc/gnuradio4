@@ -309,7 +309,7 @@ public:
         static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
     }
 
-    constexpr Port(Port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples) {}
+    constexpr Port(Port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples), _connected(other._connected), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
     operator=(Port &&other) noexcept {

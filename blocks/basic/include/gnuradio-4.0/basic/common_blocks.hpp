@@ -69,9 +69,7 @@ public:
 
 protected:
     using TPortIn = gr::PortIn<T>;
-    // std::list because ports don't like to change in-memory address
-    // after connection is established, and vector might reallocate
-    std::list<TPortIn> _input_ports;
+    std::vector<TPortIn> _input_ports;
     gr::PortOut<T>     _output_port;
 
 protected:
