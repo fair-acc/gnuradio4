@@ -69,9 +69,7 @@ public:
 
 protected:
     using TPortIn = gr::PortIn<T>;
-    // std::list because ports don't like to change in-memory address
-    // after connection is established, and vector might reallocate
-    std::list<TPortIn> _input_ports;
+    std::vector<TPortIn> _input_ports;
     gr::PortOut<T>     _output_port;
 
 protected:
@@ -186,7 +184,9 @@ public:
                 available_samples);
 
         for (auto &input_port [[maybe_unused]] : _input_ports) {
-            assert(available_samples == input_port.streamReader().consume(available_samples));
+            auto consumed = input_port.streamReader().consume(available_samples);
+            assert(available_samples == consumed);
+            std::ignore = consumed;
         }
         return { requested_work, available_samples, gr::work::Status::OK };
     }
