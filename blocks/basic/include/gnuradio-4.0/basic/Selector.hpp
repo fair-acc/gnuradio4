@@ -8,9 +8,7 @@
 namespace gr::basic {
 using namespace gr;
 
-// optional shortening
-template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
-using A           = Annotated<T, description, Arguments...>;
+
 
 using SelectorDoc = Doc<R""(
 @brief basic multiplexing class to route arbitrary inputs to outputs
@@ -20,16 +18,16 @@ See https://wiki.gnuradio.org/index.php/Selector
 The selector block allows arbitrary mapping between the input and output ports.
 
 Selector has an arbitrary number of input and output ports, defined by
-the `nInputs` and `nOutputs` properties.
+the `n_inputs` and `n_outputs` properties.
 
-The mapping is defined by a pair of vectors `mapIn` and `mapOut`, the
+The mapping is defined by a pair of vectors `map_in` and `map_out`, the
 corresponding indices from these two vectors define the
 (input port index, output port index pairs).
 
 For example, for arrays:
 
-    mapIn  = {2, 2, 3, 3}
-    mapOut = {1, 2, 3, 4}
+    map_in  = {2, 2, 3, 3}
+    map_out = {1, 2, 3, 4}
 
 The mapping is as follows:
 
@@ -42,8 +40,8 @@ The mapping is as follows:
 
 And for arrays:
 
-    mapIn  = {1, 2, 3, 4}
-    mapOut = {2, 2, 3, 3}
+    map_in  = {1, 2, 3, 4}
+    map_out = {2, 2, 3, 3}
 
 The mapping is as follows:
 
@@ -66,39 +64,43 @@ you can set the `backPressure` property to false.
 
 template<typename T>
 struct Selector : Block<Selector<T>, SelectorDoc> {
+    // optional shortening
+    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
+    using A = Annotated<U, description, Arguments...>;
+
     // port definitions
     PortIn<std::uint32_t, Async, Optional> selectOut;
-    PortOut<T, Async, Optional>            monitorOut; // optional monitor output (more for demo/API purposes than actual need)
+    PortOut<T, Async, Optional>            monitorOut; // optional monitor output (for diagnostics and debugging purposes)
     std::vector<PortIn<T, Async>>          inputs;     // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
     std::vector<PortOut<T, Async>>         outputs;
 
     // settings
-    A<std::uint32_t, "nInputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>    nInputs  = 0U;
-    A<std::uint32_t, "nOutputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>   nOutputs = 0U;
-    A<std::vector<std::uint32_t>, "mapIn", Visible, Doc<"input port index to route from">>     mapIn; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
-    A<std::vector<std::uint32_t>, "mapOut", Visible, Doc<"output port index to route to">>     mapOut;
-    A<bool, "backPressure", Visible, Doc<"true: do not consume samples from un-routed ports">> backPressure = false;
-    std::map<std::uint32_t, std::vector<std::uint32_t>>                                        _internalMapping;
-    std::uint32_t                                                                              _selectedSrc = -1U;
+    A<std::uint32_t, "n_inputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>    n_inputs  = 0U;
+    A<std::uint32_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>   n_outputs = 0U;
+    A<std::vector<std::uint32_t>, "map_in", Visible, Doc<"input port index to route from">>     map_in; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
+    A<std::vector<std::uint32_t>, "map_out", Visible, Doc<"output port index to route to">>     map_out;
+    A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">> back_pressure = false;
+    std::map<std::uint32_t, std::vector<std::uint32_t>>                                         _internalMapping;
+    std::uint32_t                                                                               _selectedSrc = -1U;
 
     void
     settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
-        if (new_settings.contains("nInputs") || new_settings.contains("nOutputs")) {
-            fmt::print("{}: configuration changed: nInputs {} -> {}, nOutputs {} -> {}\n", static_cast<void *>(this), old_settings.at("nInputs"),
-                       new_settings.contains("nInputs") ? new_settings.at("nInputs") : "same", old_settings.at("nOutputs"), new_settings.contains("nOutputs") ? new_settings.at("nOutputs") : "same");
-            inputs.resize(nInputs);
-            outputs.resize(nOutputs);
+        if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
+            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", static_cast<void *>(this), old_settings.at("n_inputs"),
+                       new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+            inputs.resize(n_inputs);
+            outputs.resize(n_outputs);
         }
-        if (new_settings.contains("mapIn") || new_settings.contains("mapOut")) {
-            assert(mapIn.value.size() == mapOut.value.size() && "mapIn and mapOut must have the same length");
+        if (new_settings.contains("map_in") || new_settings.contains("map_out")) {
+            assert(map_in.value.size() == map_out.value.size() && "map_in and map_out must have the same length");
             _internalMapping.clear();
 
-            if (mapIn.value.size() != mapOut.value.size()) {
+            if (map_in.value.size() != map_out.value.size()) {
                 throw std::invalid_argument("Input and output map need to have the same number of elements");
             }
 
-            for (std::size_t i = 0U; i < mapOut.value.size(); ++i) {
-                _internalMapping[mapIn.value[i]].push_back(mapOut.value[i]);
+            for (std::size_t i = 0U; i < map_out.value.size(); ++i) {
+                _internalMapping[map_in.value[i]].push_back(map_out.value[i]);
             }
         }
     }
@@ -114,7 +116,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
                 monitor_writer_t                     *monOut, //
                 const std::vector<output_writer_t *> &outs) {
         if (_internalMapping.empty()) {
-            if (backPressure) {
+            if (back_pressure) {
                 std::for_each(ins.begin(), ins.end(), [](auto *input) { std::ignore = input->consume(0UZ); });
             } else {
                 // make the implicit consume all available behaviour explicit
@@ -190,7 +192,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
         for (auto src_port = 0U; src_port < ins.size(); ++src_port) {
             if (used_inputs.contains(src_port)) continue;
 
-            if (backPressure) {
+            if (back_pressure) {
                 std::ignore = ins[src_port]->consume(0UZ);
 
             } else {
@@ -204,7 +206,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
 };
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, selectOut, inputs, monitorOut, outputs, nInputs, nOutputs, mapIn, mapOut, backPressure);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, selectOut, inputs, monitorOut, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure);
 static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 
 #endif // include guard

@@ -17,7 +17,7 @@
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
-#include <gnuradio-4.0/testing/tag_monitors.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace gr::basic {
 

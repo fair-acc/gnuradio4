@@ -8,7 +8,7 @@
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
-#include <gnuradio-4.0/testing/tag_monitors.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 15
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
