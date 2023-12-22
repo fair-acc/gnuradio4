@@ -9,7 +9,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
-#include <gnuradio-4.0/testing/tag_monitors.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 15
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection

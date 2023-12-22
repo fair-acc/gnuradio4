@@ -8,7 +8,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 
-#include <gnuradio-4.0/basic/selector.hpp>
+#include <gnuradio-4.0/basic/Selector.hpp>
 
 template<typename T>
 struct repeated_source : public gr::Block<repeated_source<T>> {
@@ -136,15 +136,15 @@ execute_selector_test(test_definition definition) {
     gr::basic::Selector<double>           *selector;
 
     std::vector<std::uint32_t> mapIn(definition.mapping.size());
-    std::vector<std::uint32_t> mapOut(definition.mapping.size());
+    std::vector<std::uint32_t> map_out(definition.mapping.size());
     std::ranges::transform(definition.mapping, mapIn.begin(), [](auto &p) { return p.first; });
-    std::ranges::transform(definition.mapping, mapOut.begin(), [](auto &p) { return p.second; });
+    std::ranges::transform(definition.mapping, map_out.begin(), [](auto &p) { return p.second; });
 
-    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({ { "nInputs", sources_count }, //
-                                                                                { "nOutputs", sinks_count },  //
-                                                                                { "mapIn", mapIn },           //
-                                                                                { "mapOut", mapOut },         //
-                                                                                { "backPressure", definition.back_pressure } }));
+    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({ { "n_inputs", sources_count }, //
+                                                                                { "n_outputs", sinks_count },  //
+                                                                                { "map_in", mapIn },           //
+                                                                                { "map_out", map_out },        //
+                                                                                { "back_pressure", definition.back_pressure } }));
 
     for (std::uint32_t source_index = 0; source_index < sources_count; ++source_index) {
         sources.push_back(std::addressof(graph.emplaceBlock<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
@@ -202,16 +202,16 @@ const boost::ut::suite SelectorTest = [] {
     "Selector<T> constructor"_test = [] {
         Selector<double> block_nop({ { "name", "block_nop" } });
         expect(block_nop.settings().applyStagedParameters().empty());
-        expect(eq(block_nop.nInputs, 0U));
-        expect(eq(block_nop.nOutputs, 0U));
+        expect(eq(block_nop.n_inputs, 0U));
+        expect(eq(block_nop.n_outputs, 0U));
         expect(eq(block_nop.inputs.size(), 0U));
         expect(eq(block_nop.outputs.size(), 0U));
         expect(eq(block_nop._internalMapping.size(), 0U));
 
-        Selector<double> block({ { "name", "block" }, { "nInputs", 4U }, { "nOutputs", 3U } });
+        Selector<double> block({ { "name", "block" }, { "n_inputs", 4U }, { "n_outputs", 3U } });
         expect(block.settings().applyStagedParameters().empty());
-        expect(eq(block.nInputs, 4U));
-        expect(eq(block.nOutputs, 3U));
+        expect(eq(block.n_inputs, 4U));
+        expect(eq(block.n_outputs, 3U));
         expect(eq(block.inputs.size(), 4U));
         expect(eq(block.outputs.size(), 3U));
         expect(eq(block._internalMapping.size(), 0U));
@@ -220,7 +220,7 @@ const boost::ut::suite SelectorTest = [] {
     "basic Selector<T>"_test = [] {
         using T = double;
         const std::vector<uint32_t> outputMap{ 1U, 0U };
-        Selector<T>                 block({ { "nInputs", 3U }, { "nOutputs", 2U }, { "mapIn", std::vector<uint32_t>{ 0U, 1U } }, { "mapOut", outputMap } }); // N.B. 3rd input is unconnected
+        Selector<T>                 block({ { "n_inputs", 3U }, { "n_outputs", 2U }, { "map_in", std::vector<uint32_t>{ 0U, 1U } }, { "map_out", outputMap } }); // N.B. 3rd input is unconnected
         expect(block.settings().applyStagedParameters().empty());
         expect(eq(block._internalMapping.size(), 2U));
 

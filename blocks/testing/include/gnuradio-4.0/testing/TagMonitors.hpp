@@ -1,5 +1,5 @@
-#ifndef GNURADIO_TAG_MONITORS_HPP
-#define GNURADIO_TAG_MONITORS_HPP
+#ifndef GNURADIO_TAGMONITORS_HPP
+#define GNURADIO_TAGMONITORS_HPP
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -193,8 +193,8 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
     PortIn<T>                                in;
     std::vector<Tag>                         tags{};
     std::int64_t                             n_samples_produced{ 0 };
-    std::chrono::time_point<ClockSourceType> timeFirstSample = ClockSourceType::now();
-    std::chrono::time_point<ClockSourceType> timeLastSample  = ClockSourceType::now();
+    std::chrono::time_point<ClockSourceType> _timeFirstSample = ClockSourceType::now();
+    std::chrono::time_point<ClockSourceType> _timeLastSample  = ClockSourceType::now();
 
     // template<gr::meta::t_or_simd<T> V>
     constexpr void
@@ -202,7 +202,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_ONE)
     {
         if (n_samples_produced == 0) {
-            timeFirstSample = ClockSourceType::now();
+            _timeFirstSample = ClockSourceType::now();
         }
         if (this->input_tags_present()) {
             const Tag &tag = this->input_tags()[0];
@@ -211,7 +211,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
             this->forwardTags();
         }
         n_samples_produced++;
-        timeLastSample = ClockSourceType::now();
+        _timeLastSample = ClockSourceType::now();
     }
 
     // template<gr::meta::t_or_simd<T> V>
@@ -220,7 +220,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
         requires(UseProcessOne == ProcessFunction::USE_PROCESS_BULK)
     {
         if (n_samples_produced == 0) {
-            timeFirstSample = ClockSourceType::now();
+            _timeFirstSample = ClockSourceType::now();
         }
         if (this->input_tags_present()) {
             const Tag &tag = this->input_tags()[0];
@@ -230,13 +230,13 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
         }
 
         n_samples_produced += static_cast<std::int64_t>(input.size());
-        timeLastSample = ClockSourceType::now();
+        _timeLastSample = ClockSourceType::now();
         return work::Status::OK;
     }
 
     float
     effective_sample_rate() const {
-        const auto total_elapsed_time = std::chrono::duration_cast<std::chrono::microseconds>(timeLastSample - timeFirstSample).count();
+        const auto total_elapsed_time = std::chrono::duration_cast<std::chrono::microseconds>(_timeLastSample - _timeFirstSample).count();
         return total_elapsed_time == 0 ? std::numeric_limits<float>::quiet_NaN() : static_cast<float>(n_samples_produced) * 1e6f / static_cast<float>(total_elapsed_time);
     }
 };
@@ -245,7 +245,7 @@ struct TagSink : public Block<TagSink<T, UseProcessOne>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in, n_samples_produced);
 
 namespace gr::testing {
 // the concepts can only work as expected after ENABLE_REFLECTION_FOR_TEMPLATE_FULL
@@ -267,4 +267,4 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
 } // namespace gr::testing
 
-#endif // GNURADIO_TAG_MONITORS_HPP
+#endif // GNURADIO_TAGMONITORS_HPP
