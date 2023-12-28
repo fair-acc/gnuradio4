@@ -118,6 +118,8 @@ jobs:
 
       - name: execute tests
         if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
+        env:
+          DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: ctest --output-on-failure

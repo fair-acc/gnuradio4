@@ -4,6 +4,7 @@
 #include "gnuradio-4.0/BlockRegistry.hpp"
 #include <algorithm>
 
+#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
@@ -14,6 +15,7 @@
 namespace gr::testing {
 
 template<typename T>
+    requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
 struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawable<UICategory::ChartPane, "console">> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T>   in;
@@ -37,9 +39,11 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 
     constexpr void
     processOne(const T &input) noexcept {
-        in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
-        const float Ts = 1.0f / sample_rate;
-        _historyBufferX.push_back(_historyBufferX[1] + static_cast<T>(Ts));
+        if constexpr (std::is_arithmetic_v<T>) {
+            in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
+            const T Ts     = T(1.0f) / T(sample_rate);
+            _historyBufferX.push_back(_historyBufferX[1] + static_cast<T>(Ts));
+        }
         _historyBufferY.push_back(input);
 
         if (this->input_tags_present()) { // received tag
@@ -52,34 +56,50 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
     }
 
     work::Status
-    draw() noexcept {
+    draw(const property_map &config = {}) noexcept {
         [[maybe_unused]] const work::Status status = this->invokeWork(); // calls work(...) -> processOne(...) (all in the same thread as this 'draw()'
-        const auto [xMin, xMax]                    = std::ranges::minmax_element(_historyBufferX);
-        const auto [yMin, yMax]                    = std::ranges::minmax_element(_historyBufferY);
-        if (_historyBufferX.empty() || *xMin == *xMax || *yMin == *yMax) {
-            return status; // buffer or axes' ranges are empty -> skip drawing
+
+        if constexpr (std::is_arithmetic_v<T>) {
+            const auto [xMin, xMax] = std::ranges::minmax_element(_historyBufferX);
+            const auto [yMin, yMax] = std::ranges::minmax_element(_historyBufferY);
+            if (_historyBufferX.empty() || *xMin == *xMax || *yMin == *yMax) {
+                return status; // buffer or axes' ranges are empty -> skip drawing
+            }
+
+            if (config.contains("reset_view")) {
+                gr::graphs::resetView();
+            }
+
+            // create reversed copies -- draw(...) expects std::ranges::input_range ->
+            std::vector<T> reversedX(_historyBufferX.rbegin(), _historyBufferX.rend());
+            std::vector<T> reversedY(_historyBufferY.rbegin(), _historyBufferY.rend());
+            std::vector<T> reversedTag(_historyBufferX.size());
+            if constexpr (std::is_floating_point_v<T>) {
+                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(),
+                               [](const Tag &tag, const T &yValue) { return tag.index < 0 ? std::numeric_limits<T>::quiet_NaN() : yValue; });
+            } else {
+                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(),
+                               [](const Tag &tag, const T &yValue) { return tag.index < 0 ? std::numeric_limits<T>::lowest() : yValue; });
+            }
+
+            auto adjustRange = [](T min, T max) {
+                min            = std::min(min, T(0));
+                max            = std::max(max, T(0));
+                const T margin = (max - min) * static_cast<T>(0.2);
+                return std::pair<double, double>{ min - margin, max + margin };
+            };
+
+            auto chart = gr::graphs::ImChart<130, 28>({ { *xMin, *xMax }, adjustRange(*yMin, *yMax) });
+            chart.draw(reversedX, reversedY, signal_name);
+            chart.draw<gr::graphs::Style::Marker>(reversedX, reversedTag, "Tags");
+            chart.draw();
+        } else if constexpr (gr::DataSetLike<T>) {
+            if (_historyBufferY.empty()) {
+                return status;
+            }
+            gr::dataset::draw(_historyBufferY[0], { .reset_view = config.contains("reset_view") ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP });
         }
-        fmt::println("\033[2J\033[H");
-        // create reversed copies -- draw(...) expects std::ranges::input_range ->
-        // TODO: change draw routine and/or write wrapper and/or provide direction option to HistoryBuffer
-        std::vector<T> reversedX(_historyBufferX.rbegin(), _historyBufferX.rend());
-        std::vector<T> reversedY(_historyBufferY.rbegin(), _historyBufferY.rend());
-        std::vector<T> reversedTag(_historyBufferX.size());
-        std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(),
-                       [](const Tag &tag, const T &yValue) { return tag.index < 0 ? T(0) : yValue; });
 
-        auto adjustRange = [](T min, T max) {
-            min            = std::min(min, T(0));
-            max            = std::max(max, T(0));
-            const T margin = (max - min) * static_cast<T>(0.2);
-            return std::pair<double, double>{ min - margin, max + margin };
-        };
-
-        auto chart = gr::graphs::ImChart<130, 28>({ { *xMin, *xMax }, adjustRange(*yMin, *yMax) });
-        chart.draw(reversedX, reversedY, signal_name);
-        chart.draw<gr::graphs::Style::Marker>(reversedX, reversedTag, "Tags");
-        chart.draw();
-        fmt::println("buffer has {} samples - status {:10} # graph range x = [{:2.2}, {:2.2}] y = [{:2.2}, {:2.2}]", _historyBufferX.size(), magic_enum::enum_name(status), *xMin, *xMax, *yMin, *yMax);
         return status;
     }
 };
@@ -87,6 +107,6 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::ImChartMonitor, in, sample_rate, signal_name)
-auto registerImChartMonitor = gr::registerBlock<gr::testing::ImChartMonitor, double, float>(gr::globalBlockRegistry());
+inline const auto registerImChartMonitor = gr::registerBlock<gr::testing::ImChartMonitor, float, double, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_IMCHARTMONITOR_HPP

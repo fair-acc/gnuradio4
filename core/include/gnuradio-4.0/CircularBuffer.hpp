@@ -234,6 +234,7 @@ class CircularBuffer {
         ClaimType                 _claimStrategy;
         // list of dependent reader indices
         DependendsType           _read_indices{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
+        std::atomic<std::size_t> _reader_count{0UZ};
         std::atomic<std::size_t> _writer_count{0UZ};
 
         buffer_impl() = delete;
@@ -468,12 +469,9 @@ class CircularBuffer {
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
-
-        [[nodiscard]] constexpr bool isPublished() const noexcept { return _isRangePublished; }
-
-        [[nodiscard]] constexpr std::size_t samplesPublished() const noexcept { return _nSamplesPublished; }
+        [[nodiscard]] constexpr std::size_t       available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
+        [[nodiscard]] constexpr bool              isPublished() const noexcept { return _isRangePublished; }
+        [[nodiscard]] constexpr std::size_t       samplesPublished() const noexcept { return _nSamplesPublished; }
 
     private:
         template<typename... Args, WriterCallback<U, Args...> Translator>
@@ -679,6 +677,7 @@ class CircularBuffer {
         buffer_reader() = delete;
         explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(buffer), _size(buffer->_size) {
             gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_readIndex});
+            _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
             _readIndexCached = _readIndex->value();
         }
         buffer_reader(buffer_reader&& other) noexcept : _readIndex(std::move(other._readIndex)), _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), _buffer(other._buffer), _size(_buffer->_size), _nSamplesFirstGet(std::move(other._nSamplesFirstGet)), _rangesCounter(std::move(other._rangesCounter)), _nSamplesToConsume(std::move(other._nSamplesToConsume)), _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
@@ -693,7 +692,10 @@ class CircularBuffer {
             _size = _buffer->_size;
             return *this;
         };
-        ~buffer_reader() { gr::detail::removeSequence(_buffer->_read_indices, _readIndex); }
+        ~buffer_reader() {
+            gr::detail::removeSequence(_buffer->_read_indices, _readIndex);
+            _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+        }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
@@ -756,7 +758,7 @@ public:
 
     // implementation specific interface -- not part of public Buffer / production-code API
     [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_reader_count.load(std::memory_order_relaxed); }
     [[nodiscard]] const auto& claim_strategy() { return _shared_buffer_ptr->_claimStrategy; }
     [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_cursor; }

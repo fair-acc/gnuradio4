@@ -114,6 +114,8 @@ struct LogAxisTransform {
     }
 };
 
+enum struct ResetChartView { RESET, KEEP };
+
 enum class Style { Braille, Bars, Marker };
 
 namespace detail {
@@ -134,6 +136,11 @@ optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
 }
 
 } // namespace detail
+
+inline void
+resetView() {
+    fmt::println("\033[2J\033[H");
+}
 
 /**
  * @brief compact class for ASCII charting in terminal environments, supporting custom dimensions and styles.
@@ -243,14 +250,15 @@ public:
     std::size_t n_ticks_x = std::min(10LU, screenWidth / 2U);
     std::size_t n_ticks_y = std::min(10LU, screenHeight / 2U);
 
-    constexpr ImChart(const std::source_location location = std::source_location::current()) noexcept
-        : _screen_width(screenWidth)
-        , _screen_height(screenHeight)
+    constexpr ImChart(std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight, const std::source_location location = std::source_location::current()) noexcept
+        : _screen_width(screenWidth_)
+        , _screen_height(screenHeight_)
         , _screen(_screen_height, std::vector<std::string>(_screen_width, " "))
         , _brailleArray(_screen_width * kCellWidth, std::vector<uint16_t>(_screen_height * kCellHeight, 0UZ))
         , _location(location) {}
 
-    explicit ImChart(const std::tuple<std::pair<double, double>, std::pair<double, double>> &init) : ImChart() {
+    explicit ImChart(const std::tuple<std::pair<double, double>, std::pair<double, double>> &init, std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight)
+        : ImChart(screenWidth_, screenHeight_) {
         const auto &[xBounds, yBounds] = init;
         axis_min_x                     = xBounds.first;
         axis_max_x                     = xBounds.second;
@@ -258,10 +266,11 @@ public:
         axis_max_y                     = yBounds.second;
     }
 
-    template<Style style = Style::Braille, std::ranges::input_range TContainer>
+    template<Style style = Style::Braille, std::ranges::input_range TContainer1, std::ranges::input_range TContainer2>
     void
-    draw(const TContainer &xValues, const TContainer &yValues, std::string_view datasetName = {}) {
-        using ValueType = typename TContainer::value_type;
+    draw(const TContainer1 &xValues, const TContainer2 &yValues, std::string_view datasetName = {}) {
+        static_assert(std::is_same_v<std::ranges::range_value_t<TContainer1>, std::ranges::range_value_t<TContainer2>>, "x- and y- range must have same value_type");
+        using ValueType = typename std::ranges::range_value_t<TContainer1>;
         static_assert(std::is_arithmetic_v<ValueType>, "collection's value_type must be a arithmetic type!");
         if (xValues.size() != yValues.size() || xValues.empty()) {
             return;
