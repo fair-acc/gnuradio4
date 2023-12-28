@@ -129,7 +129,7 @@ inline const boost::ut::suite _buffer_tests = [] {
     enum class BufferStrategy { posix, portable };
 
     for (WriteApi writerAPI : { WriteApi::via_lambda, WriteApi::via_split_request_publish_RAII }) {
-        for (BufferStrategy strategy : { /*BufferStrategy::posix,*/ BufferStrategy::portable }) {
+        for (BufferStrategy strategy : { BufferStrategy::posix, BufferStrategy::portable }) {
             for (std::size_t veclen : { 1UL, 1024UL }) {
                 if (not(strategy == BufferStrategy::posix and veclen == 1UL)) {
                     benchmark::results::add_separator();
