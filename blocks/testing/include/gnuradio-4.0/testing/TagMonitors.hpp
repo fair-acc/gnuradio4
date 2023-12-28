@@ -225,27 +225,24 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     PortIn<T>  in;
     PortOut<T> out;
 
-    // Currently, UncertainValue is not supported in Settings. For now, just remove the error part and store only values.
-    using TDataTypeStored = UncertainValueType_t<T>;
+    gr::Size_t  n_samples_expected{0};
+    gr::Size_t  n_samples_produced{0}; // for infinite samples the counter wraps around back to 0
+    float       sample_rate = 1000.0f;
+    std::string signal_name;
+    bool        log_tags        = true;
+    bool        log_samples     = true;
+    bool        verbose_console = false;
 
-    std::vector<TDataTypeStored> samples{};
-    gr::Size_t                   n_samples_expected{0};
-    gr::Size_t                   n_samples_produced{0}; // for infinite samples the counter wraps around back to 0
-    float                        sample_rate = 1000.0f;
-    std::string                  signal_name;
-    bool                         log_tags        = true;
-    bool                         log_samples     = true;
-    bool                         verbose_console = false;
-
-    std::vector<Tag> _tags{};
+    std::vector<T>   _samples;
+    std::vector<Tag> _tags;
 
     void start() {
         if (verbose_console) {
             fmt::println("started TagMonitor {} aka. '{}'", this->unique_name, this->name);
         }
-        samples.clear();
+        _samples.clear();
         if (log_samples) {
-            samples.reserve(std::max(0UZ, static_cast<std::size_t>(n_samples_expected)));
+            _samples.reserve(std::max(0UZ, static_cast<std::size_t>(n_samples_expected)));
         }
         _tags.clear();
     }
@@ -263,11 +260,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             }
         }
         if (log_samples) {
-            if constexpr (UncertainValueLike<T>) {
-                samples.emplace_back(input.value);
-            } else {
-                samples.emplace_back(input);
-            }
+            _samples.push_back(input);
         }
         n_samples_produced++;
         return input;
@@ -290,19 +283,9 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             if constexpr (gr::meta::any_simd<V>) {
                 alignas(stdx::memory_alignment_v<stdx::native_simd<T>>) std::array<T, V::size()> mem = {};
                 input.copy_to(&mem[0], stdx::vector_aligned);
-                if constexpr (UncertainValueLike<T>) {
-                    for (const auto& item : mem) {
-                        samples.emplace_back(item.value);
-                    }
-                } else {
-                    samples.insert(samples.end(), mem.begin(), mem.end());
-                }
+                _samples.insert(_samples.end(), mem.begin(), mem.end());
             } else {
-                if constexpr (UncertainValueLike<T>) {
-                    samples.emplace_back(input.value);
-                } else {
-                    samples.emplace_back(input);
-                }
+                _samples.emplace_back(input);
             }
         }
         if constexpr (gr::meta::any_simd<V>) {
@@ -327,13 +310,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
         }
 
         if (log_samples) {
-            if constexpr (UncertainValueLike<T>) {
-                for (const auto& item : input) {
-                    samples.emplace_back(item.value);
-                }
-            } else {
-                samples.insert(samples.end(), input.begin(), input.end());
-            }
+            _samples.insert(_samples.end(), input.begin(), input.end());
         }
 
         n_samples_produced += static_cast<gr::Size_t>(input.size());
@@ -348,27 +325,24 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T> in;
 
-    // Currently, UncertainValue is not supported in Settings. For now, just remove the error part and store only values.
-    using TDataTypeStored = UncertainValueType_t<T>;
+    gr::Size_t  n_samples_expected{0};
+    gr::Size_t  n_samples_produced{0}; // for infinite samples the counter wraps around back to 0
+    float       sample_rate = 1000.0f;
+    std::string signal_name;
+    bool        log_tags        = true;
+    bool        log_samples     = true;
+    bool        verbose_console = false;
 
-    std::vector<TDataTypeStored> samples{};
-    gr::Size_t                   n_samples_expected{0};
-    gr::Size_t                   n_samples_produced{0}; // for infinite samples the counter wraps around back to 0
-    float                        sample_rate = 1000.0f;
-    std::string                  signal_name;
-    bool                         log_tags        = true;
-    bool                         log_samples     = true;
-    bool                         verbose_console = false;
-
+    std::vector<T>   _samples{};
     std::vector<Tag> _tags{};
 
     void start() {
         if (verbose_console) {
             fmt::println("started sink {} aka. '{}'", this->unique_name, this->name);
         }
-        samples.clear();
+        _samples.clear();
         if (log_samples) {
-            samples.reserve(std::max(0UZ, static_cast<std::size_t>(n_samples_expected)));
+            _samples.reserve(std::max(0UZ, static_cast<std::size_t>(n_samples_expected)));
         }
         _tags.clear();
     }
@@ -379,7 +353,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
         }
     }
 
-    constexpr void processOne(const T& input) noexcept // N.B. non-SIMD since we need a sample-by-sample accurate tag detection
+    constexpr void processOne(const T& input) // N.B. non-SIMD since we need a sample-by-sample accurate tag detection
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
         if (this->input_tags_present()) {
@@ -392,11 +366,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
             }
         }
         if (log_samples) {
-            if constexpr (UncertainValueLike<T>) {
-                samples.emplace_back(input.value);
-            } else {
-                samples.emplace_back(input);
-            }
+            _samples.push_back(input);
         }
         n_samples_produced++;
         if (n_samples_expected > 0 && n_samples_produced >= n_samples_expected) {
@@ -405,7 +375,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     }
 
     // template<gr::meta::t_or_simd<T> V>
-    constexpr work::Status processBulk(std::span<const T> input) noexcept
+    constexpr work::Status processBulk(std::span<const T> input)
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
         if (this->input_tags_present()) {
@@ -418,13 +388,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
             }
         }
         if (log_samples) {
-            if constexpr (UncertainValueLike<T>) {
-                for (const auto& item : input) {
-                    samples.emplace_back(item.value);
-                }
-            } else {
-                samples.insert(samples.end(), input.begin(), input.end());
-            }
+            _samples.insert(_samples.end(), input.begin(), input.end());
         }
         n_samples_produced += static_cast<gr::Size_t>(input.size());
         return n_samples_expected > 0 && n_samples_produced >= n_samples_expected ? work::Status::DONE : work::Status::OK;
@@ -434,8 +398,8 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max, sample_rate, signal_name, signal_unit, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags, log_samples, verbose_console, samples);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags, log_samples, verbose_console, samples);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags, log_samples, verbose_console);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags, log_samples, verbose_console);
 
 auto registerTagSource  = gr::registerBlock<gr::testing::TagSource, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::TagSource, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
 auto registerTagMonitor = gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
