@@ -41,6 +41,9 @@ enum class TagPropagationPolicy {
 
 using property_map = pmtv::map_t;
 
+template<typename T>
+concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
+
 /**
  * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
  * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
@@ -109,6 +112,7 @@ struct alignas(hardware_constructive_interference_size) Tag {
         map[key] = value;
     }
 };
+
 } // namespace gr
 
 ENABLE_REFLECTION(gr::Tag, index, map);

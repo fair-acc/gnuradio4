@@ -289,8 +289,8 @@ public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
-    Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
-    Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
+    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -1.0f;
+    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +1.0f;
 
     PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>> in;
 
@@ -454,11 +454,11 @@ public:
     processBulk(std::span<const T> inData) noexcept {
         std::optional<property_map> tagData;
         if (this->input_tags_present()) {
-            assert(this->input_tags()[0].index == 0);
-            tagData = this->input_tags()[0].map;
+            assert(this->mergedInputTag().index == 0);
+            tagData = this->mergedInputTag().map;
             // signal info from settings overrides info from tags
             if (!_has_signal_info_from_settings) {
-                applySignalInfo(this->input_tags()[0].map);
+                applySignalInfo(this->mergedInputTag().map);
             }
         }
 
@@ -496,8 +496,8 @@ private:
         const auto rate_ = getProperty(properties, tag::SAMPLE_RATE.key(), float{});
         const auto name_ = getProperty(properties, tag::SIGNAL_NAME.key(), std::string());
         const auto unit_ = getProperty(properties, tag::SIGNAL_UNIT.key(), std::string());
-        const auto min_  = getProperty(properties, tag::SIGNAL_MIN.key(), T{});
-        const auto max_  = getProperty(properties, tag::SIGNAL_MAX.key(), T{});
+        const auto min_  = getProperty(properties, tag::SIGNAL_MIN.key(), float{});
+        const auto max_  = getProperty(properties, tag::SIGNAL_MAX.key(), float{});
         if (!rate_ && !name_ && !unit_ && !min_ && !max_) {
             return false;
         }
@@ -515,7 +515,7 @@ private:
                 listener->applySampleRate(sample_rate);
             }
             if (name_ || unit_ || min_ || max_) {
-                listener->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { signal_min, signal_max } } });
+                listener->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { T(signal_min), T(signal_max) } } });
             }
         }
 
@@ -543,7 +543,7 @@ private:
 
     void
     addListener(std::unique_ptr<AbstractListener> &&l, bool block) {
-        l->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { signal_min, signal_max } } });
+        l->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { T(signal_min), T(signal_max) } } });
         l->applySampleRate(sample_rate);
         if (block) {
             _listeners.push_back(std::move(l));

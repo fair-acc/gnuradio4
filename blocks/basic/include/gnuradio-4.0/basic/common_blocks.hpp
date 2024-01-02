@@ -142,6 +142,11 @@ public:
         return false;
     }
 
+    constexpr gr::lifecycle::State
+    state() const noexcept override {
+        return gr::lifecycle::State::RUNNING;
+    }
+
     [[nodiscard]] constexpr std::size_t
     availableInputSamples(std::vector<std::size_t> &) const noexcept override {
         return 0UZ;

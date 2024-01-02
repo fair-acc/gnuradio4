@@ -22,13 +22,25 @@ const boost::ut::suite TagTests = [] {
     using namespace gr::basic;
     using namespace gr::testing;
 
-    "ClockSource test"_test = [] {
-        constexpr bool          useIoThreadPool = true; // true: scheduler/graph-provided thread, false: use user-provided call-back or thread
-        constexpr std::uint32_t n_samples       = 1900;
-        constexpr float         sample_rate     = 2000.f;
+    static const auto mismatchedKey = [](const property_map &map) {
+        std::vector<std::string> keys;
+        for (const auto &pair : map) {
+            keys.push_back(pair.first);
+        }
+        return keys;
+    };
+
+    auto clockSourceTest = []<bool useIoThreadPool>(bool verbose = false) {
+        // useIoThreadPool - true: scheduler/graph-provided thread, false: use user-provided call-back or thread
+        if (verbose) {
+            fmt::println("started ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
+        }
+        constexpr std::uint32_t n_samples   = 1900;
+        constexpr float         sample_rate = 2000.f;
         Graph                   testGraph;
-        auto &src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
-        src.tags  = {
+        auto                   &src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>(
+                { { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" }, { "verbose_console", verbose } });
+        src.tags = {
             { 0, { { "key", "value@0" } } },       //
             { 1, { { "key", "value@1" } } },       //
             { 100, { { "key", "value@100" } } },   //
@@ -40,16 +52,13 @@ const boost::ut::suite TagTests = [] {
         };
         auto &sink1 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink1" } });
         auto &sink2 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink2" } });
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink2)));
 
         scheduler::Simple sched{ std::move(testGraph) };
-        if constexpr (!useIoThreadPool) {
-            src.tryStartThread();
-        }
         sched.runAndWait();
-        if constexpr (!useIoThreadPool) {
-            src.stopThread();
+        if (verbose) {
+            fmt::println("finished ClockSource sched.runAndWait() w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
         }
 
         expect(eq(src.n_samples_max, n_samples)) << "src did not accept require max input samples";
@@ -70,7 +79,13 @@ const boost::ut::suite TagTests = [] {
         // TODO: last decimator/interpolator + stride addition seems to break the limiting the input samples to the min of available vs. n_samples-until next tags
         // expect(equal_tag_lists(src.tags, sink1.tags)) << "sink1 (USE_PROCESS_ONE) did not receive the required tags";
         // expect(equal_tag_lists(src.tags, sink2.tags)) << "sink2 (USE_PROCESS_BULK) did not receive the required tags";
+        if (verbose) {
+            fmt::println("finished ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T>-provided thread" : "user-provided thread");
+        }
     };
+
+    "ClockSource w/ Graph/Block<T> provided thread"_test = [&clockSourceTest] { clockSourceTest.template operator()<true>(false); };
+    // "ClockSource w/ user-provided thread"_test           = [&clockSourceTest] { clockSourceTest.template operator()<false>(false); }; // TODO: check potential threading issue for user-provided threads
 
     "SignalGenerator test"_test = [] {
         const std::size_t        N      = 16; // test points
@@ -79,14 +94,15 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto &sig : signals) {
             SignalGenerator<double> signalGen{};
-            std::ignore = signalGen.settings().set({ { "signal_type", sig },
-                                                     { "n_samples_max", std::uint32_t(100) },
-                                                     { "sample_rate", 2048. },
-                                                     { "frequency", 256. },
-                                                     { "amplitude", 1. },
-                                                     { "offset", offset },
-                                                     { "phase", std::numbers::pi / 4 } });
-            std::ignore = signalGen.settings().applyStagedParameters();
+            auto                    failed = signalGen.settings().set({ { "signal_type", sig }, //
+                                                                        { "sample_rate", 2048.f },
+                                                                        { "frequency", 256. },
+                                                                        { "amplitude", 1. },
+                                                                        { "offset", offset },
+                                                                        { "phase", std::numbers::pi / 4 } });
+            expect(failed.empty()) << fmt::format("settings have mismatching keys or value types. offending keys: {}\n", fmt::join(mismatchedKey(failed), ", "));
+            const auto forwardSettings = signalGen.settings().applyStagedParameters();
+            expect(eq(forwardSettings.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(forwardSettings), ", "));
 
             // expected values corresponds to sample_rate = 1024., frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
             std::map<std::string, std ::vector<double>> expResults = {
@@ -111,14 +127,15 @@ const boost::ut::suite TagTests = [] {
         std::vector<std::string> signals{ "Const", "Sin", "Cos", "Square", "Saw", "Triangle" };
         for (const auto &sig : signals) {
             SignalGenerator<double> signalGen{};
-            std::ignore = signalGen.settings().set({ { "signal_type", sig },
-                                                     { "n_samples_max", static_cast<std::uint32_t>(N) },
-                                                     { "sample_rate", 8192. },
-                                                     { "frequency", 32. },
-                                                     { "amplitude", 2. },
-                                                     { "offset", 0. },
-                                                     { "phase", std::numbers::pi / 4. } });
-            std::ignore = signalGen.settings().applyStagedParameters();
+            const auto              failed = signalGen.settings().set({ { "signal_type", sig }, //
+                                                                        { "sample_rate", 8192.f },
+                                                                        { "frequency", 32. },
+                                                                        { "amplitude", 2. },
+                                                                        { "offset", 0. },
+                                                                        { "phase", std::numbers::pi / 4. } });
+            expect(failed.empty()) << fmt::format("settings have mismatching keys or value types. offending keys: {}\n", fmt::join(mismatchedKey(failed), ", "));
+            const auto forwardSettings = signalGen.settings().applyStagedParameters();
+            expect(eq(forwardSettings.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(forwardSettings), ", "));
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
@@ -137,13 +154,14 @@ const boost::ut::suite TagTests = [] {
         Graph                   testGraph;
         auto                   &clockSrc  = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
         auto                   &signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({ { "sample_rate", sample_rate }, { "name", "SignalGenerator" } });
-        auto                   &sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" } });
+        auto                   &sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(signalGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(signalGen).to<"in">(sink)));
 
         scheduler::Simple sched{ std::move(testGraph) };
         sched.runAndWait();
+
         expect(eq(n_samples, static_cast<std::uint32_t>(sink.n_samples_produced))) << "Number of samples does not match";
     };
 };

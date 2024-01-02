@@ -56,17 +56,17 @@ struct fixed_string {
         return N == 0;
     }
 
-    [[nodiscard]] constexpr explicit
-    operator std::string_view() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return { _data, N }; }
 
     [[nodiscard]] explicit
     operator std::string() const noexcept {
         return { _data, N };
     }
 
-    [[nodiscard]] operator const char *() const noexcept { return _data; }
+    [[nodiscard]] explicit
+    operator const char *() const noexcept {
+        return _data;
+    }
 
     [[nodiscard]] constexpr bool
     operator==(const fixed_string &other) const noexcept {
@@ -520,6 +520,20 @@ static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<std::comp
 
 template<typename T>
 concept string_like = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> || std::is_convertible_v<T, std::string_view>;
+
+namespace detail {
+template<typename T>
+struct is_const_member_function : std::false_type {};
+
+template<typename T, typename U, typename... args>
+struct is_const_member_function<U (T::*)(args...) const> : std::true_type {};
+} // namespace detail
+
+template<typename T>
+inline constexpr bool
+is_const_member_function(T) noexcept {
+    return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
+}
 
 } // namespace gr::meta
 

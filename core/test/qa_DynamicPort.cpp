@@ -79,7 +79,7 @@ public:
     gr::work::Result
     work(std::size_t requested_work) {
         // check if STOPPED and return immediately
-        if (this->state == gr::LifeCycleState::STOPPED) {
+        if (this->state == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, gr::work::Status::DONE };
         }
         if (_counter < count) {
@@ -91,8 +91,9 @@ public:
 
             return { requested_work, 1UZ, gr::work::Status::OK };
         } else {
-            this->state = gr::LifeCycleState::STOPPED; // change the state to STOPPED
-            this->publishEOSTag(0);                    // publish END_OF_STREAM tag with 0 offset
+            this->state = gr::lifecycle::State::STOPPED;
+            this->state.notify_all();
+            this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 0UZ, gr::work::Status::DONE };
         }
     }

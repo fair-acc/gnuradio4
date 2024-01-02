@@ -269,13 +269,13 @@ and local block-specific constraints as defined by the blocks' ports, e.g.
 
 #### Scheduler state diagram
 
-`LifeCycleState` enum represents possible states of the `Scheduler`.
+`lifecycle::State` enum represents possible states of the `Scheduler` or any `Block<T>`.
 
 ```cpp
-enum class LifeCycleState : char { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR };
+enum class lifecycle::State : char { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR };
 ```
 
-The complete state diagram of the `Scheduler` is shown below.
+The complete state diagram of the `Scheduler` and `Block<T>` is shown below.
 
 ```mermaid
 stateDiagram-v2
@@ -302,7 +302,7 @@ stateDiagram-v2
 All `Block`-derived classes can optionally implement any subset of the lifecycle
 methods ( `start()`, `stop()`, `reset()`, `pause()`, `resume()`).
 These methods are considered optional and can be implemented by block developers to get informed and handle state
-changes of the `Scheduler`. In addition `Block` contains `state` atomic variable (`LifeCycleState` enum) allowing to
+changes of the `Scheduler`. In addition `Block` contains `state` atomic variable (`lifecycle::State` enum) allowing to
 query the block's state.
 
 The following methods can be implemented:
@@ -314,10 +314,10 @@ The following methods can be implemented:
   state.
 * `resume()` When the block is resumed after a pause, the `resume()` method is called. It should contain logic to
   restart operations from the same state as when it was paused.
-* `reset()` This method is used to clean-up and reset the block's state to defaults.
+* `reset()` This method is used to clean up and reset the block's state to defaults.
 
 These callback methods are assumed not to block for an extended period. Blocking operations should be avoided to ensure
-the block's responsiveness and real-time behavior.
+the block's responsiveness and real-time behaviour.
 
 ```cpp
 struct UserBlock : public Block<UserBlock> {

@@ -11,8 +11,8 @@ endfunction()
 
 function(setup_test TARGET_NAME)
     if (NOT EMSCRIPTEN)
-        target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=address)
-        target_link_options(${TARGET_NAME} PRIVATE -fsanitize=address)
+        target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
+        target_link_options(${TARGET_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
     endif ()
     setup_test_no_asan(${TARGET_NAME})
 endfunction()

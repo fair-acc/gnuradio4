@@ -51,13 +51,14 @@ public:
 
     grg::work::Result
     work(std::size_t requested_work) {
-        if (this->state == gr::LifeCycleState::STOPPED) {
+        if (this->state == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, gr::work::Status::DONE };
         }
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
-            this->state = gr::LifeCycleState::STOPPED;
-            this->publishEOSTag(std::size_t(0));
+            this->state = gr::lifecycle::State::STOPPED;
+            this->state.notify_all();
+            this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 0UZ, grg::work::Status::DONE };
         }
 

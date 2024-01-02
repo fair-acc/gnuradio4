@@ -296,7 +296,7 @@ class CircularBuffer
 
     explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
     explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t n_slots_to_claim) noexcept :
-        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
+        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data.data()[_index], _n_slots_to_claim }) { }
     ReservedOutputRange(const ReservedOutputRange&) = delete;
     ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
     ReservedOutputRange(ReservedOutputRange&& other) noexcept
@@ -346,8 +346,8 @@ class CircularBuffer
     constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
     constexpr T* data() const noexcept { return _internal_span.data(); }
 
-    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data[_index + i]; }
-    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data[_index + i]; }
+    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data.data()[_index + i]; }
+    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data.data()[_index + i]; }
     operator std::span<T>&() const noexcept { return _internal_span; }
     operator std::span<T>&() noexcept { return _internal_span; }
 
@@ -534,7 +534,7 @@ class CircularBuffer
     };
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface) {
+        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
             return double_mapped_memory_resource::allocator<T>();
         } else {
             return Allocator();

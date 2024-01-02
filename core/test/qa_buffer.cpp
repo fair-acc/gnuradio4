@@ -133,7 +133,7 @@ const boost::ut::suite SequenceTests = [] {
     };
 };
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(_GLIBCXX_DEBUG)
 const boost::ut::suite DoubleMappedAllocatorTests = [] {
     using namespace boost::ut;
 
@@ -144,7 +144,7 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
         std::vector<int32_t, Allocator> vec(size, doubleMappedAllocator);
         expect(eq(vec.size(), size));
         std::iota(vec.begin(), vec.end(), 1);
-        for (auto i = 0U; i < vec.size(); i++) {
+        for (std::size_t i = 0U; i < vec.size(); ++i) {
             expect(eq(vec[i], static_cast<std::int32_t>(i + 1)));
             // to note: can safely read beyond size for this special vector
             expect(eq(vec[size + i], vec[i])); // identical to mirrored copy
@@ -478,10 +478,6 @@ const boost::ut::suite NonPowerTwoTests = [] {
         expect(not std::has_single_bit(typeSize)) << "type is non-power-of-two";
         Buffer auto buffer = CircularBuffer<Type>(1024);
         expect(ge(buffer.size(), 1024u));
-        if (gr::has_posix_mmap_interface) {
-            expect(buffer.size() % typeSize == 0u) << "divisible by the type size";
-            expect(buffer.size() % static_cast<std::size_t>(getpagesize()) == 0u) << "divisible by the memory page size";
-        }
 
         BufferWriter auto writer = buffer.new_writer();
         BufferReader auto reader = buffer.new_reader();

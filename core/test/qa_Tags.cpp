@@ -79,15 +79,17 @@ const boost::ut::suite TagTests = [] {
 };
 
 const boost::ut::suite TagPropagation = [] {
+    using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
 
-    "tag_source"_test = [] {
-        std::int64_t n_samples = 1024;
-        Graph        testGraph;
-        auto        &src = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", n_samples }, { "name", "TagSource" } });
-        src.tags         = {
+    auto runTest = []<auto srcType>(bool verbose = true) {
+        std::uint64_t      n_samples = 1024;
+        Graph              testGraph;
+        const property_map srcParameter = { { "n_samples_max", n_samples }, { "name", "TagSource" }, { "signal_name", "tagStream" }, { "verbose_console", true && verbose } };
+        auto              &src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
+        src.tags                        = {
             // TODO: allow parameter settings to include maps?!?
             { 0, { { "key", "value@0" } } },       //
             { 1, { { "key", "value@1" } } },       //
@@ -98,29 +100,61 @@ const boost::ut::suite TagPropagation = [] {
             { 1002, { { "key", "value@1002" } } }, //
             { 1023, { { "key", "value@1023" } } }  //
         };
-        auto &monitor1 = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagMonitor1" } });
-        auto &monitor2 = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagMonitor2" } });
-        auto &sink1    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "name", "TagSink1" } });
-        auto &sink2    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink2" } });
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitor1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor1).to<"in">(monitor2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor2).to<"in">(sink2)));
+        expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
+
+        auto &monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>(
+                { { "name", "TagMonitorBulk" }, { "n_samples_expected", n_samples }, { "verbose_console", true && verbose } });
+        auto &monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>(
+                { { "name", "TagMonitorOne" }, { "n_samples_expected", n_samples }, { "verbose_console", false && verbose } });
+        auto &monitorOneSIMD = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE_SIMD>>(
+                { { "name", "TagMonitorOneSIMD" }, { "n_samples_expected", n_samples }, { "verbose_console", false && verbose } });
+        auto &sinkBulk = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>(
+                { { "name", "TagSinkN" }, { "n_samples_expected", n_samples }, { "verbose_console", true && verbose } });
+        auto &sinkOne = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>(
+                { { "name", "TagSinkOne" }, { "n_samples_expected", n_samples }, { "verbose_console", true && verbose } });
+
+        // src ─> monitorBulk ─> monitorOne ─> monitorOneSIMD ┬─> sinkBulk
+        //                                                    └─> sinkOne
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(monitorOneSIMD)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkOne)));
 
         scheduler::Simple sched{ std::move(testGraph) };
         sched.runAndWait();
 
-        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(monitor1.n_samples_produced, n_samples)) << "monitor1 did not consume enough input samples";
-        expect(eq(monitor2.n_samples_produced, n_samples)) << "monitor2 did not consume enough input samples";
-        expect(eq(sink1.n_samples_produced, n_samples)) << "sink1 did not consume enough input samples";
-        expect(eq(sink2.n_samples_produced, n_samples)) << "sink2 did not consume enough input samples";
+        // settings forwarding
+        expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
+        expect(eq(src.signal_name, monitorBulk.signal_name)) << "monitorBulk signal_name";
+        expect(eq(src.signal_name, monitorOne.signal_name)) << "monitorOne signal_name";
+        expect(eq(src.signal_name, monitorOneSIMD.signal_name)) << "monitorOneSIMD signal_name";
+        expect(eq(src.signal_name, sinkBulk.signal_name)) << "sinkBulk signal_name";
+        expect(eq(src.signal_name, sinkOne.signal_name)) << "sinkOne signal_name";
 
-        expect(equal_tag_lists(src.tags, monitor1.tags)) << "monitor1 did not receive the required tags";
-        expect(equal_tag_lists(src.tags, monitor2.tags)) << "monitor2 did not receive the required tags";
-        expect(equal_tag_lists(src.tags, sink1.tags)) << "sink1 did not receive the required tags";
-        expect(equal_tag_lists(src.tags, sink2.tags)) << "sink1 did not receive the required tags";
+        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
+        expect(eq(monitorBulk.n_samples_produced, n_samples)) << "monitorBulk did not consume enough input samples";
+        expect(eq(monitorOne.n_samples_produced, n_samples)) << "monitorOne did not consume enough input samples";
+        expect(eq(monitorOneSIMD.n_samples_produced, n_samples)) << "monitorOneSIMD did not consume enough input samples";
+        expect(eq(sinkBulk.n_samples_produced, n_samples)) << "sinkBulk did not consume enough input samples";
+        expect(eq(sinkOne.n_samples_produced, n_samples)) << "sinkOne did not consume enough input samples";
+
+        expect(!monitorBulk.log_samples || eq(monitorBulk.samples.size(), n_samples)) << "monitorBulk did not log enough input samples";
+        expect(!monitorOne.log_samples || eq(monitorOne.samples.size(), n_samples)) << "monitorOne did not log enough input samples";
+        expect(!monitorOneSIMD.log_samples || eq(monitorOneSIMD.samples.size(), n_samples)) << "monitorOneSIMD did not log enough input samples";
+        expect(!sinkBulk.log_samples || eq(sinkBulk.samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
+        expect(!sinkOne.log_samples || eq(sinkOne.samples.size(), n_samples)) << "sinkOne did not log enough input samples";
+
+        expect(equal_tag_lists(src.tags, monitorBulk.tags, "signal_name"s)) << "monitorBulk did not receive the required tags";
+        expect(equal_tag_lists(src.tags, monitorOne.tags, "signal_name"s)) << "monitorOne did not receive the required tags";
+        expect(equal_tag_lists(src.tags, monitorOneSIMD.tags, "signal_name"s)) << "monitorOneSIMD did not receive the required tags";
+        expect(equal_tag_lists(src.tags, sinkBulk.tags, "signal_name"s)) << "sinkBulk did not receive the required tags";
+        expect(equal_tag_lists(src.tags, sinkOne.tags, "signal_name"s)) << "sinkOne did not receive the required tags";
     };
+
+    "TagSource<float, USE_PROCESS_BULK>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
+
+    "TagSource<float, USE_PROCESS_ONE>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_ONE>(true); };
 };
 
 int

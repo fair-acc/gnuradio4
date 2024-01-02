@@ -1,8 +1,6 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <magic_enum.hpp>
-#include <magic_enum_utility.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -40,7 +38,7 @@ struct CountSource : public gr::Block<CountSource<T>> {
     std::shared_ptr<Tracer> tracer{};
     std::size_t             count = 0;
 
-    ~CountSource() { boost::ut::expect(boost::ut::that % count == n_samples_max); }
+    ~CountSource() { boost::ut::expect(boost::ut::that % count == n_samples_max); } // TODO: throwing exceptions in destructor is bad -> need to refactor test
 
     constexpr T
     processOne() {
@@ -66,7 +64,7 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
     std::int64_t                                    false_count = 0;
     std::function<bool(std::int64_t, std::int64_t)> checker;
 
-    ~ExpectSink() {
+    ~ExpectSink() { // TODO: throwing exceptions in destructor is bad -> need to refactor test
         boost::ut::expect(boost::ut::eq(count, static_cast<std::int64_t>(n_samples_max)))
                 << fmt::format("Number of processed samples ({}) must equal to n_samples_max ({}) for ExpectSink ({})", count, n_samples_max, this->name);
         boost::ut::expect(boost::ut::eq(false_count, 0)) << fmt::format("False counter ({}) must equal to 0 for ExpectSink ({})", false_count, this->name);
@@ -412,7 +410,7 @@ const boost::ut::suite SchedulerTests = [] {
         checkBlockNames(sched.jobs()[1], { "mult1", "out" });
         sched.runAndWait();
         auto t = trace->getVector();
-        expect(boost::ut::that % t.size() >= 8u);
+        expect(boost::ut::that % t.size() >= 8u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
     };
 
     "SimpleScheduler_parallel_multi_threaded"_test = [&threadPool] {
@@ -421,7 +419,7 @@ const boost::ut::suite SchedulerTests = [] {
         auto                    sched = scheduler{ getGraphParallel(trace), threadPool };
         sched.runAndWait();
         auto t = trace->getVector();
-        expect(boost::ut::that % t.size() >= 14u);
+        expect(boost::ut::that % t.size() >= 14u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
     };
 
     "BreadthFirstScheduler_parallel_multi_threaded"_test = [&threadPool] {
