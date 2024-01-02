@@ -93,7 +93,7 @@ struct InternalPortBuffers {
 template<std::size_t minSamples = std::dynamic_extent, std::size_t maxSamples = std::dynamic_extent, bool isConst = false>
 struct RequiredSamples {
     static_assert(minSamples > 0, "Port<T, ..., RequiredSamples::MIN_SAMPLES, ...>, ..> must be >= 0");
-    static constexpr std::size_t kMinSamples = minSamples == std::dynamic_extent ? 1LU : minSamples;
+    static constexpr std::size_t kMinSamples = minSamples == std::dynamic_extent ? 1UZ : minSamples;
     static constexpr std::size_t kMaxSamples = maxSamples == std::dynamic_extent ? std::numeric_limits<std::size_t>::max() : maxSamples;
     static constexpr bool        kIsConst    = isConst;
 };
@@ -242,6 +242,7 @@ private:
     bool      _connected    = false;
     IoType    _ioHandler    = newIoHandler();
     TagIoType _tagIoHandler = newTagIoHandler();
+    Tag       _cachedTag{};
 
 public:
     [[nodiscard]] constexpr bool
@@ -309,7 +310,14 @@ public:
         static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
     }
 
-    constexpr Port(Port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples), _connected(other._connected), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port &&other) noexcept
+        : name(std::move(other.name))
+        , priority{ other.priority }
+        , min_samples(other.min_samples)
+        , max_samples(other.max_samples)
+        , _connected(other._connected)
+        , _ioHandler(std::move(other._ioHandler))
+        , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
     operator=(Port &&other) noexcept {
@@ -509,6 +517,113 @@ public:
         static_assert(kIsOutput && std::remove_cvref_t<Other>::kIsInput);
         auto src_buffer = writerHandlerInternal();
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
+    }
+
+    /**
+     * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
+     */
+    inline constexpr std::span<const Tag>
+    getTags(Tag::signed_index_type untilOffset = 0) noexcept
+        requires(kIsInput)
+    {
+        const auto  readPos           = streamReader().position();
+        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
+        std::size_t nTagsProcessed    = 0UZ;
+        bool        properTagDistance = false;
+
+        for (const Tag &tag : tags) {
+            const auto relativeTagPosition = (tag.index - readPos); // w.r.t. present stream reader position
+            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition <= untilOffset;
+            if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
+                nTagsProcessed++;
+                if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
+                    properTagDistance = true;
+                }
+            } else {
+                break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
+            }
+        }
+        return tags.first(nTagsProcessed);
+    }
+
+    inline const Tag
+    getTag(Tag::signed_index_type untilOffset = 0)
+        requires(kIsInput)
+    {
+        const auto readPos = streamReader().position();
+        if (_cachedTag.index == readPos && readPos >= 0) {
+            return _cachedTag;
+        }
+        _cachedTag.reset();
+
+        auto mergeSrcMapInto = [](const property_map &sourceMap, property_map &destinationMap) {
+            assert(&sourceMap != &destinationMap);
+            for (const auto &[key, value] : sourceMap) {
+                destinationMap.insert_or_assign(key, value);
+            }
+        };
+
+        const auto tags  = getTags(untilOffset);
+        _cachedTag.index = readPos;
+        std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag &tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
+        std::ignore = tagReader().consume(tags.size());
+
+        return _cachedTag;
+    }
+
+    inline constexpr void
+    publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+        requires(kIsOutput)
+    {
+        processPublishTag(std::move(tag_data), tagOffset);
+    }
+
+    inline constexpr void
+    publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+        requires(kIsOutput)
+    {
+        processPublishTag(tag_data, tagOffset);
+    }
+
+    [[maybe_unused]] inline constexpr bool
+    publishPendingTags() noexcept
+        requires(kIsOutput)
+    {
+        if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
+            return false;
+        }
+        auto outTags     = tagWriter().reserve_output_range(1UZ);
+        outTags[0].index = _cachedTag.index;
+        outTags[0].map   = _cachedTag.map;
+        outTags.publish(1UZ);
+
+        _cachedTag.reset();
+        return true;
+    }
+
+private:
+    template<PropertyMapType PropertyMap>
+    inline constexpr void
+    processPublishTag(PropertyMap &&tag_data, Tag::signed_index_type tagOffset) noexcept {
+        const auto newTagIndex = tagOffset < 0 ? tagOffset : streamWriter().position() + tagOffset;
+
+        if (tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
+            publishPendingTags();
+        }
+        _cachedTag.index = newTagIndex;
+        if constexpr (std::is_rvalue_reference_v<PropertyMap &&>) { // -> move semantics
+            for (auto &[key, value] : tag_data) {
+                _cachedTag.map.insert_or_assign(std::move(key), std::move(value));
+            }
+        } else { // -> copy semantics
+            for (const auto &[key, value] : tag_data) {
+                _cachedTag.map.insert_or_assign(key, value);
+            }
+        }
+
+        if (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM)) { // force tag publishing for explicitly published tags or EOS
+            publishPendingTags();
+        }
     }
 
     friend class DynamicPort;
@@ -845,76 +960,48 @@ public:
 
 static_assert(PortLike<DynamicPort>);
 
-constexpr void
-publish_tag(PortLike auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
-    port.tagWriter().publish(
-            [&port, data = std::move(tag_data), &tag_offset](std::span<gr::Tag> tag_output) {
-                tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
-                tag_output[0].map   = std::move(data);
-            },
-            1UZ);
-}
-
-constexpr void
-publish_tag(PortLike auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
-    port.tagWriter().publish(
-            [&port, &tag_data, &tag_offset](std::span<gr::Tag> tag_output) {
-                tag_output[0].index = port.streamWriter().position() + tag_offset;
-                tag_output[0].map   = tag_data;
-            },
-            1UZ);
-}
-
-constexpr std::size_t
-samples_to_next_tag(const PortLike auto &port) {
-    if (!port.isConnected() || port.tagReader().available() == 0) [[likely]] {
-        return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
+namespace detail {
+template<typename T>
+concept TagPredicate = requires(const T &t, const Tag &tag, Tag::signed_index_type readPosition) {
+    { t(tag, readPosition) } -> std::convertible_to<bool>;
+};
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition || tag.index < 0; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept {
+    auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
+    if (eosTagIter != tag.map.end() && eosTagIter->second == true) {
+        if (tag.index >= readPosition || tag.index < 0) {
+            return true;
+        }
     }
+    return false;
+};
+} // namespace detail
 
-    // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-    const auto tagData           = port.tagReader().get();
-    const auto readPosition      = port.streamReader().position();
-    const auto future_tags_begin = std::ranges::find_if(tagData, [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
+inline constexpr std::optional<std::size_t>
+nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
+    const std::span<const Tag> tagData = port.tagReader().template get<false>();
+    if (!port.isConnected() || tagData.empty()) [[likely]] {
+        return std::nullopt; // default: no tags in sight
+    }
+    const Tag::signed_index_type readPosition = port.streamReader().position();
 
-    if (future_tags_begin == tagData.begin()) {
-        const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
-        const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1UZ);
-        return n_samples_until_next_tag;
+    // at least one tag is present -> if tag is not on the first tag position read up to the tag position, or if the tag has a special 'index = -1'
+    const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto &tag) { return predicate(tag, readPosition + readOffset); });
+    if (firstMatchingTag != tagData.end()) {
+        return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::signed_index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
-        return 0;
+        return std::nullopt;
     }
 }
 
-constexpr std::size_t
-samples_to_eos_tag(const PortLike auto &port) {
-    if (!port.isConnected() || port.tagReader().available() == 0) [[likely]] {
-        return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
-    }
-    const auto tags    = port.tagReader().get();
-    const auto readPos = port.streamReader().position();
+inline constexpr std::optional<std::size_t>
+nSamplesUntilNextTag(const PortLike auto &port, Tag::signed_index_type offset = 0) {
+    return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset);
+}
 
-    // find the smallest index of EOS tag, if no EOS tag is present then index = std::numeric_limits<std::size_t>::max()
-    std::size_t result = std::numeric_limits<std::size_t>::max();
-    // TODO: 'const auto tag' without reference is a workaround for gcc compiler
-    //  by unknown reasons only copy works, reference leads to unvalidated tag.map.end() iterator
-    for (const auto tag : tags) {
-        bool containEOSTag{ false };
-        for (const auto &[key, value] : tag.map) {
-            if (key == gr::tag::END_OF_STREAM.key() && value == true) {
-                containEOSTag = true;
-                break;
-            }
-        }
-        if (containEOSTag) {
-            if (tag.index > readPos + 1) {
-                result = std::min(result, (readPos == -1) ? static_cast<std::size_t>(tag.index) : static_cast<std::size_t>(tag.index - readPos - 1));
-            } else {
-                result = 0;
-                break; // we can break, 0 is the minimum
-            }
-        }
-    }
-    return result;
+inline constexpr std::optional<std::size_t>
+samples_to_eos_tag(const PortLike auto &port, Tag::signed_index_type offset = 0) {
+    return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset);
 }
 
 } // namespace gr

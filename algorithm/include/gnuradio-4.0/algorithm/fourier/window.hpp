@@ -11,8 +11,16 @@
 #include <vector>
 
 #include <fmt/format.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 #include <gnuradio-4.0/meta/utils.hpp>
 

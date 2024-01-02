@@ -23,6 +23,36 @@ static_assert(array_or_vector_type<std::vector<std::size_t>>);
 static_assert(!array_or_vector_type<std::vector<std::size_t>, int>);
 static_assert(array_or_vector_type<std::array<std::size_t, 3>>);
 static_assert(!array_or_vector_type<std::array<std::size_t, 3>, int>);
+
+static_assert(string_like<std::string>);
+static_assert(string_like<std::string_view>);
+constexpr auto stringLiteral = "string literal";
+static_assert(string_like<decltype(stringLiteral)>);
+static_assert(string_like<decltype(fixed_string("abc"))>);
+static_assert(!string_like<int>);
+
+class MyClass {
+public:
+    void
+    nonConstFunc() {}
+
+    void
+    constFunc() const {}
+
+    void
+    constFunc2(int) const {}
+};
+
+void
+test() {
+    // do nothing
+}
+
+static_assert(!is_const_member_function(&MyClass::nonConstFunc));
+static_assert(is_const_member_function(&MyClass::constFunc));
+static_assert(is_const_member_function(&MyClass::constFunc2));
+static_assert(!is_const_member_function(&test));
+
 } // namespace gr::meta
 
 int

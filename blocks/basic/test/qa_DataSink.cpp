@@ -12,6 +12,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -35,67 +36,6 @@ struct fmt::formatter<gr::Tag> {
 };
 
 namespace gr::basic::data_sink_test {
-
-template<typename T>
-struct Source : public Block<Source<T>> {
-    PortOut<T>       out;
-    std::int32_t     n_samples_produced = 0;
-    std::int32_t     n_samples_max      = 1024;
-    std::size_t      n_tag_offset       = 0;
-    float            sample_rate        = 1000.0f;
-    T                next_value         = {};
-    std::size_t      next_tag           = 0;
-    std::vector<Tag> tags; // must be sorted by index, only one tag per sample
-
-    void
-    settingsChanged(const property_map &, const property_map &) {
-        // optional init function that is called after construction and whenever settings change
-        gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, n_tag_offset);
-    }
-
-    work::Status
-    processBulk(PublishableSpan auto &output) noexcept {
-        auto nSamples = nSamplesToPublish();
-        nSamples      = std::min(nSamples, static_cast<std::make_signed_t<std::size_t>>(output.size()));
-
-        if (nSamples == -1) {
-            this->requestStop();
-            output.publish(0UZ);
-            return work::Status::DONE;
-        }
-        if (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced)) {
-            Tag &out_tag  = this->output_tags()[0];
-            out_tag       = Tag{ 0, tags[next_tag].map };
-            out_tag.index = 0;
-            this->forwardTags();
-            next_tag++;
-        }
-
-        std::ranges::for_each(output | std::views::take(nSamples), [this](auto &elem) { elem = this->next_value++; });
-
-        n_samples_produced += static_cast<std::int64_t>(nSamples);
-        output.publish(static_cast<std::size_t>(nSamples));
-        return n_samples_produced < n_samples_max ? work::Status::OK : work::Status::DONE;
-    }
-
-private:
-    constexpr std::make_signed_t<std::size_t>
-    nSamplesToPublish() noexcept {
-        // TODO unify with other test sources
-        // split into chunks so that we have a single tag at index 0 (or none)
-        auto ret = static_cast<std::make_signed_t<std::size_t>>(n_samples_max - n_samples_produced);
-        if (next_tag < tags.size()) {
-            if (n_samples_produced < tags[next_tag].index) {
-                ret = tags[next_tag].index - n_samples_produced;
-            } else if (next_tag + 1 < tags.size()) {
-                // tag at first sample? then read up until before next tag
-                ret = tags[next_tag + 1].index - n_samples_produced;
-            }
-        }
-
-        return ret > 0 ? ret : -1; // '-1' -> DONE, produced enough samples
-    }
-};
 
 /**
  * Example tag matcher (TriggerMatcher implementation) for the multiplexed listener case (interleaved data). As a toy example, we use
@@ -218,8 +158,6 @@ runMatcherTest(std::span<const Tag> tags, M o) {
 
 } // namespace gr::basic::data_sink_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::data_sink_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
-
 template<typename T>
 std::string
 formatList(const T &l) {
@@ -242,13 +180,13 @@ const boost::ut::suite DataSinkTests = [] {
     using namespace std::string_literals;
 
     "callback continuous mode"_test = [] {
-        constexpr std::int32_t kSamples   = 200005;
-        constexpr std::size_t  kChunkSize = 1000;
+        constexpr std::uint64_t kSamples   = 200005;
+        constexpr std::size_t   kChunkSize = 1000;
 
         const auto srcTags = makeTestTags(0, 1000);
 
         gr::Graph testGraph;
-        auto     &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", kSamples } });
+        auto     &src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
         auto     &sink = testGraph.emplaceBlock<DataSink<float>>({ { "name", "test_sink" } });
         src.tags       = srcTags;
 
@@ -322,11 +260,11 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling continuous mode"_test = [] {
-        constexpr std::int32_t kSamples = 200000;
+        constexpr std::uint64_t kSamples = 200000;
 
         gr::Graph  testGraph;
         const auto tags = makeTestTags(0, 1000);
-        auto      &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", kSamples } });
+        auto      &src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
         src.tags        = tags;
         auto &sink      = testGraph.emplaceBlock<DataSink<float>>({ { "name", "test_sink" } });
 
@@ -399,14 +337,14 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
-        constexpr std::int32_t kSamples = 200000;
+        constexpr std::uint64_t kSamples = 200000;
 
         gr::Graph  testGraph;
-        auto      &src  = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", kSamples } });
+        auto      &src  = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
         const auto tags = std::vector<Tag>{ { 3000, { { "TYPE", "TRIGGER" } } }, { 8000, { { "TYPE", "NO_TRIGGER" } } }, { 180000, { { "TYPE", "TRIGGER" } } } };
         src.tags        = tags;
         auto &sink      = testGraph.emplaceBlock<DataSink<int32_t>>(
-                { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", int32_t{ 0 } }, { "signal_max", int32_t{ kSamples - 1 } } });
+                { { "name", "test_sink" }, { "signal_name", "test signal" }, { "signal_unit", "none" }, { "signal_min", -2.0f }, { "signal_max", 2.0f } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
@@ -435,7 +373,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.signal_names[0], "test signal"s));
                         expect(eq(dataset.signal_units[0], "none"s));
-                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, kSamples - 1 }));
+                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ -2, +2 }));
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].index, 3));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
@@ -461,10 +399,10 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking snapshot mode"_test = [] {
-        constexpr std::int32_t kSamples = 200000;
+        constexpr std::uint64_t kSamples = 200000;
 
         gr::Graph testGraph;
-        auto     &src = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", kSamples } });
+        auto     &src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
         src.tags      = { { 0,
                             { { std::string(tag::SIGNAL_NAME.key()), "test signal" },
                               { std::string(tag::SIGNAL_UNIT.key()), "none" },
@@ -507,7 +445,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.signal_names[0], "test signal"s));
                         expect(eq(dataset.signal_units[0], "none"s));
-                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ 0, kSamples - 1 }));
+                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{ -1, +1 }));
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].index, -5000));
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
@@ -532,11 +470,11 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking multiplexed mode"_test = [] {
         const auto tags = makeTestTags(0, 10000);
 
-        const std::int32_t n_samples = static_cast<std::int32_t>(tags.size() * 10000 + 100000);
-        gr::Graph          testGraph;
-        auto              &src = testGraph.emplaceBlock<Source<int32_t>>({ { "n_samples_max", n_samples } });
-        src.tags               = tags;
-        auto &sink             = testGraph.emplaceBlock<DataSink<int32_t>>({ { "name", "test_sink" } });
+        const std::uint64_t n_samples = static_cast<std::uint64_t>(tags.size() * 10000 + 100000);
+        gr::Graph           testGraph;
+        auto               &src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", n_samples }, { "mark_tag", false } });
+        src.tags                = tags;
+        auto &sink              = testGraph.emplaceBlock<DataSink<int32_t>>({ { "name", "test_sink" } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
@@ -564,7 +502,7 @@ const boost::ut::suite DataSinkTests = [] {
         std::vector<std::future<std::vector<int32_t>>>    results;
         std::array<std::vector<int32_t>, matchers.size()> resultsCb;
 
-        for (std::size_t i = 0; i < resultsCb.size(); ++i) {
+        for (std::size_t i = 0UZ; i < resultsCb.size(); ++i) {
             auto callback = [&r = resultsCb[i]](const auto &dataset) {
                 r.push_back(dataset.signal_values.front());
                 r.push_back(dataset.signal_values.back());
@@ -612,11 +550,11 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode overlapping"_test = [] {
-        constexpr std::int32_t kSamples  = 150000;
-        constexpr std::size_t  kTriggers = 300;
+        constexpr std::uint64_t kSamples  = 150000;
+        constexpr std::size_t   kTriggers = 300;
 
         gr::Graph testGraph;
-        auto     &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", kSamples } });
+        auto     &src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
 
         for (std::size_t i = 0; i < kTriggers; ++i) {
             src.tags.push_back(Tag{ static_cast<Tag::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
@@ -667,11 +605,11 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "callback trigger mode overlapping"_test = [] {
-        constexpr std::int32_t kSamples  = 150000;
-        constexpr std::size_t  kTriggers = 300;
+        constexpr std::uint64_t kSamples  = 150000;
+        constexpr std::size_t   kTriggers = 300;
 
         gr::Graph testGraph;
-        auto     &src = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", kSamples } });
+        auto     &src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
 
         for (std::size_t i = 0; i < kTriggers; ++i) {
             src.tags.push_back(Tag{ static_cast<Tag::signed_index_type>(60000 + i), { { "TYPE", "TRIGGER" } } });
@@ -707,10 +645,10 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "non-blocking polling continuous mode"_test = [] {
-        constexpr std::int32_t kSamples = 200000;
+        constexpr std::uint64_t kSamples = 200000;
 
         gr::Graph testGraph;
-        auto     &src  = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", kSamples } });
+        auto     &src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
         auto     &sink = testGraph.emplaceBlock<DataSink<float>>({ { "name", "test_sink" } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));

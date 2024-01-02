@@ -40,48 +40,33 @@ ClockSource Documentation -- add here
     std::uint32_t                                                                n_samples_produced{ 0 };
     A<float, "avg. sample rate", Visible>                                        sample_rate = 1000.f;
     A<std::uint32_t, "chunk_size", Visible, Doc<"number of samples per update">> chunk_size  = 100;
-    std::thread                                                                  userProvidedThread;
+    std::shared_ptr<std::thread>                                                 userProvidedThread;
+    bool                                                                         verbose_console = true;
 
-    ~ClockSource() { stopThread(); }
-
-    [[maybe_unused]] bool
-    tryStartThread() {
-        if constexpr (useIoThread) {
-            return false;
+    void
+    start() {
+        if (verbose_console) {
+            fmt::println("starting {}", this->name);
         }
-        if (bool expectedThreadState = false; this->ioThreadShallRun.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
-            // mocks re-using a user-provided thread
-            fmt::print("mocking a user-provided io-Thread for {}\n", this->name);
-            std::atomic_store_explicit(&this->ioThreadShallRun, true, std::memory_order_release);
-            this->ioThreadShallRun.notify_all();
-            userProvidedThread = std::thread([this]() {
-                fmt::print("started user-provided thread\n");
-                for (int retry = 2; this->ioThreadShallRun.load() && retry > 0; --retry) {
-                    while (this->ioThreadShallRun.load()) {
-                        std::this_thread::sleep_until(nextTimePoint);
-                        // invoke and execute work function from user-provided thread
-                        if (this->invokeWork() == work::Status::DONE) {
-                            break;
-                        } else {
-                            retry = 2;
-                        }
-                    }
-                    // delayed shut-down in case there are more tasks to be processed
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                }
-                this->stopThread();
-                fmt::print("stopped user-provided thread\n");
-            });
-            userProvidedThread.detach();
-            return true;
+        n_samples_produced = 0U;
+        tryStartThread();
+        if (verbose_console) {
+            fmt::println("started {}", this->name);
         }
-        return false;
     }
 
     void
-    stopThread() {
-        std::atomic_store_explicit(&this->ioThreadShallRun, false, std::memory_order_release);
-        this->ioThreadShallRun.notify_all();
+    stop() {
+        if (verbose_console) {
+            fmt::println("stop {}", this->name);
+        }
+        this->requestStop();
+        if constexpr (!useIoThread) {
+            if (verbose_console) {
+                fmt::println("joining user-provided {}joinable thread in block {}", userProvidedThread->joinable() ? "" : "non-", this->name);
+            }
+            userProvidedThread->join();
+        }
     }
 
     void
@@ -112,12 +97,12 @@ ClockSource Documentation -- add here
 
         std::uint32_t samples_to_produce = n_available;
         while (next_tag < tags.size() && tags[next_tag].index <= static_cast<std::make_signed_t<std::size_t>>(n_samples_produced + n_available)) {
-            gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced));
-            Tag &out_tag       = this->output_tags()[0];
-            out_tag            = tags[next_tag];
-            out_tag.index      = tags[next_tag].index - static_cast<std::make_signed_t<std::size_t>>(n_samples_produced);
+            const auto tagDeltaIndex = tags[next_tag].index - static_cast<Tag::signed_index_type>(n_samples_produced); // position w.r.t. start of this chunk
+            if (verbose_console) {
+                gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced + tagDeltaIndex));
+            }
+            out.publishTag(tags[next_tag].map, tagDeltaIndex);
             samples_to_produce = static_cast<std::uint32_t>(tags[next_tag].index) - n_samples_produced;
-            this->forwardTags();
             next_tag++;
         }
         samples_to_produce = std::min(samples_to_produce, n_samples_max.value);
@@ -141,11 +126,72 @@ ClockSource Documentation -- add here
 
         return work::Status::OK;
     }
+
+private:
+    [[maybe_unused]] bool
+    tryStartThread() {
+        if constexpr (useIoThread) {
+            return false; // use Block<T>::work generated thread
+        }
+        if (verbose_console) {
+            fmt::println("initial ClockSource state: {}", magic_enum::enum_name(this->state.load()));
+        }
+        if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; this->state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
+            // mocks re-using a user-provided thread
+            if (verbose_console) {
+                fmt::println("mocking a user-provided io-Thread for {}", this->name);
+            }
+            this->state.notify_all();
+            auto createManagedThread = [](auto &&threadFunction, auto &&threadDeleter) {
+                return std::shared_ptr<std::thread>(new std::thread(std::forward<decltype(threadFunction)>(threadFunction)), std::forward<decltype(threadDeleter)>(threadDeleter));
+            };
+            userProvidedThread = createManagedThread(
+                    [this]() {
+                        if (verbose_console) {
+                            fmt::println("started user-provided thread");
+                        }
+                        lifecycle::State actualThreadState = this->state.load();
+                        while (lifecycle::isActive(actualThreadState)) {
+                            std::this_thread::sleep_until(nextTimePoint);
+                            // invoke and execute work function from user-provided thread
+                            const work::Status status = this->invokeWork();
+                            if (status == work::Status::DONE) {
+                                std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
+                                this->state.notify_all();
+                                break;
+                            }
+                            actualThreadState = this->state.load();
+                            this->ioLastWorkStatus.exchange(status, std::memory_order_relaxed);
+                        }
+
+                        if (verbose_console) {
+                            fmt::println("stopped user-provided thread - state: {}", magic_enum::enum_name(this->state.load()));
+                        }
+                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                        this->state.notify_all();
+                    },
+                    [this](std::thread *t) {
+                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                        this->state.notify_all();
+                        if (t->joinable()) {
+                            t->join();
+                        }
+                        delete t;
+                        fmt::println("user-provided thread deleted");
+                    });
+            if (verbose_console) {
+                fmt::println("launched user-provided thread");
+            }
+            return true;
+        }
+        return false;
+    }
 };
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size, sample_rate,
+                                    verbose_console);
 
 namespace gr::basic {
 static_assert(gr::HasProcessBulkFunction<ClockSource<float>>);
