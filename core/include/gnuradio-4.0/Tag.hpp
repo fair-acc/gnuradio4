@@ -181,6 +181,38 @@ public:
     }
 };
 
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr std::strong_ordering
+operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOtherString &str) noexcept {
+    if ((dt.shortKey() <=> str) == 0) {
+        return std::strong_ordering::equal; // shortKeys are equal
+    } else {
+        return dt.key() <=> str; // compare key()
+    }
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr std::strong_ordering
+operator<=>(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt) noexcept {
+    if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
+        return std::strong_ordering::equal; // shortKeys are equal
+    } else {
+        return str <=> dt.key(); // compare key()
+    }
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr bool
+operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOtherString &str) noexcept {
+    return (dt <=> std::string_view(str)) == 0;
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr bool
+operator==(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt) noexcept {
+    return (std::string_view(str) <=> dt) == 0;
+}
+
 namespace tag { // definition of default tags and names
 inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
 inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;

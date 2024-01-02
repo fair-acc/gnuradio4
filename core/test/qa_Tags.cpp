@@ -51,6 +51,30 @@ const boost::ut::suite TagTests = [] {
         static_assert(tag::TRIGGER_NAME.shortKey() == "trigger_name");
         static_assert(tag::TRIGGER_TIME.shortKey() == "trigger_time");
         static_assert(tag::TRIGGER_OFFSET.shortKey() == "trigger_offset");
+
+        // test other tag on key definition only
+        static_assert(tag::SIGNAL_UNIT.key() == "gr:signal_unit");
+        static_assert(tag::SIGNAL_MIN.key() == "gr:signal_min");
+        static_assert(tag::SIGNAL_MAX.key() == "gr:signal_max");
+        static_assert(tag::TRIGGER_NAME.key() == "gr:trigger_name");
+        static_assert(tag::TRIGGER_TIME.key() == "gr:trigger_time");
+        static_assert(tag::TRIGGER_OFFSET.key() == "gr:trigger_offset");
+
+        using namespace std::string_literals;
+        using namespace std::string_view_literals;
+        static_assert(tag::SIGNAL_UNIT == "signal_unit"s);
+        static_assert("signal_unit"s == tag::SIGNAL_UNIT);
+
+        static_assert("signal_unit"sv == tag::SIGNAL_UNIT);
+        static_assert(tag::SIGNAL_UNIT == "signal_unit"sv);
+
+        static_assert(tag::SIGNAL_UNIT == "signal_unit");
+        static_assert("signal_unit" == tag::SIGNAL_UNIT);
+
+        // alt definition -> eventually needed for SigMF compatibility
+        using namespace gr::tag;
+        static_assert(SIGNAL_UNIT == "gr:signal_unit"sv);
+        static_assert("gr:signal_unit" == tag::SIGNAL_UNIT);
     };
 };
 

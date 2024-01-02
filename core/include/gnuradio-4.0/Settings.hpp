@@ -270,13 +270,7 @@ public:
                             using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
                             if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
-                                auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
-                                    if (str.starts_with(prefix)) {
-                                        str.remove_prefix(prefix.size());
-                                    }
-                                    return str == target;
-                                };
-                                if (matchesIgnoringPrefix(default_tag.shortKey(), std::string_view(GR_TAG_PREFIX), get_display_name(member))) {
+                                if (default_tag == get_display_name(member)) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
                                 _auto_update.emplace(get_display_name(member));

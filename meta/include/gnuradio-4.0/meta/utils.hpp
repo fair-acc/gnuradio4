@@ -36,8 +36,8 @@ struct print_types;
 
 template<typename CharT, std::size_t SIZE>
 struct fixed_string {
-    constexpr static std::size_t N            = SIZE;
-    CharT                        _data[N + 1] = {};
+    constexpr static std::size_t N              = SIZE;
+    CharT                        _data[N + 1UZ] = {};
 
     constexpr fixed_string() = default;
 
@@ -77,6 +77,20 @@ struct fixed_string {
     [[nodiscard]] friend constexpr bool
     operator==(const fixed_string &, const fixed_string<CharT, N2> &) {
         return false;
+    }
+
+    constexpr auto
+    operator<=>(const fixed_string &other) const noexcept
+            = default;
+
+    friend constexpr auto
+    operator<=>(const fixed_string &fs, std::string_view sv) noexcept {
+        return std::string_view(fs) <=> sv;
+    }
+
+    friend constexpr auto
+    operator<=>(const fixed_string &fs, const std::string &str) noexcept {
+        return std::string(fs) <=> str;
     }
 };
 
@@ -503,6 +517,9 @@ using fundamental_base_value_type_t = typename detail::fundamental_base_value_ty
 static_assert(std::is_same_v<fundamental_base_value_type_t<int>, int>);
 static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<float>>, float>);
 static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<std::complex<double>>>, double>);
+
+template<typename T>
+concept string_like = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> || std::is_convertible_v<T, std::string_view>;
 
 } // namespace gr::meta
 
