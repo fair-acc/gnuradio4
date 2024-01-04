@@ -26,7 +26,7 @@ namespace gr {
 namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
-enum class LifeCycleState : char { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR };
+enum class LifeCycleState : char { IDLE, INITIALISED, RUNNING, DONE, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR };
 
 template<typename F>
 constexpr void

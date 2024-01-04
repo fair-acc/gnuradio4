@@ -326,11 +326,35 @@ const boost::ut::suite SchedulerTests = [] {
         expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
     };
 
+    "SimpleScheduler_linear_iterate"_test = [&threadPool] {
+        using scheduler               = gr::scheduler::Simple<>;
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
+        while (!sched.isDone()) {
+            sched.iterateAndWait();
+        }
+        auto t = trace->getVector();
+        expect(boost::ut::that % t.size() == 8u);
+        expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
+    };
+
     "BreadthFirstScheduler_linear"_test = [&] {
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
         sched.runAndWait();
+        auto t = trace->getVector();
+        expect(boost::ut::that % t.size() == 8u);
+        expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
+    };
+
+    "BreadthFirstScheduler_linear_iterate"_test = [&] {
+        using scheduler               = gr::scheduler::BreadthFirst<>;
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
+        while (!sched.isDone()) {
+            sched.iterateAndWait();
+        }
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });

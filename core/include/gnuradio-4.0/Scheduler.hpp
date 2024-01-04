@@ -73,7 +73,7 @@ public:
 
     bool
     canStop() {
-        return _state == LifeCycleState::RUNNING || _state == LifeCycleState::REQUESTED_PAUSE || _state == LifeCycleState::PAUSED;
+        return _state == LifeCycleState::RUNNING || _state == LifeCycleState::REQUESTED_PAUSE || _state == LifeCycleState::PAUSED || _state == LifeCycleState::DONE;
     }
 
     bool
@@ -88,7 +88,12 @@ public:
 
     bool
     canReset() {
-        return _state == LifeCycleState::STOPPED || _state == LifeCycleState::ERROR;
+        return _state == LifeCycleState::STOPPED || _state == LifeCycleState::ERROR || _state == LifeCycleState::DONE;
+    }
+
+    bool
+    isDone() {
+        return _state == LifeCycleState::DONE;
     }
 
     void
@@ -164,17 +169,17 @@ public:
     }
 
     void
-    runOnPool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<work::Result(const std::span<BlockModel *const> &)> work_function) {
+    runOnPool(const std::vector<std::vector<BlockModel *>> &jobs, bool untilDone, const std::function<work::Result(const std::span<BlockModel *const> &)> work_function) {
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.runOnPool");
         _progress                      = 0;
         _running_threads               = jobs.size();
         for (auto &jobset : jobs) {
-            _pool->execute([this, &jobset, work_function, &jobs]() { poolWorker([&work_function, &jobset]() { return work_function(jobset); }, jobs.size()); });
+            _pool->execute([this, &jobset, untilDone, work_function, &jobs]() { poolWorker([&work_function, &jobset]() { return work_function(jobset); }, jobs.size(), untilDone); });
         }
     }
 
     void
-    poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
+    poolWorker(const std::function<work::Result()> &work, std::size_t n_batches, bool untilDone) {
         auto    &profiler_handler = _profiler.forThisThread();
         uint32_t done             = 0;
         uint32_t progress_count   = 0;
@@ -210,7 +215,16 @@ public:
                     _progress.wait(progress_new);
                 }
             }
+
+            if (!untilDone) {
+                break;
+            }
         } // while (done < n_batches)
+
+        if (done == n_batches) {
+            _state = LifeCycleState::DONE;
+        }
+
         _running_threads.fetch_sub(1);
         _running_threads.notify_all();
     }
@@ -287,6 +301,15 @@ public:
     }
 
     void
+    iterateAndWait()
+    {
+        [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_simple.iterateAndWait");
+        init();
+        iterate();
+        this->waitDone();
+    }
+
+    void
     resume() {
         if (!this->canResume()) {
             return;
@@ -297,6 +320,19 @@ public:
     }
 
     void
+    iterate() {
+        if (this->_state != LifeCycleState::INITIALISED && this->_state != LifeCycleState::RUNNING) {
+            return;
+        }
+
+        if (this->_state == LifeCycleState::INITIALISED) {
+            this->startBlocks();
+        }
+
+        work(false);
+    }
+
+    void
     start() {
         if (!this->canStart()) {
             return;
@@ -304,18 +340,26 @@ public:
 
         this->startBlocks();
 
+        work(true);
+    }
+
+private:
+    void work(bool untilDone)
+    {
         if constexpr (executionPolicy == singleThreaded) {
             this->_state = LifeCycleState::RUNNING;
             work::Result                           result;
             std::span<std::unique_ptr<BlockModel>> blocklist = std::span{ this->_graph.blocks() };
             do {
                 result = workOnce(blocklist);
-            } while (result.status == work::Status::OK);
+            } while (untilDone && result.status == work::Status::OK);
             if (result.status == work::Status::ERROR) {
                 this->_state = LifeCycleState::ERROR;
+            } else if (result.status == work::Status::DONE) {
+                this->_state = LifeCycleState::DONE;
             }
         } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
-            this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
+            this->runOnPool(this->_job_lists, untilDone, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
         }
@@ -431,6 +475,15 @@ public:
     }
 
     void
+    iterateAndWait()
+    {
+        [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_simple.iterateAndWait");
+        init();
+        iterate();
+        this->waitDone();
+    }
+
+    void
     resume() {
         if (!this->canResume()) {
             return;
@@ -448,26 +501,48 @@ public:
 
         this->startBlocks();
 
-        if constexpr (executionPolicy == singleThreaded) {
-            this->_state = LifeCycleState::RUNNING;
-            work::Result result;
-            auto         blocklist = std::span{ this->_blocklist };
-            while ((result = workOnce(blocklist)).status == work::Status::OK) {
-                if (result.status == work::Status::ERROR) {
-                    this->_state = LifeCycleState::ERROR;
-                    return;
-                }
-            }
-        } else if (executionPolicy == multiThreaded) {
-            this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
-        } else {
-            throw std::invalid_argument("Unknown execution Policy");
+        work(true);
+    }
+
+    void
+    iterate() {
+        if (this->_state != LifeCycleState::INITIALISED && this->_state != LifeCycleState::RUNNING) {
+            return;
         }
+
+        if (this->_state == LifeCycleState::INITIALISED) {
+            this->startBlocks();
+        }
+
+        work(false);
     }
 
     [[nodiscard]] const std::vector<std::vector<BlockModel *>> &
     jobs() const {
         return _job_lists;
+    }
+
+private:
+    void work(bool untilDone)
+    {
+        if constexpr (executionPolicy == singleThreaded) {
+            this->_state = LifeCycleState::RUNNING;
+            work::Result result;
+            auto         blocklist = std::span{ this->_blocklist };
+            while ((result = workOnce(blocklist)).status == work::Status::OK && untilDone) {
+                if (result.status == work::Status::ERROR) {
+                    this->_state = LifeCycleState::ERROR;
+                    return;
+                }
+            }
+            if (result.status == work::Status::DONE) {
+                this->_state = LifeCycleState::DONE;
+            }
+        } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
+            this->runOnPool(this->_job_lists, untilDone, [this](auto &job) { return this->workOnce(job); });
+        } else {
+            throw std::invalid_argument("Unknown execution Policy");
+        }
     }
 };
 } // namespace gr::scheduler
