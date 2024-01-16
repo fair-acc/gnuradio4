@@ -172,6 +172,8 @@ indexesMatch(const T &lhs, const U &rhs) {
     return std::equal(std::begin(lhs), std::end(lhs), std::begin(rhs), std::end(rhs), index_match);
 }
 
+using Scheduler = gr::scheduler::Simple<gr::scheduler::multiThreaded>;
+
 const boost::ut::suite DataSinkTests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -246,7 +248,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(DataSinkRegistry::instance().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kChunkSize, callbackWithTags));
         expect(DataSinkRegistry::instance().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kChunkSize, callbackWithTagsAndSink));
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -309,7 +311,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         {
-            gr::scheduler::Simple sched{ std::move(testGraph) };
+            Scheduler sched{ std::move(testGraph) };
             sched.runAndWait();
 
             sink.stop(); // TODO the scheduler should call this
@@ -383,7 +385,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(receivedData, receivedTags);
         });
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -456,7 +458,7 @@ const boost::ut::suite DataSinkTests = [] {
             return receivedData;
         });
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -538,7 +540,7 @@ const boost::ut::suite DataSinkTests = [] {
             results.push_back(std::move(f));
         }
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -591,7 +593,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(receivedData, receivedTags);
         });
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -633,7 +635,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         DataSinkRegistry::instance().registerTriggerCallback<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, 3000, 2000, callback);
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
@@ -675,7 +677,7 @@ const boost::ut::suite DataSinkTests = [] {
             return samplesSeen;
         });
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        Scheduler sched{ std::move(testGraph) };
         sched.runAndWait();
 
         sink.stop(); // TODO the scheduler should call this
