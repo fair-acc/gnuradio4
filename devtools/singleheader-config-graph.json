@@ -2,10 +2,18 @@
 	"project": "Graph.hpp",
 	"target": "singleheader/Graph.hpp",
 	"sources": [
-		"Graph.hpp"
+		"./core/include/gnuradio-4.0/Graph.hpp"
 	],
 	"include_paths": [
-		".",
-		"../build/_deps/refl-cpp-src/include"
+		"./core/include/",
+		"./blocks/basic/include/",
+		"./blocks/filter/include/",
+		"./blocks/fourier/include/",
+		"./blocks/testing/include/",
+		"./algorithm/include/",
+		"./meta/include/",
+		"./build/_deps/vir-simd-src/",
+		"./third_party/magic_enum/",
+		"./third_party/refl-cpp/"
 	]
 }
