@@ -1,7 +1,18 @@
-#ifndef GRAPH_PROTOTYPE_BENCHMARK_HPP
-#define GRAPH_PROTOTYPE_BENCHMARK_HPP
+#ifndef GNURADIO_BENCHMARK_HPP
+#define GNURADIO_BENCHMARK_HPP
 
 #include <algorithm>
+#include <charconv>
+#include <chrono>
+#include <iostream>
+#include <map>
+#include <numeric>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <variant>
+
 // #include <boost/ut.hpp>
 //
 // Copyright (c) 2019-2021 Kris Jusiak (kris at jusiak dot net)
@@ -13,12 +24,26 @@
 #if defined(__cpp_modules) && !defined(BOOST_UT_DISABLE_MODULE)
 export module boost.ut;
 export import std;
+#define BOOST_UT_EXPORT export
 #else
 
+#define BOOST_UT_EXPORT
 #endif
 
 #if __has_include(<iso646.h>)
 #include <iso646.h>  // and, or, not, ...
+#endif
+
+#include <version>
+// Before libc++ 17 had experimental support for format and it required a
+// special build flag. Currently libc++ has not implemented all C++20 chrono
+// improvements. Therefore doesn't define __cpp_lib_format, instead query the
+// library version to detect the support status.
+//
+// MSVC STL and libstdc++ provide __cpp_lib_format.
+#if defined(__cpp_lib_format) or \
+    (defined(_LIBCPP_VERSION) and _LIBCPP_VERSION >= 170000)
+#define BOOST_UT_HAS_FORMAT
 #endif
 
 #if not defined(__cpp_rvalue_references)
@@ -42,7 +67,7 @@ export import std;
 #elif not defined(__cpp_static_assert)
 #error "[Boost::ext].UT requires support for static assert";
 #else
-#define BOOST_UT_VERSION 1'1'9
+#define BOOST_UT_VERSION 2'0'0
 
 #if defined(__has_builtin) and defined(__GNUC__) and (__GNUC__ < 10) and \
     not defined(__clang__)
@@ -60,19 +85,21 @@ export import std;
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
-#include <regex>
 #include <sstream>
 #include <stack>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
+#include <fstream>
 #if __has_include(<unistd.h>) and __has_include(<sys/wait.h>)
 #include <sys/wait.h>
 #include <unistd.h>
@@ -81,17 +108,18 @@ export import std;
 #include <exception>
 #endif
 
+#if __has_include(<format>)
+#include <format>
+#endif
 #if __has_include(<source_location>)
 #include <source_location>
 #endif
 
-struct unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct {
+struct _unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct {
 };
 
-#if defined(__cpp_modules) && !defined(BOOST_UT_DISABLE_MODULE)
-export
-#endif
-    namespace boost::inline ext::ut::inline v1_1_9 {
+BOOST_UT_EXPORT
+namespace boost::inline ext::ut::inline v2_0_0 {
 namespace utility {
 template <class>
 class function;
@@ -219,6 +247,18 @@ template <class T = std::string_view, class TDelim>
   }
   return output;
 }
+constexpr auto regex_match(const char *str, const char *pattern) -> bool {
+  if (*pattern == '\0' && *str == '\0') return true;
+  if (*pattern == '\0' && *str != '\0') return false;
+  if (*str == '\0' && *pattern != '\0') return false;
+  if (*pattern == '.') {
+    return regex_match(str+1, pattern+1);
+  }
+  if (*pattern == *str) {
+    return regex_match(str+1, pattern+1);
+  }
+  return false;
+}
 }  // namespace utility
 
 namespace reflection {
@@ -266,31 +306,31 @@ template <typename TargetType>
   return get_template_function_name_use_type<std::decay_t<TargetType>>();
 }
 
-static constexpr const std::string_view raw_type_name =
+inline constexpr const std::string_view raw_type_name =
     get_template_function_name_use_decay_type<
-        unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct>();
+        _unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct>();
 
-static constexpr const std::size_t raw_length = raw_type_name.length();
-static constexpr const std::string_view need_name =
+inline constexpr const std::size_t raw_length = raw_type_name.length();
+inline constexpr const std::string_view need_name =
 #if defined(_MSC_VER) and not defined(__clang__)
     "struct "
-    "unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct";
+    "_unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct";
 #else
-    "unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct";
+    "_unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct";
 #endif
-static constexpr const std::size_t need_length = need_name.length();
+inline constexpr const std::size_t need_length = need_name.length();
 static_assert(need_length <= raw_length,
               "Auto find prefix and suffix lenght broken error 1");
-static constexpr const std::size_t prefix_length =
+inline constexpr const std::size_t prefix_length =
     raw_type_name.find(need_name);
 static_assert(prefix_length != std::string_view::npos,
               "Auto find prefix and suffix lenght broken error 2");
 static_assert(prefix_length <= raw_length,
               "Auto find prefix and suffix lenght broken error 3");
-static constexpr const std::size_t tail_lenght = raw_length - prefix_length;
+inline constexpr const std::size_t tail_lenght = raw_length - prefix_length;
 static_assert(need_length <= tail_lenght,
               "Auto find prefix and suffix lenght broken error 4");
-static constexpr const std::size_t suffix_length = tail_lenght - need_length;
+inline constexpr const std::size_t suffix_length = tail_lenght - need_length;
 
 }  // namespace detail
 
@@ -298,8 +338,8 @@ template <typename TargetType>
 [[nodiscard]] constexpr auto type_name() -> const std::string_view {
   const std::string_view raw_type_name =
       detail::get_template_function_name_use_type<TargetType>();
-  const size_t end = raw_type_name.length() - detail::suffix_length;
-  const size_t len = end - detail::prefix_length;
+  const std::size_t end = raw_type_name.length() - detail::suffix_length;
+  const std::size_t len = end - detail::prefix_length;
   std::string_view result = raw_type_name.substr(detail::prefix_length, len);
   return result;
 }
@@ -309,8 +349,8 @@ template <typename TargetType>
 [[nodiscard]] constexpr auto decay_type_name() -> const std::string_view {
   const std::string_view raw_type_name =
       detail::get_template_function_name_use_decay_type<TargetType>();
-  const size_t end = raw_type_name.length() - detail::suffix_length;
-  const size_t len = end - detail::prefix_length;
+  const std::size_t end = raw_type_name.length() - detail::suffix_length;
+  const std::size_t len = end - detail::prefix_length;
   std::string_view result = raw_type_name.substr(detail::prefix_length, len);
   return result;
 }
@@ -443,11 +483,11 @@ constexpr auto is_valid(...) -> bool {
 }
 
 template <class T>
-static constexpr auto is_container_v =
+inline constexpr auto is_container_v =
     is_valid<T>([](auto t) -> decltype(t.begin(), t.end(), void()) {});
 
 template <class T>
-static constexpr auto has_user_print = is_valid<T>(
+inline constexpr auto has_user_print = is_valid<T>(
     [](auto t) -> decltype(void(declval<std::ostringstream&>() << t)) {});
 
 template <class T, class = void>
@@ -487,7 +527,7 @@ inline constexpr auto is_floating_point_v<long double> = true;
 
 #if defined(__clang__) or defined(_MSC_VER)
 template <class From, class To>
-static constexpr auto is_convertible_v = __is_convertible_to(From, To);
+inline constexpr auto is_convertible_v = __is_convertible_to(From, To);
 #else
 template <class From, class To>
 constexpr auto is_convertible(int) -> decltype(bool(To(declval<From>()))) {
@@ -664,7 +704,16 @@ struct summary {};
 
 namespace detail {
 struct op {};
-struct fatal {};
+
+template <class>
+struct fatal_;
+
+struct fatal {
+  template <class T>
+  [[nodiscard]] inline auto operator()(const T& t) const {
+    return detail::fatal_{t};
+  }
+};
 struct cfg {
   using value_ref = std::variant<std::monostate, std::reference_wrapper<bool>,
                                  std::reference_wrapper<std::size_t>,
@@ -673,8 +722,14 @@ struct cfg {
   static inline reflection::source_location location{};
   static inline bool wip{};
 
+#if defined(_MSC_VER)
+  static inline int largc = __argc;
+  static inline const char** largv = const_cast<const char**>(__argv);
+#else
   static inline int largc = 0;
   static inline const char** largv = nullptr;
+#endif
+
   static inline std::string executable_name = "unknown executable";
   static inline std::string query_pattern = "";        // <- done
   static inline bool invert_query_pattern = false;     // <- done
@@ -758,7 +813,7 @@ struct cfg {
   }
 
   static inline void parse(int argc, const char* argv[]) {
-    const size_t n_args = static_cast<std::size_t>(argc);
+    const std::size_t n_args = static_cast<std::size_t>(argc);
     if (n_args > 0 && argv != nullptr) {
       cfg::largc = argc;
       cfg::largv = argv;
@@ -774,7 +829,7 @@ struct cfg {
           std::cerr << "unknown option: '" << argv[i] << "' run:" << std::endl;
           std::cerr << "'" << argv[0] << " --help'" << std::endl;
           std::cerr << "for additional help" << std::endl;
-          exit(-1);
+          std::exit(-1);
         } else {
           if (i > 1U) {
             query_pattern.append(" ");
@@ -793,7 +848,7 @@ struct cfg {
       }
       if ((i + 1) >= n_args) {
         std::cerr << "missing argument for option " << argv[i] << std::endl;
-        exit(-1);
+        std::exit(-1);
       }
       i += 1;  // skip to next argv for parsing
       if (std::holds_alternative<std::reference_wrapper<std::size_t>>(var)) {
@@ -804,7 +859,7 @@ struct cfg {
         if (last != argument.length()) {
           std::cerr << "cannot parse option of " << argv[i - 1] << " "
                     << argv[i] << std::endl;
-          exit(-1);
+          std::exit(-1);
         }
         std::get<std::reference_wrapper<std::size_t>>(var).get() = val;
       }
@@ -817,12 +872,12 @@ struct cfg {
 
     if (show_help) {
       print_usage();
-      exit(0);
+      std::exit(0);
     }
 
     if (show_lib_identity) {
       print_identity();
-      exit(0);
+      std::exit(0);
     }
 
     if (!query_pattern.empty()) {  // simple glob-like search
@@ -1263,7 +1318,7 @@ struct aborts_ : op {
       : value_{[&expr]() -> bool {
           if (const auto pid = fork(); not pid) {
             expr();
-            exit(0);
+            std::exit(0);
           }
           auto exit_status = 0;
           wait(&exit_status);
@@ -1543,8 +1598,8 @@ class reporter_junit {
   using timePoint = std::chrono::time_point<clock_ref>;
   using timeDiff = std::chrono::milliseconds;
   enum class ReportType { CONSOLE, JUNIT } report_type_;
-  using ReportType::CONSOLE;
-  using ReportType::JUNIT;
+  static constexpr ReportType CONSOLE = ReportType::CONSOLE;
+  static constexpr ReportType JUNIT = ReportType::JUNIT;
 
   struct test_result {
     test_result* parent = nullptr;
@@ -1643,7 +1698,7 @@ class reporter_junit {
       std::cout << "available reporter:\n";
       std::cout << "  console (default)\n";
       std::cout << "  junit" << std::endl;
-      exit(0);
+      std::exit(0);
     }
     if (detail::cfg::use_reporter.starts_with("junit")) {
       report_type_ = JUNIT;
@@ -1802,29 +1857,36 @@ class reporter_junit {
   auto on(events::summary) -> void {
     std::cout.flush();
     std::cout.rdbuf(cout_save);
+    std::ofstream maybe_of;
+    if (detail::cfg::output_filename != "") { maybe_of = std::ofstream(detail::cfg::output_filename); }
+
     if (report_type_ == JUNIT) {
-      print_junit_summary();
+      print_junit_summary(detail::cfg::output_filename != "" ? maybe_of : std::cout);
       return;
     }
-    print_console_summary();
+    print_console_summary(
+      detail::cfg::output_filename != "" ? maybe_of : std::cout,
+      detail::cfg::output_filename != "" ? maybe_of : std::cerr
+    );
   }
 
  protected:
   void print_duration(auto& printer) const noexcept {
     if (detail::cfg::show_duration) {
-      int64_t time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            active_scope_->run_stop - active_scope_->run_start)
-                            .count();
+      std::int64_t time_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              active_scope_->run_stop - active_scope_->run_start)
+              .count();
       // rounded to nearest ms
       double time_s = static_cast<double>(time_ms) / 1000.0;
       printer << " after " << time_s << " seconds";
     }
   }
 
-  void print_console_summary() {
+  void print_console_summary(std::ostream &out_stream, std::ostream &err_stream) {
     for (const auto& [suite_name, suite_result] : results_) {
       if (suite_result.fails) {
-        std::cerr
+        err_stream
             << "\n========================================================"
                "=======================\n"
             << "Suite " << suite_name  //
@@ -1836,7 +1898,7 @@ class reporter_junit {
             << color_.none << '\n';
         std::cerr << std::endl;
       } else {
-        std::cout << color_.pass << "Suite '" << suite_name
+        out_stream << color_.pass << "Suite '" << suite_name
                   << "': all tests passed" << color_.none << " ("
                   << suite_result.assertions << " asserts in "
                   << suite_result.n_tests << " tests)\n";
@@ -1850,59 +1912,80 @@ class reporter_junit {
     }
   }
 
-  void print_junit_summary() {
-    // mock junit output:
-    std::cout << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+  void print_junit_summary(std::ostream &stream) {
+    // aggregate results
+    size_t n_tests=0, n_fails=0;
+    double total_time = 0.0;
+    auto suite_time = [](auto const& suite_result) {
+      std::int64_t time_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              suite_result.run_stop - suite_result.run_start)
+              .count();
+      return static_cast<double>(time_ms) / 1000.0;
+    };
     for (const auto& [suite_name, suite_result] : results_) {
-      std::cout << "<testsuites";
-      std::cout << " classname=\"" << detail::cfg::executable_name << '\"';
-      std::cout << " name=\"" << suite_name << '\"';
-      std::cout << " tests=\"" << suite_result.n_tests << '\"';
-      std::cout << " errors=\"" << suite_result.fails << '\"';
-      std::cout << " failures=\"" << suite_result.fails << '\"';
-      std::cout << " skipped=\"" << suite_result.skipped << '\"';
-      int64_t time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            suite_result.run_stop - suite_result.run_start)
-                            .count();
-      std::cout << " time=\"" << (static_cast<double>(time_ms) / 1000.0)
-                << '\"';
-      std::cout << " version=\"" << BOOST_UT_VERSION << "\" />\n";
-      print_result(suite_name, " ", suite_result);
-      std::cout << "</testsuites>\n";
-      std::cout.flush();
+      n_tests += suite_result.assertions;
+      n_fails += suite_result.fails;
+      total_time += suite_time(suite_result);
     }
+
+    // mock junit output:
+    stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    stream << "<testsuites";
+      stream << " name=\"all\"";
+      stream << " tests=\"" << n_tests << '\"';
+      stream << " failures=\"" << n_fails << '\"';
+      stream << " time=\"" << total_time << '\"';
+      stream << ">\n";
+
+    for (const auto& [suite_name, suite_result] : results_) {
+      stream << "<testsuite";
+      stream << " classname=\"" << detail::cfg::executable_name << '\"';
+      stream << " name=\"" << suite_name << '\"';
+      stream << " tests=\"" << suite_result.assertions << '\"';
+      stream << " errors=\"" << suite_result.fails << '\"';
+      stream << " failures=\"" << suite_result.fails << '\"';
+      stream << " skipped=\"" << suite_result.skipped << '\"';
+      stream << " time=\"" << suite_time(suite_result) << '\"';
+      stream << " version=\"" << BOOST_UT_VERSION << "\">\n";
+      print_result(stream, suite_name, " ", suite_result);
+      stream << "</testsuite>\n";
+      stream.flush();
+    }
+    stream << "</testsuites>";
   }
-  void print_result(const std::string& suite_name, std::string indent,
+  void print_result(std::ostream &stream, const std::string& suite_name, std::string indent,
                     const test_result& parent) {
     for (const auto& [name, result] : *parent.nested_tests) {
-      std::cout << indent;
-      std::cout << "<testcase classname=\"" << result.suite_name << '\"';
-      std::cout << " name=\"" << name << '\"';
-      std::cout << " tests=\"" << result.assertions << '\"';
-      std::cout << " errors=\"" << result.fails << '\"';
-      std::cout << " failures=\"" << result.fails << '\"';
-      std::cout << " skipped=\"" << result.skipped << '\"';
-      int64_t time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            result.run_stop - result.run_start)
-                            .count();
-      std::cout << " time=\"" << (static_cast<double>(time_ms) / 1000.0)
+      stream << indent;
+      stream << "<testcase classname=\"" << result.suite_name << '\"';
+      stream << " name=\"" << name << '\"';
+      stream << " tests=\"" << result.assertions << '\"';
+      stream << " errors=\"" << result.fails << '\"';
+      stream << " failures=\"" << result.fails << '\"';
+      stream << " skipped=\"" << result.skipped << '\"';
+      std::int64_t time_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              result.run_stop - result.run_start)
+              .count();
+      stream << " time=\"" << (static_cast<double>(time_ms) / 1000.0)
                 << "\"";
-      std::cout << " status=\"" << result.status << '\"';
+      stream << " status=\"" << result.status << '\"';
       if (result.report_string.empty() && result.nested_tests->empty()) {
-        std::cout << " />\n";
+        stream << " />\n";
       } else if (!result.nested_tests->empty()) {
-        std::cout << " />\n";
-        print_result(suite_name, indent + "  ", result);
-        std::cout << indent << "</testcase>\n";
+        stream << " />\n";
+        print_result(stream, suite_name, indent + "  ", result);
+        stream << indent << "</testcase>\n";
       } else if (!result.report_string.empty()) {
-        std::cout << ">\n";
-        std::cout << indent << indent << "<system-out>\n";
-        std::cout << result.report_string << "\n";
-        std::cout << indent << indent << "</system-out>\n";
-        std::cout << indent << "</testcase>\n";
+        stream << ">\n";
+        stream << indent << indent << "<system-out>\n";
+        stream << result.report_string << "\n";
+        stream << indent << indent << "</system-out>\n";
+        stream << indent << "</testcase>\n";
       }
     }
-  };
+  }
 };
 
 struct options {
@@ -2000,11 +2083,11 @@ class runner {
       }
     }
 
-    if (!detail::cfg::query_pattern.empty()) {  //
-      const static std::regex regex(detail::cfg::query_regex_pattern);
-      bool matches = std::regex_match(test.name.data(), regex);
+    if (!detail::cfg::query_pattern.empty()) {
+      const static auto regex = detail::cfg::query_regex_pattern;
+      bool matches = utility::regex_match(test.name.data(), regex.c_str());
       for (const auto& tag2 : test.tag) {
-        matches |= std::regex_match(tag2.data(), regex);
+        matches |= utility::regex_match(tag2.data(), regex.c_str());
       }
       if (matches) {
         execute = !detail::cfg::invert_query_pattern;
@@ -2243,6 +2326,22 @@ struct log {
     on<TMsg>(events::log{msg});
     return next{};
   }
+
+#if defined(BOOST_UT_HAS_FORMAT)
+#if __cpp_lib_format >= 202207L
+  template <class... Args>
+  void operator()(std::format_string<Args...> fmt, Args&&... args) {
+    on<std::string>(
+        events::log{std::vformat(fmt.get(), std::make_format_args(args...))});
+  }
+#else
+  template <class... Args>
+  void operator()(std::string_view fmt, Args&&... args) {
+    on<std::string>(
+        events::log{std::vformat(fmt, std::make_format_args(args...))});
+  }
+#endif
+#endif
 };
 
 template <class TExpr>
@@ -2349,7 +2448,22 @@ struct expect_ {
   auto& operator<<(const TMsg& msg) {
     if (not value_) {
       on<T>(events::log{' '});
-      on<T>(events::log{msg});
+      if constexpr (requires {
+                      requires std::invocable<TMsg> and
+                                   not std::is_void_v<
+                                       std::invoke_result_t<TMsg>>;
+                    }) {
+        on<T>(events::log{std::invoke(msg)});
+      } else {
+        on<T>(events::log{msg});
+      }
+    }
+    return *this;
+  }
+
+  auto& operator<<(detail::fatal) {
+    if (not value_) {
+      on<T>(events::fatal_assertion{});
     }
     return *this;
   }
@@ -2858,7 +2972,7 @@ constexpr auto expect(const TExpr& expr,
       events::assertion<TExpr>{.expr = expr, .location = sl})};
 }
 
-[[maybe_unused]] constexpr auto fatal = detail::fatal{};
+[[maybe_unused]] inline constexpr auto fatal = detail::fatal{};
 
 #if defined(__cpp_nontype_template_parameter_class)
 template <auto Constant>
@@ -3171,30 +3285,21 @@ using operators::operator not;
 using operators::operator|;
 using operators::operator/;
 using operators::operator>>;
-}  // namespace boost::inline ext::ut::inline v1_1_9
+}  // namespace boost::inline ext::ut::inline v2_0_0
 
-#if (defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)) && !defined(__EMSCRIPTEN__)
+#if (defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)) && \
+    !defined(__EMSCRIPTEN__)
 __attribute__((constructor)) inline void cmd_line_args(int argc,
                                                        const char* argv[]) {
   ::boost::ut::detail::cfg::largc = argc;
   ::boost::ut::detail::cfg::largv = argv;
 }
 #else
-// add MSV/windows related code here (optional)
+// For MSVC, largc/largv are initialized with __argc/__argv
 #endif
 
 #endif
 
-#include <charconv>
-#include <chrono>
-#include <iostream>
-#include <map>
-#include <numeric>
-#include <ranges>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <variant>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
@@ -4228,4 +4333,4 @@ inline auto boost::ut::cfg<boost::ut::override> = ut::runner < cfg::reporter<pri
 {
 };
 
-#endif // GRAPH_PROTOTYPE_BENCHMARK_HPP
+#endif // GNURADIO_BENCHMARK_HPP

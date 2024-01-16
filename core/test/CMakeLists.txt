@@ -1,0 +1,58 @@
+set(TESTS_BINARY_PATH ${CMAKE_CURRENT_BINARY_DIR})
+set(TESTS_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
+
+configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
+
+function(setup_test_no_asan TARGET_NAME)
+    target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
+    target_link_libraries(${TARGET_NAME} PRIVATE gnuradio-options gnuradio-core fmt refl-cpp ut fftw gr-basic gr-testing)
+    add_test(NAME ${TARGET_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME})
+endfunction()
+
+function(setup_test TARGET_NAME)
+    if (NOT EMSCRIPTEN)
+        target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=address)
+        target_link_options(${TARGET_NAME} PRIVATE -fsanitize=address)
+    endif ()
+    setup_test_no_asan(${TARGET_NAME})
+endfunction()
+
+function(add_ut_test TEST_NAME)
+    add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
+    setup_test(${TEST_NAME})
+endfunction()
+
+function(add_app_test TEST_NAME)
+    add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
+    setup_test(${TEST_NAME})
+    target_link_libraries(${TEST_NAME} PRIVATE gnuradio-plugin)
+    add_dependencies(${TEST_NAME} good_math_plugin good_base_plugin bad_plugin)
+endfunction()
+
+add_ut_test(qa_buffer)
+add_ut_test(qa_DynamicBlock)
+add_ut_test(qa_DynamicPort)
+add_ut_test(qa_HierBlock)
+add_ut_test(qa_Block)
+add_ut_test(qa_Scheduler)
+add_ut_test(qa_reader_writer_lock)
+add_ut_test(qa_Settings)
+add_ut_test(qa_Tags)
+add_ut_test(qa_port_array)
+add_ut_test(qa_thread_affinity)
+add_ut_test(qa_thread_pool)
+
+if (NOT EMSCRIPTEN)
+    add_subdirectory(plugins)
+
+    add_executable(qa_plugins_test qa_plugins_test.cpp)
+    setup_test_no_asan(qa_plugins_test)
+    target_link_libraries(qa_plugins_test PRIVATE gnuradio-plugin)
+    add_dependencies(qa_plugins_test good_math_plugin good_base_plugin bad_plugin)
+
+    add_app_test(app_plugins_test app_plugins_test.cpp)
+
+    add_executable(qa_grc qa_grc.cpp)
+    setup_test_no_asan(qa_grc)
+    target_link_libraries(qa_grc PRIVATE yaml-cpp::yaml-cpp)
+endif ()

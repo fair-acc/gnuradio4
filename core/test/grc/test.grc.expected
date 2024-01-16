@@ -1,0 +1,125 @@
+blocks:
+  - name: main_source
+    id: good::fixed_source
+    parameters:
+      denominator: 1
+      event_count: 100
+      name: main_source
+      numerator: 1
+      stride: 0
+      unique_name: good::fixed_source<double>#0
+      denominator::description: denominator
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      denominator::unit: ""
+      denominator::visible: false
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: false
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: false
+      numerator::description: numerator
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      numerator::unit: ""
+      numerator::visible: false
+      stride::description: stride
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
+      stride::unit: ""
+      stride::visible: false
+      unknown_property: 42
+  - name: multiplier
+    id: good::multiply
+    parameters:
+      denominator: 1
+      name: multiplier
+      numerator: 1
+      stride: 0
+      unique_name: good::multiply<double>#0
+      denominator::description: denominator
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      denominator::unit: ""
+      denominator::visible: false
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: false
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: false
+      numerator::description: numerator
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      numerator::unit: ""
+      numerator::visible: false
+      stride::description: stride
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
+      stride::unit: ""
+      stride::visible: false
+  - name: counter
+    id: builtin_counter
+    parameters:
+      denominator: 1
+      name: counter
+      numerator: 1
+      stride: 0
+      unique_name: builtin_counter<double>#0
+      denominator::description: denominator
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      denominator::unit: ""
+      denominator::visible: false
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: false
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: false
+      numerator::description: numerator
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      numerator::unit: ""
+      numerator::visible: false
+      stride::description: stride
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
+      stride::unit: ""
+      stride::visible: false
+  - name: sink
+    id: good::cout_sink
+    parameters:
+      denominator: 1
+      name: sink
+      numerator: 1
+      stride: 0
+      total_count: 100
+      unique_name: good::cout_sink<double>#0
+      denominator::description: denominator
+      denominator::documentation: "Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      denominator::unit: ""
+      denominator::visible: false
+      description: ""
+      meta_information::description: meta-information
+      meta_information::documentation: store non-graph-processing information like UI block position etc.
+      meta_information::unit: ""
+      meta_information::visible: false
+      name::description: user-defined name
+      name::documentation: N.B. may not be unique -> ::unique_name
+      name::unit: ""
+      name::visible: false
+      numerator::description: numerator
+      numerator::documentation: "Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)"
+      numerator::unit: ""
+      numerator::visible: false
+      stride::description: stride
+      stride::documentation: samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.
+      stride::unit: ""
+      stride::visible: false
+      unknown_property: 42
+connections:
+  - [main_source, 0, multiplier, 0]
+  - [multiplier, 0, counter, 0]
+  - [counter, 0, sink, 0]

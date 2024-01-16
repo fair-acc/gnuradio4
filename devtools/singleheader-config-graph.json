@@ -1,11 +1,17 @@
 {
-	"project": "graph.hpp",
-	"target": "singleheader/graph.hpp",
+	"project": "Graph.hpp",
+	"target": "singleheader/Graph.hpp",
 	"sources": [
-		"graph.hpp"
+		"./core/include/gnuradio-4.0/Graph.hpp"
 	],
 	"include_paths": [
-		".",
-		"../build/_deps/refl-cpp-src/include"
+		"./core/include/",
+		"./blocks/basic/include/",
+		"./blocks/filter/include/",
+		"./blocks/fourier/include/",
+		"./blocks/testing/include/",
+		"./algorithm/include",
+		"./meta/include",
+		"./build/_deps/refl-cpp-src/include"
 	]
 }

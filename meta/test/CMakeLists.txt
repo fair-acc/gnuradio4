@@ -1,0 +1,6 @@
+add_ut_test(qa_formatter)
+add_ut_test(qa_traits)
+add_ut_test(qa_UncertainValue)
+target_link_libraries(qa_formatter PRIVATE gnuradio-meta)
+target_link_libraries(qa_traits PRIVATE gnuradio-meta)
+target_link_libraries(qa_UncertainValue PRIVATE gnuradio-meta)

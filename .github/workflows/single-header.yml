@@ -37,7 +37,7 @@ jobs:
       run: |
         wget https://raw.githubusercontent.com/edlund/amalgamate/c91f07eea1133aa184f652b8f1398eaf03586208/amalgamate.py
         mkdir -p singleheader
-        python3 amalgamate.py -c devtools/singleheader-config-graph.json -s include/ -v yes
+        python3 amalgamate.py -c devtools/singleheader-config-graph.json -s . -v yes
         python3 amalgamate.py -c devtools/singleheader-config-bench.json -s bench/ -v yes
 
     - name: upload to branch # keeping history of single-header branch

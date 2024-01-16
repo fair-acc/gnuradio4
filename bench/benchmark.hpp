@@ -1,8 +1,7 @@
-#ifndef GRAPH_PROTOTYPE_BENCHMARK_HPP
-#define GRAPH_PROTOTYPE_BENCHMARK_HPP
+#ifndef GNURADIO_BENCHMARK_HPP
+#define GNURADIO_BENCHMARK_HPP
 
 #include <algorithm>
-#include <boost/ut.hpp>
 #include <charconv>
 #include <chrono>
 #include <iostream>
@@ -13,6 +12,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+
+#include <boost/ut.hpp>
 
 #include <fmt/color.h>
 #include <fmt/format.h>
@@ -1046,4 +1047,4 @@ inline auto boost::ut::cfg<boost::ut::override> = ut::runner < cfg::reporter<pri
 {
 };
 
-#endif // GRAPH_PROTOTYPE_BENCHMARK_HPP
+#endif // GNURADIO_BENCHMARK_HPP
