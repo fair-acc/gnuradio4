@@ -8,7 +8,7 @@
 #include <fmt/ranges.h>
 
 #include <gnuradio-4.0/BlockRegistry.hpp>
-#include <gnuradio-4.0/plugin_loader.hpp>
+#include <gnuradio-4.0/PluginLoader.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -44,9 +44,9 @@ ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 
 struct TestContext {
     gr::BlockRegistry registry;
-    gr::plugin_loader loader;
+    gr::PluginLoader  loader;
 
-    TestContext() : loader(&registry, std::vector<std::filesystem::path>{ "core/test/plugins", "test/plugins", "plugins" }) { GP_REGISTER_NODE_RUNTIME(&registry, builtin_multiply, double, float); }
+    TestContext() : loader(&registry, std::vector<std::filesystem::path>{ "core/test/plugins", "test/plugins", "plugins" }) { GP_REGISTER_BLOCK_RUNTIME(&registry, builtin_multiply, double, float); }
 };
 
 TestContext &
@@ -153,7 +153,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         gr::Graph testGraph;
 
         // Instantiate the node that is defined in a plugin
-        auto &block_source = context().loader.instantiate_in_graph(testGraph, names::fixed_source, "double");
+        auto &block_source = context().loader.instantiateInGraph(testGraph, names::fixed_source, "double");
 
         // Instantiate a built-in node in a static way
         gr::property_map block_multiply_1_params;
@@ -161,10 +161,10 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto &block_multiply_double       = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
         // Instantiate a built-in node via the plugin loader
-        auto &block_multiply_float = context().loader.instantiate_in_graph(testGraph, names::builtin_multiply, "float");
+        auto &block_multiply_float = context().loader.instantiateInGraph(testGraph, names::builtin_multiply, "float");
 
-        auto &block_convert_to_float  = context().loader.instantiate_in_graph(testGraph, names::convert, "double;float");
-        auto &block_convert_to_double = context().loader.instantiate_in_graph(testGraph, names::convert, "float;double");
+        auto &block_convert_to_float  = context().loader.instantiateInGraph(testGraph, names::convert, "double;float");
+        auto &block_convert_to_double = context().loader.instantiateInGraph(testGraph, names::convert, "float;double");
 
         //
         std::size_t      repeats = 10;

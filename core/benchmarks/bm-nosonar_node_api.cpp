@@ -190,8 +190,8 @@ public:
 
     gr::work::Result
     work(std::size_t requested_work) noexcept {
-        auto      &out_port   = outputPort<0>(this);
-        auto      &in_port    = inputPort<0>(this);
+        auto &out_port = outputPort<0, gr::traits::port::port_kind::Stream>(this);
+        auto &in_port  = inputPort<0, gr::traits::port::port_kind::Stream>(this);
 
         auto      &reader     = in_port.streamReader();
         auto      &writer     = out_port.streamWriter();
@@ -281,8 +281,8 @@ public:
 
     gr::work::Result
     work(std::size_t requested_work) noexcept { // TODO - make this an alternate version to 'processOne'
-        auto      &out_port   = out;
-        auto      &in_port    = in;
+        auto &out_port = out;
+        auto &in_port  = in;
 
         auto      &reader     = in_port.streamReader();
         auto      &writer     = out_port.streamWriter();
@@ -344,8 +344,8 @@ public:
     gr::work::Status
     work() noexcept {
         using namespace stdx;
-        auto      &out_port   = outputPort<"out">(this);
-        auto      &in_port    = inputPort<"in">(this);
+        auto &out_port = outputPort<"out">(this);
+        auto &in_port  = inputPort<"in">(this);
 
         auto      &reader     = in_port.streamReader();
         auto      &writer     = out_port.streamWriter();
@@ -363,7 +363,7 @@ public:
         const auto objects_to_write   = stdx::is_simd_v<To> ? n_simd_to_convert : scalars_to_convert;
         const auto objects_to_read    = stdx::is_simd_v<From> ? n_simd_to_convert : scalars_to_convert;
 
-        auto       return_value       = gr::work::Status::OK;
+        auto return_value = gr::work::Status::OK;
         writer.publish( //
                 [&](std::span<To> output) {
                     const auto input = reader.get();
@@ -518,7 +518,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto     &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
         auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
 
-        using copy     = ::copy<float, 1, N_MAX, true, true>;
+        using copy = ::copy<float, 1, N_MAX, true, true>;
         std::vector<copy *> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
             cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({ { "name", fmt::format("copy {} at {}", i, gr::this_source_location()) } }));
@@ -576,9 +576,9 @@ inline const boost::ut::suite _runtime_tests = [] {
     templated_cascaded_test(static_cast<int>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - int");
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char *test_name) {
-        gr::Graph                  testGraph;
-        auto                      &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
-        auto                      &sink = testGraph.emplaceBlock<test::sink<T>>();
+        gr::Graph testGraph;
+        auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
+        auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
 
         std::vector<multiply<T> *> mult1;
         std::vector<divide<T> *>   div1;
@@ -643,9 +643,9 @@ inline const boost::ut::suite _simd_tests = [] {
     }
 
     {
-        gr::Graph                           testGraph;
-        auto                               &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
-        auto                               &sink = testGraph.emplaceBlock<test::sink<float>>();
+        gr::Graph testGraph;
+        auto     &src  = testGraph.emplaceBlock<test::source<float>>(N_SAMPLES);
+        auto     &sink = testGraph.emplaceBlock<test::sink<float>>();
 
         std::vector<multiply_SIMD<float> *> mult1;
         std::vector<multiply_SIMD<float> *> mult2;

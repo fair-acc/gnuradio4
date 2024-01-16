@@ -35,7 +35,7 @@ struct TestContext {
     explicit TestContext(std::vector<std::filesystem::path> paths = {}) : registry(), loader(&registry, std::move(paths)) {}
 
     gr::BlockRegistry registry;
-    gr::plugin_loader loader;
+    gr::PluginLoader  loader;
 };
 
 namespace {
@@ -74,8 +74,8 @@ const boost::ut::suite GrcTests = [] {
     static TestContext context = [] {
         TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
         registerBuiltinBlocks(&ctx.registry);
-        GP_REGISTER_NODE_RUNTIME(&ctx.registry, ArraySource, double);
-        GP_REGISTER_NODE_RUNTIME(&ctx.registry, ArraySink, double);
+        GP_REGISTER_BLOCK_RUNTIME(&ctx.registry, ArraySource, double);
+        GP_REGISTER_BLOCK_RUNTIME(&ctx.registry, ArraySink, double);
         return ctx;
     }();
 

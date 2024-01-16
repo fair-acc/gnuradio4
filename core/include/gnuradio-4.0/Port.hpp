@@ -10,6 +10,7 @@
 #include "annotated.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
+#include "Message.hpp"
 #include "Tag.hpp"
 
 namespace gr {
@@ -151,9 +152,12 @@ using is_tag_buffer_attribute = std::bool_constant<IsTagBufferAttribute<T>>;
 template<typename T>
 struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
+struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
+
 struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<Tag>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
+static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
@@ -651,25 +655,27 @@ template<typename T, typename... Attributes>
 using PortIn = Port<T, "", PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, typename... Attributes>
 using PortOut = Port<T, "", PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
-template<typename... Attributes>
-using MsgPortIn = Port<property_map, "", PortType::MESSAGE, PortDirection::INPUT, Attributes...>;
-template<typename... Attributes>
-using MsgPortOut = Port<property_map, "", PortType::MESSAGE, PortDirection::OUTPUT, Attributes...>;
-
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+
+template<typename... Attributes>
+using MsgPortIn = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
+template<typename... Attributes>
+using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
-using MsgPortInNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
+using MsgPortInNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
-using MsgPortOutNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+using MsgPortOutNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
 
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
-static_assert(PortLike<MsgPortIn<float>>);
-static_assert(PortLike<MsgPortOut<float>>);
+static_assert(PortLike<MsgPortIn<>>);
+static_assert(PortLike<MsgPortOut<>>);
+
+static_assert(std::is_same_v<MsgPortIn<>::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);

@@ -10,7 +10,7 @@
 #pragma GCC diagnostic pop
 
 #include "Graph.hpp"
-#include "plugin_loader.hpp"
+#include "PluginLoader.hpp"
 
 namespace gr {
 
@@ -76,7 +76,8 @@ struct YamlMap {
     }
 };
 
-inline std::size_t parseIndex(std::string_view str) {
+inline std::size_t
+parseIndex(std::string_view str) {
     std::size_t index{};
     auto [_, src_ec] = std::from_chars(str.begin(), str.end(), index);
     if (src_ec != std::errc()) {
@@ -88,29 +89,29 @@ inline std::size_t parseIndex(std::string_view str) {
 } // namespace detail
 
 inline gr::Graph
-load_grc(plugin_loader &loader, const std::string &yaml_source) {
-    Graph                               testGraph;
+load_grc(PluginLoader &loader, const std::string &yaml_source) {
+    Graph testGraph;
 
     std::map<std::string, BlockModel *> createdBlocks;
 
-    YAML::Node                          tree   = YAML::Load(yaml_source);
-    auto                                blocks = tree["blocks"];
+    YAML::Node tree   = YAML::Load(yaml_source);
+    auto       blocks = tree["blocks"];
     for (const auto &grc_block : blocks) {
         auto name = grc_block["name"].as<std::string>();
         auto id   = grc_block["id"].as<std::string>();
 
         // TODO: Discuss how GRC should store the node types, how we should
         // in general handle nodes that are parametrised by more than one type
-        auto &currentBlock = loader.instantiate_in_graph(testGraph, id, "double");
+        auto &currentBlock = loader.instantiateInGraph(testGraph, id, "double");
 
         currentBlock.setName(name);
-        createdBlocks[name]                = &currentBlock;
+        createdBlocks[name] = &currentBlock;
 
-        auto         currentBlock_settings = currentBlock.settings().get();
+        auto currentBlock_settings = currentBlock.settings().get();
 
         property_map new_properties;
 
-        auto         parameters = grc_block["parameters"];
+        auto parameters = grc_block["parameters"];
         if (parameters && parameters.IsMap()) {
             for (const auto &kv : parameters) {
                 const auto &key = kv.first.as<std::string>();
@@ -183,7 +184,7 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
             }
 
             struct result {
-                decltype(node) block_it;
+                decltype(node)                   block_it;
                 PortIndexDefinition<std::size_t> port_definition;
             };
 
@@ -205,7 +206,6 @@ load_grc(plugin_loader &loader, const std::string &yaml_source) {
             auto dst = parseBlock_port(connection[2], connection[3]);
             testGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
         } else {
-
         }
     }
 
@@ -221,7 +221,7 @@ save_grc(const gr::Graph &testGraph) {
         root.write_fn("blocks", [&]() {
             detail::YamlSeq nodes(out);
 
-            auto            writeBlock = [&](const auto &node) {
+            auto writeBlock = [&](const auto &node) {
                 detail::YamlMap map(out);
                 map.write("name", std::string(node.name()));
 

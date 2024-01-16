@@ -70,7 +70,7 @@ public:
 protected:
     using TPortIn = gr::PortIn<T>;
     std::vector<TPortIn> _input_ports;
-    gr::PortOut<T>     _output_port;
+    gr::PortOut<T>       _output_port;
 
 protected:
     using setting_map                            = std::map<std::string, int, std::less<>>;
@@ -196,6 +196,9 @@ public:
         return { requested_work, available_samples, gr::work::Status::OK };
     }
 
+    virtual void
+    processScheduledMessages() override {}
+
     void *
     raw() override {
         return this;
@@ -234,8 +237,8 @@ void
                        registerBuiltinBlocks(Registry *registry) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    GP_REGISTER_NODE_RUNTIME(registry, builtin_multiply, double, float);
-    GP_REGISTER_NODE_RUNTIME(registry, builtin_counter, double, float);
+    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_multiply, double, float);
+    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_counter, double, float);
 #pragma GCC diagnostic pop
 }
 

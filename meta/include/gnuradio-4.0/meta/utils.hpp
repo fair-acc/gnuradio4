@@ -184,7 +184,8 @@ struct message_type {};
 template<class... T>
 constexpr bool always_false = false;
 
-constexpr std::size_t invalid_index = -1UZ;
+constexpr std::size_t invalid_index              = -1UZ;
+constexpr std::size_t default_message_port_index = -2UZ;
 
 #if HAVE_SOURCE_LOCATION
 [[gnu::always_inline]] inline void
@@ -343,7 +344,7 @@ static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, st
                                       std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<fixed_string Name, typename PortList>
-consteval int
+consteval std::size_t
 indexForName() {
     auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
         auto static_name_for_index = []<std::size_t Id> {
@@ -361,7 +362,7 @@ indexForName() {
         static_assert(n_matches <= 1, "Multiple ports with that name were found. The name must be unique. You can "
                                       "still use a port index instead.");
         static_assert(n_matches == 1, "No port with the given name exists.");
-        int result = -1;
+        std::size_t result = meta::invalid_index;
         ((static_name_for_index.template operator()<Ids>() == Name ? (result = Ids) : 0), ...);
         return result;
     };

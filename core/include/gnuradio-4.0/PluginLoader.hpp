@@ -15,7 +15,7 @@
 #include "Graph.hpp"
 #include "plugin.hpp"
 
-using plugin_create_function_t  = void  (*)(gp_plugin_base **);
+using plugin_create_function_t  = void (*)(gp_plugin_base **);
 using plugin_destroy_function_t = void (*)(gp_plugin_base *);
 
 namespace gr {
@@ -33,7 +33,7 @@ private:
     plugin_destroy_function_t _destroy_fn = nullptr;
     gp_plugin_base           *_instance   = nullptr;
 
-    std::string               _status;
+    std::string _status;
 
     void
     release() {
@@ -125,24 +125,26 @@ public:
     }
 };
 
-class plugin_loader {
+class PluginLoader {
 private:
     std::vector<plugin_handler>                       _handlers;
     std::unordered_map<std::string, gp_plugin_base *> _handler_for_name;
     std::unordered_map<std::string, std::string>      _failed_plugins;
 
-    BlockRegistry                                    *_global_registry;
-    std::vector<std::string>                          _knownBlocks;
+    BlockRegistry           *_global_registry;
+    std::vector<std::string> _knownBlocks;
 
 public:
-    plugin_loader(BlockRegistry *global_registry, std::span<const std::filesystem::path> plugin_directories) : _global_registry(global_registry) {
+    PluginLoader(BlockRegistry *global_registry, std::span<const std::filesystem::path> plugin_directories) : _global_registry(global_registry) {
         for (const auto &directory : plugin_directories) {
+            fmt::print("Plugin directory {}\n", directory.string());
             std::cerr << std::filesystem::current_path() << std::endl;
 
             if (!std::filesystem::is_directory(directory)) continue;
 
             for (const auto &file : std::filesystem::directory_iterator{ directory }) {
                 if (file.is_regular_file() && file.path().extension() == ".so") {
+                    fmt::print("Loading {}\n", file.path().string());
                     if (plugin_handler handler(file.path().string()); handler) {
                         for (const auto &block_name : handler->providedBlocks()) {
                             _handler_for_name.emplace(std::string(block_name), handler.operator->());
@@ -193,7 +195,7 @@ public:
 
     template<typename Graph, typename... InstantiateArgs>
     gr::BlockModel &
-    instantiate_in_graph(Graph &graph, InstantiateArgs &&...args) {
+    instantiateInGraph(Graph &graph, InstantiateArgs &&...args) {
         auto block_load = instantiate(std::forward<InstantiateArgs>(args)...);
         if (!block_load) {
             throw fmt::format("Unable to create node");

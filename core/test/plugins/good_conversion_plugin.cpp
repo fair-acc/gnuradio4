@@ -27,4 +27,4 @@ ENABLE_REFLECTION_FOR_TEMPLATE(good::convert, in, out);
 // Another is to use the same macro for both single-parametrised
 // and mulciple-parametrised nodes, just to have the parameter
 // packs wrapped in some special type like this:
-GP_PLUGIN_REGISTER_NODE(good::convert, BlockParameters<double, float>, BlockParameters<float, double>);
+GP_PLUGIN_REGISTER_BLOCK(good::convert, BlockParameters<double, float>, BlockParameters<float, double>);

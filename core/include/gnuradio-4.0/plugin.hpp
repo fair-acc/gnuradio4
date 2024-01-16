@@ -66,8 +66,9 @@ public:
 
     template<template<typename...> typename TBlock, typename... Args>
     void
-    add_block_type(std::string block_type) {
-        registry.add_block_type<TBlock, Args...>(std::move(block_type));
+    addBlockType(std::string block_type) {
+        std::cout << "New block type: " << block_type << std::endl;
+        registry.addBlockType<TBlock, Args...>(std::move(block_type));
     }
 };
 
@@ -101,6 +102,6 @@ public:
     } \
     }
 
-#define GP_PLUGIN_REGISTER_NODE(...) GP_REGISTER_NODE(gp_plugin_instance(), __VA_ARGS__);
+#define GP_PLUGIN_REGISTER_BLOCK(...) GP_REGISTER_BLOCK(gp_plugin_instance(), __VA_ARGS__);
 
 #endif // include guard

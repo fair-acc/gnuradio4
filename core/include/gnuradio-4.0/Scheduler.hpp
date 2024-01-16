@@ -148,6 +148,11 @@ public:
         }
     }
 
+    auto &
+    graph() {
+        return _graph;
+    }
+
     void
     reset() {
         if (!canReset()) {
@@ -255,6 +260,8 @@ public:
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
         std::size_t           performedWorkAllBlocks = 0UZ;
+
+        this->_graph.processScheduledMessages();
 
         bool something_happened = false;
         for (auto &currentBlock : blocks) {

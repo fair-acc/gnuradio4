@@ -5,7 +5,7 @@
 #include <fmt/format.h>
 
 #include <gnuradio-4.0/BlockRegistry.hpp>
-#include <gnuradio-4.0/plugin_loader.hpp>
+#include <gnuradio-4.0/PluginLoader.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -19,7 +19,7 @@ struct TestContext {
     explicit TestContext(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
 
     grg::BlockRegistry registry;
-    grg::plugin_loader loader;
+    grg::PluginLoader  loader;
 };
 
 namespace names {
@@ -36,6 +36,8 @@ main(int argc, char *argv[]) {
     std::vector<std::filesystem::path> paths;
     if (argc < 2) {
         paths.emplace_back("test/plugins");
+        paths.emplace_back("plugins");
+        paths.emplace_back("core/test/plugins");
         paths.emplace_back("plugins");
     } else {
         for (int i = 1; i < argc; ++i) {
@@ -60,6 +62,10 @@ main(int argc, char *argv[]) {
     auto        known = context.loader.knownBlocks();
     std::vector requireds{ names::cout_sink, names::fixed_source, names::divide, names::multiply };
 
+    for (const auto &plugin : known) {
+        fmt::print("Known: {}\n", plugin);
+    }
+
     for (const auto &required [[maybe_unused]] : requireds) {
         assert(std::ranges::find(known, required) != known.end());
     }
@@ -67,7 +73,7 @@ main(int argc, char *argv[]) {
     grg::Graph testGraph;
 
     // Instantiate the node that is defined in a plugin
-    auto &block_source = context.loader.instantiate_in_graph(testGraph, names::fixed_source, "double");
+    auto &block_source = context.loader.instantiateInGraph(testGraph, names::fixed_source, "double");
 
     // Instantiate a built-in node in a static way
     gr::property_map block_multiply_1_params;
@@ -75,8 +81,8 @@ main(int argc, char *argv[]) {
     auto &block_multiply_1            = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
     // Instantiate a built-in node via the plugin loader
-    auto &block_multiply_2 = context.loader.instantiate_in_graph(testGraph, names::builtin_multiply, "double");
-    auto &block_counter    = context.loader.instantiate_in_graph(testGraph, names::builtin_counter, "double");
+    auto &block_multiply_2 = context.loader.instantiateInGraph(testGraph, names::builtin_multiply, "double");
+    auto &block_counter    = context.loader.instantiateInGraph(testGraph, names::builtin_counter, "double");
 
     //
     const std::size_t repeats = 100;
