@@ -13,10 +13,10 @@ A [single header version](https://raw.githubusercontent.com/fair-acc/graph-proto
 is provided in the `singleheader/`subdirectory of the single-header branch.
 If you want to locally regenerate the single header file, just follow
 the [CI step](https://github.com/fair-acc/graph-prototype/blob/main/.github/workflows/single-header.yml#L38-L41).
-It can be used on [compiler-explorer](https://compiler-explorer.com/z/EG7Eb9K83) with `-sdt=c++23 -O3` compiler options.
+It can be used on [compiler-explorer](https://compiler-explorer.com/z/EG7Eb9K83) with `-std=c++23 -O3` compiler options.
 
 ## Copyright & License
-Copyright (C) 2018-2022 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
+Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
 Unless otherwise noted: [SPDX-License-Identifier: LGPL-3.0-or-later](https://spdx.org/licenses/LGPL-3.0-or-later.html)
 
 ### Contributors
