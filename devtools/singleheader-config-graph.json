@@ -10,9 +10,10 @@
 		"./blocks/filter/include/",
 		"./blocks/fourier/include/",
 		"./blocks/testing/include/",
-		"./algorithm/include",
-		"./meta/include",
-		"./third_party/magic_enum",
-		"./third_party/refl-cpp"
+		"./algorithm/include/",
+		"./meta/include/",
+		"./build/_deps/vir-simd-src/",
+		"./third_party/magic_enum/",
+		"./third_party/refl-cpp/"
 	]
 }
