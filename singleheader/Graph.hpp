@@ -469,6 +469,11 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 #include <map>
 
 #include <fmt/format.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
 // #include <magic_enum.hpp>
 //  __  __             _        ______                          _____
 // |  \/  |           (_)      |  ____|                        / ____|_     _
@@ -2049,6 +2054,9 @@ template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
 
 #endif // NEARGYE_MAGIC_ENUM_UTILITY_HPP
 
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 // #include <gnuradio-4.0/meta/typelist.hpp>
 
@@ -4542,17 +4550,17 @@ struct fixed_string {
         return N == 0;
     }
 
-    [[nodiscard]] constexpr explicit
-    operator std::string_view() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return { _data, N }; }
 
     [[nodiscard]] explicit
     operator std::string() const noexcept {
         return { _data, N };
     }
 
-    [[nodiscard]] operator const char *() const noexcept { return _data; }
+    [[nodiscard]] explicit
+    operator const char *() const noexcept {
+        return _data;
+    }
 
     [[nodiscard]] constexpr bool
     operator==(const fixed_string &other) const noexcept {
@@ -5006,6 +5014,20 @@ static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<std::comp
 
 template<typename T>
 concept string_like = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> || std::is_convertible_v<T, std::string_view>;
+
+namespace detail {
+template<typename T>
+struct is_const_member_function : std::false_type {};
+
+template<typename T, typename U, typename... args>
+struct is_const_member_function<U (T::*)(args...) const> : std::true_type {};
+} // namespace detail
+
+template<typename T>
+inline constexpr bool
+is_const_member_function(T) noexcept {
+    return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
+}
 
 } // namespace gr::meta
 
@@ -6735,7 +6757,7 @@ class CircularBuffer
 
     explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
     explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t n_slots_to_claim) noexcept :
-        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data[_index], _n_slots_to_claim }) { }
+        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data.data()[_index], _n_slots_to_claim }) { }
     ReservedOutputRange(const ReservedOutputRange&) = delete;
     ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
     ReservedOutputRange(ReservedOutputRange&& other) noexcept
@@ -6785,8 +6807,8 @@ class CircularBuffer
     constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
     constexpr T* data() const noexcept { return _internal_span.data(); }
 
-    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data[_index + i]; }
-    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data[_index + i]; }
+    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data.data()[_index + i]; }
+    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data.data()[_index + i]; }
     operator std::span<T>&() const noexcept { return _internal_span; }
     operator std::span<T>&() noexcept { return _internal_span; }
 
@@ -6973,7 +6995,7 @@ class CircularBuffer
     };
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface) {
+        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
             return double_mapped_memory_resource::allocator<T>();
         } else {
             return Allocator();
@@ -13275,6 +13297,9 @@ enum class TagPropagationPolicy {
 
 using property_map = pmtv::map_t;
 
+template<typename T>
+concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
+
 /**
  * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
  * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
@@ -13343,6 +13368,7 @@ struct alignas(hardware_constructive_interference_size) Tag {
         map[key] = value;
     }
 };
+
 } // namespace gr
 
 ENABLE_REFLECTION(gr::Tag, index, map);
@@ -13706,7 +13732,7 @@ struct InternalPortBuffers {
 template<std::size_t minSamples = std::dynamic_extent, std::size_t maxSamples = std::dynamic_extent, bool isConst = false>
 struct RequiredSamples {
     static_assert(minSamples > 0, "Port<T, ..., RequiredSamples::MIN_SAMPLES, ...>, ..> must be >= 0");
-    static constexpr std::size_t kMinSamples = minSamples == std::dynamic_extent ? 1LU : minSamples;
+    static constexpr std::size_t kMinSamples = minSamples == std::dynamic_extent ? 1UZ : minSamples;
     static constexpr std::size_t kMaxSamples = maxSamples == std::dynamic_extent ? std::numeric_limits<std::size_t>::max() : maxSamples;
     static constexpr bool        kIsConst    = isConst;
 };
@@ -13855,6 +13881,7 @@ private:
     bool      _connected    = false;
     IoType    _ioHandler    = newIoHandler();
     TagIoType _tagIoHandler = newTagIoHandler();
+    Tag       _cachedTag{};
 
 public:
     [[nodiscard]] constexpr bool
@@ -13922,7 +13949,14 @@ public:
         static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
     }
 
-    constexpr Port(Port &&other) noexcept : name(std::move(other.name)), priority{ other.priority }, min_samples(other.min_samples), max_samples(other.max_samples), _connected(other._connected), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port &&other) noexcept
+        : name(std::move(other.name))
+        , priority{ other.priority }
+        , min_samples(other.min_samples)
+        , max_samples(other.max_samples)
+        , _connected(other._connected)
+        , _ioHandler(std::move(other._ioHandler))
+        , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
     operator=(Port &&other) noexcept {
@@ -14122,6 +14156,113 @@ public:
         static_assert(kIsOutput && std::remove_cvref_t<Other>::kIsInput);
         auto src_buffer = writerHandlerInternal();
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
+    }
+
+    /**
+     * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
+     */
+    inline constexpr std::span<const Tag>
+    getTags(Tag::signed_index_type untilOffset = 0) noexcept
+        requires(kIsInput)
+    {
+        const auto  readPos           = streamReader().position();
+        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
+        std::size_t nTagsProcessed    = 0UZ;
+        bool        properTagDistance = false;
+
+        for (const Tag &tag : tags) {
+            const auto relativeTagPosition = (tag.index - readPos); // w.r.t. present stream reader position
+            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition <= untilOffset;
+            if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
+                nTagsProcessed++;
+                if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
+                    properTagDistance = true;
+                }
+            } else {
+                break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
+            }
+        }
+        return tags.first(nTagsProcessed);
+    }
+
+    inline const Tag
+    getTag(Tag::signed_index_type untilOffset = 0)
+        requires(kIsInput)
+    {
+        const auto readPos = streamReader().position();
+        if (_cachedTag.index == readPos && readPos >= 0) {
+            return _cachedTag;
+        }
+        _cachedTag.reset();
+
+        auto mergeSrcMapInto = [](const property_map &sourceMap, property_map &destinationMap) {
+            assert(&sourceMap != &destinationMap);
+            for (const auto &[key, value] : sourceMap) {
+                destinationMap.insert_or_assign(key, value);
+            }
+        };
+
+        const auto tags  = getTags(untilOffset);
+        _cachedTag.index = readPos;
+        std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag &tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
+        std::ignore = tagReader().consume(tags.size());
+
+        return _cachedTag;
+    }
+
+    inline constexpr void
+    publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+        requires(kIsOutput)
+    {
+        processPublishTag(std::move(tag_data), tagOffset);
+    }
+
+    inline constexpr void
+    publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+        requires(kIsOutput)
+    {
+        processPublishTag(tag_data, tagOffset);
+    }
+
+    [[maybe_unused]] inline constexpr bool
+    publishPendingTags() noexcept
+        requires(kIsOutput)
+    {
+        if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
+            return false;
+        }
+        auto outTags     = tagWriter().reserve_output_range(1UZ);
+        outTags[0].index = _cachedTag.index;
+        outTags[0].map   = _cachedTag.map;
+        outTags.publish(1UZ);
+
+        _cachedTag.reset();
+        return true;
+    }
+
+private:
+    template<PropertyMapType PropertyMap>
+    inline constexpr void
+    processPublishTag(PropertyMap &&tag_data, Tag::signed_index_type tagOffset) noexcept {
+        const auto newTagIndex = tagOffset < 0 ? tagOffset : streamWriter().position() + tagOffset;
+
+        if (tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
+            publishPendingTags();
+        }
+        _cachedTag.index = newTagIndex;
+        if constexpr (std::is_rvalue_reference_v<PropertyMap &&>) { // -> move semantics
+            for (auto &[key, value] : tag_data) {
+                _cachedTag.map.insert_or_assign(std::move(key), std::move(value));
+            }
+        } else { // -> copy semantics
+            for (const auto &[key, value] : tag_data) {
+                _cachedTag.map.insert_or_assign(key, value);
+            }
+        }
+
+        if (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM)) { // force tag publishing for explicitly published tags or EOS
+            publishPendingTags();
+        }
     }
 
     friend class DynamicPort;
@@ -14458,76 +14599,48 @@ public:
 
 static_assert(PortLike<DynamicPort>);
 
-constexpr void
-publish_tag(PortLike auto &port, property_map &&tag_data, std::size_t tag_offset = 0) noexcept {
-    port.tagWriter().publish(
-            [&port, data = std::move(tag_data), &tag_offset](std::span<gr::Tag> tag_output) {
-                tag_output[0].index = port.streamWriter().position() + std::make_signed_t<std::size_t>(tag_offset);
-                tag_output[0].map   = std::move(data);
-            },
-            1UZ);
-}
-
-constexpr void
-publish_tag(PortLike auto &port, const property_map &tag_data, std::size_t tag_offset = 0) noexcept {
-    port.tagWriter().publish(
-            [&port, &tag_data, &tag_offset](std::span<gr::Tag> tag_output) {
-                tag_output[0].index = port.streamWriter().position() + tag_offset;
-                tag_output[0].map   = tag_data;
-            },
-            1UZ);
-}
-
-constexpr std::size_t
-samples_to_next_tag(const PortLike auto &port) {
-    if (!port.isConnected() || port.tagReader().available() == 0) [[likely]] {
-        return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
+namespace detail {
+template<typename T>
+concept TagPredicate = requires(const T &t, const Tag &tag, Tag::signed_index_type readPosition) {
+    { t(tag, readPosition) } -> std::convertible_to<bool>;
+};
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition || tag.index < 0; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept {
+    auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
+    if (eosTagIter != tag.map.end() && eosTagIter->second == true) {
+        if (tag.index >= readPosition || tag.index < 0) {
+            return true;
+        }
     }
+    return false;
+};
+} // namespace detail
 
-    // at least one tag is present -> if tag is not on the first tag position read up to the tag position
-    const auto tagData           = port.tagReader().get();
-    const auto readPosition      = port.streamReader().position();
-    const auto future_tags_begin = std::ranges::find_if(tagData, [&readPosition](const auto &tag) noexcept { return tag.index > readPosition + 1; });
+inline constexpr std::optional<std::size_t>
+nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
+    const std::span<const Tag> tagData = port.tagReader().template get<false>();
+    if (!port.isConnected() || tagData.empty()) [[likely]] {
+        return std::nullopt; // default: no tags in sight
+    }
+    const Tag::signed_index_type readPosition = port.streamReader().position();
 
-    if (future_tags_begin == tagData.begin()) {
-        const auto        first_future_tag_index   = static_cast<std::size_t>(future_tags_begin->index);
-        const std::size_t n_samples_until_next_tag = readPosition == -1 ? first_future_tag_index : (first_future_tag_index - static_cast<std::size_t>(readPosition) - 1UZ);
-        return n_samples_until_next_tag;
+    // at least one tag is present -> if tag is not on the first tag position read up to the tag position, or if the tag has a special 'index = -1'
+    const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto &tag) { return predicate(tag, readPosition + readOffset); });
+    if (firstMatchingTag != tagData.end()) {
+        return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::signed_index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
-        return 0;
+        return std::nullopt;
     }
 }
 
-constexpr std::size_t
-samples_to_eos_tag(const PortLike auto &port) {
-    if (!port.isConnected() || port.tagReader().available() == 0) [[likely]] {
-        return std::numeric_limits<std::size_t>::max(); // default: no tags in sight
-    }
-    const auto tags    = port.tagReader().get();
-    const auto readPos = port.streamReader().position();
+inline constexpr std::optional<std::size_t>
+nSamplesUntilNextTag(const PortLike auto &port, Tag::signed_index_type offset = 0) {
+    return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset);
+}
 
-    // find the smallest index of EOS tag, if no EOS tag is present then index = std::numeric_limits<std::size_t>::max()
-    std::size_t result = std::numeric_limits<std::size_t>::max();
-    // TODO: 'const auto tag' without reference is a workaround for gcc compiler
-    //  by unknown reasons only copy works, reference leads to unvalidated tag.map.end() iterator
-    for (const auto tag : tags) {
-        bool containEOSTag{ false };
-        for (const auto &[key, value] : tag.map) {
-            if (key == gr::tag::END_OF_STREAM.key() && value == true) {
-                containEOSTag = true;
-                break;
-            }
-        }
-        if (containEOSTag) {
-            if (tag.index > readPos + 1) {
-                result = std::min(result, (readPos == -1) ? static_cast<std::size_t>(tag.index) : static_cast<std::size_t>(tag.index - readPos - 1));
-            } else {
-                result = 0;
-                break; // we can break, 0 is the minimum
-            }
-        }
-    }
-    return result;
+inline constexpr std::optional<std::size_t>
+samples_to_eos_tag(const PortLike auto &port, Tag::signed_index_type offset = 0) {
+    return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset);
 }
 
 } // namespace gr
@@ -17463,7 +17576,73 @@ namespace gr {
 namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
-enum class LifeCycleState : char { IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR };
+namespace lifecycle {
+/**
+ * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
+ *
+ * Transition between the following states is triggered by specific actions or events:
+ * - `IDLE`: The initial state before the scheduler has been initialized.
+ * - `INITIALISED`: The scheduler has been initialized and is ready to start running.
+ * - `RUNNING`: The scheduler is actively running.
+ * - `REQUESTED_PAUSE`: A pause has been requested, and the scheduler is in the process of pausing.
+ * - `PAUSED`: The scheduler is paused and can be resumed or stopped.
+ * - `REQUESTED_STOP`: A stop has been requested, and the scheduler is in the process of stopping.
+ * - `STOPPED`: The scheduler has been stopped and can be reset or re-initialized.
+ * - `ERROR`: An error state that can be reached from any state at any time, requiring a reset.
+ *
+ * @note All `Block<T>`-derived classes can optionally implement any subset of the lifecycle methods
+ * (`start()`, `stop()`, `reset()`, `pause()`, `resume()`) to handle state changes of the `Scheduler`.
+ *
+ * State diagram:
+ *
+ *               Block<T>()              can be reached from
+ *                  │                   anywhere and anytime.
+ *            ┌─────┴────┐                   ┌────┴────┐
+ *            │   IDLE   │                   │  ERROR  │
+ *            └────┬─────┘                   └────┬────┘
+ *                 │ init()                       │ reset()
+ *                 v                              │
+ *         ┌───────┴───────┐                      │
+ *         │  INITIALISED  ├<─────────────────────┤
+ *         └───────┬───────┘                      │
+ *                 │ start()                      │
+ *                 v                              │
+ *   stop() ┌──────┴──────┐                       │  ╓
+ *   ┌──────┤   RUNNING   ├<──────────┐           │  ║
+ *   │      └─────┬───────┘           │           │  ║
+ *   │            │ pause()           │           │  ║  isActive(lifecycle::State) ─> true
+ *   │            v                   │ resume()  │  ║
+ *   │  ┌─────────┴─────────┐   ┌─────┴─────┐     │  ║
+ *   │  │  REQUESTED_PAUSE  ├──>┤  PAUSED   │     │  ║
+ *   │  └──────────┬────────┘   └─────┬─────┘     │  ╙
+ *   │             │ stop()           │ stop()    │
+ *   │             v                  │           │
+ *   │   ┌─────────┴────────┐         │           │  ╓
+ *   └──>┤  REQUESTED_STOP  ├<────────┘           │  ║
+ *       └────────┬─────────┘                     │  ║
+ *                │                               │  ║  isShuttingDown(lifecycle::State) ─> true
+ *                v                               │  ║
+ *          ┌─────┴─────┐ reset()                 │  ║
+ *          │  STOPPED  ├─────────────────────────┘  ║
+ *          └─────┬─────┘                            ╙
+ *                │
+ *                v
+ *            ~Block<T>()
+ */
+enum class State : char { IDLE, INITIALISED, RUNNING, REQUESTED_PAUSE, PAUSED, REQUESTED_STOP, STOPPED, ERROR };
+using enum State;
+
+inline constexpr bool
+isActive(lifecycle::State state) noexcept {
+    return state == RUNNING || state == REQUESTED_PAUSE || state == PAUSED;
+}
+
+inline constexpr bool
+isShuttingDown(lifecycle::State state) noexcept {
+    return state == REQUESTED_STOP || state == STOPPED;
+}
+
+} // namespace lifecycle
 
 template<typename F>
 constexpr void
@@ -17578,7 +17757,7 @@ public:
 
     std::pair<std::size_t, std::size_t>
     get() {
-        uint64_t oldCounter    = encodedCounter.load();
+        uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
         auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
         auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
         if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
@@ -17624,6 +17803,9 @@ concept BlockLike = requires(T t, std::size_t requested_work) {
 
 template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
+
+template<typename Derived>
+concept HasConstProcessOneFunction = traits::block::can_processOne<Derived> && gr::meta::is_const_member_function(&Derived::processOne);
 
 template<typename Derived>
 concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
@@ -17759,8 +17941,6 @@ struct Block : protected std::tuple<Arguments...> {
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UZ, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
-    alignas(hardware_destructive_interference_size) std::atomic_uint32_t ioThreadRunning{ 0UZ };
-    alignas(hardware_destructive_interference_size) std::atomic_bool ioThreadShallRun{ false };
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
@@ -17781,22 +17961,23 @@ struct Block : protected std::tuple<Arguments...> {
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                                 name        = gr::meta::type_name<Derived>();
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">>      meta_information;
     constexpr static std::string_view                                                                                   description = static_cast<std::string_view>(Description::value);
-    std::atomic<LifeCycleState>                                                                                         state       = LifeCycleState::IDLE;
-    static_assert(std::atomic<LifeCycleState>::is_always_lock_free, "std::atomic<LifeCycleState> is not lock-free");
+    std::atomic<lifecycle::State>                                                                                       state       = lifecycle::State::IDLE;
+    static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
 
     struct PortsStatus {
-        std::size_t in_min_samples{ std::numeric_limits<std::size_t>::min() };         // max of `port.min_buffer_size()` of all input ports
-        std::size_t in_max_samples{ std::numeric_limits<std::size_t>::max() };         // min of `port.max_buffer_size()` of all input ports
+        std::size_t in_min_samples{ 1UZ };                                             // max of `port.min_samples()` of all input ports
+        std::size_t in_max_samples{ std::numeric_limits<std::size_t>::max() };         // min of `port.max_samples()` of all input ports
         std::size_t in_available{ std::numeric_limits<std::size_t>::max() };           // min of `port.streamReader().available()` of all input ports
-        std::size_t in_samples_to_next_tag{ std::numeric_limits<std::size_t>::max() }; // min of `port.samples_to_next_tag` of all input ports
-        std::size_t in_samples_to_eos_tag{ std::numeric_limits<std::size_t>::max() };  // min of `port.samples_to_eos_tag` of all input ports
+        std::size_t nSamplesToNextTag{ std::numeric_limits<std::size_t>::max() };      // min distance to next Tag
+        std::size_t nSamplesToNextTagAfter{ std::numeric_limits<std::size_t>::max() }; // min distance after the next Tag
+        std::size_t nSamplesToEosTag{ std::numeric_limits<std::size_t>::max() };       // min of `port.samples_to_eos_tag` of all input ports
 
-        std::size_t out_min_samples{ std::numeric_limits<std::size_t>::min() }; // max of `port.min_buffer_size()` of all output ports
-        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() }; // min of `port.max_buffer_size()` of all output ports
+        std::size_t out_min_samples{ 1UZ };                                     // max of `port.min_samples()` of all output ports
+        std::size_t out_max_samples{ std::numeric_limits<std::size_t>::max() }; // min of `port.max_samples()` of all output ports
         std::size_t out_available{ std::numeric_limits<std::size_t>::max() };   // min of `port.streamWriter().available()` of all input ports
 
-        std::size_t in_samples{ 0 };  // number of input samples to process
-        std::size_t out_samples{ 0 }; // number of output samples, calculated based on `numerator` and `denominator`
+        std::size_t in_samples{ 0UZ };  // number of input samples to process
+        std::size_t out_samples{ 0UZ }; // number of output samples, calculated based on `numerator` and `denominator`
 
         bool in_at_least_one_port_has_data{ false }; // at least one port has data
         bool in_at_least_one_tag_available{ false }; // at least one port has a tag
@@ -17818,10 +17999,8 @@ struct Block : protected std::tuple<Arguments...> {
     PortsStatus ports_status{};
 
 protected:
-    bool             _input_tags_present  = false;
-    bool             _output_tags_changed = false;
-    std::vector<Tag> _tags_at_input{};
-    std::vector<Tag> _tags_at_output{};
+    bool _output_tags_changed = false;
+    Tag  _mergedInputTag{};
 
     // intermediate non-real-time<->real-time setting states
     std::unique_ptr<SettingsBase> _settings = std::make_unique<BasicSettings<Derived>>(self());
@@ -17839,6 +18018,9 @@ protected:
     void
     updatePortsStatus() {
         ports_status = PortsStatus();
+        // TODO: recheck definition of denominator vs. numerator w.r.t. up-/down-sampling
+        //  ports_status.in_min_samples  = denominator;
+        //  ports_status.out_min_samples = numerator;
 
         auto adjust_for_input_port = [&ps = ports_status]<PortLike Port>(Port &port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
@@ -17846,46 +18028,27 @@ protected:
                     return;
                 }
                 ps.has_sync_input_ports          = true;
-                ps.in_min_samples                = std::max(ps.in_min_samples, port.min_buffer_size());
-                ps.in_max_samples                = std::min(ps.in_max_samples, port.max_buffer_size());
+                ps.in_min_samples                = std::max(ps.in_min_samples, port.min_samples);
+                ps.in_max_samples                = std::min(ps.in_max_samples, port.max_samples);
                 ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
-                ps.in_samples_to_next_tag        = std::min(ps.in_samples_to_next_tag, samples_to_next_tag(port));
-                ps.in_samples_to_eos_tag         = std::min(ps.in_samples_to_eos_tag, samples_to_eos_tag(port));
+                ps.nSamplesToNextTag             = std::min(ps.nSamplesToNextTag, nSamplesUntilNextTag(port).value_or(std::numeric_limits<std::size_t>::max()));
+                ps.nSamplesToNextTagAfter        = std::min(ps.nSamplesToNextTagAfter, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max())); /* 1: in case nextTag == 0 */
+                ps.nSamplesToEosTag              = std::min(ps.nSamplesToEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
                 ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
                 ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
             }
         };
-        meta::tuple_for_each(
-                [&adjust_for_input_port]<typename Port>(Port &port_or_collection) {
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        adjust_for_input_port(port_or_collection);
-                    } else {
-                        for (auto &port : port_or_collection) {
-                            adjust_for_input_port(port);
-                        }
-                    }
-                },
-                inputPorts(&self()));
+        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts(&self()));
 
         auto adjust_for_output_port = [&ps = ports_status]<PortLike Port>(Port &port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                 ps.has_sync_output_ports = true;
-                ps.out_min_samples       = std::max(ps.out_min_samples, port.min_buffer_size());
-                ps.out_max_samples       = std::min(ps.out_max_samples, port.max_buffer_size());
+                ps.out_min_samples       = std::max(ps.out_min_samples, port.min_samples);
+                ps.out_max_samples       = std::min(ps.out_max_samples, port.max_samples);
                 ps.out_available         = std::min(ps.out_available, port.streamWriter().available());
             }
         };
-        meta::tuple_for_each(
-                [&adjust_for_output_port]<typename Port>(Port &port_or_collection) {
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        adjust_for_output_port(port_or_collection);
-                    } else {
-                        for (auto &port : port_or_collection) {
-                            adjust_for_output_port(port);
-                        }
-                    }
-                },
-                outputPorts(&self()));
+        for_each_port([&adjust_for_output_port](PortLike auto &port) { adjust_for_output_port(port); }, outputPorts(&self()));
 
         ports_status.in_samples = ports_status.in_available;
         if (ports_status.in_samples < ports_status.in_min_samples) ports_status.in_samples = 0;
@@ -17914,9 +18077,7 @@ public:
     Block() noexcept : Block({}) {}
 
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter)
-        : _tags_at_input(traits::block::input_port_types<Derived>::size())
-        , _tags_at_output(traits::block::output_port_types<Derived>::size())
-        , _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
         if (init_parameter.size() != 0) {
             const auto failed = settings().set(init_parameter);
             if (!failed.empty()) {
@@ -17925,16 +18086,24 @@ public:
         }
     }
 
-    Block(Block &&other) noexcept
-        : std::tuple<Arguments...>(std::move(other)), _tags_at_input(std::move(other._tags_at_input)), _tags_at_output(std::move(other._tags_at_output)), _settings(std::move(other._settings)) {}
+    Block(Block &&other) noexcept : std::tuple<Arguments...>(std::move(other)), _settings(std::move(other._settings)) {}
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
-        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
-        ioThreadShallRun.notify_all();
-        // wait for done
-        for (auto running = ioThreadRunning.load(); running > 0; running = ioThreadRunning.load()) {
-            ioThreadRunning.wait(running);
+        if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
+            std::atomic_store_explicit(&state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
+            state.notify_all();
         }
+        if (isBlocking()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        // wait for done
+        for (auto actualState = std::atomic_load_explicit(&state, std::memory_order_acquire); lifecycle::isActive(actualState);
+             actualState      = std::atomic_load_explicit(&state, std::memory_order_acquire)) {
+            state.wait(actualState);
+        }
+        std::atomic_store_explicit(&state, lifecycle::State::STOPPED, std::memory_order_release);
+        state.notify_all();
     }
 
     void
@@ -17968,18 +18137,16 @@ public:
         traits::block::output_ports<Derived>::template apply_func(setPortName);
 
         // Handle settings
+        // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
-            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](Tag &tag) {
-                for (const auto &[key, value] : forward_parameters) {
-                    tag.map.insert_or_assign(key, value);
-                }
-            });
-            _output_tags_changed = true;
+            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                publishTag(forward_parameters);
+            }
         }
 
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
-        state = LifeCycleState::INITIALISED;
+        state = lifecycle::State::INITIALISED;
     }
 
     template<gr::meta::array_or_vector_type Container>
@@ -18039,32 +18206,12 @@ public:
 
     [[nodiscard]] constexpr bool
     input_tags_present() const noexcept {
-        return _input_tags_present;
+        return !_mergedInputTag.map.empty();
     };
 
-    constexpr bool
-    acknowledge_input_tags() noexcept {
-        if (_input_tags_present) {
-            _input_tags_present = false;
-            return true;
-        }
-        return false;
-    };
-
-    [[nodiscard]] constexpr std::span<const Tag>
-    input_tags() const noexcept {
-        return { _tags_at_input.data(), _tags_at_input.size() };
-    }
-
-    [[nodiscard]] constexpr std::span<const Tag>
-    output_tags() const noexcept {
-        return { _tags_at_output.data(), _tags_at_output.size() };
-    }
-
-    [[nodiscard]] constexpr std::span<Tag>
-    output_tags() noexcept {
-        _output_tags_changed = true;
-        return { _tags_at_output.data(), _tags_at_output.size() };
+    [[nodiscard]] Tag
+    mergedInputTag() const noexcept {
+        return _mergedInputTag;
     }
 
     [[nodiscard]] constexpr SettingsBase &
@@ -18215,94 +18362,51 @@ public:
 
     constexpr void
     forwardTags() noexcept {
-        if (!(_output_tags_changed || _input_tags_present)) {
-            return;
+        if (input_tags_present()) {
+            // clear temporary cached input tags after processing - won't be needed after this
+            _mergedInputTag.map.clear();
         }
-        std::size_t port_id = 0; // TODO absorb this as optional tuple_for_each argument
-        // TODO: following function does not call the lvalue but erroneously the lvalue version of publish_tag(...) ?!?!
-        // meta::tuple_for_each([&port_id, this](auto &output_port) noexcept { publish_tag2(output_port, _tags_at_output[port_id++]); }, output_ports(&self()));
-        meta::tuple_for_each(
-                [&port_id, this]<typename Port>(Port &output_port) noexcept {
-                    if constexpr (!traits::port::is_port_v<Port>) {
-                        // TODO Add tag support to port collections?
-                        return;
-                    } else {
-                        if (_tags_at_output[port_id].map.empty()) {
-                            port_id++;
-                            return;
-                        }
-                        auto data                 = output_port.tagWriter().reserve_output_range(1);
-                        auto stream_writer_offset = std::max(static_cast<decltype(output_port.streamWriter().position())>(0), output_port.streamWriter().position() + 1);
-                        data[0].index             = stream_writer_offset + _tags_at_output[port_id].index;
-                        data[0].map               = _tags_at_output[port_id].map;
-                        data.publish(1);
-                        port_id++;
-                    }
-                },
-                outputPorts(&self()));
-        // clear input/output tags after processing,  N.B. ranges omitted because of missing Clang/Emscripten support
-        _input_tags_present  = false;
+
+        for_each_port([](PortLike auto &outPort) noexcept { outPort.publishPendingTags(); }, outputPorts(&self()));
         _output_tags_changed = false;
-        std::for_each(_tags_at_input.begin(), _tags_at_input.end(), [](Tag &tag) { tag.reset(); });
-        std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [](Tag &tag) { tag.reset(); });
     }
 
     constexpr void
-    updateInputAndOutputTags() noexcept {
+    updateInputAndOutputTags(Tag::signed_index_type untilOffset = 0) noexcept {
         if constexpr (HasProcessOneFunction<Derived>) {
             ports_status.in_samples  = 1; // N.B. limit to one so that only one process_on(...) invocation receives the tag
             ports_status.out_samples = 1;
         }
-        property_map merged_tag_map{}; // TODO: merged_tag_map can be removed it duplicates _tags_at_input[].map
-        _input_tags_present    = true;
-        std::size_t port_index = 0; // TODO absorb this as optional tuple_for_each argument
-        meta::tuple_for_each(
-                [&merged_tag_map, &port_index, this]<typename Port>(Port &input_port) noexcept {
-                    // TODO: Do we want to support tags for non-compile-time ports? [ivan][port_group][move_to_policy?]
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        auto &tag_at_present_input = _tags_at_input[port_index++];
-                        tag_at_present_input.reset();
-                        if (!input_port.tagReader().available()) {
-                            return;
+        for_each_port(
+                [untilOffset, this]<typename Port>(Port &input_port) noexcept {
+                    auto mergeSrcMapInto = [](const property_map &sourceMap, property_map &destinationMap) {
+                        assert(&sourceMap != &destinationMap);
+                        for (const auto &[key, value] : sourceMap) {
+                            destinationMap.insert_or_assign(key, value);
                         }
-                        const auto tags           = input_port.tagReader().get(1UZ);
-                        const auto readPos        = input_port.streamReader().position();
-                        const auto tag_stream_pos = tags[0].index - 1 - readPos;
-                        if ((readPos == -1 && tags[0].index <= 0) // first tag on initialised stream
-                            || tag_stream_pos <= 0) {
-                            for (const auto &[index, map] : tags) {
-                                for (const auto &[key, value] : map) {
-                                    tag_at_present_input.map.insert_or_assign(key, value);
-                                    merged_tag_map.insert_or_assign(key, value);
-                                }
-                            }
-                            std::ignore = input_port.tagReader().consume(1UZ);
-                        }
-                    }
+                    };
+
+                    const Tag mergedPortTags = input_port.getTag(untilOffset);
+                    mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
                 },
                 inputPorts(&self()));
 
-        if (_input_tags_present && !merged_tag_map.empty()) { // apply tags as new settings if matching
-            settings().autoUpdate(merged_tag_map);
-        }
-
-        if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-            // N.B. ranges omitted because of missing Clang/Emscripten support
-            std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&merged_tag_map](Tag &tag) { tag.map = merged_tag_map; });
-            _output_tags_changed = true;
+        if (!mergedInputTag().map.empty()) {
+            settings().autoUpdate(mergedInputTag().map); // apply tags as new settings if matching
+            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts(&self()));
+            }
+            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
+                requestStop();
+            }
         }
     }
 
     constexpr void
     updateOutputTagsWithSettingParametersIfNeeded() {
-        if (settings().changed() || _input_tags_present || _output_tags_changed) {
+        if (settings().changed()) {
             if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
-                std::for_each(_tags_at_output.begin(), _tags_at_output.end(), [&forward_parameters](Tag &tag) {
-                    for (const auto &[key, value] : forward_parameters) {
-                        tag.map.insert_or_assign(key, value);
-                    }
-                });
-                _output_tags_changed = true;
+                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts(&self()));
             }
             settings()._changed.store(false);
         }
@@ -18313,10 +18417,30 @@ public:
         if (numerator != 1UZ || denominator != 1UZ) {
             // TODO: this ill-defined checks can be done only once after parameters were changed
             const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
-            bool         is_ill_defined = (denominator > ports_status.in_max_samples) || (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples))
+            bool         is_ill_defined = (denominator > ports_status.in_max_samples)                                                            //
+                               || (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples)) //
                                || (static_cast<double>(ports_status.in_max_samples) * ratio < static_cast<double>(ports_status.out_min_samples));
-            assert(!is_ill_defined);
+
+            if (denominator > ports_status.in_max_samples) { // TODO: convert to proper error message send to msgOut
+                fmt::println(stderr, "configuration error for block {}: denominator {} > ports_status.in_max_samples {}", name, denominator, ports_status.in_max_samples);
+                assert(false && "denominator needs to be <= max InPort sample constraints");
+                return work::Status::ERROR;
+            }
+            if (static_cast<double>(ports_status.in_min_samples) * ratio > static_cast<double>(ports_status.out_max_samples)) { // TODO: convert to proper error message send to msgOut
+                fmt::println(stderr, "configuration error for block {}:  ports_status.in_min_samples * ratio {} > ports_status.out_max_samples {}, ratio (num {}/den {} = {})", name,
+                             static_cast<double>(ports_status.in_min_samples) * ratio, static_cast<double>(ports_status.out_max_samples), numerator, denominator, ratio);
+                assert(false && "reduced min-required input sample needs to be <= max OutPort sample constraints");
+                return work::Status::ERROR;
+            }
+            if (static_cast<double>(ports_status.in_max_samples) * ratio < static_cast<double>(ports_status.out_min_samples)) { // TODO: convert to proper error message send to msgOut
+                fmt::println(stderr, "configuration error for block {}:  ports_status.in_max_samples * ratio {} > ports_status.out_min_samples {}, ratio (num {}/den {} = {})", name,
+                             static_cast<double>(ports_status.in_max_samples) * ratio, static_cast<double>(ports_status.out_min_samples), numerator, denominator, ratio);
+                assert(false && "reduced max-required input sample needs to be <= min OutPort sample constraints");
+                return work::Status::ERROR;
+            }
+
             if (is_ill_defined) {
+                assert(!is_ill_defined && "ill-defined");
                 return work::Status::ERROR;
             }
 
@@ -18327,15 +18451,20 @@ public:
 
             std::size_t in_min_samples = static_cast<std::size_t>(static_cast<double>(out_min_limit) / ratio);
             if (in_min_samples % denominator != 0) in_min_samples += denominator;
-            std::size_t in_min_wo_reminder = (in_min_samples / denominator) * denominator;
+            const std::size_t in_min_wo_remainder = (in_min_samples / denominator) * denominator;
 
-            const std::size_t in_max_samples     = static_cast<std::size_t>(static_cast<double>(out_max_limit) / ratio);
-            std::size_t       in_max_wo_reminder = (in_max_samples / denominator) * denominator;
+            const std::size_t in_max_samples      = static_cast<std::size_t>(static_cast<double>(out_max_limit) / ratio);
+            const std::size_t in_max_wo_remainder = (in_max_samples / denominator) * denominator;
 
-            if (ports_status.in_samples < in_min_wo_reminder) {
+            if (ports_status.in_samples < in_min_wo_remainder) {
                 return work::Status::INSUFFICIENT_INPUT_ITEMS;
             }
-            ports_status.in_samples  = std::clamp(ports_status.in_samples, in_min_wo_reminder, in_max_wo_reminder);
+
+            if (in_min_wo_remainder < in_max_wo_remainder) {
+                ports_status.in_samples = std::clamp(ports_status.in_samples, in_min_wo_remainder, in_max_wo_remainder);
+            } else {
+                ports_status.in_samples = std::min(ports_status.in_samples, std::min(in_min_wo_remainder, in_max_wo_remainder));
+            }
             ports_status.out_samples = numerator * (ports_status.in_samples / denominator);
         }
         return work::Status::OK;
@@ -18391,22 +18520,20 @@ public:
                 outputPorts(&self()));
     }
 
-    constexpr void
-    publishEOSTag(std::size_t offset) {
-        meta::tuple_for_each(
-                [offset]<typename Port>(Port &output_port) noexcept {
-                    if constexpr (!traits::port::is_port_v<Port>) {
-                        return;
-                    } else {
-                        gr::publish_tag(output_port, { { gr::tag::END_OF_STREAM, true } }, offset);
-                    }
-                },
-                outputPorts(&self()));
+    inline constexpr void
+    publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
+        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts(&self()));
+    }
+
+    inline constexpr void
+    publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
+        for_each_port([&tag_data, tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts(&self()));
     }
 
     constexpr void
     requestStop() noexcept {
-        state = LifeCycleState::REQUESTED_STOP;
+        std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
+        this->state.notify_all();
     }
 
 protected:
@@ -18423,7 +18550,7 @@ protected:
         constexpr bool kIsSourceBlock = TInputTypes::size == 0;
         constexpr bool kIsSinkBlock   = TOutputTypes::size == 0;
 
-        if (state == LifeCycleState::STOPPED) {
+        if (std::atomic_load_explicit(&state, std::memory_order_acquire) == lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, work::Status::DONE };
         }
 
@@ -18433,34 +18560,12 @@ protected:
         updatePortsStatus();
 
         if constexpr (kIsSourceBlock) {
-            // TODO: available_samples() methods are no longer needed for Source blocks, the are needed for merge graph/block.
+            // TODO: available_samples() methods are no longer needed for Source blocks, the are presently still/only needed for merge graph/block.
             // TODO: Review if they can be removed.
-            ports_status.in_samples_to_next_tag = std::numeric_limits<std::size_t>::max(); // no tags to processed for source node
+            ports_status.nSamplesToNextTag = std::numeric_limits<std::size_t>::max(); // no tags to processed for source node
             if constexpr (requires(const Derived &d) {
-                              { self().available_samples(d) } -> std::same_as<std::make_signed_t<std::size_t>>;
+                              { available_samples(d) } -> std::same_as<std::size_t>;
                           }) {
-                // the (source) node wants to determine the number of samples to process
-                std::size_t                           max_buffer        = ports_status.out_available;
-                const std::make_signed_t<std::size_t> available_samples = self().available_samples(self());
-                if (available_samples < 0 && max_buffer > 0) {
-                    return { requested_work, 0UZ, work::Status::DONE };
-                }
-                if (available_samples == 0) {
-                    return { requested_work, 0UZ, work::Status::OK };
-                }
-                std::size_t samples_to_process = std::max(0UL, std::min(static_cast<std::size_t>(available_samples), max_buffer));
-                if (!ports_status.enoughSamplesForOutputPorts(samples_to_process)) {
-                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
-                }
-                if (samples_to_process == 0) {
-                    return { requested_work, 0UZ, work::Status::INSUFFICIENT_OUTPUT_ITEMS };
-                }
-                ports_status.in_samples  = std::min(samples_to_process, requested_work);
-                ports_status.out_samples = ports_status.in_samples;
-
-            } else if constexpr (requires(const Derived &d) {
-                                     { available_samples(d) } -> std::same_as<std::size_t>;
-                                 }) {
                 // the (source) node wants to determine the number of samples to process
                 std::size_t samples_to_process = available_samples(self());
                 if (samples_to_process == 0) {
@@ -18495,40 +18600,81 @@ protected:
                 // space_available_on_output_ports is true by construction of samplesToProcess
             }
 
-        } else { // end of kIsSourceBlock
-            ports_status.in_samples  = std::min(ports_status.in_samples, std::min(requested_work, ports_status.in_samples_to_eos_tag));
-            ports_status.out_samples = ports_status.in_samples;
-            if (ports_status.in_samples_to_eos_tag == 0 || ports_status.in_samples_to_eos_tag < ports_status.in_min_samples) {
-                state = LifeCycleState::STOPPED;
-                updateInputAndOutputTags();
+        } else {                                                                         // end of kIsSourceBlock
+            ports_status.in_samples = std::min(ports_status.in_samples, requested_work); // clamp input to scheduler work constraint
+#ifdef _DEBUG
+            fmt::println("block {} - mark1 - in {} -> out {}", name, ports_status.in_samples, ports_status.out_samples);
+#endif
+            if constexpr (!Resampling::kEnabled) { // clamp input until (excluding) next tag unless the read-position is on the tag
+                // N.B. minimum size '1' because we could have two tags on adjacent samples.
+                ports_status.in_samples  = ports_status.nSamplesToNextTag == 0 ? std::min(ports_status.in_samples, std::max(ports_status.nSamplesToNextTagAfter, 1UZ))
+                                                                               : std::min(ports_status.in_samples, ports_status.nSamplesToNextTag);
+                ports_status.out_samples = ports_status.in_samples;
+            }
+#ifdef _DEBUG
+            fmt::println("block {} - mark2 - in {} -> out {}", name, ports_status.in_samples, ports_status.out_samples);
+#endif
+            ports_status.in_samples = std::min(ports_status.in_samples, ports_status.nSamplesToEosTag); // clamp input until EOS tag
+            // TODO: recheck definitions of numerator and denominator
+            //   Provided we we define N := <numerator> and M := <denominator>, do we expect (assuming a simple in->out block) that
+            //  a) for N input samples M output samples are produced, or
+            //  b) for a given number of input samples X -> X * N/M output samples are produced.
+            //  Some of the logic conditions vary depending on whether we assume 'a)' or 'b)'.
+            const bool isEOSTagPresent = ports_status.nSamplesToEosTag == 0                                                             //
+                                      || ports_status.nSamplesToEosTag < std::max(ports_status.in_samples, ports_status.in_min_samples) //
+                                      || ports_status.nSamplesToEosTag < numerator;
+#ifdef _DEBUG
+            if (isEOSTagPresent) {
+                fmt::println("##block {} received EOS tag at {} < in_min_samples {}", name, ports_status.nSamplesToEosTag, ports_status.in_min_samples);
+            }
+#endif
+
+            if (isEOSTagPresent || lifecycle::isShuttingDown(state)) {
+                state = lifecycle::State::STOPPED;
+                state.notify_all();
+#ifdef _DEBUG
+                fmt::println("##block {} received EOS tag at {} in_samples {} -> lifecycle::State::STOPPED", name, ports_status.nSamplesToEosTag, ports_status.in_samples);
+#endif
+                updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
                 updateOutputTagsWithSettingParametersIfNeeded();
-                forwardTags();
                 return { requested_work, 0UZ, work::Status::DONE };
             }
 
             if constexpr (Resampling::kEnabled) {
-                const bool isEOSTagPresent  = ports_status.in_samples_to_eos_tag < ports_status.in_samples;
-                const auto rasamplingStatus = doResampling();
-                if (rasamplingStatus != work::Status::OK) {
-                    if (rasamplingStatus == work::Status::INSUFFICIENT_INPUT_ITEMS && isEOSTagPresent) {
-                        state = LifeCycleState::STOPPED;
-                        updateInputAndOutputTags();
+                const auto resamplingStatus = doResampling();
+                if (resamplingStatus != work::Status::OK) {
+                    if (resamplingStatus == work::Status::INSUFFICIENT_INPUT_ITEMS || isEOSTagPresent) {
+                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                        state.notify_all();
+                        updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
                         updateOutputTagsWithSettingParametersIfNeeded();
                         forwardTags();
                         //  EOS is not at 0 position and thus not read by updateInputAndOutputTags(), we need to publish new EOS
-                        publishEOSTag(0);
+                        publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                         return { requested_work, 0UZ, work::Status::DONE };
                     }
-                    return { requested_work, 0UZ, rasamplingStatus };
+                    return { requested_work, 0UZ, resamplingStatus };
                 }
             }
-
+#ifdef _DEBUG
+            fmt::println("block {} - mark3 - in {} -> out {}", name, ports_status.in_samples, ports_status.out_samples);
+#endif
             if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
                 return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
 
             // TODO: special case for portsStatus.in_samples == 0 ?
-            if (!ports_status.enoughSamplesForOutputPorts(ports_status.out_samples)) {
+            if (!ports_status.enoughSamplesForOutputPorts(ports_status.out_samples)) { // !(out_samples > out_min_samples)
+#ifdef _DEBUG
+                fmt::println("mark1 - state {} - ports_status.nSamplesToEosTag = {} in/out: {}/{} available {} {} numerator {} denominator {}, in_min_samples {} out_min_samples {} synchOut: {}  "
+                             "isEOSTagPresent: {}",                                              //
+                             magic_enum::enum_name(state.load()), ports_status.nSamplesToEosTag, //
+                             ports_status.in_samples, ports_status.out_samples,                  //
+                             ports_status.in_available, ports_status.out_available,              //
+                             this->numerator, this->denominator,                                 //
+                             ports_status.in_min_samples, ports_status.out_min_samples,          //
+                             ports_status.has_sync_output_ports, isEOSTagPresent);
+#endif
                 return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
             if (!ports_status.spaceAvailableOnOutputPorts(ports_status.out_samples)) {
@@ -18536,8 +18682,8 @@ protected:
             }
         }
 
-        if (ports_status.in_samples_to_next_tag == 0) {
-            updateInputAndOutputTags();
+        if (ports_status.nSamplesToNextTag == 0) {
+            updateInputAndOutputTags(0);
         }
 
         updateOutputTagsWithSettingParametersIfNeeded();
@@ -18579,7 +18725,6 @@ protected:
                         stride_counter    = 0;
                     }
                     const bool success = consumeReaders(self(), nSamplesToConsume);
-                    forwardTags();
                     return { requested_work, nSamplesToConsume, success ? work::Status::OK : work::Status::ERROR };
                 }
             }
@@ -18594,17 +18739,17 @@ protected:
                 return self().processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(writersTuple)...);
             }(std::make_index_sequence<traits::block::input_ports<Derived>::size>(), std::make_index_sequence<traits::block::output_ports<Derived>::size>());
 
-            write_to_outputs(ports_status.out_samples, writersTuple);
-            const bool success = consumeReaders(self(), nSamplesToConsume);
             forwardTags();
             if constexpr (kIsSourceBlock) {
                 if (ret == work::Status::DONE) {
-                    state = LifeCycleState::STOPPED;
-                    publishEOSTag(1); // offset 1 -> just after the last sample
+                    std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                    state.notify_all();
+                    publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                     return { requested_work, ports_status.in_samples, work::Status::DONE };
                 }
             }
-
+            write_to_outputs(ports_status.out_samples, writersTuple);
+            const bool success = consumeReaders(self(), nSamplesToConsume);
             return { requested_work, ports_status.in_samples, success ? ret : work::Status::ERROR };
 
         } else if constexpr (HasProcessOneFunction<Derived>) {
@@ -18638,36 +18783,45 @@ protected:
                 });
             } else {
                 // Non-SIMD loop
-                for (std::size_t i = 0; i < ports_status.in_samples; ++i) {
-                    const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
-                    meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writersTuple, results);
-                    // TODO: Allow source blocks to implement only processBulk for performance reasons?
-                    if constexpr (kIsSourceBlock) {
+                if constexpr (HasConstProcessOneFunction<Derived>) {
+                    // processOne is const -> can process whole batch similar to SIMD-ised call
+                    for (std::size_t i = 0; i < ports_status.in_samples; ++i) {
+                        const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+                        meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writersTuple, results);
+                    }
+                } else {
+                    // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
+                    for (std::size_t i = 0; i < ports_status.in_samples; ++i) {
+                        const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+                        meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writersTuple, results);
                         nOutSamplesBeforeRequestedStop++;
-                        if (state == LifeCycleState::REQUESTED_STOP) [[unlikely]] {
-                            state = LifeCycleState::STOPPED;
-                            publishEOSTag(i + 2); // (i+1) - index of current sample, (i+2) - index after the current sample
+                        if (_output_tags_changed || lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire))) [[unlikely]] {
+                            // emitted tag and/or requested to stop
                             break;
                         }
                     }
                 }
             }
 
-            if constexpr (kIsSourceBlock) {
-                if (nOutSamplesBeforeRequestedStop > 0) {
-                    ports_status.out_samples = nOutSamplesBeforeRequestedStop;
-                    nSamplesToConsume        = nOutSamplesBeforeRequestedStop;
-                }
+            //            if constexpr (kIsSourceBlock) {
+            if (nOutSamplesBeforeRequestedStop > 0) {
+                ports_status.out_samples = nOutSamplesBeforeRequestedStop;
+                nSamplesToConsume        = nOutSamplesBeforeRequestedStop;
             }
+            //            }
 
+            forwardTags();
             write_to_outputs(ports_status.out_samples, writersTuple);
             const bool success = consumeReaders(self(), nSamplesToConsume);
-            forwardTags();
-#ifdef _DEBUG
-            if (!success) {
-                fmt::print("Block {} failed to consume {} values from inputs\n", self().name(), samples_to_process);
+            if (lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire))) [[unlikely]] {
+                std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                this->state.notify_all();
+                publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
+                return { requested_work, ports_status.in_samples, success ? work::Status::DONE : work::Status::ERROR };
             }
-#endif
+
+            // return { requested_work, ports_status.in_samples, success ? (lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire)) ? work::Status::DONE :
+            // work::Status::OK) : work::Status::ERROR };
             return { requested_work, ports_status.in_samples, success ? work::Status::OK : work::Status::ERROR };
         } // processOne(...) handling
         //        else {
@@ -18681,14 +18835,8 @@ public:
     invokeWork()
         requires(blockingIO)
     {
-        auto [work_requested, work_done, last_status] = workInternal(ioRequestedWork.load(std::memory_order_relaxed));
+        auto [work_requested, work_done, last_status] = workInternal(std::atomic_load_explicit(&ioRequestedWork, std::memory_order_acquire));
         ioWorkDone.increment(work_requested, work_done);
-        if (auto [incWorkRequested, incWorkDone] = ioWorkDone.get(); last_status == work::Status::DONE && incWorkDone > 0) {
-            // finished local iteration but need to report more work to be done until
-            // external scheduler loop acknowledged all samples being processed
-            // via the 'ioWorkDone.getAndReset()' call
-            last_status = work::Status::OK;
-        }
         ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
 
         std::ignore = progress->incrementAndGet();
@@ -18708,46 +18856,44 @@ public:
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
-            if (bool expectedThreadState = false; ioThreadShallRun.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
+            if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
                     ioThreadPool->execute([this]() {
-#ifdef _DEBUG
-                        fmt::print("starting thread for {} count {}\n", name, ioThreadRunning.fetch_add(1));
-#else
-                        ioThreadRunning.fetch_add(1);
-#endif
-                        for (int retryCount = 2; ioThreadShallRun && retryCount > 0; retryCount--) {
-                            while (ioThreadShallRun && retryCount) {
+                        assert(lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire)));
+                        lifecycle::State actualThreadState = std::atomic_load_explicit(&state, std::memory_order_acquire);
+                        while (lifecycle::isActive(actualThreadState)) {
+                            // execute ten times before testing actual state -- minimises overhead atomic load to work execution if the latter is a noop or very fast to execute
+                            for (std::size_t testState = 0UZ; testState < 10UZ; ++testState) {
                                 if (invokeWork() == work::Status::DONE) {
+                                    actualThreadState = lifecycle::State::REQUESTED_STOP;
+                                    std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
+                                    state.notify_all();
                                     break;
-                                } else {
-                                    // processed data before shutting down wait (see below) and retry (here: once)
-                                    retryCount = 2;
                                 }
                             }
-                            // delayed shut-down in case there are more tasks to be processed
-                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                            actualThreadState = std::atomic_load_explicit(&state, std::memory_order_acquire);
                         }
-                        std::atomic_store_explicit(&ioThreadShallRun, false, std::memory_order_release);
-                        ioThreadShallRun.notify_all();
-#ifdef _DEBUG
-                        fmt::print("shutting down thread for {} count {}\n", name, ioThreadRunning.fetch_sub(1));
-#else
-                        ioThreadRunning.fetch_sub(1);
-#endif
-                        ioThreadRunning.notify_all();
+                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                        state.notify_all();
                     });
-                } else {
-                    // let user call '' explicitly
+                } else { // use user-provided ioThreadPool
+                    // let user call 'work' explicitly and set both 'ioWorkDone' and 'ioLastWorkStatus'
                 }
             }
-            const work::Status lastStatus                         = ioLastWorkStatus.exchange(work::Status::OK, std::memory_order_relaxed);
+            if constexpr (!useIoThread) {
+                const bool blockIsActive = lifecycle::isActive(state.load());
+                if (!blockIsActive) {
+                    publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
+                    ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
+                }
+            }
+
             const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
             // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
 #if defined(__EMSCRIPTEN__)
             std::this_thread::sleep_for(std::chrono::nanoseconds(1));
 #endif
-            return { accumulatedRequestedWork, performedWork, performedWork > 0 ? work::Status::OK : lastStatus };
+            return { accumulatedRequestedWork, performedWork, ioLastWorkStatus.load() };
         } else {
             return workInternal(requested_work);
         }
@@ -18837,32 +18983,28 @@ struct RegisterBlock {
 };
 } // namespace detail
 
+template<typename Function, typename Tuple, typename... Tuples>
+auto
+for_each_port(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    return gr::meta::tuple_for_each(
+            [&function](auto &&...args) {
+                (..., ([&function](auto &&arg) {
+                     using ArgType = std::decay_t<decltype(arg)>;
+                     if constexpr (traits::port::is_port_v<ArgType>) {
+                         function(arg); // arg is a port, apply function directly
+                     } else if constexpr (traits::port::is_port_collection_v<ArgType>) {
+                         for (auto &port : arg) { // arg is a collection of ports, apply function to each port
+                             function(port);
+                         }
+                     } else {
+                         static_assert(gr::meta::always_false<Tuple>, "not a port or collection of ports");
+                     }
+                 }(args)));
+            },
+            std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+}
+
 } // namespace gr
-
-template<>
-struct fmt::formatter<gr::work::Status> {
-    static constexpr auto
-    parse(const format_parse_context &ctx) {
-        const auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
-        return it;
-    }
-
-    template<typename FormatContext>
-    auto
-    format(const gr::work::Status &status, FormatContext &ctx) {
-        using enum gr::work::Status;
-        switch (status) {
-        case ERROR: return fmt::format_to(ctx.out(), "ERROR");
-        case INSUFFICIENT_OUTPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_OUTPUT_ITEMS");
-        case INSUFFICIENT_INPUT_ITEMS: return fmt::format_to(ctx.out(), "INSUFFICIENT_INPUT_ITEMS");
-        case DONE: return fmt::format_to(ctx.out(), "DONE");
-        case OK: return fmt::format_to(ctx.out(), "OK");
-        default: return fmt::format_to(ctx.out(), "UNKNOWN");
-        }
-        return fmt::format_to(ctx.out(), "UNKNOWN");
-    }
-};
 
 template<>
 struct fmt::formatter<gr::work::Result> {
@@ -18876,7 +19018,7 @@ struct fmt::formatter<gr::work::Result> {
     template<typename FormatContext>
     auto
     format(const gr::work::Result &work_return, FormatContext &ctx) {
-        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, fmt::format("{}", work_return.status));
+        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, magic_enum::enum_name(work_return.status));
     }
 };
 
@@ -19098,6 +19240,12 @@ public:
     [[nodiscard]] virtual constexpr bool
     isBlocking() const noexcept
             = 0;
+
+    /**
+     * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
+     * See enum description for details.
+     */
+    [[nodiscard]] virtual lifecycle::State state() const noexcept = 0;
 
     /**
      * @brief number of available readable samples at the block's input ports
@@ -19324,6 +19472,10 @@ public:
     [[nodiscard]] constexpr bool
     isBlocking() const noexcept override {
         return blockRef().isBlocking();
+    }
+
+    [[nodiscard]] lifecycle::State state() const noexcept override {
+        return blockRef().state.load();
     }
 
     [[nodiscard]] constexpr std::size_t
@@ -19658,11 +19810,18 @@ public:
 
     template<BlockLike TBlock>
     auto &
-    emplaceBlock(const property_map &initial_settings) {
+    emplaceBlock(const property_map &initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>());
         auto  raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
-        std::ignore         = raw_ref->settings().set(initial_settings);
+        const auto failed   = raw_ref->settings().set(initialSettings);
+        if (!failed.empty()) {
+            std::vector<std::string> keys;
+            for (const auto& pair : failed) {
+                keys.push_back(pair.first);
+            }
+            throw std::invalid_argument(fmt::format("initial Block settings could not be applied successfully - mismatched keys or value-type: {}\n", fmt::join(keys, ", ")));
+        }
         raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }

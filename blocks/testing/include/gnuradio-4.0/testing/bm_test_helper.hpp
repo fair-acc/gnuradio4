@@ -54,7 +54,7 @@ public:
             auto &port   = out;
             auto &writer = port.streamWriter();
             if (n_samples_produced == 0) {
-                gr::publish_tag(port, { { "N_SAMPLES_MAX", _n_samples_max } }, _n_tag_offset); // shorter version
+                port.publishTag({ { "N_SAMPLES_MAX", _n_samples_max } }, _n_tag_offset); // shorter version
             }
 
             if constexpr (use_bulk_operation) {
@@ -98,13 +98,12 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     processOne(V a) noexcept {
         // optional user-level tag processing
         if (this->input_tags_present()) {
-            if (this->input_tags_present() && this->input_tags()[0].map.contains("N_SAMPLES_MAX")) {
-                const auto value = this->input_tags()[0].map.at("N_SAMPLES_MAX");
+            if (this->input_tags_present() && this->mergedInputTag().map.contains("N_SAMPLES_MAX")) {
+                const auto value = this->mergedInputTag().map.at("N_SAMPLES_MAX");
                 if (std::holds_alternative<uint64_t>(value)) { // should be std::size_t but emscripten/pmtv seem to have issues with it
                     should_receive_n_samples = std::get<uint64_t>(value);
                     _last_tag_position       = in.streamReader().position();
                 }
-                this->acknowledge_input_tags(); // clears further tag notifications
             }
         }
 

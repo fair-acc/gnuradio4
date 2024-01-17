@@ -18,7 +18,7 @@ enum ExecutionPolicy { singleThreaded, multiThreaded };
 template<profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase {
 public:
-    LifeCycleState _state = LifeCycleState::IDLE;
+    lifecycle::State _state = lifecycle::State::IDLE;
 
 protected:
     gr::Graph                           _graph;
@@ -63,32 +63,32 @@ public:
 
     bool
     canInit() {
-        return _state == LifeCycleState::IDLE;
+        return _state == lifecycle::State::IDLE;
     }
 
     bool
     canStart() {
-        return _state == LifeCycleState::INITIALISED;
+        return _state == lifecycle::State::INITIALISED;
     }
 
     bool
     canStop() {
-        return _state == LifeCycleState::RUNNING || _state == LifeCycleState::REQUESTED_PAUSE || _state == LifeCycleState::PAUSED;
+        return _state == lifecycle::State::RUNNING || _state == lifecycle::State::REQUESTED_PAUSE || _state == lifecycle::State::PAUSED;
     }
 
     bool
     canPause() {
-        return _state == LifeCycleState::RUNNING;
+        return _state == lifecycle::State::RUNNING;
     }
 
     bool
     canResume() {
-        return _state == LifeCycleState::PAUSED;
+        return _state == lifecycle::State::PAUSED;
     }
 
     bool
     canReset() {
-        return _state == LifeCycleState::STOPPED || _state == LifeCycleState::ERROR;
+        return _state == lifecycle::State::STOPPED || _state == lifecycle::State::ERROR;
     }
 
     void
@@ -99,7 +99,7 @@ public:
         requestStop();
         waitDone();
         this->stopBlocks();
-        _state = LifeCycleState::STOPPED;
+        _state = lifecycle::State::STOPPED;
     }
 
     void
@@ -110,12 +110,12 @@ public:
         requestPause();
         waitDone();
         this->pauseBlocks();
-        _state = LifeCycleState::PAUSED;
+        _state = lifecycle::State::PAUSED;
     }
 
     void
     waitDone() {
-        using enum LifeCycleState;
+        using enum lifecycle::State;
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.waitDone");
         for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
             _running_threads.wait(running);
@@ -125,13 +125,13 @@ public:
     void
     requestStop() {
         _stop_requested = true;
-        _state          = LifeCycleState::REQUESTED_STOP;
+        _state          = lifecycle::State::REQUESTED_STOP;
     }
 
     void
     requestPause() {
         _stop_requested = true;
-        _state          = LifeCycleState::REQUESTED_PAUSE;
+        _state          = lifecycle::State::REQUESTED_PAUSE;
     }
 
     void
@@ -142,9 +142,9 @@ public:
         }
         const auto result = _graph.performConnections();
         if (result) {
-            _state = LifeCycleState::INITIALISED;
+            _state = lifecycle::State::INITIALISED;
         } else {
-            _state = LifeCycleState::ERROR;
+            _state = lifecycle::State::ERROR;
         }
     }
 
@@ -160,7 +160,7 @@ public:
         // std::for_each(_graph.edges().begin(), _graph.edges().end(), [](auto &edge) {
         //
         // });
-        _state = LifeCycleState::INITIALISED;
+        _state = lifecycle::State::INITIALISED;
     }
 
     void
@@ -253,26 +253,21 @@ public:
     template<typename block_type>
     work::Result
     workOnce(const std::span<block_type> &blocks) {
-        constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
-        bool                  something_happened = false;
-        std::size_t           performed_work     = 0UZ;
+        constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
+        std::size_t           performedWorkAllBlocks = 0UZ;
+
+        bool something_happened = false;
         for (auto &currentBlock : blocks) {
-            gr::work::Result result = currentBlock->work(requested_work);
-            performed_work += result.performed_work;
-            if (result.status == work::Status::ERROR) {
+            const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
+            performedWorkAllBlocks += performed_work;
+            if (status == work::Status::ERROR) {
                 return { requested_work, performed_work, work::Status::ERROR };
-            } else if (result.status == work::Status::INSUFFICIENT_INPUT_ITEMS || result.status == work::Status::DONE) {
-                // nothing
-            } else if (result.status == work::Status::OK || result.status == work::Status::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (status != work::Status::DONE) {
                 something_happened = true;
             }
-            if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
-                std::vector<std::size_t> available_input_samples(20);
-                std::ignore = currentBlock->availableInputSamples(available_input_samples);
-                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0UZ) > 0UZ;
-            }
         }
-        return { requested_work, performed_work, something_happened ? work::Status::OK : work::Status::DONE };
+
+        return { requestedWorkAllBlocks, performedWorkAllBlocks, something_happened ? work::Status::OK : work::Status::DONE };
     }
 
     // todo: could be moved to base class, but would make `start()` virtual or require CRTP
@@ -305,16 +300,17 @@ public:
         this->startBlocks();
 
         if constexpr (executionPolicy == singleThreaded) {
-            this->_state = LifeCycleState::RUNNING;
+            this->_state = lifecycle::State::RUNNING;
             work::Result                           result;
             std::span<std::unique_ptr<BlockModel>> blocklist = std::span{ this->_graph.blocks() };
             do {
                 result = workOnce(blocklist);
             } while (result.status == work::Status::OK);
             if (result.status == work::Status::ERROR) {
-                this->_state = LifeCycleState::ERROR;
+                this->_state = lifecycle::State::ERROR;
             }
         } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
+            this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
@@ -406,16 +402,8 @@ public:
             performed_work += result.performed_work;
             if (result.status == work::Status::ERROR) {
                 return { requested_work, performed_work, work::Status::ERROR };
-            } else if (result.status == work::Status::INSUFFICIENT_INPUT_ITEMS || result.status == work::Status::DONE) {
-                // nothing
-            } else if (result.status == work::Status::OK || result.status == work::Status::INSUFFICIENT_OUTPUT_ITEMS) {
+            } else if (result.status != work::Status::DONE) {
                 something_happened = true;
-            }
-
-            if (currentBlock->isBlocking()) { // work-around for `DONE` issue when running with multithreaded BlockingIO blocks -> TODO: needs a better solution on a global scope
-                std::vector<std::size_t> available_input_samples(20);
-                std::ignore = currentBlock->availableInputSamples(available_input_samples);
-                something_happened |= std::accumulate(available_input_samples.begin(), available_input_samples.end(), 0UZ) > 0UZ;
             }
         }
 
@@ -449,16 +437,17 @@ public:
         this->startBlocks();
 
         if constexpr (executionPolicy == singleThreaded) {
-            this->_state = LifeCycleState::RUNNING;
+            this->_state = lifecycle::State::RUNNING;
             work::Result result;
             auto         blocklist = std::span{ this->_blocklist };
             while ((result = workOnce(blocklist)).status == work::Status::OK) {
                 if (result.status == work::Status::ERROR) {
-                    this->_state = LifeCycleState::ERROR;
+                    this->_state = lifecycle::State::ERROR;
                     return;
                 }
             }
         } else if (executionPolicy == multiThreaded) {
+            this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");

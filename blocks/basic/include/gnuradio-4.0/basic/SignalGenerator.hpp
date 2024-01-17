@@ -2,8 +2,6 @@
 #define GNURADIO_SIGNAL_SOURCE_HPP
 
 #include <gnuradio-4.0/Block.hpp>
-#include <magic_enum.hpp>
-#include <magic_enum_utility.hpp>
 #include <numbers>
 
 namespace gr::basic {
@@ -61,13 +59,12 @@ This waveform linearly increases from -amplitude to amplitude in the first half 
 s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
 )"">;
 
-template<typename T>
-    requires(std::floating_point<T>)
+template<std::floating_point T>
 struct SignalGenerator : public gr::Block<SignalGenerator<T>, BlockingIO<true>, SignalGeneratorDoc> {
     PortIn<T>  in; // ClockSource input
     PortOut<T> out;
 
-    Annotated<T, "sample_rate", Visible, Doc<"sample rate">>                       sample_rate = T(1000.);
+    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                   sample_rate = 1000.f;
     Annotated<std::string, "signal_type", Visible, Doc<"see signal_source::Type">> signal_type = "Sin";
     Annotated<T, "frequency", Visible>                                             frequency   = T(1.);
     Annotated<T, "amplitude", Visible>                                             amplitude   = T(1.);
@@ -78,13 +75,13 @@ struct SignalGenerator : public gr::Block<SignalGenerator<T>, BlockingIO<true>, 
 
 private:
     signal_source::Type _signalType = signal_source::parse(signal_type);
-    T                   _timeTick   = T(1.) / sample_rate;
+    T                   _timeTick   = T(1.) / T(sample_rate);
 
 public:
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
         _signalType = signal_source::parse(signal_type);
-        _timeTick   = T(1.) / sample_rate;
+        _timeTick   = T(1.) / T(sample_rate);
     }
 
     [[nodiscard]] constexpr T

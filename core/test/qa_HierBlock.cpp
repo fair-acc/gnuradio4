@@ -44,7 +44,7 @@ protected:
 
     gr::scheduler::Simple<> _scheduler;
 
-    gr::LifeCycleState state;
+    gr::lifecycle::State _state;
 
     gr::Graph
     make_graph() {
@@ -73,19 +73,29 @@ public:
     init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
 
     void
-    start() override {}
+    start() override {
+        _state = gr::lifecycle::State::RUNNING;
+    }
 
     void
-    stop() override {}
+    stop() override {
+        _state = gr::lifecycle::State::STOPPED;
+    }
 
     void
-    pause() override {}
+    pause() override {
+        _state = gr::lifecycle::State::PAUSED;
+    }
 
     void
-    resume() override {}
+    resume() override {
+        _state = gr::lifecycle::State::RUNNING;
+    }
 
     void
-    reset() override {}
+    reset() override {
+        _state = gr::lifecycle::State::INITIALISED;
+    }
 
     [[nodiscard]] std::string_view
     name() const override {
@@ -102,6 +112,11 @@ public:
         return false;
     }
 
+    constexpr gr::lifecycle::State
+    state() const noexcept override {
+        return this->_state;
+    }
+
     [[nodiscard]] constexpr std::size_t
     availableInputSamples(std::vector<std::size_t> &) const noexcept override {
         return 0UL;
@@ -114,11 +129,11 @@ public:
 
     gr::work::Result
     work(std::size_t requested_work) override {
-        if (state == gr::LifeCycleState::STOPPED) {
+        if (_state == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UL, gr::work::Status::DONE };
         }
         _scheduler.runAndWait();
-        state = gr::LifeCycleState::STOPPED;
+        _state = gr::lifecycle::State::STOPPED;
         return { requested_work, requested_work, gr::work::Status::DONE };
     }
 
@@ -163,7 +178,7 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
 
     gr::work::Result
     work(std::size_t requested_work) {
-        if (this->state == gr::LifeCycleState::STOPPED) {
+        if (this->state == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UL, gr::work::Status::DONE };
         }
 
@@ -182,8 +197,9 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
             return { requested_work, 1UL, gr::work::Status::OK };
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            this->state = gr::LifeCycleState::STOPPED;
-            this->publishEOSTag(0);
+            this->state = gr::lifecycle::State::STOPPED;
+            this->state.notify_all();
+            this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 1UL, gr::work::Status::DONE };
         }
     }

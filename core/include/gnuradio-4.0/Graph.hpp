@@ -217,6 +217,12 @@ public:
             = 0;
 
     /**
+     * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
+     * See enum description for details.
+     */
+    [[nodiscard]] virtual lifecycle::State state() const noexcept = 0;
+
+    /**
      * @brief number of available readable samples at the block's input ports
      */
     [[nodiscard]] virtual constexpr std::size_t
@@ -441,6 +447,10 @@ public:
     [[nodiscard]] constexpr bool
     isBlocking() const noexcept override {
         return blockRef().isBlocking();
+    }
+
+    [[nodiscard]] lifecycle::State state() const noexcept override {
+        return blockRef().state.load();
     }
 
     [[nodiscard]] constexpr std::size_t
@@ -775,11 +785,18 @@ public:
 
     template<BlockLike TBlock>
     auto &
-    emplaceBlock(const property_map &initial_settings) {
+    emplaceBlock(const property_map &initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>());
         auto  raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
-        std::ignore         = raw_ref->settings().set(initial_settings);
+        const auto failed   = raw_ref->settings().set(initialSettings);
+        if (!failed.empty()) {
+            std::vector<std::string> keys;
+            for (const auto& pair : failed) {
+                keys.push_back(pair.first);
+            }
+            throw std::invalid_argument(fmt::format("initial Block settings could not be applied successfully - mismatched keys or value-type: {}\n", fmt::join(keys, ", ")));
+        }
         raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
