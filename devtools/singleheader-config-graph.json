@@ -13,6 +13,7 @@
 		"./algorithm/include/",
 		"./meta/include/",
 		"./build/_deps/vir-simd-src/",
+		"./build/_deps/pmt-src/include/",
 		"./third_party/magic_enum/",
 		"./third_party/refl-cpp/"
 	]

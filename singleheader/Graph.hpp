@@ -11913,7 +11913,1329 @@ REFL_END
 
 #include <map>
 
-#include <pmtv/pmt.hpp>
+// #include <pmtv/pmt.hpp>
+
+
+
+// #include "base64/base64.h"
+/*
+ * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */
+/* ====================================================================
+ * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. All advertising materials mentioning features or use of this
+ *    software must display the following acknowledgment:
+ *    "This product includes software developed by the Apache Group
+ *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ *
+ * 4. The names "Apache Server" and "Apache Group" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For written permission, please contact
+ *    apache@apache.org.
+ *
+ * 5. Products derived from this software may not be called "Apache"
+ *    nor may "Apache" appear in their names without prior written
+ *    permission of the Apache Group.
+ *
+ * 6. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by the Apache Group
+ *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
+ * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+ * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * ====================================================================
+ *
+ * This software consists of voluntary contributions made by many
+ * individuals on behalf of the Apache Group and was originally based
+ * on public domain software written at the National Center for
+ * Supercomputing Applications, University of Illinois, Urbana-Champaign.
+ * For more information on the Apache Group and the Apache HTTP server
+ * project, please see <http://www.apache.org/>.
+ *
+ */
+
+
+#ifndef _BASE64_H_
+#define _BASE64_H_
+
+#include <string.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// int Base64encode_len(int len);
+// int Base64encode(char* coded_dst, const char* plain_src, int len_plain_src);
+
+// int Base64decode_len(const char* coded_src);
+// int Base64decode(char* plain_dst, const char* coded_src);
+
+// #ifdef __cplusplus
+// }
+// #endif
+
+/* Base64 encoder/decoder. Originally Apache file ap_base64.c
+ */
+
+/* aaaack but it's fast and const should make it shared text page. */
+static const unsigned char pr2six[256] = {
+    /* ASCII table */
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 62, 64, 64, 64, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64,
+    64, 64, 64, 64, 64, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
+    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64, 64, 26, 27, 28,
+    29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+    49, 50, 51, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64
+};
+
+static inline int Base64decode_len(const char* bufcoded)
+{
+    const auto* bufin {reinterpret_cast<const unsigned char*>(bufcoded)};
+    while (pr2six[*(bufin++)] <= 63)
+        ;
+    auto nprbytes {static_cast<int>(bufin - reinterpret_cast<const unsigned char*>(bufcoded)) - 1};
+    return ((nprbytes + 3) / 4) * 3 + 1;
+}
+
+static inline int Base64decode(char* bufplain, const char* bufcoded)
+{
+    const auto* bufin {reinterpret_cast<const unsigned char*>(bufcoded)};
+    while (pr2six[*(bufin++)] <= 63)
+        ;
+    auto nprbytes {static_cast<int>(bufin - reinterpret_cast<const unsigned char*>(bufcoded)) - 1};
+
+    auto* bufout {reinterpret_cast<unsigned char*>(bufplain)};
+    bufin = reinterpret_cast<const unsigned char*>(bufcoded);
+
+    while (nprbytes > 4) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[*bufin] << 2 | pr2six[bufin[1]] >> 4);
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[1]] << 4 | pr2six[bufin[2]] >> 2);
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[2]] << 6 | pr2six[bufin[3]]);
+        bufin += 4;
+        nprbytes -= 4;
+    }
+
+    /* Note: (nprbytes == 1) would be an error, so just ingore that case */
+    if (nprbytes > 1) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[*bufin] << 2 | pr2six[bufin[1]] >> 4);
+    }
+    if (nprbytes > 2) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[1]] << 4 | pr2six[bufin[2]] >> 2);
+    }
+    if (nprbytes > 3) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[2]] << 6 | pr2six[bufin[3]]);
+    }
+
+    *(bufout++) = '\0';
+    return ((nprbytes + 3) / 4) * 3 - ((4 - nprbytes) & 3);
+}
+
+static const char basis_64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static inline int Base64encode_len(int len) { return ((len + 2) / 3 * 4) + 1; }
+
+static inline int Base64encode(char* encoded, const char* string, int len)
+{
+    int i {0};
+    char* p {encoded};
+    for (i = 0; i < len - 2; i += 3) {
+        *p++ = basis_64[(string[i] >> 2) & 0x3F];
+        *p++ = basis_64[((string[i] & 0x3) << 4) | ((string[i + 1] & 0xF0) >> 4)];
+        *p++ = basis_64[((string[i + 1] & 0xF) << 2) | ((string[i + 2] & 0xC0) >> 6)];
+        *p++ = basis_64[string[i + 2] & 0x3F];
+    }
+    if (i < len) {
+        *p++ = basis_64[(string[i] >> 2) & 0x3F];
+        if (i == (len - 1)) {
+            *p++ = basis_64[((string[i] & 0x3) << 4)];
+            *p++ = '=';
+        }
+        else {
+            *p++ = basis_64[((string[i] & 0x3) << 4) | ((string[i + 1] & 0xF0) >> 4)];
+            *p++ = basis_64[((string[i + 1] & 0xF) << 2)];
+        }
+        *p++ = '=';
+    }
+
+    *p++ = '\0';
+    return static_cast<int>(p - encoded);
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif //_BASE64_H_
+// #include <pmtv/type_helpers.hpp>
+
+
+#include <complex>
+#include <concepts>
+#include <map>
+#include <memory>
+#include <ranges>
+#include <variant>
+#include <vector>
+
+// #include <pmtv/rva_variant.hpp>
+/*
+From https://github.com/codeinred/recursive-variant
+
+Note that is may not be needed anymore in c++23.  
+See https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2162r0.html
+
+Boost Software License - Version 1.0 - August 17th, 2003
+
+© 2021 Alecto Irene Perez
+
+Permission is hereby granted, free of charge, to any person or organization
+obtaining a copy of the software and accompanying documentation covered by this
+license (the "Software") to use, reproduce, display, distribute, execute, and
+transmit the Software, and to prepare derivative works of the Software, and to
+permit third-parties to whom the Software is furnished to do so, all subject to
+the following:
+
+The copyright notices in the Software and this entire statement, including the
+above license grant, this restriction and the following disclaimer, must be
+included in all copies of the Software, in whole or in part, and all derivative
+works of the Software, especially those created in whole or in part by Deep
+Neural Networks, Language Models, or other such programs advertised as "AI" or
+as "Artificial Intelligence" or as "Machine Learning", either with or without
+human input or intervention, unless such copies or derivative works are solely
+in the form of machine-executable object code generated by a source language
+processor.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES
+OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+#ifndef RECURSIVE_VARIANT_AUTHORITY_VARIANT_HPP
+#define RECURSIVE_VARIANT_AUTHORITY_VARIANT_HPP
+#include <cstdint>
+#include <variant>
+
+namespace rva {
+/**
+ * @brief replace is a template type used to implement replace_t. It provides
+ * member, a using declaration named `type`.
+ *
+ * @tparam T the type to transform.
+ * @tparam Find the type to find
+ * @tparam Replace the type to replace it with.
+ */
+template <class T, class Find, class Replace>
+struct replace;
+/**
+ * @brief replace is a template that takes a type T (which itself might be a
+ * template), and replaces all instances of *Find* with *Replace*. For example:
+ *
+ * - `replace_t<char, char, int>` -> `int`
+ * - `replace_t<std::vector<char>, char, int>` -> `std::vector<int>`
+ *
+ * @tparam T the type to transform.
+ * @tparam Find the type to find
+ * @tparam Replace the type to replace it with.
+ */
+template <class T, class Find, class Replace>
+using replace_t = typename replace<T, Find, Replace>::type;
+
+struct self_t {
+};
+
+// See: https://en.cppreference.com/w/cpp/utility/variant
+template <class... T>
+class variant : public std::variant<replace_t<T, self_t, variant<T...>>...>
+{
+public:
+    using base_type = std::variant<replace_t<T, self_t, variant<T...>>...>;
+    constexpr static bool nothrow_swappable = std::is_nothrow_swappable_v<base_type>;
+
+    using base_type::base_type;
+
+    // Observers
+    using base_type::index;
+    using base_type::valueless_by_exception;
+
+    // Modifiers
+    using base_type::operator=;
+    using base_type::emplace;
+    using base_type::swap;
+
+    variant() = default;
+    variant(variant const&) = default;
+    variant(variant&&) = default;
+
+    variant& operator=(variant const&) = default;
+    variant& operator=(variant&&) = default;
+
+    constexpr void swap(variant& other) noexcept(nothrow_swappable)
+    {
+        base_type::swap(other);
+    }
+    constexpr base_type& get_base() & noexcept { return *this; }
+    constexpr base_type const& get_base() const& noexcept { return *this; }
+    constexpr base_type&& get_base() && noexcept { return *this; }
+    constexpr base_type const&& get_base() const&& noexcept { return *this; }
+
+    constexpr base_type* get_pointer_to_base() noexcept { return this; }
+    constexpr base_type const* get_pointer_to_base() const noexcept { return this; }
+
+    auto operator<=>(variant const&) const = default;
+    bool operator==(variant const&) const = default;
+
+    size_t size()
+    {
+        return std::visit(
+            [](const auto& arg) -> size_t {
+                using TYPE = std::decay_t<decltype(arg)>;
+                if constexpr (std::same_as<std::monostate, TYPE>)
+                    return 0;
+                else if constexpr (std::ranges::range<TYPE>)
+                    return arg.size();
+                return 1;
+            },
+            get_base());
+    }
+};
+
+// See: https://en.cppreference.com/w/cpp/utility/variant/visit
+template <class Visitor, class... Variants>
+constexpr decltype(auto) visit(Visitor&& visitor, Variants&&... variants)
+{
+    return std::visit(std::forward<Visitor>(visitor),
+                      std::forward<Variants>(variants).get_base()...);
+}
+template <class R, class Visitor, class... Variants>
+constexpr R visit(Visitor&& visitor, Variants&&... variants)
+{
+    return std::visit<R>(std::forward<Visitor>(visitor),
+                         std::forward<Variants>(variants).get_base()...);
+}
+
+// See: https://en.cppreference.com/w/cpp/utility/variant/get
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(rva::variant<Types...>& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(rva::variant<Types...>&& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(const rva::variant<Types...>& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(const rva::variant<Types...>&& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr T& get(rva::variant<Types...>& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr T&& get(rva::variant<Types...>&& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr const T& get(const rva::variant<Types...>& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr const T&& get(const rva::variant<Types...>&& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+
+// See: https://en.cppreference.com/w/cpp/utility/variant/get_if
+template <std::size_t I, class... Types>
+constexpr auto* get_if(rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<I>(pv->get_pointer_to_base());
+}
+template <std::size_t I, class... Types>
+constexpr auto const* get_if(const rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<I>(pv->get_pointer_to_base());
+}
+template <class T, class... Types>
+constexpr auto* get_if(rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<T>(pv->get_pointer_to_base());
+}
+template <class T, class... Types>
+constexpr auto const* get_if(const rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<T>(pv->get_pointer_to_base());
+}
+
+template <class T, class... Types>
+constexpr bool holds_alternative(const rva::variant<Types...>& v) noexcept
+{
+    return std::holds_alternative(v.get_base());
+}
+} // namespace rva
+
+template <class... T>
+struct std::hash<rva::variant<T...>> : std::hash<std::variant<T...>> {
+    using base_type = std::hash<std::variant<T...>>;
+    using base_type::base_type;
+    hash() = default;
+    hash(hash const&) = default;
+    hash(hash&&) = default;
+    size_t operator()(rva::variant<T...> const& v) const
+    {
+        return base_type::operator()(v.get_base());
+    }
+};
+
+template <class... Types>
+struct std::variant_size<rva::variant<Types...>>
+    : std::integral_constant<std::size_t, sizeof...(Types)> {
+};
+template <class... Types>
+struct std::variant_size<const rva::variant<Types...>>
+    : std::integral_constant<std::size_t, sizeof...(Types)> {
+};
+
+template <std::size_t I, class... Types>
+struct std::variant_alternative<I, rva::variant<Types...>>
+    : std::variant_alternative<I, typename rva::variant<Types...>::base_type> {
+};
+template <std::size_t I, class... Types>
+struct std::variant_alternative<I, const rva::variant<Types...>>
+    : std::variant_alternative<I, typename rva::variant<Types...>::base_type> {
+};
+
+// Implementation for replace
+namespace rva {
+template <class T, class Find, class Replace>
+struct replace {
+    using type = T;
+};
+template <class Find, class Replace>
+struct replace<Find, Find, Replace> {
+    using type = Replace;
+};
+template <class Find, class Replace>
+struct replace<Find*, Find, Replace> {
+    using type = Replace*;
+};
+template <class Find, class Replace>
+struct replace<Find&, Find, Replace> {
+    using type = Replace&;
+};
+template <class Find, class Replace>
+struct replace<Find&&, Find, Replace> {
+    using type = Replace&&;
+};
+template <class Find, class Replace>
+struct replace<Find[], Find, Replace> {
+    using type = Replace[];
+};
+template <class Find, class Replace, std::size_t N>
+struct replace<Find[N], Find, Replace> {
+    using type = Replace[N];
+};
+template <class Find, class Replace>
+struct replace<const Find, Find, Replace> {
+    using type = const Replace;
+};
+template <class Find, class Replace>
+struct replace<const Find*, Find, Replace> {
+    using type = const Replace*;
+};
+template <class Find, class Replace>
+struct replace<const Find&, Find, Replace> {
+    using type = const Replace&;
+};
+template <class Find, class Replace>
+struct replace<const Find[], Find, Replace> {
+    using type = const Replace[];
+};
+template <class Find, class Replace, std::size_t N>
+struct replace<const Find[N], Find, Replace> {
+    using type = const Replace[N];
+};
+template <class T, class Find, class Replace>
+struct replace<T*, Find, Replace> {
+    using type = replace_t<T, Find, Replace>*;
+};
+template <class T, class Find, class Replace>
+struct replace<T&, Find, Replace> {
+    using type = replace_t<T, Find, Replace>&;
+};
+template <class T, class Find, class Replace>
+struct replace<T&&, Find, Replace> {
+    using type = replace_t<T, Find, Replace>&&;
+};
+template <class T, class Find, class Replace>
+struct replace<T[], Find, Replace> {
+    using type = replace_t<T, Find, Replace>[];
+};
+template <class T, class Find, class Replace, std::size_t N>
+struct replace<T[N], Find, Replace> {
+    using type = replace_t<T, Find, Replace>[N];
+};
+template <class T, class Find, class Replace>
+struct replace<const T, Find, Replace> {
+    using type = replace_t<T, Find, Replace> const;
+};
+template <class T, class Find, class Replace>
+struct replace<const T*, Find, Replace> {
+    using type = replace_t<T, Find, Replace> const*;
+};
+template <class T, class Find, class Replace>
+struct replace<const T&, Find, Replace> {
+    using type = replace_t<T, Find, Replace> const&;
+};
+template <class T, class Find, class Replace>
+struct replace<const T[], Find, Replace> {
+    using type = replace_t<T, Find, Replace> const[];
+};
+template <class T, class Find, class Replace, std::size_t N>
+struct replace<const T[N], Find, Replace> {
+    using type = replace_t<T, Find, Replace> const[N];
+};
+
+template <template <class...> class T, class... Ts, class Find, class Replace>
+struct replace<T<Ts...>, Find, Replace> {
+    using type = T<replace_t<Ts, Find, Replace>...>;
+};
+
+// Add shortcut for rva::variant to avoid replacing into instances of an
+// rva::variant that's given as a template parameter to another rva::variant
+template <class... Ts, class Find, class Replace>
+struct replace<rva::variant<Ts...>, Find, Replace> {
+    using type = rva::variant<Ts...>;
+};
+} // namespace rva
+
+#endif
+
+
+namespace pmtv {
+
+namespace detail {
+
+// Convert a list of types to the full set used for the pmt.
+template<template<typename... > class VariantType, typename... Args>
+struct as_pmt {
+    using type = VariantType<std::monostate,
+                             Args...,
+                             std::vector<Args>...,
+                             std::string,
+                             std::vector<std::string>,
+                             std::vector<rva::self_t>,
+                             std::map<std::string, rva::self_t, std::less<>>
+                             >;
+};
+
+template<template<typename... > class TemplateType, typename ...T>
+struct as_pmt<TemplateType, std::tuple<T...>> {
+    using type = typename as_pmt<TemplateType, T...>::type;
+};
+}
+
+
+template<template<typename... > class VariantType, class... Args>
+using as_pmt_t = typename detail::as_pmt<VariantType, Args...>::type;
+
+// Check if `std::size_t` has the same type as `uint16_t` or `uint32_t` or `uint64_t`.
+// If it has the same type, then there is no need to add `std::size_t` the supported types.
+// Otherwise, `std::size_t` is added to the supported types.
+// This can happen if one builds using Emscripten where `std::size_t` is defined as `unsigned long` and
+// `uint32_t` and `uint64_t` are defined as `unsigned int` and `unsigned long long`, respectively.
+static constexpr bool support_size_t = !std::is_same_v<std::size_t, uint16_t> && !std::is_same_v<std::size_t, uint32_t> && !std::is_same_v<std::size_t, uint64_t>;
+
+// Note that per the spec, std::complex is undefined for any type other than float, double, or long_double
+using default_supported_types_without_size_t = std::tuple<bool,
+        uint8_t, uint16_t, uint32_t, uint64_t,
+        int8_t, int16_t, int32_t, int64_t,
+        float, double, std::complex<float>, std::complex<double>>;
+
+// Add std::size_t to default_supported_types_without_size_t
+using default_supported_types_with_size_t = decltype(std::tuple_cat(std::declval<default_supported_types_without_size_t>(), std::declval<std::tuple<std::size_t>>()));
+
+using default_supported_types = typename std::conditional_t<support_size_t, default_supported_types_with_size_t, default_supported_types_without_size_t>;
+
+// initialisation via type list stored in tuple (N.B. tuple could be extended by user with custom OOT types)
+using pmt_var_t = as_pmt_t<rva::variant, default_supported_types>;
+
+using pmt_null = std::monostate;
+
+
+template <typename T>
+concept PmtNull = std::is_same_v<T, std::monostate>;
+
+template <typename T>
+concept Complex =
+    std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
+
+template <typename T>
+concept Scalar = std::same_as<T, bool> || std::integral<T> || std::floating_point<T> || Complex<T>;
+
+template <typename T>
+concept UniformVector =
+    std::ranges::contiguous_range<T> && Scalar<typename T::value_type>;
+
+// A vector of bool can be optimized to one bit per element, so it doesn't satisfy UniformVector
+template <typename T>
+concept UniformBoolVector = 
+    std::ranges::range<T> && std::same_as<typename T::value_type, bool>;
+
+template <typename T>
+concept UniformStringVector =
+    std::ranges::range<T> && std::same_as<typename T::value_type, std::string>;
+
+template <typename T>
+concept PmtMap = std::is_same_v<T, std::map<std::string, pmt_var_t, std::less<>>>;
+
+template <typename T>
+concept String = std::is_same_v<T, std::string>;
+
+template <typename T>
+concept PmtVector =
+    std::ranges::range<T> && std::is_same_v<typename T::value_type, pmt_var_t>;
+
+} // namespace pmtv
+
+// #include <pmtv/version.hpp>
+
+
+#include <stdint.h>
+
+namespace pmtv {
+static const uint16_t pmt_version = 1;
+}
+#include <complex>
+#include <cstddef>
+#include <ranges>
+#include <span>
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+
+// #include <refl.hpp>
+
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
+// Support for std::format is really spotty.
+// Gcc12 does not support it.
+// Eventually replace with std::format when that is widely available.
+#include <fmt/format.h>
+
+namespace pmtv {
+
+using pmt = pmt_var_t;
+using map_t = std::map<std::string, pmt, std::less<>>;
+
+template <class T>
+inline constexpr std::in_place_type_t<std::vector<T>> vec_t{};
+
+template <typename T>
+concept IsPmt = std::is_same_v<T, pmt>;
+
+// template <class T, class V>
+// auto get_vector(V value) -> decltype(std::get<std::vector<T>>(value) {
+//     return std::get<std::vector<T>>(value);
+// }
+template <class T, class V>
+std::vector<T>& get_vector(V value)
+{
+    return std::get<std::vector<T>>(value);
+}
+
+template <class T, class V>
+std::span<T> get_span(V& value)
+{
+    return std::span(std::get<std::vector<T>>(value));
+}
+
+template <class V>
+map_t& get_map(V& value)
+{
+    return std::get<map_t>(value);
+}
+
+template <IsPmt P>
+size_t elements(const P& value)
+{
+    return std::visit(
+        [](const auto& arg) -> size_t {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::same_as<std::monostate, T>)
+                return 0;
+            else if constexpr (std::ranges::range<T>)
+                return arg.size();
+            return 1;
+        },
+        value.get_base());
+}
+
+template <IsPmt P>
+size_t bytes_per_element(const P& value)
+{
+    return std::visit(
+        [](const auto& arg) -> size_t {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::same_as<std::monostate, T>)
+                return 0;
+            else if constexpr (std::ranges::range<T>)
+                return sizeof(typename T::value_type);
+            return sizeof(T);
+        },
+        value.get_base());
+}
+
+
+/*
+ Functions for converting between structures and pmts.  Each member of the structure must be
+ convertible to a pmt.  No data interpretation is done.  (For example a pointer and a length
+ won't work because we don't know that they are related fields.  A span or a vector would.)
+ An extra requirement is that we must use a macro to declare structures and fields that we
+ want to use this way.
+
+For example,
+ struct my_data {
+    float x;
+    int y;
+    std::complex<float> z;
+ };
+
+ REFL_AUTO(type(my_data), field(x), field(y), field(z))
+
+ Note that any members not declared in the `REFL_AUTO` call will not be transferred with the
+ data.
+
+*/
+
+template <typename T>
+constexpr auto readable_members = filter(refl::member_list<T>{}, [](auto member) { return is_readable(member); });
+
+
+/*********************Map Conversion Functions*****************************************/
+
+// Functions for converting between pmt stuctures and maps.
+template <class T>
+constexpr void map_from_struct(const T& value, map_t& result) {
+    // iterate over the members of T
+    for_each(refl::reflect(value).members, [&](auto member)
+    {
+        if constexpr (is_readable(member))
+        {
+            result[get_display_name(member)] = member(value);
+        }
+    });
+}
+
+template <class T>
+auto map_from_struct(const T& value) {
+    // iterate over the members of T
+    map_t result;
+    map_from_struct(value, result);
+    return result;
+}
+
+template <class T>
+void to_struct(const map_t& value, T& result) {
+    // iterate over the members of T
+    for_each(refl::reflect(result).members, [&](auto member)
+    {
+        if constexpr (is_readable(member))
+        {
+            using member_type = std::decay_t<decltype(member(result))>;
+            member(result) = std::get<member_type>(value.at(get_display_name(member)));
+        }
+    });
+}
+
+template <class T>
+T to_struct(const map_t& value) {
+    T result;
+    to_struct(value, result);
+    return result;
+}
+
+template <class T>
+bool validate_map(const map_t& value, bool exact=false) {
+    // Ensure that the map contains the members of the struct with the correct types.
+    // iterate over the members of T
+    T temp;
+    if (exact && value.size() != readable_members<T>.size) return false;
+    bool result = true;
+    for_each(refl::reflect(temp).members, [&](auto member)
+    {
+        if constexpr (is_readable(member))
+        {
+            using member_type = std::decay_t<decltype(member(temp))>;
+            // Does the map contain the key and hold the correct type?
+            if (! value.count(get_display_name(member)) ||
+                ! std::holds_alternative<member_type>(value.at(get_display_name(member))))
+                result = false;
+        }
+    });
+    return result;
+}
+
+
+template <class T>
+constexpr uint8_t pmtTypeIndex()
+{
+    if constexpr (std::same_as<T, std::monostate>)
+        return 0;
+    else if constexpr (std::same_as<T, bool>)
+        return 1;
+    else if constexpr (std::signed_integral<T>)
+        return 2;
+    else if constexpr (std::unsigned_integral<T>)
+        return 3;
+    else if constexpr (std::floating_point<T>)
+        return 4;
+    else if constexpr (Complex<T>)
+        return 5;
+    else if constexpr (std::same_as<T, std::string>)
+        return 6;
+    else if constexpr (std::same_as<T, std::map<std::string, pmt, std::less<>>>)
+        return 7;
+    else if constexpr (std::same_as<T, std::vector<std::string>>)
+        return 8;
+    else if constexpr (std::ranges::range<T>) {
+        if constexpr (UniformVector<T>) {
+            return pmtTypeIndex<typename T::value_type>() << 4;
+        }
+        else {
+            return 9; // for vector of PMTs
+        }
+    }
+}
+
+template <class T>
+constexpr uint16_t serialId()
+{
+    if constexpr (Complex<T>) {
+        return (pmtTypeIndex<T>() << 8) | sizeof(typename T::value_type);
+    }
+    else if constexpr (Scalar<T> || std::same_as<T, bool>) {
+        static_assert(sizeof(T) < 32, "Can't serial data wider than 16 bytes");
+        if constexpr (support_size_t && std::is_same_v<T, std::size_t>){
+            return (pmtTypeIndex<uint64_t>() << 8) | sizeof(uint64_t);
+        } else {
+            return (pmtTypeIndex < T > () << 8) | sizeof(T);
+        }
+    }
+    else if constexpr (UniformVector<T>) {
+        static_assert(sizeof(typename T::value_type) < 32,
+                      "Can't serial data wider than 16 bytes");
+        return (pmtTypeIndex<T>() << 8) | sizeof(typename T::value_type);
+    }
+    else
+        return pmtTypeIndex<T>() << 8;
+}
+
+// Forward decalaration so we can recursively serialize.
+template <IsPmt P>
+std::streamsize serialize(std::streambuf& sb, const P& value);
+
+template <class T>
+struct serialInfo {
+    using value_type = std::conditional_t<support_size_t && std::is_same_v<T, std::size_t>, uint64_t, T>;
+    static constexpr uint16_t value = serialId<T>();
+};
+
+inline std::streamsize _serialize_version(std::streambuf& sb) {
+    return sb.sputn(reinterpret_cast<const char*>(&pmt_version), 2);
+}
+
+template <class T>
+std::streamsize _serialize_id(std::streambuf& sb) {
+    using Td = std::decay_t<T>;
+    auto id = serialInfo<Td>::value;
+    return sb.sputn(reinterpret_cast<const char*>(&id), 2);
+}
+
+template <PmtVector T>
+std::streamsize _serialize(std::streambuf& sb, const T& arg) {
+    auto length = _serialize_id<T>(sb);
+    uint64_t sz = arg.size();
+    length += sb.sputn(reinterpret_cast<const char*>(&sz), sizeof(uint64_t));
+    for (auto& value: arg) {
+        length += serialize(sb, value);
+    }
+    return length;
+}
+
+template <UniformBoolVector T>
+std::streamsize _serialize(std::streambuf& sb, const T& arg) {
+    auto length = _serialize_id<T>(sb);
+    uint64_t sz = arg.size();
+    length += sb.sputn(reinterpret_cast<const char*>(&sz), sizeof(uint64_t));
+    char one = 1;
+    char zero = 0;
+    for (auto value : arg) {
+        length += sb.sputn(value ? &one : &zero, sizeof(char));
+    }
+    return length;
+}
+
+template <UniformStringVector T>
+std::streamsize _serialize(std::streambuf& sb, const T& arg) {
+    auto length = _serialize_id<T>(sb);
+    uint64_t sz = arg.size();
+    length += sb.sputn(reinterpret_cast<const char*>(&sz), sizeof(uint64_t));
+    for (auto& value: arg) {
+        // Send length then value
+        sz = value.size();
+        length += sb.sputn(reinterpret_cast<const char*>(&sz), sizeof(uint64_t));
+        length += sb.sputn(value.data(), static_cast<std::streamsize>(value.size()));
+    }
+    return length;
+}
+
+template <UniformVector T>
+std::streamsize _serialize(std::streambuf& sb, const T& arg) {
+    auto length = _serialize_id<T>(sb);
+    uint64_t sz = arg.size();
+    length += sb.sputn(reinterpret_cast<const char*>(&sz), sizeof(uint64_t));
+    length += sb.sputn(reinterpret_cast<const char*>(arg.data()),static_cast<std::streamsize>(arg.size() * sizeof(arg[0])));
+    return length;
+}
+
+template <PmtNull T>
+std::streamsize _serialize(std::streambuf& sb, [[maybe_unused]] const T& arg) {
+    return _serialize_id<T>(sb);
+}
+
+template <Scalar T>
+std::streamsize _serialize(std::streambuf& sb, const T& arg) {
+    if constexpr (support_size_t && std::is_same_v<T, std::size_t>) {
+        uint64_t arg64 {arg};
+        return _serialize_id<uint64_t>(sb) + sb.sputn(reinterpret_cast<const char*>(&arg64), sizeof(arg64));
+    } else {
+        return _serialize_id<T>(sb) +  sb.sputn(reinterpret_cast<const char*>(&arg), sizeof(arg));
+    }
+}
+
+template <PmtMap T>
+std::streamsize _serialize(std::streambuf& sb, const T& arg) {
+    auto length = _serialize_id<T>(sb);
+    uint32_t nkeys = uint32_t(arg.size());
+    length += sb.sputn(reinterpret_cast<const char*>(&nkeys), sizeof(nkeys));
+    uint32_t ksize;
+    for (const auto& [k, v] : arg) {
+        // For right now just prefix the size to the key and send it
+        ksize = uint32_t(k.size());
+        length +=
+            sb.sputn(reinterpret_cast<const char*>(&ksize), sizeof(ksize));
+        length += sb.sputn(k.c_str(), ksize);
+        length += serialize(sb, v);
+    }
+    return length;
+}
+
+// FIXME - make this consistent endianness
+template <IsPmt P>
+std::streamsize serialize(std::streambuf& sb, const P& value)
+{
+    auto length = _serialize_version(sb);
+
+    std::visit(
+        [&length, &sb](auto&& arg) {
+            length += _serialize(sb, arg);
+        },
+        value);
+
+    return length;
+}
+
+template <class T>
+T _deserialize_val(std::streambuf& sb);
+
+static pmt deserialize(std::streambuf& sb)
+{
+    uint16_t version;
+    // pmt_container_type container;
+    sb.sgetn(reinterpret_cast<char*>(&version), sizeof(version));
+    // sb.sgetn(reinterpret_cast<char*>(&container), sizeof(container));
+
+    uint16_t receivedId;
+    sb.sgetn(reinterpret_cast<char*>(&receivedId), sizeof(receivedId));
+
+    pmt ret;
+
+    switch (receivedId) {
+    case serialInfo<bool>::value:
+        return _deserialize_val<bool>(sb);
+    case serialInfo<uint8_t>::value:
+        return _deserialize_val<uint8_t>(sb);
+    case serialInfo<uint16_t>::value:
+        return _deserialize_val<uint16_t>(sb);
+    case serialInfo<uint32_t>::value:
+        return _deserialize_val<uint32_t>(sb);
+    case serialInfo<uint64_t>::value:
+        return _deserialize_val<uint64_t>(sb);
+    case serialInfo<int8_t>::value:
+        return _deserialize_val<int8_t>(sb);
+    case serialInfo<int16_t>::value:
+        return _deserialize_val<int16_t>(sb);
+    case serialInfo<int32_t>::value:
+        return _deserialize_val<int32_t>(sb);
+    case serialInfo<int64_t>::value:
+        return _deserialize_val<int64_t>(sb);
+    case serialInfo<float>::value:
+        return _deserialize_val<float>(sb);
+    case serialInfo<double>::value:
+        return _deserialize_val<double>(sb);
+    case serialInfo<std::complex<float>>::value:
+        return _deserialize_val<std::complex<float>>(sb);
+    case serialInfo<std::complex<double>>::value:
+        return _deserialize_val<std::complex<double>>(sb);
+
+    // case serialInfo<std::vector<bool>>::value: return
+    // _deserialize_val<std::vector<bool>>(sb);
+    case serialInfo<std::vector<uint8_t>>::value:
+        return _deserialize_val<std::vector<uint8_t>>(sb);
+    case serialInfo<std::vector<uint16_t>>::value:
+        return _deserialize_val<std::vector<uint16_t>>(sb);
+    case serialInfo<std::vector<uint32_t>>::value:
+        return _deserialize_val<std::vector<uint32_t>>(sb);
+    case serialInfo<std::vector<uint64_t>>::value:
+        return _deserialize_val<std::vector<uint64_t>>(sb);
+    case serialInfo<std::vector<int8_t>>::value:
+        return _deserialize_val<std::vector<int8_t>>(sb);
+    case serialInfo<std::vector<int16_t>>::value:
+        return _deserialize_val<std::vector<int16_t>>(sb);
+    case serialInfo<std::vector<int32_t>>::value:
+        return _deserialize_val<std::vector<int32_t>>(sb);
+    case serialInfo<std::vector<int64_t>>::value:
+        return _deserialize_val<std::vector<int64_t>>(sb);
+    case serialInfo<std::vector<float>>::value:
+        return _deserialize_val<std::vector<float>>(sb);
+    case serialInfo<std::vector<double>>::value:
+        return _deserialize_val<std::vector<double>>(sb);
+    case serialInfo<std::vector<std::complex<float>>>::value:
+        return _deserialize_val<std::vector<std::complex<float>>>(sb);
+    case serialInfo<std::vector<std::complex<double>>>::value:
+        return _deserialize_val<std::vector<std::complex<double>>>(sb);
+
+    case serialInfo<std::string>::value:
+        return _deserialize_val<std::string>(sb);
+    case serialInfo<std::vector<std::string>>::value:
+        return _deserialize_val<std::vector<std::string>>(sb);
+    case serialInfo<std::vector<pmtv::pmt>>::value:
+        return _deserialize_val<std::vector<pmtv::pmt>>(sb);
+    case serialInfo<map_t>::value:
+        return _deserialize_val<map_t>(sb);
+    default:
+        throw std::runtime_error("pmt::deserialize: Invalid PMT type type");
+    }
+
+    return ret;
+}
+
+template <class T>
+T _deserialize_val(std::streambuf& sb)
+{
+    if constexpr (Scalar<T>) {
+        T val;
+        sb.sgetn(reinterpret_cast<char*>(&val), sizeof(val));
+        return val;
+    }
+    else if constexpr (PmtVector<T>) {
+        std::vector<pmt> val;
+        uint64_t nelems;
+        sb.sgetn(reinterpret_cast<char*>(&nelems), sizeof(nelems));
+        for (uint64_t n = 0; n < nelems; n++) {
+            val.push_back(deserialize(sb));
+        }
+        return val;
+    }
+    else if constexpr (UniformVector<T> && !String<T>) {
+        uint64_t sz;
+        sb.sgetn(reinterpret_cast<char*>(&sz), sizeof(uint64_t));
+        std::vector<typename T::value_type> val(sz);
+        sb.sgetn(reinterpret_cast<char*>(val.data()), static_cast<std::streamsize>(sz * sizeof(val[0])));
+        return val;
+    }
+    else if constexpr (String<T>) {
+        uint64_t sz;
+        sb.sgetn(reinterpret_cast<char*>(&sz), sizeof(uint64_t));
+        std::string val(sz, '0');
+        sb.sgetn(reinterpret_cast<char*>(val.data()), static_cast<std::streamsize>(sz));
+        return val;
+    }
+    else if constexpr (UniformStringVector<T>) {
+        uint64_t sz;
+        sb.sgetn(reinterpret_cast<char*>(&sz), sizeof(uint64_t));
+        std::vector<typename T::value_type> val(sz);
+        for (size_t i = 0; i < val.size(); i++) {
+            sb.sgetn(reinterpret_cast<char*>(&sz), sizeof(uint64_t));
+            val[i].resize(sz);
+            sb.sgetn(val[i].data(), static_cast<std::streamsize>(sz));
+        }
+        return val;
+    }
+    else if constexpr (PmtMap<T>) {
+        map_t val;
+
+        uint32_t nkeys;
+        sb.sgetn(reinterpret_cast<char*>(&nkeys), static_cast<std::streamsize>(sizeof(nkeys)));
+        for (uint32_t n = 0; n < nkeys; n++) {
+            uint32_t ksize;
+            sb.sgetn(reinterpret_cast<char*>(&ksize), static_cast<std::streamsize>(sizeof(ksize)));
+            std::vector<char> data;
+            data.resize(ksize);
+            sb.sgetn(data.data(), ksize);
+
+            val[std::string(data.begin(), data.end())] = deserialize(sb);
+        }
+        return val;
+    }
+    else {
+        throw std::runtime_error(
+            "pmt::_deserialize_value: attempted to deserialize invalid PMT type");
+    }
+}
+
+
+template <IsPmt P>
+std::string to_base64(const P& value)
+{
+    std::stringbuf sb;
+    auto nbytes = serialize(sb, value);
+    std::string pre_encoded_str(static_cast<std::size_t>(nbytes), '0');
+    sb.sgetn(pre_encoded_str.data(), nbytes);
+    auto nencoded_bytes = Base64encode_len(static_cast<int>(nbytes));
+    std::string encoded_str(static_cast<std::size_t>(nencoded_bytes), '0');
+    auto nencoded = Base64encode(encoded_str.data(), pre_encoded_str.data(), static_cast<int>(nbytes));
+    encoded_str.resize(static_cast<std::size_t>(nencoded - 1)); // because it null terminates
+    return encoded_str;
+}
+
+[[maybe_unused]] static pmt from_base64(const std::string& encoded_str)
+{
+    std::string bufplain(encoded_str.size(), '0');
+    Base64decode(bufplain.data(), encoded_str.data());
+    std::stringbuf sb(bufplain);
+    return deserialize(sb);
+}
+
+// Allows us to cast from a pmt like this: auto x = cast<float>(mypmt);
+template <class T, IsPmt P>
+T cast(const P& value)
+{
+    return std::visit(
+        [](const auto& arg) -> T {
+            using U = std::decay_t<decltype(arg)>;
+            if constexpr (std::constructible_from<T, U>) {
+                if constexpr(Complex<T>) {
+                    if constexpr (std::integral<U> || std::floating_point<U>) {
+                        return std::complex<typename T::value_type>(static_cast<typename T::value_type>(arg));
+                    } else {
+                         return static_cast<T>(arg);
+                    }
+                } else {
+                    return static_cast<T>(arg);
+                }
+            }
+            // else if constexpr (PmtMap<T> && PmtMap<U>) {
+            //     return std::get<std::map<std::string, pmt_var_t, std::less<>>>(arg);
+            // }
+            else
+                throw std::runtime_error(fmt::format(
+                    "Invalid PMT Cast {} {}", typeid(T).name(), typeid(U).name()));
+        },
+        value);
+}
+
+} // namespace pmtv
+
+namespace fmt {
+template <>
+struct formatter<pmtv::map_t::value_type> {
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const {
+        return fmt::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
+    }
+};
+
+template <pmtv::Complex C>
+struct formatter<C> {
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const C& arg, FormatContext& ctx) const {
+        if (arg.imag() >= 0)
+            return fmt::format_to(ctx.out(), "{0}+j{1}", arg.real(), arg.imag());
+        else
+            return fmt::format_to(ctx.out(), "{0}-j{1}", arg.real(), -arg.imag());
+    }
+};
+
+
+template<pmtv::IsPmt P>
+struct formatter<P>
+{
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const P& value, FormatContext& ctx) const {
+        // Due to an issue with the c++ spec that has since been resolved, we have to do something
+        // funky here.  See
+        // https://stackoverflow.com/questions/37526366/nested-constexpr-function-calls-before-definition-in-a-constant-expression-con
+        // This problem only appears to occur in gcc 11 in certain optimization modes. The problem
+        // occurs when we want to format a vector<pmt>.  Ideally, we can write something like:
+        //      return fmt::format_to(ctx.out(), "[{}]", fmt::join(arg, ", "));
+        // It looks like the issue effects clang 14/15 as well.
+        // However, due to the above issue, it fails to compile.  So we have to do the equivalent
+        // ourselves.  We can't recursively call the formatter, but we can recursively call a lambda
+        // function that does the formatting.
+        // It gets more complicated, because we need to pass the function into the lambda.  We can't
+        // pass in the lamdba as it is defined, so we create a nested lambda.  Which accepts a function
+        // as a argument.
+        // Because we are calling std::visit, we can't pass non-variant arguments to the visitor, so we
+        // have to create a new nested lambda every time we format a vector to ensure that it works.
+        using namespace pmtv;
+        using ret_type = decltype(fmt::format_to(ctx.out(), ""));
+        auto format_func = [&ctx](const auto format_arg) {
+            auto function_main = [&ctx](const auto arg, auto function) -> ret_type {
+            using namespace pmtv;
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (Scalar<T> || Complex<T>)
+                return fmt::format_to(ctx.out(), "{}", arg);
+            else if constexpr (std::same_as<T, std::string>)
+                return fmt::format_to(ctx.out(), "{}",  arg);
+            else if constexpr (UniformVector<T> || UniformStringVector<T>)
+                return fmt::format_to(ctx.out(), "[{}]", fmt::join(arg, ", "));
+            else if constexpr (std::same_as<T, std::vector<pmt>>) {
+                fmt::format_to(ctx.out(), "[");
+                auto new_func = [&function](const auto new_arg) -> ret_type { return function(new_arg, function); };
+                for (auto& a: std::span(arg).first(arg.size()-1)) {
+                    std::visit(new_func, a);
+                    fmt::format_to(ctx.out(), ", ");
+                }
+                std::visit(new_func, arg[arg.size()-1]);
+                return fmt::format_to(ctx.out(), "]");
+                // When we drop support for gcc11/clang15, get rid of the nested lambda and replace
+                // the above with this line.
+                //return fmt::format_to(ctx.out(), "[{}]", fmt::join(arg, ", "));
+            } else if constexpr (PmtMap<T>) {
+                fmt::format_to(ctx.out(), "{{");
+                auto new_func = [&function](const auto new_arg) -> ret_type { return function(new_arg, function); };
+                size_t i = 0;
+                for (auto& [k, v]: arg) {
+                    fmt::format_to(ctx.out(), "{}: ", k);
+                    std::visit(new_func, v);
+                    if (i++ < arg.size() - 1)
+                        fmt::format_to(ctx.out(), ", ");
+                }
+                return fmt::format_to(ctx.out(), "}}");
+                // When we drop support for gcc11/clang15, get rid of the nested lambda and replace
+                // the above with this line.
+                //return fmt::format_to(ctx.out(), "{{{}}}", fmt::join(arg, ", "));
+            } else if constexpr (std::same_as<std::monostate, T>)
+                return fmt::format_to(ctx.out(), "null");
+            return fmt::format_to(ctx.out(), "unknown type {}", typeid(T).name());
+            };
+            return function_main(format_arg, function_main);
+        };
+        return std::visit(format_func, value);
+
+    }
+};
+
+} // namespace fmt
+
+namespace pmtv {
+    template <IsPmt P>
+    std::ostream& operator<<(std::ostream& os, const P& value) {
+        os << fmt::format("{}", value);
+        return os;
+    }
+}
+
+
 
 // #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -12151,7 +13473,8 @@ inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE,  SIGNAL_NAME,    SIGNA
 #include <chrono>
 #include <cstdint>
 #include <map>
-#include <pmtv/pmt.hpp>
+// #include <pmtv/pmt.hpp>
+
 #include <variant>
 #include <vector>
 
