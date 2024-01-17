@@ -310,6 +310,7 @@ public:
                 this->_state = lifecycle::State::ERROR;
             }
         } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
+            this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
@@ -446,6 +447,7 @@ public:
                 }
             }
         } else if (executionPolicy == multiThreaded) {
+            this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
