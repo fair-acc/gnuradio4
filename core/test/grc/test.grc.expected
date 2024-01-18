@@ -4,6 +4,7 @@ blocks:
     parameters:
       denominator: 1
       event_count: 100
+      meta_information: ""
       name: main_source
       numerator: 1
       stride: 0
@@ -34,6 +35,7 @@ blocks:
     id: good::multiply
     parameters:
       denominator: 1
+      meta_information: ""
       name: multiplier
       numerator: 1
       stride: 0
@@ -63,6 +65,7 @@ blocks:
     id: builtin_counter
     parameters:
       denominator: 1
+      meta_information: ""
       name: counter
       numerator: 1
       stride: 0
@@ -92,6 +95,7 @@ blocks:
     id: good::cout_sink
     parameters:
       denominator: 1
+      meta_information: ""
       name: sink
       numerator: 1
       stride: 0
