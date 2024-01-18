@@ -14,6 +14,7 @@
 
 #include <pmtv/pmt.hpp>
 
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "Settings.hpp"
@@ -40,7 +41,7 @@ class CtxSettings : public SettingsBase {
      * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
      * which indicates that no matches were found and there is no chance of matching anything in a further round.
      */
-    using MatchPredicate                                 = std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
+    using MatchPredicate = std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
 
     TBlock                                       *_block = nullptr;
     mutable std::mutex                            _lock{};
@@ -316,7 +317,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (!std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
@@ -448,7 +449,7 @@ private:
     template<typename Type>
     inline constexpr static bool
     isSupportedType() {
-        return std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>;
+        return std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type> || std::is_same_v<Type, property_map>;
     }
 
     template<typename T, typename Func>

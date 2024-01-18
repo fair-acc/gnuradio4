@@ -1,10 +1,10 @@
 #ifndef GNURADIO_FORMATTER_HPP
 #define GNURADIO_FORMATTER_HPP
 
+#include "UncertainValue.hpp"
 #include <complex>
 #include <fmt/format.h>
-
-#include "UncertainValue.hpp"
+#include <gnuradio-4.0/Tag.hpp>
 
 template<typename T>
 struct fmt::formatter<std::complex<T>> {
@@ -68,16 +68,34 @@ struct fmt::formatter<std::complex<T>> {
 template<gr::arithmetic_or_complex_like T>
 struct fmt::formatter<gr::UncertainValue<T>> {
     template<typename ParseContext>
-    constexpr auto parse(ParseContext &ctx) { return ctx.begin(); }
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
 
     template<typename FormatContext>
     constexpr auto
-    format(const gr::UncertainValue<T>&  value, FormatContext &ctx) const {
+    format(const gr::UncertainValue<T> &value, FormatContext &ctx) const {
         if constexpr (gr::meta::complex_like<T>) {
             return fmt::format_to(ctx.out(), "({} ± {})", value.value, value.uncertainty);
         } else {
             return fmt::format_to(ctx.out(), "({:G} ± {:G})", value.value, value.uncertainty);
         }
+    }
+};
+
+template<>
+struct fmt::formatter<gr::property_map> {
+    template<typename ParseContext>
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    constexpr auto
+    format(const gr::property_map &value, FormatContext &ctx) const {
+        return fmt::format_to(ctx.out(), "{{ {} }}", fmt::join(value, ", "));
     }
 };
 

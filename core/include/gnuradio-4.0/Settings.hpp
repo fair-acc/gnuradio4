@@ -13,6 +13,7 @@
 #include "BlockTraits.hpp"
 #include "reflection.hpp"
 #include "Tag.hpp"
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr {
 
@@ -237,7 +238,7 @@ struct SettingsBase {
 namespace detail {
 template<typename T>
 concept HasBaseType = requires { typename std::remove_cvref_t<T>::base_t; };
-};
+}; // namespace detail
 
 template<typename TBlock>
 class BasicSettings : public SettingsBase {
@@ -625,7 +626,7 @@ private:
     template<typename T>
     inline constexpr static bool
     isSupportedType() {
-        return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || gr::meta::vector_type<T>;
+        return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || gr::meta::vector_type<T> || std::is_same_v<T, property_map>;
     }
 
     template<typename T, typename Func>
