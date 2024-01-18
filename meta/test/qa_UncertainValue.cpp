@@ -665,7 +665,7 @@ const boost::ut::suite uncertainValue = [] {
         expect(approx(0.160, value.uncertainty, 1e-3));
     };
 
-    tag("visual") / "visual examples"_test = [] {
+    boost::ut::tag("visual") / "visual examples"_test = [] {
         // uncorrelated values
         UncertainValue uValueA{ 4.0, 2.0 };
         UncertainValue uValueB{ 2.0, 1.0 };

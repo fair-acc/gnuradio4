@@ -252,17 +252,17 @@ const boost::ut::suite SettingsTests = [] {
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = testGraph.emplaceBlock<Source<float>>({ { "sample_rate", 42.f }, { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
-        expect(eq(src.settings().autoUpdateParameters().size(), 3UL));
+        expect(eq(src.settings().autoUpdateParameters().size(), 4UL));
         expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // sample_rate
         auto &block1 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#1" } });
         auto &block2 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#2" } });
         auto &sink   = testGraph.emplaceBlock<Sink<float>>();
-        expect(eq(sink.settings().autoUpdateParameters().size(), 5UL));
+        expect(eq(sink.settings().autoUpdateParameters().size(), 6UL));
         expect(eq(sink.settings().autoForwardParameters().size(), 1UL)); // sample_rate
 
         block1.context = "Test Context";
         block1.settings().updateActiveParameters();
-        expect(eq(block1.settings().autoUpdateParameters().size(), 6UL));
+        expect(eq(block1.settings().autoUpdateParameters().size(), 7UL));
         expect(eq(block1.settings().autoForwardParameters().size(), 2UL));
         // need to add 'n_samples_max' to forwarding list for the block to automatically forward it
         // as the 'n_samples_max' tag is not part of the canonical 'gr::tag::DEFAULT_TAGS' list
@@ -284,7 +284,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().get(keys1).empty());
         expect(block1.settings().get(keys2).empty());
         expect(block1.settings().get(keys3).empty());
-        expect(eq(block1.settings().get().size(), 11UL));
+        expect(eq(block1.settings().get().size(), 12UL));
 
         // set non-existent setting
         expect(not block1.settings().changed()) << "settings not changed";
@@ -359,7 +359,7 @@ const boost::ut::suite SettingsTests = [] {
         "empty"_test = [] {
             auto block = TestBlock<float>();
             block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
-            expect(eq(block.settings().get().size(), 11UL));
+            expect(eq(block.settings().get().size(), 12UL));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
@@ -370,7 +370,7 @@ const boost::ut::suite SettingsTests = [] {
             block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().stagedParameters().size(), 0u));
             block.settings().updateActiveParameters();
-            expect(eq(block.settings().get().size(), 11UL));
+            expect(eq(block.settings().get().size(), 12UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -379,7 +379,7 @@ const boost::ut::suite SettingsTests = [] {
         "empty via graph"_test = [] {
             Graph testGraph;
             auto &block = testGraph.emplaceBlock<TestBlock<float>>();
-            expect(eq(block.settings().get().size(), 11UL));
+            expect(eq(block.settings().get().size(), 12UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
@@ -387,7 +387,7 @@ const boost::ut::suite SettingsTests = [] {
         "with init parameter via graph"_test = [] {
             Graph testGraph;
             auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "scaling_factor", 2.f } });
-            expect(eq(block.settings().get().size(), 11UL));
+            expect(eq(block.settings().get().size(), 12UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -397,7 +397,7 @@ const boost::ut::suite SettingsTests = [] {
         Graph testGraph;
         auto &block = testGraph.emplaceBlock<TestBlock<float>>();
         block.settings().updateActiveParameters();
-        expect(eq(block.settings().get().size(), 11UL));
+        expect(eq(block.settings().get().size(), 12UL));
 
         block.debug    = true;
         const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } }, { "string_vector_setting", std::vector<std::string>{ "A", "B", "C" } } });
