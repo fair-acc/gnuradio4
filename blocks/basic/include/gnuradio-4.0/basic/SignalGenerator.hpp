@@ -1,5 +1,5 @@
-#ifndef GNURADIO_SIGNAL_SOURCE_HPP
-#define GNURADIO_SIGNAL_SOURCE_HPP
+#ifndef GNURADIO_SIGNAL_GENERATOR_HPP
+#define GNURADIO_SIGNAL_GENERATOR_HPP
 
 #include <gnuradio-4.0/Block.hpp>
 #include <numbers>
@@ -8,7 +8,7 @@ namespace gr::basic {
 
 using namespace gr;
 
-namespace signal_source {
+namespace signal_generator {
 enum class Type : int { Const, Sin, Cos, Square, Saw, Triangle };
 using enum Type;
 constexpr auto                                 TypeList  = magic_enum::enum_values<Type>();
@@ -18,12 +18,12 @@ constexpr Type
 parse(std::string_view name) {
     auto signalType = magic_enum::enum_cast<Type>(name, magic_enum::case_insensitive);
     if (!signalType.has_value()) {
-        throw std::invalid_argument(fmt::format("unknown signal source type '{}'", name));
+        throw std::invalid_argument(fmt::format("unknown signal generator type '{}'", name));
     }
     return signalType.value();
 }
 
-} // namespace signal_source
+} // namespace signal_generator
 
 using SignalGeneratorDoc = Doc<R""(
 @brief The SignalGenerator class generates various types of signal waveforms, including sine, cosine, square, constant, saw, and triangle signals.
@@ -64,29 +64,29 @@ struct SignalGenerator : public gr::Block<SignalGenerator<T>, BlockingIO<true>, 
     PortIn<T>  in; // ClockSource input
     PortOut<T> out;
 
-    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                   sample_rate = 1000.f;
-    Annotated<std::string, "signal_type", Visible, Doc<"see signal_source::Type">> signal_type = "Sin";
-    Annotated<T, "frequency", Visible>                                             frequency   = T(1.);
-    Annotated<T, "amplitude", Visible>                                             amplitude   = T(1.);
-    Annotated<T, "offset", Visible>                                                offset      = T(0.);
-    Annotated<T, "phase", Visible, Doc<"in rad">>                                  phase       = T(0.);
+    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                      sample_rate = 1000.f;
+    Annotated<std::string, "signal_type", Visible, Doc<"see signal_generator::Type">> signal_type = "Sin";
+    Annotated<T, "frequency", Visible>                                                frequency   = T(1.);
+    Annotated<T, "amplitude", Visible>                                                amplitude   = T(1.);
+    Annotated<T, "offset", Visible>                                                   offset      = T(0.);
+    Annotated<T, "phase", Visible, Doc<"in rad">>                                     phase       = T(0.);
 
     T _currentTime = T(0.);
 
 private:
-    signal_source::Type _signalType = signal_source::parse(signal_type);
-    T                   _timeTick   = T(1.) / T(sample_rate);
+    signal_generator::Type _signalType = signal_generator::parse(signal_type);
+    T                      _timeTick   = T(1.) / T(sample_rate);
 
 public:
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
-        _signalType = signal_source::parse(signal_type);
+        _signalType = signal_generator::parse(signal_type);
         _timeTick   = T(1.) / T(sample_rate);
     }
 
     [[nodiscard]] constexpr T
     processOne(T /*input*/) noexcept {
-        using enum signal_source::Type;
+        using enum signal_generator::Type;
 
         constexpr T pi2 = T(2.) * std::numbers::pi_v<T>;
         T           value{};
@@ -121,4 +121,4 @@ public:
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::SignalGenerator<T>), in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
 
-#endif // GNURADIO_SIGNAL_SOURCE_HPP
+#endif // GNURADIO_SIGNAL_GENERATOR_HPP
