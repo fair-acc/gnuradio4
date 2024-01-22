@@ -319,8 +319,8 @@ public:
                 continue;
             }
 
-            const auto brailleColIndex = horAxisTransform::toScreen(x, axis_min_x, axis_max_x, horOffset, arrayWidth);
-            const auto brailleRowIndex = arrayHeight - verAxisTransform::toScreen(y, axis_min_y, axis_max_y, 0UZ, arrayHeight);
+            const auto brailleColIndex = horAxisTransform::toScreen(x, ValueType(axis_min_x), ValueType(axis_max_x), horOffset, arrayWidth);
+            const auto brailleRowIndex = arrayHeight - verAxisTransform::toScreen(y, ValueType(axis_min_y), ValueType(axis_max_y), 0UZ, arrayHeight);
             if (brailleRowIndex >= (arrayHeight - 1UZ) || brailleColIndex >= arrayWidth || (style == Style::Bars && brailleRowIndex >= horAxisPosY)) {
                 continue;
             }
@@ -443,7 +443,7 @@ public:
 
     [[nodiscard]] constexpr std::size_t
     getVerticalAxisPositionX() const noexcept {
-        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>(((0. - axis_min_x) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
+        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
         // adjust for axis labels
         std::size_t y_label_width = std::max(fmt::format("{:G}", axis_min_y).size(), fmt::format("{:G}", axis_max_y).size());
         return std::clamp(y_axis_x, y_label_width + 3, _screen_width); // Ensure axis positions are within screen bounds
