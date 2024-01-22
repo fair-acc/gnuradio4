@@ -56,7 +56,7 @@ const boost::ut::suite DynamicBlocktests = [] {
         // sources_count / 2 inputs on construction, and change the number
         // via settings
         auto &adder = testGraph.addBlock(std::make_unique<multi_adder<double>>(sources_count / 2));
-        auto &sink  = testGraph.emplaceBlock<DebugSink<double>>({});
+        auto &sink  = testGraph.emplaceBlock<InspectSink<double>>({});
 
         // Function that adds a new source node to the graph, and connects
         // it to one of adder's ports
@@ -80,7 +80,7 @@ const boost::ut::suite DynamicBlocktests = [] {
             const auto work = sink.work(1UZ);
             expect(eq(work.performed_work, 1UZ));
 
-            expect(eq(sink.lastValue, static_cast<double>((i + 1) * sources.size())));
+            expect(eq(sink.value, static_cast<double>((i + 1) * sources.size())));
         }
 
         // add yet another sources_count number of ports
@@ -104,7 +104,7 @@ const boost::ut::suite DynamicBlocktests = [] {
             const auto sink_work = sink.work(1UZ);
             expect(eq(sink_work.performed_work, 1UZ));
 
-            expect(eq(sink.lastValue, static_cast<double>((i + 1) * sources_count + (i - events_count + 1) * sources_count)));
+            expect(eq(sink.value, static_cast<double>((i + 1) * sources_count + (i - events_count + 1) * sources_count)));
         }
     };
 };
