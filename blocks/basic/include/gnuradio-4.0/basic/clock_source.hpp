@@ -53,7 +53,7 @@ struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceTyp
     A<float, "avg. sample rate", Visible>                                        sample_rate = 1000.f;
     A<std::uint32_t, "chunk_size", Visible, Doc<"number of samples per update">> chunk_size  = 100;
     std::shared_ptr<std::thread>                                                 userProvidedThread;
-    bool                                                                         verbose_console = true;
+    bool                                                                         verbose_console = false;
 
 private:
     std::chrono::time_point<ClockSourceType> _beginSequenceTimePoint = ClockSourceType::now();
