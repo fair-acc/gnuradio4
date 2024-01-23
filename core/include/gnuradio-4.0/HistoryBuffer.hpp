@@ -72,6 +72,8 @@ class HistoryBuffer {
     }
 
 public:
+    using value_type = T;
+
     constexpr explicit HistoryBuffer() noexcept { static_assert(N != std::dynamic_extent, "need to specify capacity"); }
 
     constexpr explicit HistoryBuffer(std::size_t capacity) : _buffer(capacity * 2), _capacity(capacity) {
@@ -151,6 +153,11 @@ public:
     [[nodiscard]] constexpr size_t
     size() const noexcept {
         return _size;
+    }
+
+    [[nodiscard]] constexpr bool
+    empty() const noexcept {
+        return _size == 0;
     }
 
     [[nodiscard]] constexpr size_t
