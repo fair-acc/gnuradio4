@@ -902,7 +902,7 @@ public:
                 return work::Status::ERROR;
             }
 
-            ports_status.in_samples = static_cast<std::size_t>(ports_status.in_samples / denominator) * denominator; // remove reminder
+            ports_status.in_samples = static_cast<std::size_t>(ports_status.in_samples / denominator) * denominator; // remove remainder
 
             const std::size_t out_min_limit = ports_status.out_min_samples;
             const std::size_t out_max_limit = std::min(ports_status.out_available, ports_status.out_max_samples);
@@ -918,10 +918,10 @@ public:
                 return work::Status::INSUFFICIENT_INPUT_ITEMS;
             }
 
-            if (in_min_wo_remainder < in_max_wo_remainder) {
+            if (in_min_wo_remainder <= in_max_wo_remainder) {
                 ports_status.in_samples = std::clamp(ports_status.in_samples, in_min_wo_remainder, in_max_wo_remainder);
             } else {
-                ports_status.in_samples = std::min(ports_status.in_samples, std::min(in_min_wo_remainder, in_max_wo_remainder));
+                return work::Status::ERROR;
             }
             ports_status.out_samples = numerator * (ports_status.in_samples / denominator);
         }
@@ -1065,21 +1065,21 @@ protected:
 #endif
             if constexpr (!Resampling::kEnabled) { // clamp input until (excluding) next tag unless the read-position is on the tag
                 // N.B. minimum size '1' because we could have two tags on adjacent samples.
-                ports_status.in_samples  = ports_status.nSamplesToNextTag == 0 ? std::min(ports_status.in_samples, std::max(ports_status.nSamplesToNextTagAfter, 1UZ))
-                                                                               : std::min(ports_status.in_samples, ports_status.nSamplesToNextTag);
-                ports_status.out_samples = ports_status.in_samples;
+                ports_status.in_samples = ports_status.nSamplesToNextTag == 0 ? std::min(ports_status.in_samples, std::max(ports_status.nSamplesToNextTagAfter, 1UZ))
+                                                                              : std::min(ports_status.in_samples, ports_status.nSamplesToNextTag);
             }
 #ifdef _DEBUG
             fmt::println("block {} - mark2 - in {} -> out {}", name, ports_status.in_samples, ports_status.out_samples);
 #endif
-            ports_status.in_samples = std::min(ports_status.in_samples, ports_status.nSamplesToEosTag); // clamp input until EOS tag
+            ports_status.in_samples  = std::min(ports_status.in_samples, ports_status.nSamplesToEosTag); // clamp input until EOS tag
+            ports_status.out_samples = ports_status.in_samples;
             // TODO: recheck definitions of numerator and denominator
             //   Provided we we define N := <numerator> and M := <denominator>, do we expect (assuming a simple in->out block) that
             //  a) for N input samples M output samples are produced, or
             //  b) for a given number of input samples X -> X * N/M output samples are produced.
             //  Some of the logic conditions vary depending on whether we assume 'a)' or 'b)'.
-            const bool isEOSTagPresent = ports_status.nSamplesToEosTag == 0                                                             //
-                                      || ports_status.nSamplesToEosTag < std::max(ports_status.in_samples, ports_status.in_min_samples) //
+            const bool isEOSTagPresent = ports_status.nSamplesToEosTag == 0                          //
+                                      || ports_status.nSamplesToEosTag < ports_status.in_min_samples //
                                       || ports_status.nSamplesToEosTag < numerator;
 #ifdef _DEBUG
             if (isEOSTagPresent) {
