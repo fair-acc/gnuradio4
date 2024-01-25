@@ -29,6 +29,22 @@ struct TestStruct {
     }
 };
 
+void
+consumableInputRangeTest1(auto in) {
+    const auto inFirst = in[0];
+}
+
+void
+consumableInputRangeTest2(gr::ConsumableSpan auto in) {
+    const auto inFirst = in[0];
+}
+
+template<typename T>
+void
+consumableInputRangeTest3(std::span<const T> in) {
+    const auto inFirst = in[0];
+}
+
 const boost::ut::suite BasicConceptsTests = [] {
     using namespace boost::ut;
 
@@ -53,8 +69,9 @@ const boost::ut::suite BasicConceptsTests = [] {
                 // runtime interface tests
                 expect(eq(reader.available(), std::size_t{ 0 }));
                 expect(eq(reader.position(), std::make_signed_t<std::size_t>{ -1 }));
-                expect(nothrow([&reader] { expect(eq(reader.get(std::size_t{ 0 }).size(), std::size_t{ 0 })); })) << typeName << "throws";
-                expect(nothrow([&reader] { expect(reader.consume(std::size_t{ 0 })); }));
+                gr::ConsumableSpan auto data = reader.get(std::size_t{ 0 });
+                expect(nothrow([&reader, &data] { expect(eq(data.size(), std::size_t{ 0 })); })) << typeName << "throws";
+                expect(nothrow([&reader, &data] { expect(data.consume(std::size_t{ 0 })); }));
 
                 expect(writer.available() >= buffer.size());
                 expect(nothrow([&writer] { writer.publish([](const std::span<int32_t> &) { /* noop */ }, 0); }));
@@ -68,9 +85,13 @@ const boost::ut::suite BasicConceptsTests = [] {
                 if constexpr (requires { value.publish(1); }) {
                     value.publish(1);
                 }
+                consumableInputRangeTest1(data);
+                consumableInputRangeTest2(data);
+                // consumableInputRangeTest3(data); // this does not compile
+                consumableInputRangeTest3(static_cast<std::span<const int32_t>>(data));
             }
-            | std::tuple<gr::test::BufferSkeleton<int32_t>, gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>,
-                         gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Multi>>{ 2, 2, 2 };
+            // TODO: remove gr::test::BufferSkeleton<int32_t> from test, need solution to make ConsumableInputRange public
+            | std::tuple<gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>, gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Multi>>{ 2, 2 };
 };
 
 const boost::ut::suite SequenceTests = [] {
@@ -225,14 +246,14 @@ const boost::ut::suite UserApiExamples = [] {
 
         // N.B. here using a simple read-only (sink) example:
         for (int i = 0; reader.available() != 0; i++) {
-            std::span<const int32_t> fixedLength = reader.get(3); // explicitly typed for illustration
-            auto                     available   = reader.get();
+            gr::ConsumableSpan auto fixedLength = reader.get(3); // 'std::span<const int32_t> fixedLength' is not allowed explicitly
+            gr::ConsumableSpan auto available   = reader.get();
             fmt::print("iteration {} - fixed-size data[{:2}]: [{}]\n", i, fixedLength.size(), fmt::join(fixedLength, ", "));
             fmt::print("iteration {} - full-size  data[{:2}]: [{}]\n", i, available.size(), fmt::join(available, ", "));
 
             // consume data -> allows corresponding buffer to be overwritten by writer
             // if there are no other reader claiming that buffer segment
-            if (reader.consume(fixedLength.size())) {
+            if (fixedLength.consume(fixedLength.size())) {
                 // for info-only - since available() can change in parallel
                 // N.B. lock-free buffer and other writer may add while processing
                 fmt::print("iteration {} - consumed {} elements - still available: {}\n", i, fixedLength.size(), reader.available());
@@ -289,11 +310,11 @@ const boost::ut::suite CircularBufferTests = [] {
                     auto blockSize = static_cast<std::size_t>(_blockSize);
                     for (std::size_t i = 0; i < buffer.size(); i++) {
                         expect(writer.try_publish([&counter](auto &writable) { std::iota(writable.begin(), writable.end(), counter += writable.size()); }, blockSize));
-                        auto readable = reader.get();
+                        gr::ConsumableSpan auto readable = reader.get();
                         expect(eq(readable.size(), blockSize));
                         expect(eq(readable.front(), static_cast<int>(counter)));
                         expect(eq(readable.back(), static_cast<int>(counter + blockSize - 1)));
-                        expect(reader.consume(blockSize));
+                        expect(readable.consume(blockSize));
                     }
                 }
 
@@ -305,12 +326,12 @@ const boost::ut::suite CircularBufferTests = [] {
                         data[i] = static_cast<int>(i + 1);
                     }
                     data.publish(4);
-                    auto read_data = reader.get();
+                    gr::ConsumableSpan auto read_data = reader.get();
                     expect(eq(read_data.size(), std::size_t{ 4 }));
                     for (std::size_t i = 0; i < data.size(); i++) {
                         expect(eq(static_cast<int>(i + 1), read_data[i])) << "case 0: read index " << i;
                     }
-                    expect(reader.consume(4));
+                    expect(read_data.consume(4));
                 }
                 for (int k = 0; k < 3; k++) {
                     // case 1: reserve more than actually written
@@ -322,12 +343,12 @@ const boost::ut::suite CircularBufferTests = [] {
                     data.publish(2);
                     const auto cursor_after = buffer.cursor_sequence().value();
                     expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
-                    auto read_data = reader.get();
+                    gr::ConsumableSpan auto read_data = reader.get();
                     expect(eq(std::size_t{ 2 }, read_data.size())) << fmt::format("received {} samples instead of expected 2", read_data.size());
                     for (std::size_t i = 0; i < data.size(); i++) {
                         expect(eq(static_cast<int>(i + 1), read_data[i])) << "read 1: index " << i;
                     }
-                    expect(reader.consume(2));
+                    expect(read_data.consume(2));
                 }
                 for (int k = 0; k < 3; k++) {
                     // case 2: reserve using RAII token
@@ -341,12 +362,12 @@ const boost::ut::suite CircularBufferTests = [] {
                     data.publish(2);
                     const auto cursor_after = buffer.cursor_sequence().value();
                     expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
-                    auto read_data = reader.get();
+                    gr::ConsumableSpan auto read_data = reader.get();
                     expect(eq(std::size_t{ 2 }, read_data.size())) << fmt::format("received {} samples instead of expected 2", read_data.size());
                     for (std::size_t i = 0; i < data.size(); i++) {
                         expect(eq(static_cast<int>(i + 1), read_data[i])) << "read 1: index " << i;
                     }
-                    expect(reader.consume(2));
+                    expect(read_data.consume(2));
                 }
             }
             | std::vector{
@@ -395,10 +416,10 @@ const boost::ut::suite UserDefinedTypeCasting = [] {
                 },
                 2);
         expect(eq(reader.available(), std::size_t{ 2 }));
-        std::span<const std::complex<float>> data = reader.get();
+        ConsumableSpan auto data = reader.get();
         expect(eq(data.size(), std::size_t{ 2 }));
 
-        auto const const_bytes = std::as_bytes(data);
+        auto const const_bytes = std::as_bytes(static_cast<std::span<const std::complex<float>>>(data));
         expect(eq(const_bytes.size(), data.size() * sizeof(std::complex<float>)));
 
         auto convertToFloatSpan = [](std::span<const std::complex<float>> &c) -> std::span<const float> {
@@ -410,7 +431,7 @@ const boost::ut::suite UserDefinedTypeCasting = [] {
         expect(eq(floatArray[2], +2.0f));
         expect(eq(floatArray[3], -2.0f));
 
-        expect(reader.consume(data.size()));
+        expect(data.consume(data.size()));
         expect(eq(reader.available(), std::size_t{ 0 })); // needed otherwise buffer write will not be called
     };
 };
@@ -454,16 +475,16 @@ const boost::ut::suite StreamTagConcept = [] {
 
         { // read-only worker (sink) mock-up
             fmt::print("read position: {}\n", reader.position());
-            const auto readData = reader.get();
-            const auto tags     = tagReader.get();
+            const ConsumableSpan auto readData = reader.get();
+            const ConsumableSpan auto tags     = tagReader.get();
 
             fmt::print("received {} tags\n", tags.size());
             for (auto &readTag : tags) {
                 fmt::print("stream-tag @{:3}: '{}'\n", readTag.index, readTag.data);
             }
 
-            expect(reader.consume(readData.size()));
-            expect(tagReader.consume(tags.size())); // N.B. consume tag based on expiry
+            expect(readData.consume(readData.size()));
+            expect(tags.consume(tags.size())); // N.B. consume tag based on expiry
         }
     };
 };
@@ -497,14 +518,14 @@ const boost::ut::suite NonPowerTwoTests = [] {
 
         const auto readSamples = [&reader] {
             while (reader.available()) {
-                const auto vectorData = reader.get();
+                const ConsumableSpan auto vectorData = reader.get();
                 for (auto &vector : vectorData) {
                     static int offset = -1;
                     expect(eq(vector.size(), 1u)) << "vector size == 1";
                     expect(eq(vector[0] - offset, 1)) << "vector offset == 1";
                     offset = vector[0];
                 }
-                expect(reader.consume(vectorData.size()));
+                expect(vectorData.consume(vectorData.size()));
             }
         };
 
