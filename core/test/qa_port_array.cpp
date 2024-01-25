@@ -125,14 +125,14 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
             auto available = std::min(inputReader->available(), outputWriter->available());
             if (available == 0) return gr::work::Status::DONE;
 
-            auto inputSpan  = inputReader->get(available);
-            auto outputSpan = outputWriter->reserve_output_range(available);
+            gr::ConsumableSpan auto inputSpan  = inputReader->get(available);
+            auto                    outputSpan = outputWriter->reserve_output_range(available);
 
             for (std::size_t valueIndex = 0; valueIndex < available; ++valueIndex) {
                 outputSpan[valueIndex] = inputSpan[valueIndex];
             }
 
-            inputReader->consume(available);
+            inputSpan.consume(available);
             outputSpan.publish(available);
         }
         return gr::work::Status::OK;

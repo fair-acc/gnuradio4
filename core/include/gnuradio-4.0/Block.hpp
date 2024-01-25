@@ -284,17 +284,6 @@ concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
-template<typename T>
-concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
-
-static_assert(ConsumableSpan<traits::block::detail::dummy_input_span<float>>);
-
-template<typename T>
-concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
-                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0UZ); };
-
-static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
-
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -1101,9 +1090,7 @@ protected:
 
         // TODO: these checks can be moved to setting changed
         checkParametersAndThrowIfNeeded();
-
         updatePortsStatus();
-
         if constexpr (kIsSourceBlock) {
             // TODO: available_samples() methods are no longer needed for Source blocks, the are presently still/only needed for merge graph/block.
             // TODO: Review if they can be removed.

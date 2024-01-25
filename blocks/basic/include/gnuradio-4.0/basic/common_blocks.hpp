@@ -175,7 +175,8 @@ public:
 
         std::vector<std::span<const double>> readers;
         for (auto &input_port : _input_ports) {
-            readers.push_back(input_port.streamReader().get(available_samples));
+            gr::ConsumableSpan auto r = input_port.streamReader().get(available_samples);
+            readers.push_back(static_cast<std::span<const double>>(r));
         }
 
         auto &writer = _output_port.streamWriter();

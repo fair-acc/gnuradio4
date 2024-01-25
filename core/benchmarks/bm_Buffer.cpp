@@ -55,7 +55,7 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
 
     constexpr int n_repeat = 8;
 
-    std::barrier  barrier(static_cast<std::ptrdiff_t>(nProducer + nConsumer + 1));
+    std::barrier barrier(static_cast<std::ptrdiff_t>(nProducer + nConsumer + 1));
 
     // init producers
     std::atomic<int>         threadID = 0;
@@ -100,10 +100,10 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
                     if (reader.available() < vector_length) {
                         continue;
                     }
-                    const auto &input = reader.get(vector_length);
+                    const ConsumableSpan auto &input = reader.get(vector_length);
                     nSamplesConsumed += input.size();
 
-                    if (!reader.consume(input.size())) {
+                    if (!input.consume(input.size())) {
                         throw std::runtime_error(fmt::format("could not consume {} samples", input.size()));
                     }
                 }

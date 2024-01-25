@@ -404,8 +404,8 @@ public:
             while (!seen_finished) {
                 seen_finished = finished;
                 while (reader.available() > 0) {
-                    auto event = reader.get(1);
-                    auto it    = mapped_threads.find(event[0].thread_id);
+                    gr::ConsumableSpan auto event = reader.get(1);
+                    auto                    it    = mapped_threads.find(event[0].thread_id);
                     if (it == mapped_threads.end()) {
                         it = mapped_threads.emplace(event[0].thread_id, static_cast<int>(mapped_threads.size())).first;
                     }
@@ -415,7 +415,7 @@ public:
                         fmt::print(out_stream, "{}", event[0].toJSON(pid, it->second));
                     }
                     is_first    = false;
-                    std::ignore = reader.consume(1);
+                    std::ignore = event.consume(1);
                 }
             }
             fmt::print(out_stream, "\n]\n");
