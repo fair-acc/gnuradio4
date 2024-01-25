@@ -18472,18 +18472,20 @@ protected:
 
         auto adjust_for_input_port = [&ps = ports_status]<PortLike Port>(Port &port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                if (!port.isConnected()) {
-                    return;
+                if (port.isConnected()) {
+                    ps.has_sync_input_ports          = true;
+                    ps.in_min_samples                = std::max(ps.in_min_samples, port.min_samples);
+                    ps.in_max_samples                = std::min(ps.in_max_samples, port.max_samples);
+                    ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
+                    ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
+                    ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
                 }
-                ps.has_sync_input_ports          = true;
-                ps.in_min_samples                = std::max(ps.in_min_samples, port.min_samples);
-                ps.in_max_samples                = std::min(ps.in_max_samples, port.max_samples);
-                ps.in_available                  = std::min(ps.in_available, port.streamReader().available());
-                ps.nSamplesToNextTag             = std::min(ps.nSamplesToNextTag, nSamplesUntilNextTag(port).value_or(std::numeric_limits<std::size_t>::max()));
-                ps.nSamplesToNextTagAfter        = std::min(ps.nSamplesToNextTagAfter, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max())); /* 1: in case nextTag == 0 */
-                ps.nSamplesToEosTag              = std::min(ps.nSamplesToEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
-                ps.in_at_least_one_port_has_data = ps.in_at_least_one_port_has_data | (port.streamReader().available() > 0);
-                ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
+            }
+            // if Async ports are present then we still want to process Tags fo these ports
+            if (port.isConnected()) {
+                ps.nSamplesToNextTag      = std::min(ps.nSamplesToNextTag, nSamplesUntilNextTag(port).value_or(std::numeric_limits<std::size_t>::max()));
+                ps.nSamplesToNextTagAfter = std::min(ps.nSamplesToNextTagAfter, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max())); /* 1: in case nextTag == 0 */
+                ps.nSamplesToEosTag       = std::min(ps.nSamplesToEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
             }
         };
         for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts(&self()));

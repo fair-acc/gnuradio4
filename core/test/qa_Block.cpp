@@ -4,9 +4,11 @@
 
 #include <fmt/format.h>
 
+#include "gnuradio-4.0/basic/clock_source.hpp"
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -98,8 +100,29 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr:
     }
 };
 
+template<typename T>
+struct AsyncBlock : gr::Block<AsyncBlock<T>> {
+    gr::PortIn<T, gr::Async>  in;
+    gr::PortOut<T, gr::Async> out;
+
+    gr::work::Status
+    processBulk(gr::PortIn<T, gr::Async>::ReaderType *inReader, gr::PortOut<T, gr::Async>::WriterType *outputWriter) {
+        auto available = std::min(inReader->available(), outputWriter->available());
+        if (available == 0) {
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+        auto inSpan  = inReader->get(available);
+        auto outSpan = outputWriter->reserve_output_range(available);
+        std::copy(inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(available)), outSpan.begin());
+        boost::ut::expect(inReader->consume(available)) << "Samples were not consumed";
+        outSpan.publish(available);
+        return gr::work::Status::OK;
+    }
+};
+
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, n_samples);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (IntDecBlock<T>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (AsyncBlock<T>), in, out);
 
 void
 interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
@@ -287,6 +310,25 @@ const boost::ut::suite _stride_tests = [] {
         stride_test( {.n_samples = 1000000, .stride = 249900, .in_port_max = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500 }, thread_pool);
     };
     // clang-format on
+
+    "Async ports tests"_test = [&thread_pool] {
+        using namespace gr;
+        using namespace gr::testing;
+        constexpr std::uint64_t n_samples   = 1000;
+        constexpr float         sample_rate = 1000.f;
+        Graph                   testGraph;
+        auto                   &tagSrc     = testGraph.emplaceBlock<TagSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "TagSource" } });
+        auto                   &asyncBlock = testGraph.emplaceBlock<AsyncBlock<float>>({ { "name", "AsyncBlock" } });
+        auto                   &sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
+
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).to<"in">(sink)));
+
+        scheduler::Simple sched{ std::move(testGraph) };
+        sched.runAndWait();
+
+        expect(eq(n_samples, static_cast<std::uint32_t>(sink.n_samples_produced))) << "Number of samples does not match";
+    };
 };
 
 int
