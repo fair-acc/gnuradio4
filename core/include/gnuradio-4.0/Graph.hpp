@@ -64,7 +64,8 @@ public:
         if (!_dynamicPortsLoaded) _dynamicPortsLoader();
     }
 
-    BuiltinMessagePortPair *builtinMessagePorts = nullptr;
+    MsgPortInNamed<"__Builtin">  *msgIn;
+    MsgPortOutNamed<"__Builtin"> *msgOut;
 
     [[nodiscard]] gr::DynamicPort &
     dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
@@ -327,6 +328,11 @@ private:
         }
     }
 
+    void initMessagePorts() {
+        msgIn = std::addressof(_block.msgIn);
+        msgOut = std::addressof(_block.msgOut);
+    }
+
     void
     createDynamicPortsLoader() {
         _dynamicPortsLoader = [this] {
@@ -392,26 +398,26 @@ public:
     ~BlockWrapper() override = default;
 
     BlockWrapper() {
-        builtinMessagePorts = std::addressof(_block.builtinMessagePorts);
+        initMessagePorts();
         createDynamicPortsLoader();
     }
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
     explicit BlockWrapper(Arg &&arg) : _block(std::forward<Arg>(arg)) {
-        builtinMessagePorts = std::addressof(_block.builtinMessagePorts);
+        initMessagePorts();
         createDynamicPortsLoader();
     }
 
     template<typename... Args>
         requires(!detail::contains_type<BlockWrapper, std::decay_t<Args>...> && sizeof...(Args) > 1)
     explicit BlockWrapper(Args &&...args) : _block{ std::forward<Args>(args)... } {
-        builtinMessagePorts = std::addressof(_block.builtinMessagePorts);
+        initMessagePorts();
         createDynamicPortsLoader();
     }
 
     explicit BlockWrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _block{ std::move(init_parameter) } {
-        builtinMessagePorts = std::addressof(_block.builtinMessagePorts);
+        initMessagePorts();
         createDynamicPortsLoader();
     }
 
@@ -742,7 +748,7 @@ private:
         [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
         to(Destination &destination) {
             if constexpr (destinationPortIndex == gr::meta::default_message_port_index) {
-                return to<Destination, decltype(destination.builtinMessagePorts.input)>(destination, destination.builtinMessagePorts.input);
+                return to<Destination, decltype(destination.msgIn)>(destination, destination.msgIn);
 
             } else {
                 return to<destinationPortIndex, meta::invalid_index, Destination>(destination);
@@ -787,8 +793,8 @@ private:
         auto &currentBlockData       = _blocksData[std::string(currentBlock->uniqueName())];
         currentBlockData.blockAccess = currentBlock.get();
 
-        if (ConnectionResult::SUCCESS != currentBlockData.toChildMessagePort.connect(currentBlock->builtinMessagePorts->input)
-            || ConnectionResult::SUCCESS != currentBlock->builtinMessagePorts->output.connect(currentBlockData.fromChildMessagePort)) {
+        if (ConnectionResult::SUCCESS != currentBlockData.toChildMessagePort.connect(*currentBlock->msgIn)
+            || ConnectionResult::SUCCESS != currentBlock->msgOut->connect(currentBlockData.fromChildMessagePort)) {
             throw fmt::format("Connect of graph {} and child {} failed", unique_name, currentBlock->uniqueName());
         }
     }
@@ -872,7 +878,7 @@ public:
     [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
     connect(Source &source) {
         if constexpr (sourcePortIndex == meta::default_message_port_index) {
-            return SourceConnector<Source, decltype(source.builtinMessagePorts.output), meta::invalid_index, meta::invalid_index>(*this, source, source.builtinMessagePorts.output);
+            return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut);
         } else {
             return connect<sourcePortIndex, meta::invalid_index, Source>(source);
         }
@@ -951,7 +957,7 @@ public:
                     [&message](std::span<Message> &writable) { writable[0] = message; }, 1);
         };
 
-        if (std::addressof(port) == std::addressof(builtinMessagePorts.input)) {
+        if (std::addressof(port) == std::addressof(msgIn)) {
             std::vector<Message> matchedInputForAll;
             matchedInputForAll.reserve(input.size());
 
@@ -1021,7 +1027,7 @@ public:
                     // fmt::print("..... Graph sending a message with a new sender {}\n", newSender);
                     message[gr::message::key::Sender] = std::move(newSender);
                     // We're not using emitMessage as it would override the sender name
-                    builtinMessagePorts.output.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
+                    msgOut.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
                 }
             }
         }

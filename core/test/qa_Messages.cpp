@@ -280,8 +280,8 @@ const boost::ut::suite MessagesTests = [] {
 
         FactorSettingsMessageSender<float>    messageSender(eventChecker);
         SettingsUpdatedMessageReceiver<float> messageReceiver(eventChecker);
-        expect(eq(ConnectionResult::SUCCESS, messageSender.builtinMessagePorts.output.connect(flow.builtinMessagePorts.input)));
-        expect(eq(ConnectionResult::SUCCESS, flow.builtinMessagePorts.output.connect(messageReceiver.builtinMessagePorts.input)));
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, flow.msgOut.connect(messageReceiver.msgIn)));
 
         std::thread messenger([&] {
             while (!messageSender.finished()) {

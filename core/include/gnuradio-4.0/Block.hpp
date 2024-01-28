@@ -162,7 +162,7 @@ template<fixed_string Name, typename Self>
 inputPort(Self *self) noexcept {
     constexpr int Index = meta::indexForName<Name, traits::block::all_input_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
-        return self->builtinMessagePorts.input;
+        return self->msgIn;
     }
     return inputPort<Index, traits::port::port_kind::Any, Self>(self);
 }
@@ -172,7 +172,7 @@ template<fixed_string Name, typename Self>
 outputPort(Self *self) noexcept {
     constexpr int Index = meta::indexForName<Name, traits::block::all_output_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
-        return self->builtinMessagePorts.output;
+        return self->msgOut;
     }
     return outputPort<Index, traits::port::port_kind::Any, Self>(self);
 }
@@ -295,11 +295,6 @@ concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::outp
                       and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0UZ); };
 
 static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
-
-struct BuiltinMessagePortPair {
-    MsgPortInNamed<"__Builtin">  input;
-    MsgPortOutNamed<"__Builtin"> output;
-};
 
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
@@ -461,7 +456,11 @@ public:
     std::atomic<lifecycle::State>     state       = lifecycle::State::IDLE;
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
 
-    BuiltinMessagePortPair builtinMessagePorts;
+    // TODO: C++26 make sure these are not reflected
+    // We support ports that are template parameters or reflected member variables,
+    // so these are handled in a special way
+    MsgPortInNamed<"__Builtin">  msgIn;
+    MsgPortOutNamed<"__Builtin"> msgOut;
 
     struct PortsStatus {
         std::size_t in_min_samples{ 1UZ };                                             // max of `port.min_samples()` of all input ports
@@ -1051,14 +1050,14 @@ public:
                 inPort.streamReader().consume(available);
             }
         };
-        processPort(builtinMessagePorts.input);
+        processPort(msgIn);
         for_each_port(processPort, inputPorts<traits::port::port_kind::Message>(&self()));
     }
 
     template<typename TMessage>
     void
     emitMessage(TMessage &&message) {
-        emitMessage(builtinMessagePorts.output, std::forward<TMessage>(message));
+        emitMessage(msgOut, std::forward<TMessage>(message));
     }
 
     void
@@ -1435,7 +1434,7 @@ public:
     void
     processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> messages) {
         fmt::print("{} got a message\n", self().unique_name);
-        if (std::addressof(port) != std::addressof(builtinMessagePorts.input)) {
+        if (std::addressof(port) != std::addressof(msgIn)) {
             fmt::print("{} got a message on a wrong port\n", self().unique_name);
             return;
         }
