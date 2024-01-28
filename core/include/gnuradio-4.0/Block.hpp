@@ -180,7 +180,6 @@ outputPort(Self *self) noexcept {
 template<traits::port::kind::type Kind, typename Self>
 [[nodiscard]] constexpr auto
 inputPorts(Self *self) noexcept {
-    auto size = traits::block::ports_data<Self>::template for_kind<Kind>::input_ports::size;
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
         return std::tie(inputPort<Idx, Kind>(self)...);
     }(std::make_index_sequence<traits::block::ports_data<Self>::template for_kind<Kind>::input_ports::size()>());
@@ -443,9 +442,12 @@ public:
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
     //
-    std::size_t       stride_counter = 0UZ;
-    const std::size_t unique_id      = _unique_id_counter++;
-    const std::string unique_name    = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    std::size_t                   stride_counter = 0UZ;
+    std::atomic<lifecycle::State> state          = lifecycle::State::IDLE;
+
+    // TODO: These are not involved in move operations, might be a problem later
+    const std::size_t unique_id   = _unique_id_counter++;
+    const std::string unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name = gr::meta::type_name<Derived>();
@@ -453,7 +455,6 @@ public:
 
     //
     constexpr static std::string_view description = static_cast<std::string_view>(Description::value);
-    std::atomic<lifecycle::State>     state       = lifecycle::State::IDLE;
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
 
     // TODO: C++26 make sure these are not reflected
@@ -584,7 +585,39 @@ public:
         }
     }
 
-    Block(Block &&other) noexcept : std::tuple<Arguments...>(std::move(other)), _settings(std::move(other._settings)) {}
+    Block(Block &&other) noexcept
+        : std::tuple<Arguments...>(std::move(other))
+        , _settings(std::move(other._settings))
+        , numerator(std::move(other.numerator))
+        , denominator(std::move(other.denominator))
+        , stride(std::move(other.stride))
+        , stride_counter(std::move(other.stride_counter))
+        // , state(std::move(other.state)) // atomic, not included in move operations
+        , msgIn(std::move(other.msgIn))
+        , msgOut(std::move(other.msgOut))
+        , ports_status(std::move(other.ports_status))
+        , _output_tags_changed(std::move(other._output_tags_changed))
+        , _mergedInputTag(std::move(other._mergedInputTag)) {}
+
+    Block &
+    operator=(Block &&other) noexcept {
+        auto tmp = std::move(other);
+
+        std::tuple<Arguments...>::swap(*this, *tmp);
+        std::swap(_settings, tmp._settings);
+        std::swap(numerator, tmp.numerator);
+        std::swap(denominator, tmp.denominator);
+        std::swap(stride, tmp.stride);
+        std::swap(stride_counter, tmp.stride_counter);
+        // std::swap(state, tmp.state); // atomic, not included in move operations
+        std::swap(msgIn, tmp.msgIn);
+        std::swap(msgOut, tmp.msgOut);
+        std::swap(ports_status, tmp.ports_status);
+        std::swap(_output_tags_changed, tmp._output_tags_changed);
+        std::swap(_mergedInputTag, tmp._mergedInputTag);
+
+        return *this;
+    }
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
