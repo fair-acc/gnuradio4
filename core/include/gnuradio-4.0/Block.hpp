@@ -133,7 +133,7 @@ invokeProcessOneWithOrWithoutOffset(T &node, std::size_t offset, const Us &...in
         return node.processOne(inputs...);
 }
 
-template<std::size_t Index, auto Kind, typename Self>
+template<std::size_t Index, traits::port::kind::type Kind, typename Self>
 [[nodiscard]] constexpr auto &
 inputPort(Self *self) noexcept {
     using TRequestedPortType = typename traits::block::ports_data<Self>::template for_kind<Kind>::input_ports::template at<Index>;
@@ -145,7 +145,7 @@ inputPort(Self *self) noexcept {
     }
 }
 
-template<std::size_t Index, auto Kind, typename Self>
+template<std::size_t Index, traits::port::kind::type Kind, typename Self>
 [[nodiscard]] constexpr auto &
 outputPort(Self *self) noexcept {
     using TRequestedPortType = typename traits::block::ports_data<Self>::template for_kind<Kind>::output_ports::template at<Index>;
@@ -164,7 +164,7 @@ inputPort(Self *self) noexcept {
     if constexpr (Index == meta::default_message_port_index) {
         return self->msgIn;
     }
-    return inputPort<Index, traits::port::port_kind::Any, Self>(self);
+    return inputPort<Index, traits::port::kind::Any, Self>(self);
 }
 
 template<fixed_string Name, typename Self>
@@ -174,10 +174,10 @@ outputPort(Self *self) noexcept {
     if constexpr (Index == meta::default_message_port_index) {
         return self->msgOut;
     }
-    return outputPort<Index, traits::port::port_kind::Any, Self>(self);
+    return outputPort<Index, traits::port::kind::Any, Self>(self);
 }
 
-template<auto Kind, typename Self>
+template<traits::port::kind::type Kind, typename Self>
 [[nodiscard]] constexpr auto
 inputPorts(Self *self) noexcept {
     auto size = traits::block::ports_data<Self>::template for_kind<Kind>::input_ports::size;
@@ -186,7 +186,7 @@ inputPorts(Self *self) noexcept {
     }(std::make_index_sequence<traits::block::ports_data<Self>::template for_kind<Kind>::input_ports::size()>());
 }
 
-template<auto Kind, typename Self>
+template<traits::port::kind::type Kind, typename Self>
 [[nodiscard]] constexpr auto
 outputPorts(Self *self) noexcept {
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
@@ -536,7 +536,7 @@ protected:
                 ps.in_at_least_one_tag_available = ps.in_at_least_one_port_has_data | (port.tagReader().available() > 0);
             }
         };
-        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts<traits::port::port_kind::Stream>(&self()));
+        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts<traits::port::kind::Stream>(&self()));
 
         auto adjust_for_output_port = [&ps = ports_status]<PortLike Port>(Port &port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
@@ -546,7 +546,7 @@ protected:
                 ps.out_available         = std::min(ps.out_available, port.streamWriter().available());
             }
         };
-        for_each_port([&adjust_for_output_port](PortLike auto &port) { adjust_for_output_port(port); }, outputPorts<traits::port::port_kind::Stream>(&self()));
+        for_each_port([&adjust_for_output_port](PortLike auto &port) { adjust_for_output_port(port); }, outputPorts<traits::port::kind::Stream>(&self()));
 
         ports_status.in_samples = ports_status.in_available;
         if (ports_status.in_samples < ports_status.in_min_samples) ports_status.in_samples = 0;
@@ -668,7 +668,7 @@ public:
                         }
                     }
                 },
-                inputPorts<traits::port::port_kind::Stream>(&self()));
+                inputPorts<traits::port::kind::Stream>(&self()));
         return traits::block::stream_input_port_types<Derived>::size;
     }
 
@@ -693,7 +693,7 @@ public:
                         }
                     }
                 },
-                outputPorts<traits::port::port_kind::Stream>(&self()));
+                outputPorts<traits::port::kind::Stream>(&self()));
         return traits::block::stream_output_port_types<Derived>::size;
     }
 
@@ -823,7 +823,7 @@ public:
                         };
                         (consume_port(input_port), ...);
                     },
-                    inputPorts<traits::port::port_kind::Stream>(&self));
+                    inputPorts<traits::port::kind::Stream>(&self));
         }
         return success;
     }
@@ -865,7 +865,7 @@ public:
             _mergedInputTag.map.clear();
         }
 
-        for_each_port([](PortLike auto &outPort) noexcept { outPort.publishPendingTags(); }, outputPorts<traits::port::port_kind::Stream>(&self()));
+        for_each_port([](PortLike auto &outPort) noexcept { outPort.publishPendingTags(); }, outputPorts<traits::port::kind::Stream>(&self()));
         _output_tags_changed = false;
     }
 
@@ -887,12 +887,12 @@ public:
                     const Tag mergedPortTags = input_port.getTag(untilOffset);
                     mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
                 },
-                inputPorts<traits::port::port_kind::Stream>(&self()));
+                inputPorts<traits::port::kind::Stream>(&self()));
 
         if (!mergedInputTag().map.empty()) {
             settings().autoUpdate(mergedInputTag().map); // apply tags as new settings if matching
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<traits::port::port_kind::Stream>(&self()));
+                for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<traits::port::kind::Stream>(&self()));
             }
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
                 requestStop();
@@ -904,7 +904,7 @@ public:
     updateOutputTagsWithSettingParametersIfNeeded() {
         if (settings().changed()) {
             if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
-                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts<traits::port::port_kind::Stream>(&self()));
+                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts<traits::port::kind::Stream>(&self()));
             }
             settings()._changed.store(false);
         }
@@ -990,7 +990,7 @@ public:
                         return result;
                     }
                 },
-                inputPorts<traits::port::port_kind::Stream>(&self()));
+                inputPorts<traits::port::kind::Stream>(&self()));
     }
 
     constexpr auto
@@ -1015,17 +1015,17 @@ public:
                         return result;
                     }
                 },
-                outputPorts<traits::port::port_kind::Stream>(&self()));
+                outputPorts<traits::port::kind::Stream>(&self()));
     }
 
     inline constexpr void
     publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<traits::port::port_kind::Stream>(&self()));
+        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<traits::port::kind::Stream>(&self()));
     }
 
     inline constexpr void
     publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([&tag_data, tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<traits::port::port_kind::Stream>(&self()));
+        for_each_port([&tag_data, tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<traits::port::kind::Stream>(&self()));
     }
 
     constexpr void
@@ -1051,7 +1051,7 @@ public:
             }
         };
         processPort(msgIn);
-        for_each_port(processPort, inputPorts<traits::port::port_kind::Message>(&self()));
+        for_each_port(processPort, inputPorts<traits::port::kind::Message>(&self()));
     }
 
     template<typename TMessage>

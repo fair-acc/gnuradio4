@@ -190,8 +190,8 @@ public:
 
     gr::work::Result
     work(std::size_t requested_work) noexcept {
-        auto &out_port = outputPort<0, gr::traits::port::port_kind::Stream>(this);
-        auto &in_port  = inputPort<0, gr::traits::port::port_kind::Stream>(this);
+        auto &out_port = outputPort<0, gr::traits::port::kind::Stream>(this);
+        auto &in_port  = inputPort<0, gr::traits::port::kind::Stream>(this);
 
         auto      &reader     = in_port.streamReader();
         auto      &writer     = out_port.streamWriter();

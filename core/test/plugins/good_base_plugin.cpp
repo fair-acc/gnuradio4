@@ -62,7 +62,7 @@ public:
             return { requested_work, 0UZ, grg::work::Status::DONE };
         }
 
-        auto &port   = gr::outputPort<0, gr::traits::port::port_kind::Stream>(this);
+        auto &port   = gr::outputPort<0, gr::traits::port::kind::Stream>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1UZ);
         data[0]      = value;

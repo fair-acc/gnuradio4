@@ -101,19 +101,19 @@ struct fixedBlock_ports_data_helper<TBlock, InputPorts, OutputPorts> {
     using defined_input_ports  = InputPorts;
     using defined_output_ports = OutputPorts;
 
-    template<auto Kind>
+    template<gr::traits::port::kind::type Kind>
     struct for_kind {
-        using input_ports  = typename defined_input_ports ::template filter<traits::port::port_kind::tester_for<Kind>::template is_input_port_or_collection>;
-        using output_ports = typename defined_output_ports ::template filter<traits::port::port_kind::tester_for<Kind>::template is_output_port_or_collection>;
+        using input_ports  = typename defined_input_ports ::template filter<traits::port::kind::tester_for<Kind>::template is_input_port_or_collection>;
+        using output_ports = typename defined_output_ports ::template filter<traits::port::kind::tester_for<Kind>::template is_output_port_or_collection>;
         using all_ports    = meta::concat<input_ports, output_ports>;
 
         using input_port_types  = typename input_ports ::template transform<port::type>;
         using output_port_types = typename output_ports ::template transform<port::type>;
     };
 
-    using all     = for_kind<traits::port::port_kind::Any>;
-    using stream  = for_kind<traits::port::port_kind::Stream>;
-    using message = for_kind<traits::port::port_kind::Message>;
+    using all     = for_kind<traits::port::kind::Any>;
+    using stream  = for_kind<traits::port::kind::Stream>;
+    using message = for_kind<traits::port::kind::Message>;
 };
 
 // This specialization defines block attributes when the block is created
@@ -130,18 +130,18 @@ struct fixedBlock_ports_data_helper<TBlock, Ports...> {
         }
     }())>;
 
-    template<auto Kind>
+    template<traits::port::kind::type Kind>
     struct for_kind {
-        using input_ports  = typename all_ports ::template filter<traits::port::port_kind::tester_for<Kind>::template is_input_port_or_collection>;
-        using output_ports = typename all_ports ::template filter<traits::port::port_kind::tester_for<Kind>::template is_output_port_or_collection>;
+        using input_ports  = typename all_ports ::template filter<traits::port::kind::tester_for<Kind>::template is_input_port_or_collection>;
+        using output_ports = typename all_ports ::template filter<traits::port::kind::tester_for<Kind>::template is_output_port_or_collection>;
 
         using input_port_types  = typename input_ports ::template transform<port::type>;
         using output_port_types = typename output_ports ::template transform<port::type>;
     };
 
-    using all     = for_kind<traits::port::port_kind::Any>;
-    using stream  = for_kind<traits::port::port_kind::Stream>;
-    using message = for_kind<traits::port::port_kind::Message>;
+    using all     = for_kind<traits::port::kind::Any>;
+    using stream  = for_kind<traits::port::kind::Stream>;
+    using message = for_kind<traits::port::kind::Message>;
 };
 
 // clang-format off

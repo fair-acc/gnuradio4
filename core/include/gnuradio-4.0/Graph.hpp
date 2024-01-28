@@ -355,9 +355,9 @@ private:
                     } else {
                         // We can also have ports defined as template parameters
                         if constexpr (decltype(direction)::value == PortDirection::INPUT) {
-                            processPort(where, gr::inputPort<decltype(index)::value, traits::port::port_kind::Any>(&blockRef()));
+                            processPort(where, gr::inputPort<decltype(index)::value, traits::port::kind::Any>(&blockRef()));
                         } else {
-                            processPort(where, gr::outputPort<decltype(index)::value, traits::port::port_kind::Any>(&blockRef()));
+                            processPort(where, gr::outputPort<decltype(index)::value, traits::port::kind::Any>(&blockRef()));
                         }
                     }
                 } else {
@@ -740,7 +740,7 @@ private:
         template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
         [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
         to(Destination &destination) {
-            auto &destinationPort = inputPort<destinationPortIndex, traits::port::port_kind::Any>(&destination);
+            auto &destinationPort = inputPort<destinationPortIndex, traits::port::kind::Any>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
         }
 
@@ -870,7 +870,7 @@ public:
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
     connect(Source &source) {
-        auto &port_or_collection = outputPort<sourcePortIndex, traits::port::port_kind::Any>(&source);
+        auto &port_or_collection = outputPort<sourcePortIndex, traits::port::kind::Any>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
     }
 
