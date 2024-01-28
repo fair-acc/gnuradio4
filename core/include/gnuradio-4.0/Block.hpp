@@ -1038,16 +1038,16 @@ public:
     processScheduledMessages() {
         // fmt::print("processScheduledMessages for {}\n", unique_name);
         auto processPort = [this]<PortLike TPort>(TPort &inPort) {
+            const auto available = inPort.streamReader().available();
             if constexpr (traits::block::can_processMessagesForPort<Derived, TPort>) {
-                const auto available = inPort.streamReader().available();
                 if (available > 0) {
                     self().processMessages(inPort, inPort.streamReader().get(available));
                 }
-                inPort.streamReader().consume(available);
-
-            } else {
-                const auto available = inPort.streamReader().available();
-                inPort.streamReader().consume(available);
+            }
+            if (available > 0) {
+                if (auto consumed = inPort.streamReader().consume(available); !consumed) {
+                    throw fmt::format("Could not consume the messages from the message port");
+                }
             }
         };
         processPort(msgIn);
