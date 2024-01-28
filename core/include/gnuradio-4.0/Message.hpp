@@ -20,19 +20,10 @@ const std::string ErrorInfo = "ERROR_INFO_KEY"; // optional: if a message has an
 
 namespace message::kind {
 const std::string Error           = "ERROR_KIND";
-const std::string Control         = "CONTROL_KIND";
 const std::string Graph_update    = "GRAPH_UPDATE_KIND";
 const std::string UpdateSettings  = "UPDATE_SETTINGS_KIND";
 const std::string SettingsChanged = "SETTINGS_CHANGED_KIND";
 } // namespace message::kind
-
-namespace message::control {
-const std::string Start  = "START_CONTROL";
-const std::string Stop   = "STOP_CONTROL";
-const std::string Pause  = "PAUSE_CONTROL";
-const std::string Resume = "RESUME_CONTROL";
-const std::string Reset  = "RESET_CONTROL";
-} // namespace message::control
 
 using Message = property_map;
 

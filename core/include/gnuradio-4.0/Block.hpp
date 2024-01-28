@@ -1448,31 +1448,7 @@ public:
                 continue;
             }
 
-            if (kind == gr::message::kind::Control) {
-                const auto what = messageField<std::string>(message, gr::message::key::What).value();
-                // fmt::print("{} got a control message {}\n", self().unique_name, what);
-                if constexpr (requires { self().start(); })
-                    if (what == gr::message::control::Start) {
-                        self().start();
-                    }
-                if constexpr (requires { self().stop(); })
-                    if (what == gr::message::control::Stop) {
-                        self().stop();
-                    }
-                if constexpr (requires { self().pause(); })
-                    if (what == gr::message::control::Pause) {
-                        self().pause();
-                    }
-                if constexpr (requires { self().resume(); })
-                    if (what == gr::message::control::Resume) {
-                        self().resume();
-                    }
-                if constexpr (requires { self().reset(); })
-                    if (what == gr::message::control::Reset) {
-                        self().reset();
-                    }
-
-            } else if (kind == gr::message::kind::UpdateSettings) {
+            if (kind == gr::message::kind::UpdateSettings) {
                 const auto data   = messageField<property_map>(message, gr::message::key::Data).value();
                 auto       notSet = settings().set(data);
 
