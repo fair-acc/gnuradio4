@@ -425,6 +425,7 @@ public:
         return std::get<T>(*this);
     }
 
+    // TODO: These are not involved in move operations, might be a problem later
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
@@ -587,7 +588,6 @@ public:
 
     Block(Block &&other) noexcept
         : std::tuple<Arguments...>(std::move(other))
-        , _settings(std::move(other._settings))
         , numerator(std::move(other.numerator))
         , denominator(std::move(other.denominator))
         , stride(std::move(other.stride))
@@ -597,13 +597,14 @@ public:
         , msgOut(std::move(other.msgOut))
         , ports_status(std::move(other.ports_status))
         , _output_tags_changed(std::move(other._output_tags_changed))
-        , _mergedInputTag(std::move(other._mergedInputTag)) {}
+        , _mergedInputTag(std::move(other._mergedInputTag))
+        , _settings(std::move(other._settings)) {}
 
     Block &
     operator=(Block &&other) noexcept {
         auto tmp = std::move(other);
 
-        std::tuple<Arguments...>::swap(*this, *tmp);
+        std::tuple<Arguments...>::swap(*this, tmp);
         std::swap(_settings, tmp._settings);
         std::swap(numerator, tmp.numerator);
         std::swap(denominator, tmp.denominator);

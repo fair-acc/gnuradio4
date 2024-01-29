@@ -30,7 +30,7 @@ createOnesGenerator(IsDone &isDone) {
 
 auto
 messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &totalCounter, std::string inMessageKind, gr::Message replyMessage) {
-    return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+    return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> messages) {
         if (countdown > 0) {
             for (const auto &message : messages) {
                 const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
@@ -107,7 +107,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
 
         gr::testing::FunctionSink<float> messageReceiver;
-        messageReceiver.messageProcessor = [&](auto *_this, gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+        messageReceiver.messageProcessor = [&](auto */*_this*/, gr::MsgPortInNamed<"__Builtin"> &/*port*/, std::span<const gr::Message> messages) {
             for (const auto &message : messages) {
                 const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
                 if (kind == "custom_reply_kind") {
@@ -245,10 +245,11 @@ const boost::ut::suite MessagesTests = [] {
                 return {};
             }
         };
+
         expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
 
         gr::testing::FunctionSink<float> messageReceiver;
-        messageReceiver.messageProcessor = [&](auto *_this, gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+        messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> &/*port*/, std::span<const gr::Message> messages) {
             for (const auto &message : messages) {
                 const auto kind = *gr::messageField<std::string>(message, gr::message::key::Kind);
                 if (kind == gr::message::kind::SettingsChanged) {

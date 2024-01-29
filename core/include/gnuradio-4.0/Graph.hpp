@@ -466,8 +466,8 @@ public:
         return blockRef().work(requested_work);
     }
 
-    virtual void
-    processScheduledMessages() {
+    void
+    processScheduledMessages() override {
         return blockRef().processScheduledMessages();
     }
 
@@ -661,7 +661,7 @@ private:
              typename Destination, typename DestinationPort>
     [[nodiscard]] ConnectionResult
     connectImpl(Source &sourceNodeRaw, SourcePort &source_port_or_collection, Destination &destinationNodeRaw, DestinationPort &destinationPort_or_collection, std::size_t minBufferSize = 65536,
-                std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+                std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(sourceNodeRaw); })
             || !std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(destinationNodeRaw); })) {
             throw std::runtime_error(
@@ -695,7 +695,7 @@ private:
             auto *destinationNode = findBlock(destinationNodeRaw).get();
             // TODO: Rethink edge definition, indices, message port -1 etc.
             _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{ sourcePortIndex, sourcePortSubIndex }, destinationNode,
-                                PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, name);
+                                PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, edgeName);
         }
 
         return result;
@@ -911,14 +911,14 @@ public:
         requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult
     connect(Source &sourceBlockRaw, PortIndexDefinition<std::size_t> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::size_t> destinationPortDefinition,
-            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         auto result = findBlock(sourceBlockRaw)
                               ->dynamicOutputPort(sourcePortDefinition.topLevel, sourcePortDefinition.subIndex)
                               .connect(findBlock(destinationBlockRaw)->dynamicInputPort(destinationPortDefinition.topLevel, destinationPortDefinition.subIndex));
         if (result == ConnectionResult::SUCCESS) {
             auto *sourceBlock      = findBlock(sourceBlockRaw).get();
             auto *destinationBlock = findBlock(destinationBlockRaw).get();
-            _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, name);
+            _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, edgeName);
         }
         return result;
     }
@@ -927,22 +927,22 @@ public:
         requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult
     connect(Source &sourceBlockRaw, PortIndexDefinition<std::string> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::string> destinationPortDefinition,
-            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         auto sourcePortIndex      = this->findBlock(sourceBlockRaw)->dynamicOutputPortIndex(sourcePortDefinition.topLevel);
         auto destinationPortIndex = this->findBlock(destinationBlockRaw)->dynamicInputPortIndex(destinationPortDefinition.topLevel);
         return connect(sourceBlockRaw, { sourcePortIndex, sourcePortDefinition.subIndex }, destinationBlockRaw, { destinationPortIndex, destinationPortDefinition.subIndex }, minBufferSize, weight,
-                       name);
+                       edgeName);
     }
 
     void
     processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> input) {
         // fmt::print("==>>> Calling Graph's {} processMessages and passing to children, count = {}\n", this->unique_name, input.size());
 
-        auto splitFirstComponent = [](std::string_view name) -> std::optional<std::pair<std::string_view, std::string_view>> {
-            auto itSlash = std::ranges::find(name, '/');
-            if (itSlash == name.end()) return {};
+        auto splitFirstComponent = [](std::string_view blockName) -> std::optional<std::pair<std::string_view, std::string_view>> {
+            auto itSlash = std::ranges::find(blockName, '/');
+            if (itSlash == blockName.end()) return {};
 
-            return { { std::string_view(name.begin(), itSlash), std::string_view(itSlash + 1, name.end()) } };
+            return { { std::string_view(blockName.begin(), itSlash), std::string_view(itSlash + 1, blockName.end()) } };
         };
 
         auto notifyChild = [this](std::string_view childName, const auto &message) {
@@ -952,8 +952,8 @@ public:
                 return;
             }
 
-            auto &port = it->second.toChildMessagePort;
-            port.streamWriter().try_publish( //
+            auto &childPort = it->second.toChildMessagePort;
+            childPort.streamWriter().try_publish( //
                     [&message](std::span<Message> &writable) { writable[0] = message; }, 1);
         };
 

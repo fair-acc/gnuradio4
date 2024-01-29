@@ -137,7 +137,7 @@ public:
         return { requested_work, requested_work, gr::work::Status::DONE };
     }
 
-    virtual void
+    void
     processScheduledMessages() override {
         // TODO
     }
