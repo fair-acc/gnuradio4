@@ -1,8 +1,11 @@
+#include "gnuradio-4.0/basic/common_blocks.hpp"
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
+
+#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -13,257 +16,69 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
-template<typename T>
-struct SimpleSource : gr::Block<SimpleSource<T>> {
-    T              value;
-    gr::PortOut<T> out;
-
-    T
-    processOne() {
-        return value;
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(SimpleSource, out);
-
-template<typename T>
-struct CoutSink : gr::Block<CoutSink<T>> {
-    gr::PortIn<T> in;
-
-    void
-    processOne(T value) {
-        std::cout << value << "  ";
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(CoutSink, in);
-
-// TODO:
-//  - needed: sources, basic process, sinks
-//            message senders, message checkers/receivers
-//  - test: one block sends another a message in the same graph
-//  - test: block from outsie sends a message to a block inside the graph
-//  - test: block from inside of a graph sends a message to outside
-//  - test: one block sends a multicast message to everyone in a graph
-//  - test: control messages to start and stop
-//  - test: settings update messages
-//
-//  - tests: custom message ports
-//  - processMessages overloads with 'different' message port types
-//
-//  - test: message processing when scheduler is stopped
-//
-//  idea: tests can use messages to trigger checks
-
-struct EventChecker {
-    struct Event {
-        std::string who;
-        std::string what;
-    };
-
-    std::vector<Event> _recordedEvents;
-    std::mutex         _recordedEventsMutex;
-
-    void
-    addEvent(const std::string &who, const std::string &what) {
-        fmt::print(">> Event added to the record {} -> {}\n", who, what);
-        _recordedEvents.emplace_back(who, what);
-    }
-
-    bool
-    checkEvents(std::string who, const std::vector<std::string> &whats) {
-        return std::ranges::equal(_recordedEvents                                                                       //
-                                          | std::views::filter([&who](const Event &event) { return who == event.who; }) //
-                                          | std::views::transform(&Event::what),
-                                  whats);
-    }
-};
-
-///
-
-template<typename T>
-struct CountSource : public gr::Block<CountSource<T>> {
-    gr::PortOut<T> out;
-    std::size_t    n_samples_max = 0;
-    std::size_t    count         = 0;
-
-    EventChecker *_eventChecker;
-
-    CountSource(EventChecker &eventChecker) : _eventChecker(std::addressof(eventChecker)) {}
-
-    ~CountSource() {}
-
-    constexpr T
-    processOne() {
-        count++;
-        if (count % 50'000 == 0) {
-            fmt::print("Last sent {}\n", count);
-        }
-        if (count >= n_samples_max) {
-            fmt::print("Requesting stop!\n");
-            this->requestStop();
-        }
-        return static_cast<int>(count);
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, out, n_samples_max);
-static_assert(gr::BlockLike<CountSource<float>>);
-
-///
-
-template<typename T>
-struct Amplify : public gr::Block<Amplify<T>> {
-    gr::PortIn<T>  in;
-    gr::PortOut<T> out;
-    T              factor     = 1.0;
-    T              lastFactor = 1.0;
-
-    EventChecker *_eventChecker;
-
-    Amplify(EventChecker &eventChecker) : _eventChecker(std::addressof(eventChecker)) {}
-
-    constexpr T
-    processOne(T value) {
-        if (lastFactor != factor) {
-            _eventChecker->addEvent("Amplify", fmt::format("factor_changed_to={}", factor));
-            lastFactor = factor;
-        }
-        return factor * value;
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(Amplify, in, out, factor);
-static_assert(gr::BlockLike<Amplify<float>>);
-
-///
-
-template<typename T>
-struct Sink : gr::Block<Sink<T>> {
-    gr::PortIn<T> in;
-
-    EventChecker *_eventChecker;
-
-    Sink(EventChecker &eventChecker) : _eventChecker(std::addressof(eventChecker)) {}
-
-    constexpr void
-    processOne(T value) {
-        std::cout << value << std::endl;
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(Sink, in);
-static_assert(gr::BlockLike<Sink<float>>);
-
-///
-
-template<typename T>
-struct FactorSettingsMessageSender : public gr::Block<FactorSettingsMessageSender<T>> {
-    gr::PortOut<T> unused;
-    int            countdown = 3;
-    T              factor    = 1.0;
-    std::string    target;
-
-    EventChecker *_eventChecker;
-
-    FactorSettingsMessageSender(EventChecker &eventChecker, std::string _target = {}) : _eventChecker(std::addressof(eventChecker)), target(std::move(_target)) {}
-
-    bool
-    finished() const {
-        return countdown == 0;
-    }
-
-    constexpr T
-    processOne() {
-        if (countdown > 0) {
-            countdown--;
-
-            gr::Message message;
-            message[gr::message::key::Kind]   = gr::message::kind::UpdateSettings;
-            message[gr::message::key::Target] = target;
-            message[gr::message::key::Data]   = gr::property_map{ { "factor", factor } };
-
-            this->emitMessage(std::move(message));
-
-            if (countdown == 0) {
-                fmt::print("{} finished sending messages\n", this->unique_name);
-            }
-            factor += 1;
-
-            std::this_thread::sleep_for(100ms);
+template<typename IsDone>
+auto
+createOnesGenerator(IsDone &isDone) {
+    return [&isDone](auto * /*_this */) -> std::optional<float> {
+        if (!isDone()) {
+            return 1.0f;
         } else {
-            this->requestStop();
+            return {};
         }
-        return static_cast<T>(countdown);
-    }
-};
+    };
+}
 
-ENABLE_REFLECTION_FOR_TEMPLATE(FactorSettingsMessageSender, unused)
-
-///
-
-template<typename T>
-struct SettingsUpdatedMessageReceiver : public gr::Block<SettingsUpdatedMessageReceiver<T>> {
-    gr::PortOut<T> unused;
-    std::size_t    countdown = 10;
-    T              factor    = 1.0;
-
-    EventChecker *_eventChecker;
-
-    SettingsUpdatedMessageReceiver(EventChecker &eventChecker) : _eventChecker(std::addressof(eventChecker)) {}
-
-    bool
-    finished() const {
-        return countdown == 0;
-    }
-
-    constexpr T
-    processOne() {}
-
-    void
-    processMessages(gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
-        for (const auto &message : messages) {
-            // fmt::print("[SUCCESS] {} got a message from {} of kind {}\n", this->unique_name,     //
-            //            gr::messageField<std::string>(message, gr::message::key::Sender).value(), //
-            //            gr::messageField<std::string>(message, gr::message::key::Kind).value());
-            const auto data   = gr::messageField<gr::property_map>(message, gr::message::key::Data).value();
-            const auto sender = gr::messageField<std::string>(message, gr::message::key::Sender).value();
-            const auto error  = gr::messageField<gr::Message>(message, gr::message::key::ErrorInfo);
-            if (error) {
-                const auto  errorData = gr::messageField<gr::property_map>(*error, gr::message::key::Data).value();
-                std::string keysNotSet;
-                for (const auto &[k, v] : errorData) {
-                    keysNotSet += " " + k;
+auto
+messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &totalCounter, std::string inMessageKind, gr::Message replyMessage) {
+    return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+        if (countdown > 0) {
+            for (const auto &message : messages) {
+                const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
+                assert(kind);
+                if (kind != "custom_kind") {
+                    continue;
                 }
-                _eventChecker->addEvent("SettingsUpdatedMessageReceiver"s + " "s + sender, "not_set" + keysNotSet);
-            } else {
-                _eventChecker->addEvent("SettingsUpdatedMessageReceiver"s + " "s + sender, "all_is_fine");
+
+                countdown--;
+                totalCounter++;
+
+                if (!replyMessage.empty()) _this->emitMessage(_this->msgOut, std::move(replyMessage));
             }
         }
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE(SettingsUpdatedMessageReceiver, unused)
-static_assert(gr::traits::block::can_processMessagesForPort<SettingsUpdatedMessageReceiver<float>, gr::MsgPortInNamed<"__Builtin">>);
-
-///
+    };
+}
 
 const boost::ut::suite MessagesTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    "SimplePortConnections"_test = [] {
+    // Testing if multicast messages sent from outside of the graph reach
+    // the nodes inside, and if messages sent from the node reach the outside
+    "MulticastMessaggingWithTheWorld"_test = [] {
         using Scheduler = gr::scheduler::Simple<>;
 
-        EventChecker eventChecker;
+        std::atomic_size_t    collectedEventCount     = 0;
+        std::atomic_size_t    sourceMessagesCountdown = 1;
+        std::atomic_size_t    sinkMessagesCountdown   = 1;
+        constexpr std::size_t requiredEventCount      = 2;
+        std::atomic_bool      receiverGotAMessage     = false;
+        auto                  isDone                  = [&] { return requiredEventCount == collectedEventCount && receiverGotAMessage; };
 
-        auto scheduler = [&eventChecker] {
+        auto scheduler = [&] {
             gr::Graph flow;
-            auto     &source     = flow.emplaceBlock<CountSource<float>>(eventChecker);
-            source.n_samples_max = 1'000'000;
+            auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
 
-            auto &sink    = flow.emplaceBlock<Sink<float>>(eventChecker);
-            auto &process = flow.emplaceBlock<Amplify<float>>(eventChecker);
+            source.generator        = createOnesGenerator(isDone);
+            source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+
+            auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
+            sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
+                gr::Message outMessage;
+                outMessage[gr::message::key::Kind] = "custom_reply_kind";
+                return outMessage;
+            }());
+
+            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
 
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
@@ -278,13 +93,181 @@ const boost::ut::suite MessagesTests = [] {
             fmt::print("    {}\n", block->uniqueName());
         }
 
-        FactorSettingsMessageSender<float>    messageSender(eventChecker);
-        SettingsUpdatedMessageReceiver<float> messageReceiver(eventChecker);
+        gr::testing::MessageSender<float> messageSender;
+        messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
+            if (!isDone()) {
+                gr::Message message;
+                message[gr::message::key::Kind]   = "custom_kind";
+                message[gr::message::key::Target] = "";
+                return message;
+            } else {
+                return {};
+            }
+        };
         expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+
+        gr::testing::FunctionSink<float> messageReceiver;
+        messageReceiver.messageProcessor = [&](auto *_this, gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+            for (const auto &message : messages) {
+                const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
+                if (kind == "custom_reply_kind") {
+                    receiverGotAMessage = true;
+                }
+            }
+        };
         expect(eq(ConnectionResult::SUCCESS, flow.msgOut.connect(messageReceiver.msgIn)));
 
         std::thread messenger([&] {
-            while (!messageSender.finished()) {
+            while (!isDone()) {
+                std::this_thread::sleep_for(100ms);
+                messageSender.processOne();
+                messageReceiver.processScheduledMessages();
+            }
+
+            fmt::print("sender and receiver thread done\n");
+        });
+
+        scheduler.runAndWait();
+        messenger.join();
+    };
+
+    // Testing if targetted messages sent from outside of the graph reach
+    // the node
+    "TargettedMessageForABlock"_test = [] {
+        using Scheduler = gr::scheduler::Simple<>;
+
+        constexpr std::size_t requiredEventCount      = 2;
+        std::atomic_size_t    collectedEventCount     = 0;
+        std::atomic_size_t    sourceMessagesCountdown = 1; // not a target, should not go down
+        std::atomic_size_t    sinkMessagesCountdown   = 2;
+        auto                  isDone                  = [&] { return requiredEventCount == collectedEventCount; };
+
+        auto scheduler = [&] {
+            gr::Graph flow;
+            auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
+
+            source.generator        = createOnesGenerator(isDone);
+            source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+
+            auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
+            sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+
+            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
+
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+
+            return Scheduler(std::move(flow));
+        }();
+
+        auto &flow = scheduler.graph();
+
+        std::string target;
+        fmt::print("Graph:\n");
+        for (const auto &block : flow.blocks()) {
+            fmt::print("    {}\n", block->uniqueName());
+            if (block->uniqueName().starts_with("gr::testing::FunctionSink")) {
+                target = "*/"s + std::string(block->uniqueName());
+                fmt::print("This is going to be the target {}\n", target);
+            }
+        }
+
+        gr::testing::MessageSender<float> messageSender;
+        messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
+            if (!isDone()) {
+                gr::Message message;
+                message[gr::message::key::Kind]   = "custom_kind";
+                message[gr::message::key::Target] = target;
+                return message;
+            } else {
+                return {};
+            }
+        };
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+
+        std::thread messenger([&] {
+            while (!isDone()) {
+                std::this_thread::sleep_for(100ms);
+                messageSender.processOne();
+            }
+
+            fmt::print("sender and receiver thread done\n");
+        });
+
+        scheduler.runAndWait();
+        messenger.join();
+
+        expect(sourceMessagesCountdown == 1);
+        expect(sinkMessagesCountdown == 0);
+    };
+
+    // Testing if settings messages work
+    "SettingsManagement"_test = [] {
+        using Scheduler = gr::scheduler::Simple<>;
+
+        constexpr std::atomic_size_t requiredMessageCount        = 4;
+        std::atomic_size_t           settingsSuccessMessageCount = 0;
+        std::atomic_size_t           settingsFailureMessageCount = 0;
+        //
+        auto isDone = [&] { return settingsSuccessMessageCount >= requiredMessageCount && settingsFailureMessageCount >= requiredMessageCount; };
+
+        auto scheduler = [&] {
+            gr::Graph flow;
+            auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
+
+            source.generator = createOnesGenerator(isDone);
+
+            auto &sink    = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
+            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
+
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+
+            return Scheduler(std::move(flow));
+        }();
+
+        auto &flow = scheduler.graph();
+
+        fmt::print("Graph:\n");
+        for (const auto &block : flow.blocks()) {
+            fmt::print("    {}\n", block->uniqueName());
+        }
+
+        gr::testing::MessageSender<float> messageSender;
+        messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
+            if (!isDone()) {
+                gr::Message message;
+                message[gr::message::key::Kind]   = gr::message::kind::UpdateSettings;
+                message[gr::message::key::Target] = std::string();
+                message[gr::message::key::Data]   = gr::property_map{ { "factor", 4.4f } };
+                return message;
+            } else {
+                return {};
+            }
+        };
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+
+        gr::testing::FunctionSink<float> messageReceiver;
+        messageReceiver.messageProcessor = [&](auto *_this, gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+            for (const auto &message : messages) {
+                const auto kind = *gr::messageField<std::string>(message, gr::message::key::Kind);
+                if (kind == gr::message::kind::SettingsChanged) {
+                    const auto sender    = gr::messageField<std::string>(message, gr::message::key::Sender);
+                    const auto errorInfo = gr::messageField<property_map>(message, gr::message::key::ErrorInfo);
+
+                    if (errorInfo.has_value()) {
+                        settingsSuccessMessageCount++;
+                    } else {
+                        settingsFailureMessageCount++;
+                    }
+                }
+            }
+        };
+        expect(eq(ConnectionResult::SUCCESS, flow.msgOut.connect(messageReceiver.msgIn)));
+
+        std::thread messenger([&] {
+            while (!isDone()) {
+                std::this_thread::sleep_for(100ms);
                 messageSender.processOne();
                 messageReceiver.processScheduledMessages();
             }

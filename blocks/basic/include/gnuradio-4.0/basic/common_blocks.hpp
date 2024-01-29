@@ -12,9 +12,9 @@
 
 template<typename T>
 class builtin_multiply : public gr::Block<builtin_multiply<T>> {
-    T _factor = static_cast<T>(1.0f);
-
 public:
+    T factor = static_cast<T>(1.0f);
+
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
@@ -23,17 +23,17 @@ public:
     builtin_multiply(gr::property_map properties) {
         auto it = properties.find("factor");
         if (it != properties.cend()) {
-            _factor = std::get<T>(it->second);
+            factor = std::get<T>(it->second);
         }
     }
 
     [[nodiscard]] constexpr auto
     processOne(T a) const noexcept {
-        return a * _factor;
+        return a * factor;
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out, factor);
 
 template<typename T>
 class builtin_counter : public gr::Block<builtin_counter<T>> {
@@ -196,7 +196,7 @@ public:
         return { requested_work, available_samples, gr::work::Status::OK };
     }
 
-    virtual void
+    void
     processScheduledMessages() override {}
 
     void *

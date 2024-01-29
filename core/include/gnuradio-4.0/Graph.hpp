@@ -788,7 +788,7 @@ private:
 
     void
     connectChildMessagePorts(auto &currentBlock) {
-        fmt::print("<===> Connecting {} and child {}\n", unique_name, currentBlock->uniqueName());
+        // fmt::print("<===> Connecting {} and child {}\n", unique_name, currentBlock->uniqueName());
 
         auto &currentBlockData       = _blocksData[std::string(currentBlock->uniqueName())];
         currentBlockData.blockAccess = currentBlock.get();

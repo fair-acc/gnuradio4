@@ -1466,7 +1466,6 @@ public:
 
     void
     processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> messages) {
-        fmt::print("{} got a message\n", self().unique_name);
         if (std::addressof(port) != std::addressof(msgIn)) {
             fmt::print("{} got a message on a wrong port\n", self().unique_name);
             return;
@@ -1477,7 +1476,6 @@ public:
             const auto target = messageField<std::string>(message, gr::message::key::Target);
 
             if (target && !target->empty() && *target != self().unique_name) {
-                fmt::print("{} message {} is not for me, but for {}", self().unique_name, kind, *target);
                 continue;
             }
 
@@ -1489,7 +1487,6 @@ public:
                 for (const auto &[k, v] : notSet) {
                     keysNotSet += " " + k;
                 }
-                fmt::print("{} got a settings update request message {},\tthe [{} ] keys have not been set\n", self().unique_name, data.size(), keysNotSet);
 
                 Message settingsUpdated;
                 settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
@@ -1570,7 +1567,6 @@ struct BlockParameters {
     template<template<typename...> typename TBlock, typename RegisterInstance>
     void
     registerOn(RegisterInstance *plugin_instance, std::string block_type) const {
-        fmt::print("registerOn called for {}\n", block_type);
         plugin_instance->template addBlockType<TBlock, Types...>(block_type);
     }
 };

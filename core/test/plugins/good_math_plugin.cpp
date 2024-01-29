@@ -3,7 +3,7 @@
 
 #include <gnuradio-4.0/plugin.hpp>
 
-GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
+GP_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
 
