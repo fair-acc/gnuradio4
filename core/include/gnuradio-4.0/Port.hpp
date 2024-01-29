@@ -324,18 +324,7 @@ public:
         , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
-    operator=(Port &&other) noexcept {
-        Port tmp(std::move(other));
-        std::swap(name, tmp._name);
-        std::swap(min_samples, tmp._min_samples);
-        std::swap(max_samples, tmp._max_samples);
-        std::swap(priority, tmp._priority);
-
-        std::swap(_connected, tmp._connected);
-        std::swap(_ioHandler, tmp._ioHandler);
-        std::swap(_tagIoHandler, tmp._tagIoHandler);
-        return *this;
-    }
+    operator=(Port &&other)  = delete;
 
     ~Port() = default;
 

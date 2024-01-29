@@ -592,7 +592,7 @@ public:
         , denominator(std::move(other.denominator))
         , stride(std::move(other.stride))
         , stride_counter(std::move(other.stride_counter))
-        // , state(std::move(other.state)) // atomic, not included in move operations
+        , state(other.state.load()) // atomic, not moving
         , msgIn(std::move(other.msgIn))
         , msgOut(std::move(other.msgOut))
         , ports_status(std::move(other.ports_status))
@@ -600,25 +600,11 @@ public:
         , _mergedInputTag(std::move(other._mergedInputTag))
         , _settings(std::move(other._settings)) {}
 
+    // There are a few const or conditionally const member variables,
+    // we can not have a move-assignment that is equivalent to
+    // the move constructor
     Block &
-    operator=(Block &&other) noexcept {
-        auto tmp = std::move(other);
-
-        std::tuple<Arguments...>::swap(*this, tmp);
-        std::swap(_settings, tmp._settings);
-        std::swap(numerator, tmp.numerator);
-        std::swap(denominator, tmp.denominator);
-        std::swap(stride, tmp.stride);
-        std::swap(stride_counter, tmp.stride_counter);
-        // std::swap(state, tmp.state); // atomic, not included in move operations
-        std::swap(msgIn, tmp.msgIn);
-        std::swap(msgOut, tmp.msgOut);
-        std::swap(ports_status, tmp.ports_status);
-        std::swap(_output_tags_changed, tmp._output_tags_changed);
-        std::swap(_mergedInputTag, tmp._mergedInputTag);
-
-        return *this;
-    }
+    operator=(Block &&other) = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
