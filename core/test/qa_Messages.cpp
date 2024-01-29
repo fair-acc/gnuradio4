@@ -166,7 +166,7 @@ const boost::ut::suite MessagesTests = [] {
         fmt::print("Graph:\n");
         for (const auto &block : flow.blocks()) {
             fmt::print("    {}\n", block->uniqueName());
-            if (block->uniqueName().starts_with("gr::testing::FunctionSink")) {
+            if (block->uniqueName().contains("FunctionSink")) {
                 target = "*/"s + std::string(block->uniqueName());
                 fmt::print("This is going to be the target {}\n", target);
             }
