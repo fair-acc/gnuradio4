@@ -429,7 +429,7 @@ public:
     buffer() {
         struct port_buffers {
             BufferType    streamBuffer;
-            TagBufferType tagBufferType;
+            TagBufferType tagBuffer;
         };
 
         return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
@@ -443,7 +443,7 @@ public:
             _connected    = true;
         } else {
             _ioHandler    = streamBuffer.new_writer();
-            _tagIoHandler = tagBuffer.new_reader();
+            _tagIoHandler = tagBuffer.new_writer();
         }
     }
 

@@ -631,17 +631,6 @@ private:
 
     std::vector<std::unique_ptr<BlockModel>> _blocks;
 
-    struct BlockData {
-        BlockModel                      *blockAccess = nullptr;
-        MsgPortOutNamed<"__ForChildren"> toChildMessagePort;
-        MsgPortInNamed<"__FromChildren"> fromChildMessagePort;
-    };
-
-    // struct transparent_less : std::less<> {
-    //     using is_transparent = void; };
-
-    std::map<std::string, BlockData, std::less<>> _blocksData;
-
     template<typename TBlock>
     std::unique_ptr<BlockModel> &
     findBlock(TBlock &what) {
@@ -793,17 +782,6 @@ private:
                 = delete;
     };
 
-    void
-    connectChildMessagePorts(auto &currentBlock) {
-        auto &currentBlockData       = _blocksData[std::string(currentBlock->uniqueName())];
-        currentBlockData.blockAccess = currentBlock.get();
-
-        if (ConnectionResult::SUCCESS != currentBlockData.toChildMessagePort.connect(*currentBlock->msgIn)
-            || ConnectionResult::SUCCESS != currentBlock->msgOut->connect(currentBlockData.fromChildMessagePort)) {
-            throw fmt::format("Connect of graph {} and child {} failed", unique_name, currentBlock->uniqueName());
-        }
-    }
-
 public:
     Graph(Graph &)  = delete;
     Graph(Graph &&) = default;
@@ -847,7 +825,6 @@ public:
         auto &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::forward<Args>(args)...));
         auto  raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
         raw_ref->init(progress, ioThreadPool);
-        connectChildMessagePorts(new_block_ref);
         return *raw_ref;
     }
 
@@ -866,7 +843,6 @@ public:
             throw std::invalid_argument(fmt::format("initial Block settings could not be applied successfully - mismatched keys or value-type: {}\n", fmt::join(keys, ", ")));
         }
         raw_ref->init(progress, ioThreadPool);
-        connectChildMessagePorts(new_block_ref);
         return *raw_ref;
     }
 
@@ -945,101 +921,6 @@ public:
                        edgeName);
     }
 
-    void
-    processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> input) {
-        auto splitFirstComponent = [](std::string_view blockName) -> std::optional<std::pair<std::string_view, std::string_view>> {
-            auto itSlash = std::ranges::find(blockName, '/');
-            if (itSlash == blockName.end()) return {};
-
-            return { { std::string_view(blockName.begin(), itSlash), std::string_view(itSlash + 1, blockName.end()) } };
-        };
-
-        auto notifyChild = [this](std::string_view childName, const auto &message) {
-            auto it = _blocksData.find(childName);
-            if (it == _blocksData.end()) {
-                // Got a message for an unknown child
-                return;
-            }
-
-            auto &childPort = it->second.toChildMessagePort;
-            childPort.streamWriter().try_publish( //
-                    [&message](std::span<Message> &writable) { writable[0] = message; }, 1);
-        };
-
-        if (std::addressof(port) == std::addressof(msgIn)) {
-            std::vector<Message> matchedInputForAll;
-            matchedInputForAll.reserve(input.size());
-
-            // Both filtering and transform need to check the target format,
-            // a raw for loop is a more efficient choice than ranges
-            for (const auto &message : input) {
-                const auto target = messageField<std::string>(message, gr::message::key::Target);
-                if (!target || target->empty() || *target == "*") {
-                    matchedInputForAll.push_back(message);
-
-                } else {
-                    auto topComponents = splitFirstComponent(*target);
-
-                    if (topComponents) {
-                        auto &[graphComponent, rest] = *topComponents;
-
-                        if (graphComponent != "*" && graphComponent != self().unique_name) {
-                            // ignore this message, it is not meant for us or our children
-
-                        } else {
-                            // Otherwise, strip the graph unique_name from the target proprerty
-                            // and pass the message to our child or children
-                            Message result(message);
-                            result[gr::message::key::Target] = std::string(rest);
-
-                            auto       childComponents = splitFirstComponent(rest);
-                            const auto childName       = childComponents ? childComponents->first : rest;
-                            if (childName == "" || childName == "*") {
-                                matchedInputForAll.push_back(result);
-                            } else {
-                                notifyChild(childName, result);
-                            }
-                        }
-                    } else {
-                        // If the target is specified, yet there is no slash in
-                        // the name, ignore the message as the graph itself doesn't
-                        // get messages (yet)
-                    }
-                }
-            }
-
-            if (!matchedInputForAll.empty()) {
-                for (auto &[_, blockData] : _blocksData) {
-                    blockData.toChildMessagePort.streamWriter().try_publish( //
-                            [&matchedInputForAll](std::span<Message> &writable) { std::ranges::copy(matchedInputForAll, writable.begin()); }, size(matchedInputForAll));
-                }
-            }
-        }
-    }
-
-    void
-    processScheduledMessages() {
-        gr::Block<Graph>::processScheduledMessages();
-
-        for (const auto &[blockName, blockData] : _blocksData) {
-            // Call block's processScheduledMessages
-            blockData.blockAccess->processScheduledMessages();
-
-            // Now process messages coming from this block
-            auto      &inPort    = blockData.fromChildMessagePort;
-            const auto available = inPort.streamReader().available();
-            if (available > 0) {
-                const auto &input = inPort.streamReader().get(available);
-                for (auto message : input) {
-                    auto newSender                    = self().unique_name + "/" + messageField<std::string>(message, gr::message::key::Sender).value();
-                    message[gr::message::key::Sender] = std::move(newSender);
-                    // We're not using emitMessage as it would override the sender name
-                    msgOut.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
-                }
-            }
-        }
-    }
-
     template<typename Anything>
     void
     processMessages(MsgPortInNamed<"__FromChildren"> &port, std::span<const Anything> input) {
@@ -1059,22 +940,17 @@ public:
     template<typename F> // TODO: F must be constraint by a descriptive concept
     void
     forEachBlock(F &&f) const {
-        std::for_each(_blocks.cbegin(), _blocks.cend(), [f](const auto &block_ptr) { f(*block_ptr.get()); });
+        std::ranges::for_each(_blocks, [f](const auto &block_ptr) { std::invoke(f, *block_ptr.get()); });
     }
 
     template<typename F> // TODO: F must be constraint by a descriptive concept
     void
     forEachEdge(F &&f) const {
-        std::for_each(_edges.cbegin(), _edges.cend(), [f](const auto &edge) { f(edge); });
+        std::ranges::for_each(_edges, [f](const auto &edge) { std::invoke(f, edge); });
     }
 };
 
-} // namespace gr
-
-namespace gr {
 static_assert(BlockLike<Graph>);
-static_assert(traits::block::can_processMessagesForPort<Graph, MsgPortInNamed<"__Builtin">>);
-static_assert(traits::block::can_processMessagesForPort<Graph, MsgPortInNamed<"__FromChildren">>);
 
 /*******************************************************************************************************/
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/

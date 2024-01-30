@@ -1452,7 +1452,7 @@ public:
         }
 
         for (const auto &message : messages) {
-            const auto kind   = messageField<std::string>(message, gr::message::key::Kind).value();
+            const auto kind   = messageField<std::string>(message, gr::message::key::Kind).value_or(std::string{});
             const auto target = messageField<std::string>(message, gr::message::key::Target);
 
             if (target && !target->empty() && *target != self().unique_name) {

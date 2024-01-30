@@ -33,6 +33,11 @@ messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &total
     return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> messages) {
         if (countdown > 0) {
             for (const auto &message : messages) {
+                const auto target = gr::messageField<std::string>(message, gr::message::key::Target);
+
+                // Filtering on target is block's job now
+                if (target && !target->empty() && *target != _this->unique_name) continue;
+
                 const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
                 assert(kind);
                 if (kind != "custom_kind") {
@@ -62,7 +67,7 @@ const boost::ut::suite MessagesTests = [] {
         std::atomic_size_t    sinkMessagesCountdown   = 1;
         constexpr std::size_t requiredEventCount      = 2;
         std::atomic_bool      receiverGotAMessage     = false;
-        auto                  isDone                  = [&] { return requiredEventCount == collectedEventCount && receiverGotAMessage; };
+        auto                  isDone                  = [&] { return requiredEventCount <= collectedEventCount && receiverGotAMessage; };
 
         auto scheduler = [&] {
             gr::Graph flow;
@@ -71,6 +76,8 @@ const boost::ut::suite MessagesTests = [] {
             source.generator        = createOnesGenerator(isDone);
             source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
 
+            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
+
             auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
             sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
                 gr::Message outMessage;
@@ -78,20 +85,11 @@ const boost::ut::suite MessagesTests = [] {
                 return outMessage;
             }());
 
-            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
-
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
 
             return Scheduler(std::move(flow));
         }();
-
-        auto &flow = scheduler.graph();
-
-        fmt::print("Graph:\n");
-        for (const auto &block : flow.blocks()) {
-            fmt::print("    {}\n", block->uniqueName());
-        }
 
         gr::testing::MessageSender<float> messageSender;
         messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
@@ -104,10 +102,10 @@ const boost::ut::suite MessagesTests = [] {
                 return {};
             }
         };
-        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
 
         gr::testing::FunctionSink<float> messageReceiver;
-        messageReceiver.messageProcessor = [&](auto */*_this*/, gr::MsgPortInNamed<"__Builtin"> &/*port*/, std::span<const gr::Message> messages) {
+        messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
             for (const auto &message : messages) {
                 const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
                 if (kind == "custom_reply_kind") {
@@ -115,7 +113,7 @@ const boost::ut::suite MessagesTests = [] {
                 }
             }
         };
-        expect(eq(ConnectionResult::SUCCESS, flow.msgOut.connect(messageReceiver.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
 
         std::thread messenger([&] {
             while (!isDone()) {
@@ -123,8 +121,6 @@ const boost::ut::suite MessagesTests = [] {
                 messageSender.processOne();
                 messageReceiver.processScheduledMessages();
             }
-
-            fmt::print("sender and receiver thread done\n");
         });
 
         scheduler.runAndWait();
@@ -136,11 +132,11 @@ const boost::ut::suite MessagesTests = [] {
     "TargettedMessageForABlock"_test = [] {
         using Scheduler = gr::scheduler::Simple<>;
 
-        constexpr std::size_t requiredEventCount      = 2;
         std::atomic_size_t    collectedEventCount     = 0;
         std::atomic_size_t    sourceMessagesCountdown = 1; // not a target, should not go down
         std::atomic_size_t    sinkMessagesCountdown   = 2;
-        auto                  isDone                  = [&] { return requiredEventCount == collectedEventCount; };
+        constexpr std::size_t requiredEventCount      = 2;
+        auto                  isDone                  = [&] { return requiredEventCount <= collectedEventCount; };
 
         auto scheduler = [&] {
             gr::Graph flow;
@@ -149,10 +145,10 @@ const boost::ut::suite MessagesTests = [] {
             source.generator        = createOnesGenerator(isDone);
             source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
 
+            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
+
             auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
             sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, {});
-
-            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
 
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
@@ -163,12 +159,9 @@ const boost::ut::suite MessagesTests = [] {
         auto &flow = scheduler.graph();
 
         std::string target;
-        fmt::print("Graph:\n");
         for (const auto &block : flow.blocks()) {
-            fmt::print("    {}\n", block->uniqueName());
             if (block->uniqueName().contains("FunctionSink")) {
-                target = "*/"s + std::string(block->uniqueName());
-                fmt::print("This is going to be the target {}\n", target);
+                target = block->uniqueName();
             }
         }
 
@@ -178,20 +171,19 @@ const boost::ut::suite MessagesTests = [] {
                 gr::Message message;
                 message[gr::message::key::Kind]   = "custom_kind";
                 message[gr::message::key::Target] = target;
+
                 return message;
             } else {
                 return {};
             }
         };
-        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
 
         std::thread messenger([&] {
             while (!isDone()) {
                 std::this_thread::sleep_for(100ms);
                 messageSender.processOne();
             }
-
-            fmt::print("sender and receiver thread done\n");
         });
 
         scheduler.runAndWait();
@@ -217,21 +209,14 @@ const boost::ut::suite MessagesTests = [] {
 
             source.generator = createOnesGenerator(isDone);
 
-            auto &sink    = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
             auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
+            auto &sink    = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
 
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
 
             return Scheduler(std::move(flow));
         }();
-
-        auto &flow = scheduler.graph();
-
-        fmt::print("Graph:\n");
-        for (const auto &block : flow.blocks()) {
-            fmt::print("    {}\n", block->uniqueName());
-        }
 
         gr::testing::MessageSender<float> messageSender;
         messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
@@ -246,10 +231,10 @@ const boost::ut::suite MessagesTests = [] {
             }
         };
 
-        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(flow.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
 
         gr::testing::FunctionSink<float> messageReceiver;
-        messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> &/*port*/, std::span<const gr::Message> messages) {
+        messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
             for (const auto &message : messages) {
                 const auto kind = *gr::messageField<std::string>(message, gr::message::key::Kind);
                 if (kind == gr::message::kind::SettingsChanged) {
@@ -264,7 +249,7 @@ const boost::ut::suite MessagesTests = [] {
                 }
             }
         };
-        expect(eq(ConnectionResult::SUCCESS, flow.msgOut.connect(messageReceiver.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
 
         std::thread messenger([&] {
             while (!isDone()) {
@@ -272,11 +257,81 @@ const boost::ut::suite MessagesTests = [] {
                 messageSender.processOne();
                 messageReceiver.processScheduledMessages();
             }
-
-            fmt::print("sender and receiver thread done\n");
         });
 
         scheduler.runAndWait();
+        messenger.join();
+    };
+
+    // Testing message passing without a running scheduler
+    "MessagesWithoutARunningScheduler"_test = [] {
+        using Scheduler = gr::scheduler::Simple<>;
+
+        std::atomic_size_t    collectedEventCount     = 0;
+        std::atomic_size_t    sourceMessagesCountdown = 1;
+        std::atomic_size_t    sinkMessagesCountdown   = 1;
+        constexpr std::size_t requiredEventCount      = 2;
+        std::atomic_bool      receiverGotAMessage     = false;
+        auto                  isDone                  = [&] { return requiredEventCount <= collectedEventCount && receiverGotAMessage; };
+
+        auto scheduler = [&] {
+            gr::Graph flow;
+            auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
+
+            source.generator        = createOnesGenerator(isDone);
+            source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+
+            auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
+
+            auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
+            sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
+                gr::Message outMessage;
+                outMessage[gr::message::key::Kind] = "custom_reply_kind";
+                return outMessage;
+            }());
+
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+
+            return Scheduler(std::move(flow));
+        }();
+
+        gr::testing::MessageSender<float> messageSender;
+        messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
+            if (!isDone()) {
+                gr::Message message;
+                message[gr::message::key::Kind]   = "custom_kind";
+                message[gr::message::key::Target] = "";
+                return message;
+            } else {
+                return {};
+            }
+        };
+        expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
+
+        gr::testing::FunctionSink<float> messageReceiver;
+        messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
+            for (const auto &message : messages) {
+                const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
+                if (kind == "custom_reply_kind") {
+                    receiverGotAMessage = true;
+                }
+            }
+        };
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
+
+        std::thread messenger([&] {
+            while (!isDone()) {
+                std::this_thread::sleep_for(100ms);
+                messageSender.processOne();
+                messageReceiver.processScheduledMessages();
+            }
+        });
+
+        scheduler.init();
+        while (!isDone()) {
+            scheduler.processScheduledMessages();
+        }
         messenger.join();
     };
 };
