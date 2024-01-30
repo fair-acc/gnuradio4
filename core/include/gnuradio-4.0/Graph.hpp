@@ -328,8 +328,9 @@ private:
         }
     }
 
-    void initMessagePorts() {
-        msgIn = std::addressof(_block.msgIn);
+    void
+    initMessagePorts() {
+        msgIn  = std::addressof(_block.msgIn);
         msgOut = std::addressof(_block.msgOut);
     }
 
@@ -738,14 +739,20 @@ private:
         // connect using the port index
 
         template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
-        to(Destination &destination) {
+        [[nodiscard]] auto
+        to_internal(Destination &destination) {
             auto &destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
         }
 
-        template<std::size_t destinationPortIndex, typename Destination>
+        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
         [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
+        to(Destination &destination) {
+            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
+        }
+
+        template<std::size_t destinationPortIndex, typename Destination>
+        [[nodiscard]] auto
         to(Destination &destination) {
             if constexpr (destinationPortIndex == gr::meta::default_message_port_index) {
                 return to<Destination, decltype(destination.msgIn)>(destination, destination.msgIn);
@@ -767,7 +774,7 @@ private:
                                   meta::message_type<"These are the known names:">, traits::block::all_input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports>
                         port_not_found_error{};
             }
-            return to<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
+            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
         }
 
         template<fixed_string destinationPortName, typename Destination>
@@ -866,14 +873,20 @@ public:
     // connect using the port index
 
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
-    connect(Source &source) {
+    [[nodiscard]] auto
+    connect_internal(Source &source) {
         auto &port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
     }
 
+    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
+    [[nodiscard, deprecated("The connect with the port name should be used")]] auto
+    connect(Source &source) {
+        return connect_internal<sourcePortIndex, sourcePortSubIndex, Source>(source);
+    }
+
     template<std::size_t sourcePortIndex, typename Source>
-    [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
+    [[nodiscard]] auto
     connect(Source &source) {
         if constexpr (sourcePortIndex == meta::default_message_port_index) {
             return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut);
@@ -894,7 +907,7 @@ public:
                               meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports>
                     port_not_found_error{};
         }
-        return connect<sourcePortIndex, sourcePortSubIndex, Source>(source);
+        return connect_internal<sourcePortIndex, sourcePortSubIndex, Source>(source);
     }
 
     template<fixed_string sourcePortName, typename Source>
@@ -1018,7 +1031,7 @@ public:
             if (available > 0) {
                 const auto &input = inPort.streamReader().get(available);
                 for (auto message : input) {
-                    auto newSender = self().unique_name + "/" + messageField<std::string>(message, gr::message::key::Sender).value();
+                    auto newSender                    = self().unique_name + "/" + messageField<std::string>(message, gr::message::key::Sender).value();
                     message[gr::message::key::Sender] = std::move(newSender);
                     // We're not using emitMessage as it would override the sender name
                     msgOut.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
