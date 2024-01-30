@@ -1074,12 +1074,6 @@ public:
         for_each_port(processPort, inputPorts<traits::port::kind::Message>(&self()));
     }
 
-    template<typename TMessage>
-    void
-    emitMessage(TMessage &&message) {
-        emitMessage(msgOut, std::forward<TMessage>(message));
-    }
-
     void
     emitMessage(auto &port, Message message) {
         message[gr::message::key::Sender] = unique_name;
@@ -1485,7 +1479,7 @@ public:
                     errorMessage[gr::message::key::Data]         = notSet;
                     settingsUpdated[gr::message::key::ErrorInfo] = std::move(errorMessage);
                 }
-                emitMessage(std::move(settingsUpdated));
+                emitMessage(msgOut, std::move(settingsUpdated));
             }
         }
     }
