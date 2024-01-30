@@ -56,9 +56,9 @@ protected:
         assert(gr::ConnectionResult::SUCCESS == graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block));
         assert(gr::ConnectionResult::SUCCESS == graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block));
 
-        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0, gr::traits::port::kind::Stream>(&left_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
-        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0, gr::traits::port::kind::Stream>(&right_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
-        _dynamicOutputPorts.emplace_back(gr::DynamicPort(gr::outputPort<0, gr::traits::port::kind::Stream>(&adder_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0, gr::PortType::STREAM>(&left_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0, gr::PortType::STREAM>(&right_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicOutputPorts.emplace_back(gr::DynamicPort(gr::outputPort<0, gr::PortType::STREAM>(&adder_block), gr::DynamicPort::non_owned_reference_tag{}));
 
         _dynamicPortsLoaded = true;
         return graph;

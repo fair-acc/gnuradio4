@@ -29,7 +29,8 @@ enum class ConnectionResult { SUCCESS, FAILED };
 
 enum class PortType {
     STREAM, /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
-    MESSAGE /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+    MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+    ANY // 'ANY' only for querying and not to be used for port declarations
 };
 
 /**
@@ -208,6 +209,7 @@ struct Port {
     using with_name_and_descriptor = Port<T, newName, portType, portDirection, ReflDescriptor, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
+    static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
 
     using value_type        = T;
     using AttributeTypeList = typename gr::meta::typelist<Attributes...>;

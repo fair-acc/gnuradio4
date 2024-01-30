@@ -14,7 +14,7 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
 
     gr::work::Result
     work(std::size_t requested_work) {
-        auto &port   = gr::outputPort<0, gr::traits::port::kind::Stream>(this);
+        auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1UZ);
         data[0]      = value;

@@ -355,9 +355,9 @@ private:
                     } else {
                         // We can also have ports defined as template parameters
                         if constexpr (decltype(direction)::value == PortDirection::INPUT) {
-                            processPort(where, gr::inputPort<decltype(index)::value, traits::port::kind::Any>(&blockRef()));
+                            processPort(where, gr::inputPort<decltype(index)::value, PortType::ANY>(&blockRef()));
                         } else {
-                            processPort(where, gr::outputPort<decltype(index)::value, traits::port::kind::Any>(&blockRef()));
+                            processPort(where, gr::outputPort<decltype(index)::value, PortType::ANY>(&blockRef()));
                         }
                     }
                 } else {
@@ -740,7 +740,7 @@ private:
         template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
         [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
         to(Destination &destination) {
-            auto &destinationPort = inputPort<destinationPortIndex, traits::port::kind::Any>(&destination);
+            auto &destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
         }
 
@@ -788,8 +788,6 @@ private:
 
     void
     connectChildMessagePorts(auto &currentBlock) {
-        // fmt::print("<===> Connecting {} and child {}\n", unique_name, currentBlock->uniqueName());
-
         auto &currentBlockData       = _blocksData[std::string(currentBlock->uniqueName())];
         currentBlockData.blockAccess = currentBlock.get();
 
@@ -870,7 +868,7 @@ public:
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
     connect(Source &source) {
-        auto &port_or_collection = outputPort<sourcePortIndex, traits::port::kind::Any>(&source);
+        auto &port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
     }
 
@@ -936,8 +934,6 @@ public:
 
     void
     processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> input) {
-        // fmt::print("==>>> Calling Graph's {} processMessages and passing to children, count = {}\n", this->unique_name, input.size());
-
         auto splitFirstComponent = [](std::string_view blockName) -> std::optional<std::pair<std::string_view, std::string_view>> {
             auto itSlash = std::ranges::find(blockName, '/');
             if (itSlash == blockName.end()) return {};
@@ -1020,11 +1016,9 @@ public:
             auto      &inPort    = blockData.fromChildMessagePort;
             const auto available = inPort.streamReader().available();
             if (available > 0) {
-                // fmt::print("<<<== {} child {} sent us a message", this->unique_name, blockData.blockAccess->uniqueName());
                 const auto &input = inPort.streamReader().get(available);
                 for (auto message : input) {
                     auto newSender = self().unique_name + "/" + messageField<std::string>(message, gr::message::key::Sender).value();
-                    // fmt::print("..... Graph sending a message with a new sender {}\n", newSender);
                     message[gr::message::key::Sender] = std::move(newSender);
                     // We're not using emitMessage as it would override the sender name
                     msgOut.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);

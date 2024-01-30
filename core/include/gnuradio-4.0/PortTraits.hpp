@@ -66,22 +66,20 @@ template<typename T>
 using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
 
 struct kind {
-    enum type { Any, Stream, Message };
-
     template<typename Port>
     static constexpr auto
     value_helper() {
         if constexpr (std::is_same_v<typename Port::value_type, gr::Message>) {
-            return Message;
+            return gr::PortType::MESSAGE;
         } else {
-            return Stream;
+            return gr::PortType::STREAM;
         }
     }
 
-    template<kind::type Kind>
+    template<PortType portType>
     struct tester_for {
         template<typename Port>
-        static constexpr bool matches_kind = Kind == Any || kind::value_helper<Port>() == Kind;
+        static constexpr bool matches_kind = portType == PortType::ANY || kind::value_helper<Port>() == portType;
 
         template<typename T>
         constexpr static bool
@@ -124,7 +122,7 @@ template<typename... Ports>
 struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
 
 template<typename Type>
-constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_for<traits::port::kind::Any>::is_port_or_collection<Type>();
+constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_for<PortType::ANY>::is_port_or_collection<Type>();
 
 } // namespace gr::traits::port
 

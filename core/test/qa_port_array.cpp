@@ -33,7 +33,7 @@ struct RepeatedSource : public gr::Block<RepeatedSource<T>> {
         }
 
         if (remaining_events_count != 0) {
-            auto &port   = gr::outputPort<0, gr::traits::port::kind::Stream>(this);
+            auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
             auto &writer = port.streamWriter();
             auto  data   = writer.reserve_output_range(1UZ);
 
