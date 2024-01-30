@@ -1104,14 +1104,19 @@ protected:
                 const auto resamplingStatus = doResampling();
                 if (resamplingStatus != work::Status::OK) {
                     if (resamplingStatus == work::Status::INSUFFICIENT_INPUT_ITEMS || isEOSTagPresent) {
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        state.notify_all();
+                        if (isEOSTagPresent) {
+                            std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
+                            state.notify_all();
+                        }
                         updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
                         updateOutputTagsWithSettingParametersIfNeeded();
                         forwardTags();
-                        //  EOS is not at 0 position and thus not read by updateInputAndOutputTags(), we need to publish new EOS
-                        publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
-                        return { requested_work, 0UZ, work::Status::DONE };
+                        if (isEOSTagPresent) {
+                            //  EOS is not at 0 position and thus not read by updateInputAndOutputTags(), we need to publish new EOS
+                            publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
+                            return { requested_work, 0UZ, work::Status::DONE };
+                        }
+                        return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
                     }
                     return { requested_work, 0UZ, resamplingStatus };
                 }
