@@ -59,7 +59,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 //  - use Block::set_name instead of returning an empty name
 // TODO: Inherit from Block class when create new block.
 template<typename T>
-class multi_adder : public gr::BlockModel {
+class multi_adder : public gr::lifecycle::StateMachine<multi_adder<T>>, public gr::BlockModel {
     static std::atomic_size_t _unique_id_counter;
 
 public:
@@ -112,21 +112,6 @@ public:
     void
     init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
 
-    void
-    start() override {}
-
-    void
-    stop() override {}
-
-    void
-    pause() override {}
-
-    void
-    resume() override {}
-
-    void
-    reset() override {}
-
     [[nodiscard]] std::string_view
     name() const override {
         return unique_name_;
@@ -142,9 +127,14 @@ public:
         return false;
     }
 
-    constexpr gr::lifecycle::State
+    [[nodiscard]] std::expected<void, gr::lifecycle::ErrorType>
+    changeState(gr::lifecycle::State newState) noexcept override {
+        return this->changeStateTo(newState);
+    }
+
+    [[nodiscard]] constexpr gr::lifecycle::State
     state() const noexcept override {
-        return gr::lifecycle::State::RUNNING;
+        return this->state();
     }
 
     [[nodiscard]] constexpr std::size_t

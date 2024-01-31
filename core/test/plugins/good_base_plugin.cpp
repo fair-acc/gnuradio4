@@ -51,13 +51,15 @@ public:
 
     grg::work::Result
     work(std::size_t requested_work) {
-        if (this->state == gr::lifecycle::State::STOPPED) {
+        if (this->state() == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, gr::work::Status::DONE };
         }
         if (event_count == 0) {
             std::cerr << "fixed_source done\n";
-            this->state = gr::lifecycle::State::STOPPED;
-            this->state.notify_all();
+            if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+            }
             this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 0UZ, grg::work::Status::DONE };
         }

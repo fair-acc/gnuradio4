@@ -103,6 +103,11 @@ struct ErrorType {
     constexpr ErrorType() = default;
 
     ErrorType(std::string_view msg, const std::source_location &location) : message(msg), sourceLocation(location) {}
+
+    std::string
+    srcLoc() const noexcept {
+        return fmt::format("{}", sourceLocation);
+    }
 };
 
 /**

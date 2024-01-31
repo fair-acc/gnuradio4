@@ -23,7 +23,7 @@ struct adder : public gr::Block<adder<T>, gr::PortInNamed<T, "addend0">, gr::Por
 };
 
 template<typename T>
-class HierBlock : public gr::BlockModel {
+class HierBlock : public gr::lifecycle::StateMachine<HierBlock<T>>, public gr::BlockModel {
 private:
     static std::atomic_size_t _unique_id_counter;
     const std::size_t         _unique_id   = _unique_id_counter++;
@@ -43,8 +43,6 @@ protected:
     using in_port_t = gr::PortIn<T>;
 
     gr::scheduler::Simple<> _scheduler;
-
-    gr::lifecycle::State _state;
 
     gr::Graph
     make_graph() {
@@ -72,31 +70,6 @@ public:
     void
     init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
 
-    void
-    start() override {
-        _state = gr::lifecycle::State::RUNNING;
-    }
-
-    void
-    stop() override {
-        _state = gr::lifecycle::State::STOPPED;
-    }
-
-    void
-    pause() override {
-        _state = gr::lifecycle::State::PAUSED;
-    }
-
-    void
-    resume() override {
-        _state = gr::lifecycle::State::RUNNING;
-    }
-
-    void
-    reset() override {
-        _state = gr::lifecycle::State::INITIALISED;
-    }
-
     [[nodiscard]] std::string_view
     name() const override {
         return _unique_name;
@@ -112,9 +85,14 @@ public:
         return false;
     }
 
+    [[nodiscard]] std::expected<void, gr::lifecycle::ErrorType>
+    changeState(gr::lifecycle::State newState) noexcept override {
+        return this->changeStateTo(newState);
+    }
+
     constexpr gr::lifecycle::State
     state() const noexcept override {
-        return this->_state;
+        return this->state();
     }
 
     [[nodiscard]] constexpr std::size_t
@@ -129,12 +107,12 @@ public:
 
     gr::work::Result
     work(std::size_t requested_work) override {
-        if (_state == gr::lifecycle::State::STOPPED) {
+        if (state() == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UL, gr::work::Status::DONE };
         }
         _scheduler.runAndWait();
-        _state = gr::lifecycle::State::STOPPED;
-        return { requested_work, requested_work, gr::work::Status::DONE };
+        bool ok = this->changeStateTo(gr::lifecycle::State::STOPPED).has_value();
+        return { requested_work, requested_work, ok ? gr::work::Status::DONE : gr::work::Status::ERROR };
     }
 
     void
@@ -183,7 +161,7 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
 
     gr::work::Result
     work(std::size_t requested_work) {
-        if (this->state == gr::lifecycle::State::STOPPED) {
+        if (this->state() == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UL, gr::work::Status::DONE };
         }
 
@@ -202,8 +180,10 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
             return { requested_work, 1UL, gr::work::Status::OK };
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            this->state = gr::lifecycle::State::STOPPED;
-            this->state.notify_all();
+            if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+            }
             this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 1UL, gr::work::Status::DONE };
         }
