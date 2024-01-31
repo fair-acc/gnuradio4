@@ -22,22 +22,88 @@
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include <gnuradio-4.0/BlockTraits.hpp>
-#include <gnuradio-4.0/Port.hpp>
-#include <gnuradio-4.0/Sequence.hpp>
-#include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/thread/thread_pool.hpp>
+#include "BlockTraits.hpp"
+#include "Port.hpp"
+#include "Sequence.hpp"
+#include "Tag.hpp"
+#include "thread/thread_pool.hpp"
 
-#include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
-#include <gnuradio-4.0/reflection.hpp>
-#include <gnuradio-4.0/Settings.hpp>
-
-#include <gnuradio-4.0/LifeCycle.hpp>
+#include "annotated.hpp" // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
+#include "reflection.hpp"
+#include "Settings.hpp"
 
 namespace gr {
 
 namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
+
+namespace lifecycle {
+/**
+ * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
+ *
+ * Transition between the following states is triggered by specific actions or events:
+ * - `IDLE`: The initial state before the scheduler has been initialized.
+ * - `INITIALISED`: The scheduler has been initialized and is ready to start running.
+ * - `RUNNING`: The scheduler is actively running.
+ * - `REQUESTED_PAUSE`: A pause has been requested, and the scheduler is in the process of pausing.
+ * - `PAUSED`: The scheduler is paused and can be resumed or stopped.
+ * - `REQUESTED_STOP`: A stop has been requested, and the scheduler is in the process of stopping.
+ * - `STOPPED`: The scheduler has been stopped and can be reset or re-initialized.
+ * - `ERROR`: An error state that can be reached from any state at any time, requiring a reset.
+ *
+ * @note All `Block<T>`-derived classes can optionally implement any subset of the lifecycle methods
+ * (`start()`, `stop()`, `reset()`, `pause()`, `resume()`) to handle state changes of the `Scheduler`.
+ *
+ * State diagram:
+ *
+ *               Block<T>()              can be reached from
+ *                  │                   anywhere and anytime.
+ *            ┌─────┴────┐                   ┌────┴────┐
+ *            │   IDLE   │                   │  ERROR  │
+ *            └────┬─────┘                   └────┬────┘
+ *                 │ init()                       │ reset()
+ *                 v                              │
+ *         ┌───────┴───────┐                      │
+ *         │  INITIALISED  ├<─────────────────────┤
+ *         └───────┬───────┘                      │
+ *                 │ start()                      │
+ *                 v                              │
+ *   stop() ┌──────┴──────┐                       │  ╓
+ *   ┌──────┤   RUNNING   ├<──────────┐           │  ║
+ *   │      └─────┬───────┘           │           │  ║
+ *   │            │ pause()           │           │  ║  isActive(lifecycle::State) ─> true
+ *   │            v                   │ resume()  │  ║
+ *   │  ┌─────────┴─────────┐   ┌─────┴─────┐     │  ║
+ *   │  │  REQUESTED_PAUSE  ├──>┤  PAUSED   │     │  ║
+ *   │  └──────────┬────────┘   └─────┬─────┘     │  ╙
+ *   │             │ stop()           │ stop()    │
+ *   │             v                  │           │
+ *   │   ┌─────────┴────────┐         │           │  ╓
+ *   └──>┤  REQUESTED_STOP  ├<────────┘           │  ║
+ *       └────────┬─────────┘                     │  ║
+ *                │                               │  ║  isShuttingDown(lifecycle::State) ─> true
+ *                v                               │  ║
+ *          ┌─────┴─────┐ reset()                 │  ║
+ *          │  STOPPED  ├─────────────────────────┘  ║
+ *          └─────┬─────┘                            ╙
+ *                │
+ *                v
+ *            ~Block<T>()
+ */
+enum class State : char { IDLE, INITIALISED, RUNNING, REQUESTED_PAUSE, PAUSED, REQUESTED_STOP, STOPPED, ERROR };
+using enum State;
+
+inline constexpr bool
+isActive(lifecycle::State state) noexcept {
+    return state == RUNNING || state == REQUESTED_PAUSE || state == PAUSED;
+}
+
+inline constexpr bool
+isShuttingDown(lifecycle::State state) noexcept {
+    return state == REQUESTED_STOP || state == STOPPED;
+}
+
+} // namespace lifecycle
 
 template<typename F>
 constexpr void
@@ -540,8 +606,7 @@ public:
     // we can not have a move-assignment that is equivalent to
     // the move constructor
     Block &
-    operator=(Block &&other)
-            = delete;
+    operator=(Block &&other) = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
