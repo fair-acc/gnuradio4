@@ -56,9 +56,9 @@ protected:
         assert(gr::ConnectionResult::SUCCESS == graph.connect<"scaled">(left_scale_block).to<"addend0">(adder_block));
         assert(gr::ConnectionResult::SUCCESS == graph.connect<"scaled">(right_scale_block).to<"addend1">(adder_block));
 
-        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0>(&left_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
-        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0>(&right_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
-        _dynamicOutputPorts.emplace_back(gr::DynamicPort(gr::outputPort<0>(&adder_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0, gr::PortType::STREAM>(&left_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicInputPorts.emplace_back(gr::DynamicPort(gr::inputPort<0, gr::PortType::STREAM>(&right_scale_block), gr::DynamicPort::non_owned_reference_tag{}));
+        _dynamicOutputPorts.emplace_back(gr::DynamicPort(gr::outputPort<0, gr::PortType::STREAM>(&adder_block), gr::DynamicPort::non_owned_reference_tag{}));
 
         _dynamicPortsLoaded = true;
         return graph;
@@ -135,6 +135,11 @@ public:
         _scheduler.runAndWait();
         _state = gr::lifecycle::State::STOPPED;
         return { requested_work, requested_work, gr::work::Status::DONE };
+    }
+
+    void
+    processScheduledMessages() override {
+        // TODO
     }
 
     void *

@@ -3,10 +3,9 @@
 
 #include <gnuradio-4.0/plugin.hpp>
 
-GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
+GP_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
-namespace grg = gr;
 
 template<typename T>
 auto
@@ -28,8 +27,8 @@ protected:
     T _factor = static_cast<T>(1.0f);
 
 public:
-    grg::PortIn<T, grg::RequiredSamples<1, 1024>>  in;
-    grg::PortOut<T, grg::RequiredSamples<1, 1024>> out;
+    gr::PortIn<T, gr::RequiredSamples<1, 1024>>  in;
+    gr::PortOut<T, gr::RequiredSamples<1, 1024>> out;
 
     math_base() = delete;
 
@@ -37,7 +36,7 @@ public:
 };
 
 template<typename T>
-class multiply : public grg::Block<multiply<T>>, public math_base<T> {
+class multiply : public gr::Block<multiply<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
@@ -49,7 +48,7 @@ public:
 };
 
 template<typename T>
-class divide : public grg::Block<divide<T>>, public math_base<T> {
+class divide : public gr::Block<divide<T>>, public math_base<T> {
 public:
     using math_base<T>::math_base;
 
@@ -62,8 +61,18 @@ public:
 
 } // namespace good
 
+namespace bts = gr::traits::block;
+
 ENABLE_REFLECTION_FOR_TEMPLATE(good::multiply, in, out);
-GP_PLUGIN_REGISTER_NODE(good::multiply, float, double);
+GP_PLUGIN_REGISTER_BLOCK(good::multiply, float, double);
+static_assert(bts::all_input_ports<good::multiply<float>>::size == 1);
+static_assert(std::is_same_v<bts::all_input_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
+static_assert(bts::stream_input_ports<good::multiply<float>>::size == 1);
+static_assert(std::is_same_v<bts::stream_input_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
+static_assert(bts::all_output_ports<good::multiply<float>>::size == 1);
+static_assert(std::is_same_v<bts::all_output_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
+static_assert(bts::stream_output_ports<good::multiply<float>>::size == 1);
+static_assert(std::is_same_v<bts::stream_output_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::divide, in, out);
-GP_PLUGIN_REGISTER_NODE(good::divide, float, double);
+GP_PLUGIN_REGISTER_BLOCK(good::divide, float, double);

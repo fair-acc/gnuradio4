@@ -150,7 +150,7 @@ const boost::ut::suite PortApiTests = [] {
         const BufferReader auto             &reader = input_port.streamReader();
         expect(eq(reader.available(), 0UZ));
         auto buffers = output_port.buffer();
-        input_port.setBuffer(buffers.streamBuffer, buffers.tagBufferType);
+        input_port.setBuffer(buffers.streamBuffer, buffers.tagBuffer);
 
         expect(eq(buffers.streamBuffer.n_readers(), 1UZ));
 

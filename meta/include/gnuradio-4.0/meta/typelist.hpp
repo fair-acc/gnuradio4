@@ -330,8 +330,8 @@ concept is_typelist_v = requires { typename T::typelist_tag; };
 
 template<typename... Ts>
 struct typelist {
-    using this_t                                                                    = typelist<Ts...>;
-    using typelist_tag                                                              = std::true_type;
+    using this_t       = typelist<Ts...>;
+    using typelist_tag = std::true_type;
 
     static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
 
@@ -340,21 +340,21 @@ struct typelist {
 
     template<class F, std::size_t... Is, typename... LeadingArguments>
     static constexpr void
-    apply_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
+    for_each_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
         (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
     }
 
     template<class F, typename... LeadingArguments>
     static constexpr void
-    apply_func(F &&f, LeadingArguments &&...args) {
-        apply_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
+    for_each(F &&f, LeadingArguments &&...args) {
+        for_each_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
     }
 
     template<std::size_t I>
     using at = detail::at_impl<I, Ts...>::type;
 
-    template<typename Head>
-    using prepend = typelist<Head, Ts...>;
+    template<typename... Heads>
+    using prepend = typelist<Heads..., Ts...>;
 
     template<typename... Other>
     static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
@@ -393,7 +393,7 @@ struct typelist {
         }
     }())>;
 
-    using safe_head         = std::remove_pointer_t<decltype([] {
+    using safe_head = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) > 0) {
             return static_cast<this_t::at<0> *>(nullptr);
         } else {
@@ -417,7 +417,7 @@ struct typelist {
     static constexpr std::size_t
     index_of() {
         std::size_t result = static_cast<std::size_t>(-1);
-        gr::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
+        gr::meta::typelist<Ts...>::for_each([&](auto index, auto &&t) {
             if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
                 result = index;
             }
@@ -428,8 +428,8 @@ struct typelist {
     template<typename T>
     inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
 
-    using tuple_type                      = std::tuple<Ts...>;
-    using tuple_or_type                   = std::remove_pointer_t<decltype([] {
+    using tuple_type    = std::tuple<Ts...>;
+    using tuple_or_type = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) == 0) {
             return static_cast<void *>(nullptr);
         } else if constexpr (sizeof...(Ts) == 1) {

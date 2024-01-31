@@ -62,7 +62,7 @@ public:
             return { requested_work, 0UZ, grg::work::Status::DONE };
         }
 
-        auto &port   = gr::outputPort<0>(this);
+        auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1UZ);
         data[0]      = value;
@@ -79,8 +79,32 @@ public:
 };
 } // namespace good
 
+namespace bts = gr::traits::block;
+
 ENABLE_REFLECTION_FOR_TEMPLATE(good::cout_sink, total_count);
-GP_PLUGIN_REGISTER_NODE(good::cout_sink, float, double);
+GP_PLUGIN_REGISTER_BLOCK(good::cout_sink, float, double);
+static_assert(bts::all_input_ports<good::cout_sink<float>>::size == 1);
+static_assert(std::is_same_v<bts::all_input_port_types<good::cout_sink<float>>, gr::meta::typelist<float>>);
+static_assert(bts::stream_input_ports<good::cout_sink<float>>::size == 1);
+static_assert(std::is_same_v<bts::stream_input_port_types<good::cout_sink<float>>, gr::meta::typelist<float>>);
+
+static_assert(bts::all_output_ports<good::cout_sink<float>>::size == 0);
+static_assert(std::is_same_v<bts::all_output_port_types<good::cout_sink<float>>, gr::meta::typelist<>>);
+static_assert(bts::stream_output_ports<good::cout_sink<float>>::size == 0);
+static_assert(std::is_same_v<bts::stream_output_port_types<good::cout_sink<float>>, gr::meta::typelist<>>);
+
+static_assert(bts::all_output_ports<good::cout_sink<float>>::size == 0);
+static_assert(std::is_same_v<bts::all_output_port_types<good::cout_sink<float>>, gr::meta::typelist<>>);
+static_assert(bts::stream_output_ports<good::cout_sink<float>>::size == 0);
+static_assert(std::is_same_v<bts::stream_output_port_types<good::cout_sink<float>>, gr::meta::typelist<>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::fixed_source, event_count);
-GP_PLUGIN_REGISTER_NODE(good::fixed_source, float, double);
+GP_PLUGIN_REGISTER_BLOCK(good::fixed_source, float, double);
+static_assert(bts::all_input_ports<good::fixed_source<float>>::size == 0);
+static_assert(std::is_same_v<bts::all_input_port_types<good::fixed_source<float>>, gr::meta::typelist<>>);
+static_assert(bts::stream_input_ports<good::fixed_source<float>>::size == 0);
+static_assert(std::is_same_v<bts::stream_input_port_types<good::fixed_source<float>>, gr::meta::typelist<>>);
+static_assert(bts::all_output_ports<good::fixed_source<float>>::size == 1);
+static_assert(std::is_same_v<bts::all_output_port_types<good::fixed_source<float>>, gr::meta::typelist<float>>);
+static_assert(bts::stream_output_ports<good::fixed_source<float>>::size == 1);
+static_assert(std::is_same_v<bts::stream_output_port_types<good::fixed_source<float>>, gr::meta::typelist<float>>);

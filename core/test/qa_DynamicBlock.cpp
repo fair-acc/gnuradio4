@@ -14,7 +14,7 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
 
     gr::work::Result
     work(std::size_t requested_work) {
-        auto &port   = gr::outputPort<0>(this);
+        auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
         auto &writer = port.streamWriter();
         auto  data   = writer.reserve_output_range(1UZ);
         data[0]      = value;
@@ -26,12 +26,12 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
 };
 
 static_assert(gr::BlockLike<fixed_source<int>>);
-static_assert(gr::traits::block::input_ports<fixed_source<int>>::size() == 0);
-static_assert(gr::traits::block::output_ports<fixed_source<int>>::size() == 1);
+static_assert(gr::traits::block::stream_input_ports<fixed_source<int>>::size() == 0);
+static_assert(gr::traits::block::stream_output_ports<fixed_source<int>>::size() == 1);
 
 template<typename T>
 struct DebugSink : public gr::Block<DebugSink<T>> {
-    T lastValue = {};
+    T             lastValue = {};
     gr::PortIn<T> in;
 
     void
@@ -47,10 +47,10 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (DebugSink<T>), lastValue, in)
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
     "Change number of ports dynamically"_test = [] {
-        constexpr const int sources_count = 10;
+        constexpr const int         sources_count = 10;
         constexpr const std::size_t events_count  = 5;
 
-        gr::Graph                   testGraph;
+        gr::Graph testGraph;
 
         // Adder has sources_count inputs in total, but let's create
         // sources_count / 2 inputs on construction, and change the number
@@ -99,7 +99,7 @@ const boost::ut::suite DynamicBlocktests = [] {
                 const auto source_work = source->work(1UZ);
                 expect(eq(source_work.performed_work, 1UZ));
             }
-            const auto adder_work     = adder.work(1UZ);
+            const auto adder_work = adder.work(1UZ);
             expect(eq(adder_work.performed_work, 1UZ));
             const auto sink_work = sink.work(1UZ);
             expect(eq(sink_work.performed_work, 1UZ));
