@@ -270,7 +270,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                            if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                                 if (default_tag == get_display_name(member)) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
@@ -360,7 +360,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -418,7 +418,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
@@ -509,7 +509,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
@@ -554,7 +554,7 @@ public:
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (!traits::block::detail::is_port_or_collection<Type>() && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
@@ -593,7 +593,7 @@ public:
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr ((!traits::block::detail::is_port_or_collection<Type>()) && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_block));
                 }
             };
@@ -612,7 +612,7 @@ private:
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr (!traits::block::detail::is_port_or_collection<Type>() && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };

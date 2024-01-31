@@ -68,7 +68,7 @@ class duplicate : public grg::Block<duplicate<T, Count>, gr::meta::typelist<grg:
     using base = grg::Block<duplicate<T, Count>, gr::meta::typelist<grg::PortInNamed<T, "in">>, grg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
 
 public:
-    using return_type = typename grg::traits::block::return_type<base>;
+    using return_type = typename grg::traits::block::stream_return_type<base>;
 
     [[nodiscard]] constexpr return_type
     processOne(T a) const noexcept {

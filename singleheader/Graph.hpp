@@ -334,8 +334,8 @@ concept is_typelist_v = requires { typename T::typelist_tag; };
 
 template<typename... Ts>
 struct typelist {
-    using this_t                                                                    = typelist<Ts...>;
-    using typelist_tag                                                              = std::true_type;
+    using this_t       = typelist<Ts...>;
+    using typelist_tag = std::true_type;
 
     static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
 
@@ -344,21 +344,21 @@ struct typelist {
 
     template<class F, std::size_t... Is, typename... LeadingArguments>
     static constexpr void
-    apply_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
+    for_each_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
         (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
     }
 
     template<class F, typename... LeadingArguments>
     static constexpr void
-    apply_func(F &&f, LeadingArguments &&...args) {
-        apply_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
+    for_each(F &&f, LeadingArguments &&...args) {
+        for_each_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
     }
 
     template<std::size_t I>
     using at = detail::at_impl<I, Ts...>::type;
 
-    template<typename Head>
-    using prepend = typelist<Head, Ts...>;
+    template<typename... Heads>
+    using prepend = typelist<Heads..., Ts...>;
 
     template<typename... Other>
     static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
@@ -397,7 +397,7 @@ struct typelist {
         }
     }())>;
 
-    using safe_head         = std::remove_pointer_t<decltype([] {
+    using safe_head = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) > 0) {
             return static_cast<this_t::at<0> *>(nullptr);
         } else {
@@ -421,7 +421,7 @@ struct typelist {
     static constexpr std::size_t
     index_of() {
         std::size_t result = static_cast<std::size_t>(-1);
-        gr::meta::typelist<Ts...>::template apply_func([&](auto index, auto &&t) {
+        gr::meta::typelist<Ts...>::for_each([&](auto index, auto &&t) {
             if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
                 result = index;
             }
@@ -432,8 +432,8 @@ struct typelist {
     template<typename T>
     inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
 
-    using tuple_type                      = std::tuple<Ts...>;
-    using tuple_or_type                   = std::remove_pointer_t<decltype([] {
+    using tuple_type    = std::tuple<Ts...>;
+    using tuple_or_type = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) == 0) {
             return static_cast<void *>(nullptr);
         } else if constexpr (sizeof...(Ts) == 1) {
@@ -467,6580 +467,677 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 
 #include <limits>
 #include <map>
+#include <source_location>
 
-#include <fmt/format.h>
-#ifdef __GNUC__
-#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
-#pragma GCC diagnostic ignored "-Wuseless-cast"
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#endif
-// #include <magic_enum.hpp>
-//  __  __             _        ______                          _____
-// |  \/  |           (_)      |  ____|                        / ____|_     _
-// | \  / | __ _  __ _ _  ___  | |__   _ __  _   _ _ __ ___   | |   _| |_ _| |_
-// | |\/| |/ _` |/ _` | |/ __| |  __| | '_ \| | | | '_ ` _ \  | |  |_   _|_   _|
-// | |  | | (_| | (_| | | (__  | |____| | | | |_| | | | | | | | |____|_|   |_|
-// |_|  |_|\__,_|\__, |_|\___| |______|_| |_|\__,_|_| |_| |_|  \_____|
-//                __/ | https://github.com/Neargye/magic_enum
-//               |___/  version 0.9.3
-//
-// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2019 - 2023 Daniil Goncharov <neargye@gmail.com>.
-//
-// Permission is hereby  granted, free of charge, to any  person obtaining a copy
-// of this software and associated  documentation files (the "Software"), to deal
-// in the Software  without restriction, including without  limitation the rights
-// to  use, copy,  modify, merge,  publish, distribute,  sublicense, and/or  sell
-// copies  of  the Software,  and  to  permit persons  to  whom  the Software  is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE  IS PROVIDED "AS  IS", WITHOUT WARRANTY  OF ANY KIND,  EXPRESS OR
-// IMPLIED,  INCLUDING BUT  NOT  LIMITED TO  THE  WARRANTIES OF  MERCHANTABILITY,
-// FITNESS FOR  A PARTICULAR PURPOSE AND  NONINFRINGEMENT. IN NO EVENT  SHALL THE
-// AUTHORS  OR COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM,  DAMAGES OR  OTHER
-// LIABILITY, WHETHER IN AN ACTION OF  CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// #include <pmtv/pmt.hpp>
 
-#ifndef NEARGYE_MAGIC_ENUM_HPP
-#define NEARGYE_MAGIC_ENUM_HPP
 
-#define MAGIC_ENUM_VERSION_MAJOR 0
-#define MAGIC_ENUM_VERSION_MINOR 9
-#define MAGIC_ENUM_VERSION_PATCH 3
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <limits>
-#include <type_traits>
-#include <utility>
+// #include "base64/base64.h"
+/*
+ * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ *
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ *
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ *
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
+ *
+ * @APPLE_LICENSE_HEADER_END@
+ */
+/* ====================================================================
+ * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. All advertising materials mentioning features or use of this
+ *    software must display the following acknowledgment:
+ *    "This product includes software developed by the Apache Group
+ *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ *
+ * 4. The names "Apache Server" and "Apache Group" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For written permission, please contact
+ *    apache@apache.org.
+ *
+ * 5. Products derived from this software may not be called "Apache"
+ *    nor may "Apache" appear in their names without prior written
+ *    permission of the Apache Group.
+ *
+ * 6. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by the Apache Group
+ *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
+ * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+ * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * ====================================================================
+ *
+ * This software consists of voluntary contributions made by many
+ * individuals on behalf of the Apache Group and was originally based
+ * on public domain software written at the National Center for
+ * Supercomputing Applications, University of Illinois, Urbana-Champaign.
+ * For more information on the Apache Group and the Apache HTTP server
+ * project, please see <http://www.apache.org/>.
+ *
+ */
 
-#if defined(MAGIC_ENUM_CONFIG_FILE)
-#  include MAGIC_ENUM_CONFIG_FILE
-#endif
 
-#if !defined(MAGIC_ENUM_USING_ALIAS_OPTIONAL)
-#  include <optional>
-#endif
-#if !defined(MAGIC_ENUM_USING_ALIAS_STRING)
-#  include <string>
-#endif
-#if !defined(MAGIC_ENUM_USING_ALIAS_STRING_VIEW)
-#  include <string_view>
-#endif
+#ifndef _BASE64_H_
+#define _BASE64_H_
 
-#if defined(MAGIC_ENUM_NO_ASSERT)
-#  define MAGIC_ENUM_ASSERT(...) static_cast<void>(0)
-#else
-#  include <cassert>
-#  define MAGIC_ENUM_ASSERT(...) assert((__VA_ARGS__))
-#endif
+#include <string.h>
 
-#if defined(__clang__)
-#  pragma clang diagnostic push
-#  pragma clang diagnostic ignored "-Wunknown-warning-option"
-#  pragma clang diagnostic ignored "-Wenum-constexpr-conversion"
-#elif defined(__GNUC__)
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wmaybe-uninitialized" // May be used uninitialized 'return {};'.
-#elif defined(_MSC_VER)
-#  pragma warning(push)
-#  pragma warning(disable : 26495) // Variable 'static_str<N>::chars_' is uninitialized.
-#  pragma warning(disable : 28020) // Arithmetic overflow: Using operator '-' on a 4 byte value and then casting the result to a 8 byte value.
-#  pragma warning(disable : 26451) // The expression '0<=_Param_(1)&&_Param_(1)<=1-1' is not true at this call.
-#  pragma warning(disable : 4514) // Unreferenced inline function has been removed.
-#endif
-
-// Checks magic_enum compiler compatibility.
-#if defined(__clang__) && __clang_major__ >= 5 || defined(__GNUC__) && __GNUC__ >= 9 || defined(_MSC_VER) && _MSC_VER >= 1910 || defined(__RESHARPER__)
-#  undef  MAGIC_ENUM_SUPPORTED
-#  define MAGIC_ENUM_SUPPORTED 1
-#endif
-
-// Checks magic_enum compiler aliases compatibility.
-#if defined(__clang__) && __clang_major__ >= 5 || defined(__GNUC__) && __GNUC__ >= 9 || defined(_MSC_VER) && _MSC_VER >= 1920
-#  undef  MAGIC_ENUM_SUPPORTED_ALIASES
-#  define MAGIC_ENUM_SUPPORTED_ALIASES 1
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-// Enum value must be greater or equals than MAGIC_ENUM_RANGE_MIN. By default MAGIC_ENUM_RANGE_MIN = -128.
-// If need another min range for all enum types by default, redefine the macro MAGIC_ENUM_RANGE_MIN.
-#if !defined(MAGIC_ENUM_RANGE_MIN)
-#  define MAGIC_ENUM_RANGE_MIN -128
-#endif
+// int Base64encode_len(int len);
+// int Base64encode(char* coded_dst, const char* plain_src, int len_plain_src);
 
-// Enum value must be less or equals than MAGIC_ENUM_RANGE_MAX. By default MAGIC_ENUM_RANGE_MAX = 128.
-// If need another max range for all enum types by default, redefine the macro MAGIC_ENUM_RANGE_MAX.
-#if !defined(MAGIC_ENUM_RANGE_MAX)
-#  define MAGIC_ENUM_RANGE_MAX 127
-#endif
+// int Base64decode_len(const char* coded_src);
+// int Base64decode(char* plain_dst, const char* coded_src);
 
-// Improve ReSharper C++ intellisense performance with builtins, avoiding unnecessary template instantiations.
-#if defined(__RESHARPER__)
-#  undef MAGIC_ENUM_GET_ENUM_NAME_BUILTIN
-#  undef MAGIC_ENUM_GET_TYPE_NAME_BUILTIN
-#  if __RESHARPER__ >= 20230100
-#    define MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V) __rscpp_enumerator_name(V)
-#    define MAGIC_ENUM_GET_TYPE_NAME_BUILTIN(T) __rscpp_type_name<T>()
-#  else
-#    define MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V) nullptr
-#    define MAGIC_ENUM_GET_TYPE_NAME_BUILTIN(T) nullptr
-#  endif
-#endif
+// #ifdef __cplusplus
+// }
+// #endif
 
-namespace magic_enum {
+/* Base64 encoder/decoder. Originally Apache file ap_base64.c
+ */
 
-// If need another optional type, define the macro MAGIC_ENUM_USING_ALIAS_OPTIONAL.
-#if defined(MAGIC_ENUM_USING_ALIAS_OPTIONAL)
-MAGIC_ENUM_USING_ALIAS_OPTIONAL
-#else
-using std::optional;
-#endif
-
-// If need another string_view type, define the macro MAGIC_ENUM_USING_ALIAS_STRING_VIEW.
-#if defined(MAGIC_ENUM_USING_ALIAS_STRING_VIEW)
-MAGIC_ENUM_USING_ALIAS_STRING_VIEW
-#else
-using std::string_view;
-#endif
-
-// If need another string type, define the macro MAGIC_ENUM_USING_ALIAS_STRING.
-#if defined(MAGIC_ENUM_USING_ALIAS_STRING)
-MAGIC_ENUM_USING_ALIAS_STRING
-#else
-using std::string;
-#endif
-
-using char_type = string_view::value_type;
-static_assert(std::is_same_v<string_view::value_type, string::value_type>, "magic_enum::customize requires same string_view::value_type and string::value_type");
-static_assert([] {
-  if constexpr (std::is_same_v<char_type, wchar_t>) {
-    constexpr const char     c[] =  "abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789|";
-    constexpr const wchar_t wc[] = L"abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789|";
-    static_assert(std::size(c) == std::size(wc), "magic_enum::customize identifier characters are multichars in wchar_t.");
-
-    for (std::size_t i = 0; i < std::size(c); ++i) {
-      if (c[i] != wc[i]) {
-        return false;
-      }
-    }
-  }
-  return true;
-} (), "magic_enum::customize wchar_t is not compatible with ASCII.");
-
-namespace customize {
-
-// Enum value must be in range [MAGIC_ENUM_RANGE_MIN, MAGIC_ENUM_RANGE_MAX]. By default MAGIC_ENUM_RANGE_MIN = -128, MAGIC_ENUM_RANGE_MAX = 128.
-// If need another range for all enum types by default, redefine the macro MAGIC_ENUM_RANGE_MIN and MAGIC_ENUM_RANGE_MAX.
-// If need another range for specific enum type, add specialization enum_range for necessary enum type.
-template <typename E>
-struct enum_range {
-  static_assert(std::is_enum_v<E>, "magic_enum::customize::enum_range requires enum type.");
-  static constexpr int min = MAGIC_ENUM_RANGE_MIN;
-  static constexpr int max = MAGIC_ENUM_RANGE_MAX;
-  static_assert(max > min, "magic_enum::customize::enum_range requires max > min.");
+/* aaaack but it's fast and const should make it shared text page. */
+static const unsigned char pr2six[256] = {
+    /* ASCII table */
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 62, 64, 64, 64, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64,
+    64, 64, 64, 64, 64, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
+    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64, 64, 26, 27, 28,
+    29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+    49, 50, 51, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64
 };
 
-static_assert(MAGIC_ENUM_RANGE_MAX > MAGIC_ENUM_RANGE_MIN, "MAGIC_ENUM_RANGE_MAX must be greater than MAGIC_ENUM_RANGE_MIN.");
-static_assert((MAGIC_ENUM_RANGE_MAX - MAGIC_ENUM_RANGE_MIN) < (std::numeric_limits<std::uint16_t>::max)(), "MAGIC_ENUM_RANGE must be less than UINT16_MAX.");
-
-namespace detail {
-
-enum class customize_tag {
-  default_tag,
-  invalid_tag,
-  custom_tag
-};
-
-} // namespace magic_enum::customize::detail
-
-class customize_t : public std::pair<detail::customize_tag, string_view> {
- public:
-  constexpr customize_t(string_view srt) : std::pair<detail::customize_tag, string_view>{detail::customize_tag::custom_tag, srt} {}
-  constexpr customize_t(const char_type* srt) : customize_t{string_view{srt}} {}
-  constexpr customize_t(detail::customize_tag tag) : std::pair<detail::customize_tag, string_view>{tag, string_view{}} {
-    MAGIC_ENUM_ASSERT(tag != detail::customize_tag::custom_tag);
-  }
-};
-
-// Default customize.
-inline constexpr auto default_tag = customize_t{detail::customize_tag::default_tag};
-// Invalid customize.
-inline constexpr auto invalid_tag = customize_t{detail::customize_tag::invalid_tag};
-
-// If need custom names for enum, add specialization enum_name for necessary enum type.
-template <typename E>
-constexpr customize_t enum_name(E) noexcept {
-  return default_tag;
+static inline int Base64decode_len(const char* bufcoded)
+{
+    const auto* bufin {reinterpret_cast<const unsigned char*>(bufcoded)};
+    while (pr2six[*(bufin++)] <= 63)
+        ;
+    auto nprbytes {static_cast<int>(bufin - reinterpret_cast<const unsigned char*>(bufcoded)) - 1};
+    return ((nprbytes + 3) / 4) * 3 + 1;
 }
 
-// If need custom type name for enum, add specialization enum_type_name for necessary enum type.
-template <typename E>
-constexpr customize_t enum_type_name() noexcept {
-  return default_tag;
-}
+static inline int Base64decode(char* bufplain, const char* bufcoded)
+{
+    const auto* bufin {reinterpret_cast<const unsigned char*>(bufcoded)};
+    while (pr2six[*(bufin++)] <= 63)
+        ;
+    auto nprbytes {static_cast<int>(bufin - reinterpret_cast<const unsigned char*>(bufcoded)) - 1};
 
-} // namespace magic_enum::customize
+    auto* bufout {reinterpret_cast<unsigned char*>(bufplain)};
+    bufin = reinterpret_cast<const unsigned char*>(bufcoded);
 
-namespace detail {
-
-template <typename T>
-struct supported
-#if defined(MAGIC_ENUM_SUPPORTED) && MAGIC_ENUM_SUPPORTED || defined(MAGIC_ENUM_NO_CHECK_SUPPORT)
-    : std::true_type {};
-#else
-    : std::false_type {};
-#endif
-
-template <auto V, typename E = std::decay_t<decltype(V)>, std::enable_if_t<std::is_enum_v<E>, int> = 0>
-using enum_constant = std::integral_constant<E, V>;
-
-template <typename... T>
-inline constexpr bool always_false_v = false;
-
-template <typename T, typename = void>
-struct has_is_flags : std::false_type {};
-
-template <typename T>
-struct has_is_flags<T, std::void_t<decltype(customize::enum_range<T>::is_flags)>> : std::bool_constant<std::is_same_v<bool, std::decay_t<decltype(customize::enum_range<T>::is_flags)>>> {};
-
-template <typename T, typename = void>
-struct range_min : std::integral_constant<int, MAGIC_ENUM_RANGE_MIN> {};
-
-template <typename T>
-struct range_min<T, std::void_t<decltype(customize::enum_range<T>::min)>> : std::integral_constant<decltype(customize::enum_range<T>::min), customize::enum_range<T>::min> {};
-
-template <typename T, typename = void>
-struct range_max : std::integral_constant<int, MAGIC_ENUM_RANGE_MAX> {};
-
-template <typename T>
-struct range_max<T, std::void_t<decltype(customize::enum_range<T>::max)>> : std::integral_constant<decltype(customize::enum_range<T>::max), customize::enum_range<T>::max> {};
-
-struct str_view {
-  const char* str_ = nullptr;
-  std::size_t size_ = 0;
-};
-
-template <std::uint16_t N>
-class static_str {
- public:
-  constexpr explicit static_str(str_view str) noexcept : static_str{str.str_, std::make_integer_sequence<std::uint16_t, N>{}} {
-    MAGIC_ENUM_ASSERT(str.size_ == N);
-  }
-
-  constexpr explicit static_str(string_view str) noexcept : static_str{str.data(), std::make_integer_sequence<std::uint16_t, N>{}} {
-    MAGIC_ENUM_ASSERT(str.size() == N);
-  }
-
-  constexpr const char_type* data() const noexcept { return chars_; }
-
-  constexpr std::uint16_t size() const noexcept { return N; }
-
-  constexpr operator string_view() const noexcept { return {data(), size()}; }
-
- private:
-  template <std::uint16_t... I>
-  constexpr static_str(const char* str, std::integer_sequence<std::uint16_t, I...>) noexcept : chars_{static_cast<char_type>(str[I])..., static_cast<char_type>('\0')} {}
-
-  template <std::uint16_t... I>
-  constexpr static_str(string_view str, std::integer_sequence<std::uint16_t, I...>) noexcept : chars_{str[I]..., static_cast<char_type>('\0')} {}
-
-  char_type chars_[static_cast<std::size_t>(N) + 1];
-};
-
-template <>
-class static_str<0> {
- public:
-  constexpr explicit static_str() = default;
-
-  constexpr explicit static_str(str_view) noexcept {}
-
-  constexpr explicit static_str(string_view) noexcept {}
-
-  constexpr const char_type* data() const noexcept { return nullptr; }
-
-  constexpr std::uint16_t size() const noexcept { return 0; }
-
-  constexpr operator string_view() const noexcept { return {}; }
-};
-
-template <typename Op = std::equal_to<>>
-class case_insensitive {
-  static constexpr char_type to_lower(char_type c) noexcept {
-    return (c >= static_cast<char_type>('A') && c <= static_cast<char_type>('Z')) ? static_cast<char_type>(c + (static_cast<char_type>('a') - static_cast<char_type>('A'))) : c;
-  }
-
- public:
-  template <typename L, typename R>
-  constexpr auto operator()(L lhs,R rhs) const noexcept -> std::enable_if_t<std::is_same_v<std::decay_t<L>, char_type> && std::is_same_v<std::decay_t<R>, char_type>, bool> {
-    return Op{}(to_lower(lhs), to_lower(rhs));
-  }
-};
-
-constexpr std::size_t find(string_view str, char_type c) noexcept {
-#if defined(__clang__) && __clang_major__ < 9 && defined(__GLIBCXX__) || defined(_MSC_VER) && _MSC_VER < 1920 && !defined(__clang__)
-// https://stackoverflow.com/questions/56484834/constexpr-stdstring-viewfind-last-of-doesnt-work-on-clang-8-with-libstdc
-// https://developercommunity.visualstudio.com/content/problem/360432/vs20178-regression-c-failed-in-test.html
-  constexpr bool workaround = true;
-#else
-  constexpr bool workaround = false;
-#endif
-
-  if constexpr (workaround) {
-    for (std::size_t i = 0; i < str.size(); ++i) {
-      if (str[i] == c) {
-        return i;
-      }
+    while (nprbytes > 4) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[*bufin] << 2 | pr2six[bufin[1]] >> 4);
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[1]] << 4 | pr2six[bufin[2]] >> 2);
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[2]] << 6 | pr2six[bufin[3]]);
+        bufin += 4;
+        nprbytes -= 4;
     }
 
-    return string_view::npos;
-  } else {
-    return str.find(c);
-  }
-}
-
-template <typename BinaryPredicate>
-constexpr bool is_default_predicate() noexcept {
-  return std::is_same_v<std::decay_t<BinaryPredicate>, std::equal_to<string_view::value_type>> ||
-         std::is_same_v<std::decay_t<BinaryPredicate>, std::equal_to<>>;
-}
-
-template <typename BinaryPredicate>
-constexpr bool is_nothrow_invocable() {
-  return is_default_predicate<BinaryPredicate>() ||
-         std::is_nothrow_invocable_r_v<bool, BinaryPredicate, char_type, char_type>;
-}
-
-template <typename BinaryPredicate>
-constexpr bool cmp_equal(string_view lhs, string_view rhs, [[maybe_unused]] BinaryPredicate&& p) noexcept(is_nothrow_invocable<BinaryPredicate>()) {
-#if defined(_MSC_VER) && _MSC_VER < 1920 && !defined(__clang__)
-  // https://developercommunity.visualstudio.com/content/problem/360432/vs20178-regression-c-failed-in-test.html
-  // https://developercommunity.visualstudio.com/content/problem/232218/c-constexpr-string-view.html
-  constexpr bool workaround = true;
-#else
-  constexpr bool workaround = false;
-#endif
-
-  if constexpr (!is_default_predicate<BinaryPredicate>() || workaround) {
-    if (lhs.size() != rhs.size()) {
-      return false;
+    /* Note: (nprbytes == 1) would be an error, so just ingore that case */
+    if (nprbytes > 1) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[*bufin] << 2 | pr2six[bufin[1]] >> 4);
+    }
+    if (nprbytes > 2) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[1]] << 4 | pr2six[bufin[2]] >> 2);
+    }
+    if (nprbytes > 3) {
+        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[2]] << 6 | pr2six[bufin[3]]);
     }
 
-    const auto size = lhs.size();
-    for (std::size_t i = 0; i < size; ++i) {
-      if (!p(lhs[i], rhs[i])) {
-        return false;
-      }
+    *(bufout++) = '\0';
+    return ((nprbytes + 3) / 4) * 3 - ((4 - nprbytes) & 3);
+}
+
+static const char basis_64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static inline int Base64encode_len(int len) { return ((len + 2) / 3 * 4) + 1; }
+
+static inline int Base64encode(char* encoded, const char* string, int len)
+{
+    int i {0};
+    char* p {encoded};
+    for (i = 0; i < len - 2; i += 3) {
+        *p++ = basis_64[(string[i] >> 2) & 0x3F];
+        *p++ = basis_64[((string[i] & 0x3) << 4) | ((string[i + 1] & 0xF0) >> 4)];
+        *p++ = basis_64[((string[i + 1] & 0xF) << 2) | ((string[i + 2] & 0xC0) >> 6)];
+        *p++ = basis_64[string[i + 2] & 0x3F];
     }
-
-    return true;
-  } else {
-    return lhs == rhs;
-  }
-}
-
-template <typename L, typename R>
-constexpr bool cmp_less(L lhs, R rhs) noexcept {
-  static_assert(std::is_integral_v<L> && std::is_integral_v<R>, "magic_enum::detail::cmp_less requires integral type.");
-
-  if constexpr (std::is_signed_v<L> == std::is_signed_v<R>) {
-    // If same signedness (both signed or both unsigned).
-    return lhs < rhs;
-  } else if constexpr (std::is_same_v<L, bool>) { // bool special case
-      return static_cast<R>(lhs) < rhs;
-  } else if constexpr (std::is_same_v<R, bool>) { // bool special case
-      return lhs < static_cast<L>(rhs);
-  } else if constexpr (std::is_signed_v<R>) {
-    // If 'right' is negative, then result is 'false', otherwise cast & compare.
-    return rhs > 0 && lhs < static_cast<std::make_unsigned_t<R>>(rhs);
-  } else {
-    // If 'left' is negative, then result is 'true', otherwise cast & compare.
-    return lhs < 0 || static_cast<std::make_unsigned_t<L>>(lhs) < rhs;
-  }
-}
-
-template <typename I>
-constexpr I log2(I value) noexcept {
-  static_assert(std::is_integral_v<I>, "magic_enum::detail::log2 requires integral type.");
-
-  if constexpr (std::is_same_v<I, bool>) { // bool special case
-    return MAGIC_ENUM_ASSERT(false), value;
-  } else {
-    auto ret = I{0};
-    for (; value > I{1}; value >>= I{1}, ++ret) {}
-
-    return ret;
-  }
-}
-
-#if defined(__cpp_lib_array_constexpr) && __cpp_lib_array_constexpr >= 201603L
-#  define MAGIC_ENUM_ARRAY_CONSTEXPR 1
-#else
-template <typename T, std::size_t N, std::size_t... I>
-constexpr std::array<std::remove_cv_t<T>, N> to_array(T (&a)[N], std::index_sequence<I...>) noexcept {
-  return {{a[I]...}};
-}
-#endif
-
-template <typename T>
-inline constexpr bool is_enum_v = std::is_enum_v<T> && std::is_same_v<T, std::decay_t<T>>;
-
-template <typename E>
-constexpr auto n() noexcept {
-  static_assert(is_enum_v<E>, "magic_enum::detail::n requires enum type.");
-
-  if constexpr (supported<E>::value) {
-#if defined(MAGIC_ENUM_GET_TYPE_NAME_BUILTIN)
-    constexpr auto name_ptr = MAGIC_ENUM_GET_TYPE_NAME_BUILTIN(E);
-    constexpr auto name = name_ptr ? str_view{name_ptr, std::char_traits<char>::length(name_ptr)} : str_view{};
-#elif defined(__clang__)
-    auto name = str_view{__PRETTY_FUNCTION__ + 34, sizeof(__PRETTY_FUNCTION__) - 36};
-#elif defined(__GNUC__)
-    auto name = str_view{__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1};
-    if (name.str_[name.size_ - 1] == ']') {
-      name.size_ -= 50;
-      name.str_ += 49;
-    } else {
-      name.size_ -= 40;
-      name.str_ += 37;
-    }
-#elif defined(_MSC_VER)
-    auto name = str_view{__FUNCSIG__ + 40, sizeof(__FUNCSIG__) - 57};
-#else
-    auto name = str_view{};
-#endif
-    std::size_t p = 0;
-    for (std::size_t i = name.size_; i > 0; --i) {
-      if (name.str_[i] == ':') {
-        p = i + 1;
-        break;
-      }
-    }
-    if (p > 0) {
-      name.size_ -= p;
-      name.str_ += p;
-    }
-    return name;
-  } else {
-    return str_view{}; // Unsupported compiler or Invalid customize.
-  }
-}
-
-template <typename E>
-constexpr auto type_name() noexcept {
-  [[maybe_unused]] constexpr auto custom = customize::enum_type_name<E>();
-  static_assert(std::is_same_v<std::decay_t<decltype(custom)>, customize::customize_t>, "magic_enum::customize requires customize_t type.");
-  if constexpr (custom.first == customize::detail::customize_tag::custom_tag) {
-    constexpr auto name = custom.second;
-    static_assert(!name.empty(), "magic_enum::customize requires not empty string.");
-    return static_str<name.size()>{name};
-  } else if constexpr (custom.first == customize::detail::customize_tag::invalid_tag) {
-    return static_str<0>{};
-  } else if constexpr (custom.first == customize::detail::customize_tag::default_tag) {
-    constexpr auto name = n<E>();
-    return static_str<name.size_>{name};
-  } else {
-    static_assert(always_false_v<E>, "magic_enum::customize invalid.");
-  }
-}
-
-template <typename E>
-inline constexpr auto type_name_v = type_name<E>();
-
-template <auto V>
-constexpr auto n() noexcept {
-  static_assert(is_enum_v<decltype(V)>, "magic_enum::detail::n requires enum type.");
-
-  if constexpr (supported<decltype(V)>::value) {
-#if defined(MAGIC_ENUM_GET_ENUM_NAME_BUILTIN)
-    constexpr auto name_ptr = MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V);
-    auto name = name_ptr ? str_view{name_ptr, std::char_traits<char>::length(name_ptr)} : str_view{};
-#elif defined(__clang__)
-    auto name = str_view{__PRETTY_FUNCTION__ + 34, sizeof(__PRETTY_FUNCTION__) - 36};
-    if (name.size_ > 22 && name.str_[0] == '(' && name.str_[1] == 'a' && name.str_[10] == ' ' && name.str_[22] == ':') {
-      name.size_ -= 23;
-      name.str_ += 23;
-    }
-    if (name.str_[0] == '(' || name.str_[0] == '-' || (name.str_[0] >= '0' && name.str_[0] <= '9')) {
-      name = str_view{};
-    }
-#elif defined(__GNUC__)
-    auto name = str_view{__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1};
-    if (name.str_[name.size_ - 1] == ']') {
-      name.size_ -= 55;
-      name.str_ += 54;
-    } else {
-      name.size_ -= 40;
-      name.str_ += 37;
-    }
-    if (name.str_[0] == '(') {
-      name = str_view{};
-    }
-#elif defined(_MSC_VER)
-    str_view name;
-    if ((__FUNCSIG__[5] == '_' && __FUNCSIG__[35] != '(') || (__FUNCSIG__[5] == 'c' && __FUNCSIG__[41] != '(')) {
-      name = str_view{__FUNCSIG__ + 35, sizeof(__FUNCSIG__) - 52};
-    }
-#else
-    auto name = str_view{};
-#endif
-    std::size_t p = 0;
-    for (std::size_t i = name.size_; i > 0; --i) {
-      if (name.str_[i] == ':') {
-        p = i + 1;
-        break;
-      }
-    }
-    if (p > 0) {
-      name.size_ -= p;
-      name.str_ += p;
-    }
-    return name;
-  } else {
-    return str_view{}; // Unsupported compiler or Invalid customize.
-  }
-}
-
-#if defined(_MSC_VER) && !defined(__clang__) && _MSC_VER < 1920
-#  define MAGIC_ENUM_VS_2017_WORKAROUND 1
-#endif
-
-#if defined(MAGIC_ENUM_VS_2017_WORKAROUND)
-template <typename E, E V>
-constexpr auto n() noexcept {
-  static_assert(is_enum_v<E>, "magic_enum::detail::n requires enum type.");
-
-#  if defined(MAGIC_ENUM_GET_ENUM_NAME_BUILTIN)
-  constexpr auto name_ptr = MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V);
-  auto name = name_ptr ? str_view{name_ptr, std::char_traits<char>::length(name_ptr)} : str_view{};
-#  else
-  str_view name = str_view{__FUNCSIG__, sizeof(__FUNCSIG__) - 17};
-  std::size_t p = 0;
-  for (std::size_t i = name.size_; i > 0; --i) {
-    if (name.str_[i] == ',' || name.str_[i] == ':') {
-      p = i + 1;
-      break;
-    }
-  }
-  if (p > 0) {
-    name.size_ -= p;
-    name.str_ += p;
-  }
-  if (name.str_[0] == '(' || name.str_[0] == '-' || (name.str_[0] >= '0' && name.str_[0] <= '9')) {
-    name = str_view{};
-  }
-  return name;
-#  endif
-}
-#endif
-
-template <typename E, E V>
-constexpr auto enum_name() noexcept {
-  [[maybe_unused]] constexpr auto custom = customize::enum_name<E>(V);
-  static_assert(std::is_same_v<std::decay_t<decltype(custom)>, customize::customize_t>, "magic_enum::customize requires customize_t type.");
-  if constexpr (custom.first == customize::detail::customize_tag::custom_tag) {
-    constexpr auto name = custom.second;
-    static_assert(!name.empty(), "magic_enum::customize requires not empty string.");
-    return static_str<name.size()>{name};
-  } else if constexpr (custom.first == customize::detail::customize_tag::invalid_tag) {
-    return static_str<0>{};
-  } else if constexpr (custom.first == customize::detail::customize_tag::default_tag) {
-#if defined(MAGIC_ENUM_VS_2017_WORKAROUND)
-    constexpr auto name = n<E, V>();
-#else
-    constexpr auto name = n<V>();
-#endif
-    return static_str<name.size_>{name};
-  } else {
-    static_assert(always_false_v<E>, "magic_enum::customize invalid.");
-  }
-}
-
-template <typename E, E V>
-inline constexpr auto enum_name_v = enum_name<E, V>();
-
-template <typename E, auto V>
-constexpr bool is_valid() noexcept {
-#if defined(__clang__) && __clang_major__ >= 16
-  // https://reviews.llvm.org/D130058, https://reviews.llvm.org/D131307
-  constexpr E v = __builtin_bit_cast(E, V);
-#else
-  constexpr E v = static_cast<E>(V);
-#endif
-  [[maybe_unused]] constexpr auto custom = customize::enum_name<E>(v);
-  static_assert(std::is_same_v<std::decay_t<decltype(custom)>, customize::customize_t>, "magic_enum::customize requires customize_t type.");
-  if constexpr (custom.first == customize::detail::customize_tag::custom_tag) {
-    constexpr auto name = custom.second;
-    static_assert(!name.empty(), "magic_enum::customize requires not empty string.");
-    return name.size() != 0;
-  } else if constexpr (custom.first == customize::detail::customize_tag::default_tag) {
-#if defined(MAGIC_ENUM_VS_2017_WORKAROUND)
-    return n<E, v>().size_ != 0;
-#else
-    return n<v>().size_ != 0;
-#endif
-  } else {
-    return false;
-  }
-}
-
-enum class enum_subtype {
-  common,
-  flags
-};
-
-template <typename E, int O, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr U ualue(std::size_t i) noexcept {
-  if constexpr (std::is_same_v<U, bool>) { // bool special case
-    static_assert(O == 0, "magic_enum::detail::ualue requires valid offset.");
-
-    return static_cast<U>(i);
-  } else if constexpr (S == enum_subtype::flags) {
-    return static_cast<U>(U{1} << static_cast<U>(static_cast<int>(i) + O));
-  } else {
-    return static_cast<U>(static_cast<int>(i) + O);
-  }
-}
-
-template <typename E, int O, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr E value(std::size_t i) noexcept {
-  return static_cast<E>(ualue<E, O, S>(i));
-}
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr int reflected_min() noexcept {
-  if constexpr (S == enum_subtype::flags) {
-    return 0;
-  } else {
-    constexpr auto lhs = range_min<E>::value;
-    constexpr auto rhs = (std::numeric_limits<U>::min)();
-
-    if constexpr (cmp_less(rhs, lhs)) {
-      return lhs;
-    } else {
-      return rhs;
-    }
-  }
-}
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr int reflected_max() noexcept {
-  if constexpr (S == enum_subtype::flags) {
-    return std::numeric_limits<U>::digits - 1;
-  } else {
-    constexpr auto lhs = range_max<E>::value;
-    constexpr auto rhs = (std::numeric_limits<U>::max)();
-
-    if constexpr (cmp_less(lhs, rhs)) {
-      return lhs;
-    } else {
-      return rhs;
-    }
-  }
-}
-
-#define MAGIC_ENUM_FOR_EACH_256(T)                                                                                                                                                                 \
-  T(  0)T(  1)T(  2)T(  3)T(  4)T(  5)T(  6)T(  7)T(  8)T(  9)T( 10)T( 11)T( 12)T( 13)T( 14)T( 15)T( 16)T( 17)T( 18)T( 19)T( 20)T( 21)T( 22)T( 23)T( 24)T( 25)T( 26)T( 27)T( 28)T( 29)T( 30)T( 31) \
-  T( 32)T( 33)T( 34)T( 35)T( 36)T( 37)T( 38)T( 39)T( 40)T( 41)T( 42)T( 43)T( 44)T( 45)T( 46)T( 47)T( 48)T( 49)T( 50)T( 51)T( 52)T( 53)T( 54)T( 55)T( 56)T( 57)T( 58)T( 59)T( 60)T( 61)T( 62)T( 63) \
-  T( 64)T( 65)T( 66)T( 67)T( 68)T( 69)T( 70)T( 71)T( 72)T( 73)T( 74)T( 75)T( 76)T( 77)T( 78)T( 79)T( 80)T( 81)T( 82)T( 83)T( 84)T( 85)T( 86)T( 87)T( 88)T( 89)T( 90)T( 91)T( 92)T( 93)T( 94)T( 95) \
-  T( 96)T( 97)T( 98)T( 99)T(100)T(101)T(102)T(103)T(104)T(105)T(106)T(107)T(108)T(109)T(110)T(111)T(112)T(113)T(114)T(115)T(116)T(117)T(118)T(119)T(120)T(121)T(122)T(123)T(124)T(125)T(126)T(127) \
-  T(128)T(129)T(130)T(131)T(132)T(133)T(134)T(135)T(136)T(137)T(138)T(139)T(140)T(141)T(142)T(143)T(144)T(145)T(146)T(147)T(148)T(149)T(150)T(151)T(152)T(153)T(154)T(155)T(156)T(157)T(158)T(159) \
-  T(160)T(161)T(162)T(163)T(164)T(165)T(166)T(167)T(168)T(169)T(170)T(171)T(172)T(173)T(174)T(175)T(176)T(177)T(178)T(179)T(180)T(181)T(182)T(183)T(184)T(185)T(186)T(187)T(188)T(189)T(190)T(191) \
-  T(192)T(193)T(194)T(195)T(196)T(197)T(198)T(199)T(200)T(201)T(202)T(203)T(204)T(205)T(206)T(207)T(208)T(209)T(210)T(211)T(212)T(213)T(214)T(215)T(216)T(217)T(218)T(219)T(220)T(221)T(222)T(223) \
-  T(224)T(225)T(226)T(227)T(228)T(229)T(230)T(231)T(232)T(233)T(234)T(235)T(236)T(237)T(238)T(239)T(240)T(241)T(242)T(243)T(244)T(245)T(246)T(247)T(248)T(249)T(250)T(251)T(252)T(253)T(254)T(255)
-
-template <typename E, enum_subtype S, std::size_t Size, int Min, std::size_t I>
-constexpr void valid_count(bool* valid, std::size_t& count) noexcept {
-#define MAGIC_ENUM_V(O)                                     \
-  if constexpr ((I + O) < Size) {                           \
-    if constexpr (is_valid<E, ualue<E, Min, S>(I + O)>()) { \
-      valid[I + O] = true;                                  \
-      ++count;                                              \
-    }                                                       \
-  }
-
-  MAGIC_ENUM_FOR_EACH_256(MAGIC_ENUM_V);
-
-  if constexpr ((I + 256) < Size) {
-    valid_count<E, S, Size, Min, I + 256>(valid, count);
-  }
-#undef MAGIC_ENUM_V
-}
-
-template <std::size_t N>
-struct valid_count_t {
-  std::size_t count = 0;
-  bool valid[N] = {};
-};
-
-template <typename E, enum_subtype S, std::size_t Size, int Min>
-constexpr auto valid_count() noexcept {
-  valid_count_t<Size> vc;
-  valid_count<E, S, Size, Min, 0>(vc.valid, vc.count);
-  return vc;
-}
-
-template <typename E, enum_subtype S, std::size_t Size, int Min>
-constexpr auto values() noexcept {
-  constexpr auto vc = valid_count<E, S, Size, Min>();
-
-  if constexpr (vc.count > 0) {
-#if defined(MAGIC_ENUM_ARRAY_CONSTEXPR)
-    std::array<E, vc.count> values = {};
-#else
-    E values[vc.count] = {};
-#endif
-    for (std::size_t i = 0, v = 0; v < vc.count; ++i) {
-      if (vc.valid[i]) {
-        values[v++] = value<E, Min, S>(i);
-      }
-    }
-#if defined(MAGIC_ENUM_ARRAY_CONSTEXPR)
-    return values;
-#else
-    return to_array(values, std::make_index_sequence<vc.count>{});
-#endif
-  } else {
-    return std::array<E, 0>{};
-  }
-}
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr auto values() noexcept {
-  constexpr auto min = reflected_min<E, S>();
-  constexpr auto max = reflected_max<E, S>();
-  constexpr auto range_size = max - min + 1;
-  static_assert(range_size > 0, "magic_enum::enum_range requires valid size.");
-  static_assert(range_size < (std::numeric_limits<std::uint16_t>::max)(), "magic_enum::enum_range requires valid size.");
-
-  return values<E, S, range_size, min>();
-}
-
-template <typename E, typename U = std::underlying_type_t<E>>
-constexpr enum_subtype subtype(std::true_type) noexcept {
-  if constexpr (std::is_same_v<U, bool>) { // bool special case
-    return enum_subtype::common;
-  } else if constexpr (has_is_flags<E>::value) {
-    return customize::enum_range<E>::is_flags ? enum_subtype::flags : enum_subtype::common;
-  } else {
-#if defined(MAGIC_ENUM_AUTO_IS_FLAGS)
-    constexpr auto flags_values = values<E, enum_subtype::flags>();
-    constexpr auto default_values = values<E, enum_subtype::common>();
-    if (flags_values.size() == 0 || default_values.size() > flags_values.size()) {
-      return enum_subtype::common;
-    }
-    for (std::size_t i = 0; i < default_values.size(); ++i) {
-      const auto v = static_cast<U>(default_values[i]);
-      if (v != 0 && (v & (v - 1)) != 0) {
-        return enum_subtype::common;
-      }
-    }
-    return enum_subtype::flags;
-#else
-    return enum_subtype::common;
-#endif
-  }
-}
-
-template <typename T>
-constexpr enum_subtype subtype(std::false_type) noexcept {
-  // For non-enum type return default common subtype.
-  return enum_subtype::common;
-}
-
-template <typename E, typename D = std::decay_t<E>>
-inline constexpr auto subtype_v = subtype<D>(std::is_enum<D>{});
-
-template <typename E, enum_subtype S>
-inline constexpr auto values_v = values<E, S>();
-
-template <typename E, enum_subtype S, typename D = std::decay_t<E>>
-using values_t = decltype((values_v<D, S>));
-
-template <typename E, enum_subtype S>
-inline constexpr auto count_v = values_v<E, S>.size();
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-inline constexpr auto min_v = (count_v<E, S> > 0) ? static_cast<U>(values_v<E, S>.front()) : U{0};
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-inline constexpr auto max_v = (count_v<E, S> > 0) ? static_cast<U>(values_v<E, S>.back()) : U{0};
-
-template <typename E, enum_subtype S, std::size_t... I>
-constexpr auto names(std::index_sequence<I...>) noexcept {
-  return std::array<string_view, sizeof...(I)>{{enum_name_v<E, values_v<E, S>[I]>...}};
-}
-
-template <typename E, enum_subtype S>
-inline constexpr auto names_v = names<E, S>(std::make_index_sequence<count_v<E, S>>{});
-
-template <typename E, enum_subtype S, typename D = std::decay_t<E>>
-using names_t = decltype((names_v<D, S>));
-
-template <typename E, enum_subtype S, std::size_t... I>
-constexpr auto entries(std::index_sequence<I...>) noexcept {
-  return std::array<std::pair<E, string_view>, sizeof...(I)>{{{values_v<E, S>[I], enum_name_v<E, values_v<E, S>[I]>}...}};
-}
-
-template <typename E, enum_subtype S>
-inline constexpr auto entries_v = entries<E, S>(std::make_index_sequence<count_v<E, S>>{});
-
-template <typename E, enum_subtype S, typename D = std::decay_t<E>>
-using entries_t = decltype((entries_v<D, S>));
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr bool is_sparse() noexcept {
-  if constexpr (count_v<E, S> == 0) {
-    return false;
-  } else if constexpr (std::is_same_v<U, bool>) { // bool special case
-    return false;
-  } else {
-    constexpr auto max = (S == enum_subtype::flags) ? log2(max_v<E, S>) : max_v<E, S>;
-    constexpr auto min = (S == enum_subtype::flags) ? log2(min_v<E, S>) : min_v<E, S>;
-    constexpr auto range_size = max - min + 1;
-
-    return range_size != count_v<E, S>;
-  }
-}
-
-template <typename E, enum_subtype S = subtype_v<E>>
-inline constexpr bool is_sparse_v = is_sparse<E, S>();
-
-template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
-constexpr U values_ors() noexcept {
-  static_assert(S == enum_subtype::flags, "magic_enum::detail::values_ors requires valid subtype.");
-
-  auto ors = U{0};
-  for (std::size_t i = 0; i < count_v<E, S>; ++i) {
-    ors |= static_cast<U>(values_v<E, S>[i]);
-  }
-
-  return ors;
-}
-
-template <bool, typename R>
-struct enable_if_enum {};
-
-template <typename R>
-struct enable_if_enum<true, R> {
-  using type = R;
-  static_assert(supported<R>::value, "magic_enum unsupported compiler (https://github.com/Neargye/magic_enum#compiler-compatibility).");
-};
-
-template <typename T, typename R, typename BinaryPredicate = std::equal_to<>, typename D = std::decay_t<T>>
-using enable_if_t = typename enable_if_enum<std::is_enum_v<D> && std::is_invocable_r_v<bool, BinaryPredicate, char_type, char_type>, R>::type;
-
-template <typename T, std::enable_if_t<std::is_enum_v<std::decay_t<T>>, int> = 0>
-using enum_concept = T;
-
-template <typename T, bool = std::is_enum_v<T>>
-struct is_scoped_enum : std::false_type {};
-
-template <typename T>
-struct is_scoped_enum<T, true> : std::bool_constant<!std::is_convertible_v<T, std::underlying_type_t<T>>> {};
-
-template <typename T, bool = std::is_enum_v<T>>
-struct is_unscoped_enum : std::false_type {};
-
-template <typename T>
-struct is_unscoped_enum<T, true> : std::bool_constant<std::is_convertible_v<T, std::underlying_type_t<T>>> {};
-
-template <typename T, bool = std::is_enum_v<std::decay_t<T>>>
-struct underlying_type {};
-
-template <typename T>
-struct underlying_type<T, true> : std::underlying_type<std::decay_t<T>> {};
-
-#if defined(MAGIC_ENUM_ENABLE_HASH) || defined(MAGIC_ENUM_ENABLE_HASH_SWITCH)
-
-template <typename Value, typename = void>
-struct constexpr_hash_t;
-
-template <typename Value>
-struct constexpr_hash_t<Value, std::enable_if_t<is_enum_v<Value>>> {
-  constexpr auto operator()(Value value) const noexcept {
-    using U = typename underlying_type<Value>::type;
-    if constexpr (std::is_same_v<U, bool>) { // bool special case
-      return static_cast<std::size_t>(value);
-    } else {
-      return static_cast<U>(value);
-    }
-  }
-  using secondary_hash = constexpr_hash_t;
-};
-
-template <typename Value>
-struct constexpr_hash_t<Value, std::enable_if_t<std::is_same_v<Value, string_view>>> {
-  static constexpr std::uint32_t crc_table[256] {
-    0x00000000L, 0x77073096L, 0xee0e612cL, 0x990951baL, 0x076dc419L, 0x706af48fL, 0xe963a535L, 0x9e6495a3L,
-    0x0edb8832L, 0x79dcb8a4L, 0xe0d5e91eL, 0x97d2d988L, 0x09b64c2bL, 0x7eb17cbdL, 0xe7b82d07L, 0x90bf1d91L,
-    0x1db71064L, 0x6ab020f2L, 0xf3b97148L, 0x84be41deL, 0x1adad47dL, 0x6ddde4ebL, 0xf4d4b551L, 0x83d385c7L,
-    0x136c9856L, 0x646ba8c0L, 0xfd62f97aL, 0x8a65c9ecL, 0x14015c4fL, 0x63066cd9L, 0xfa0f3d63L, 0x8d080df5L,
-    0x3b6e20c8L, 0x4c69105eL, 0xd56041e4L, 0xa2677172L, 0x3c03e4d1L, 0x4b04d447L, 0xd20d85fdL, 0xa50ab56bL,
-    0x35b5a8faL, 0x42b2986cL, 0xdbbbc9d6L, 0xacbcf940L, 0x32d86ce3L, 0x45df5c75L, 0xdcd60dcfL, 0xabd13d59L,
-    0x26d930acL, 0x51de003aL, 0xc8d75180L, 0xbfd06116L, 0x21b4f4b5L, 0x56b3c423L, 0xcfba9599L, 0xb8bda50fL,
-    0x2802b89eL, 0x5f058808L, 0xc60cd9b2L, 0xb10be924L, 0x2f6f7c87L, 0x58684c11L, 0xc1611dabL, 0xb6662d3dL,
-    0x76dc4190L, 0x01db7106L, 0x98d220bcL, 0xefd5102aL, 0x71b18589L, 0x06b6b51fL, 0x9fbfe4a5L, 0xe8b8d433L,
-    0x7807c9a2L, 0x0f00f934L, 0x9609a88eL, 0xe10e9818L, 0x7f6a0dbbL, 0x086d3d2dL, 0x91646c97L, 0xe6635c01L,
-    0x6b6b51f4L, 0x1c6c6162L, 0x856530d8L, 0xf262004eL, 0x6c0695edL, 0x1b01a57bL, 0x8208f4c1L, 0xf50fc457L,
-    0x65b0d9c6L, 0x12b7e950L, 0x8bbeb8eaL, 0xfcb9887cL, 0x62dd1ddfL, 0x15da2d49L, 0x8cd37cf3L, 0xfbd44c65L,
-    0x4db26158L, 0x3ab551ceL, 0xa3bc0074L, 0xd4bb30e2L, 0x4adfa541L, 0x3dd895d7L, 0xa4d1c46dL, 0xd3d6f4fbL,
-    0x4369e96aL, 0x346ed9fcL, 0xad678846L, 0xda60b8d0L, 0x44042d73L, 0x33031de5L, 0xaa0a4c5fL, 0xdd0d7cc9L,
-    0x5005713cL, 0x270241aaL, 0xbe0b1010L, 0xc90c2086L, 0x5768b525L, 0x206f85b3L, 0xb966d409L, 0xce61e49fL,
-    0x5edef90eL, 0x29d9c998L, 0xb0d09822L, 0xc7d7a8b4L, 0x59b33d17L, 0x2eb40d81L, 0xb7bd5c3bL, 0xc0ba6cadL,
-    0xedb88320L, 0x9abfb3b6L, 0x03b6e20cL, 0x74b1d29aL, 0xead54739L, 0x9dd277afL, 0x04db2615L, 0x73dc1683L,
-    0xe3630b12L, 0x94643b84L, 0x0d6d6a3eL, 0x7a6a5aa8L, 0xe40ecf0bL, 0x9309ff9dL, 0x0a00ae27L, 0x7d079eb1L,
-    0xf00f9344L, 0x8708a3d2L, 0x1e01f268L, 0x6906c2feL, 0xf762575dL, 0x806567cbL, 0x196c3671L, 0x6e6b06e7L,
-    0xfed41b76L, 0x89d32be0L, 0x10da7a5aL, 0x67dd4accL, 0xf9b9df6fL, 0x8ebeeff9L, 0x17b7be43L, 0x60b08ed5L,
-    0xd6d6a3e8L, 0xa1d1937eL, 0x38d8c2c4L, 0x4fdff252L, 0xd1bb67f1L, 0xa6bc5767L, 0x3fb506ddL, 0x48b2364bL,
-    0xd80d2bdaL, 0xaf0a1b4cL, 0x36034af6L, 0x41047a60L, 0xdf60efc3L, 0xa867df55L, 0x316e8eefL, 0x4669be79L,
-    0xcb61b38cL, 0xbc66831aL, 0x256fd2a0L, 0x5268e236L, 0xcc0c7795L, 0xbb0b4703L, 0x220216b9L, 0x5505262fL,
-    0xc5ba3bbeL, 0xb2bd0b28L, 0x2bb45a92L, 0x5cb36a04L, 0xc2d7ffa7L, 0xb5d0cf31L, 0x2cd99e8bL, 0x5bdeae1dL,
-    0x9b64c2b0L, 0xec63f226L, 0x756aa39cL, 0x026d930aL, 0x9c0906a9L, 0xeb0e363fL, 0x72076785L, 0x05005713L,
-    0x95bf4a82L, 0xe2b87a14L, 0x7bb12baeL, 0x0cb61b38L, 0x92d28e9bL, 0xe5d5be0dL, 0x7cdcefb7L, 0x0bdbdf21L,
-    0x86d3d2d4L, 0xf1d4e242L, 0x68ddb3f8L, 0x1fda836eL, 0x81be16cdL, 0xf6b9265bL, 0x6fb077e1L, 0x18b74777L,
-    0x88085ae6L, 0xff0f6a70L, 0x66063bcaL, 0x11010b5cL, 0x8f659effL, 0xf862ae69L, 0x616bffd3L, 0x166ccf45L,
-    0xa00ae278L, 0xd70dd2eeL, 0x4e048354L, 0x3903b3c2L, 0xa7672661L, 0xd06016f7L, 0x4969474dL, 0x3e6e77dbL,
-    0xaed16a4aL, 0xd9d65adcL, 0x40df0b66L, 0x37d83bf0L, 0xa9bcae53L, 0xdebb9ec5L, 0x47b2cf7fL, 0x30b5ffe9L,
-    0xbdbdf21cL, 0xcabac28aL, 0x53b39330L, 0x24b4a3a6L, 0xbad03605L, 0xcdd70693L, 0x54de5729L, 0x23d967bfL,
-    0xb3667a2eL, 0xc4614ab8L, 0x5d681b02L, 0x2a6f2b94L, 0xb40bbe37L, 0xc30c8ea1L, 0x5a05df1bL, 0x2d02ef8dL
-  };
-  constexpr std::uint32_t operator()(string_view value) const noexcept {
-    auto crc = static_cast<std::uint32_t>(0xffffffffL);
-    for (const auto c : value) {
-      crc = (crc >> 8) ^ crc_table[(crc ^ static_cast<std::uint32_t>(c)) & 0xff];
-    }
-    return crc ^ 0xffffffffL;
-  }
-
-  struct secondary_hash {
-    constexpr std::uint32_t operator()(string_view value) const noexcept {
-      auto acc = static_cast<std::uint64_t>(2166136261ULL);
-      for (const auto c : value) {
-        acc = ((acc ^ static_cast<std::uint64_t>(c)) * static_cast<std::uint64_t>(16777619ULL)) & (std::numeric_limits<std::uint32_t>::max)();
-      }
-      return static_cast<std::uint32_t>(acc);
-    }
-  };
-};
-
-template <typename Hash>
-inline constexpr Hash hash_v{};
-
-template <auto* GlobValues, typename Hash>
-constexpr auto calculate_cases(std::size_t Page) noexcept {
-  constexpr std::array values = *GlobValues;
-  constexpr std::size_t size = values.size();
-
-  using switch_t = std::invoke_result_t<Hash, typename decltype(values)::value_type>;
-  static_assert(std::is_integral_v<switch_t> && !std::is_same_v<switch_t, bool>);
-  const std::size_t values_to = (std::min)(static_cast<std::size_t>(256), size - Page);
-
-  std::array<switch_t, 256> result{};
-  auto fill = result.begin();
-  {
-    auto first = values.begin() + static_cast<std::ptrdiff_t>(Page);
-    auto last = values.begin() + static_cast<std::ptrdiff_t>(Page + values_to);
-    while (first != last) {
-      *fill++ = hash_v<Hash>(*first++);
-    }
-  }
-
-  // dead cases, try to avoid case collisions
-  for (switch_t last_value = result[values_to - 1]; fill != result.end() && last_value != (std::numeric_limits<switch_t>::max)(); *fill++ = ++last_value) {
-  }
-
-  {
-    auto it = result.begin();
-    auto last_value = (std::numeric_limits<switch_t>::min)();
-    for (; fill != result.end(); *fill++ = last_value++) {
-      while (last_value == *it) {
-        ++last_value, ++it;
-      }
-    }
-  }
-
-  return result;
-}
-
-template <typename R, typename F, typename... Args>
-constexpr R invoke_r(F&& f, Args&&... args) noexcept(std::is_nothrow_invocable_r_v<R, F, Args...>) {
-  if constexpr (std::is_void_v<R>) {
-    std::forward<F>(f)(std::forward<Args>(args)...);
-  } else {
-    return static_cast<R>(std::forward<F>(f)(std::forward<Args>(args)...));
-  }
-}
-
-enum class case_call_t {
-  index,
-  value
-};
-
-template <typename T = void>
-inline constexpr auto default_result_type_lambda = []() noexcept(std::is_nothrow_default_constructible_v<T>) { return T{}; };
-
-template <>
-inline constexpr auto default_result_type_lambda<void> = []() noexcept {};
-
-template <auto* Arr, typename Hash>
-constexpr bool has_duplicate() noexcept {
-  using value_t = std::decay_t<decltype((*Arr)[0])>;
-  using hash_value_t = std::invoke_result_t<Hash, value_t>;
-  std::array<hash_value_t, Arr->size()> hashes{};
-  std::size_t size = 0;
-  for (auto elem : *Arr) {
-    hashes[size] = hash_v<Hash>(elem);
-    for (auto i = size++; i > 0; --i) {
-      if (hashes[i] < hashes[i - 1]) {
-        auto tmp = hashes[i];
-        hashes[i] = hashes[i - 1];
-        hashes[i - 1] = tmp;
-      } else if (hashes[i] == hashes[i - 1]) {
-        return false;
-      } else {
-        break;
-      }
-    }
-  }
-  return true;
-}
-
-#define MAGIC_ENUM_CASE(val)                                                                                                  \
-  case cases[val]:                                                                                                            \
-    if constexpr ((val) + Page < size) {                                                                                      \
-      if (!pred(values[val + Page], searched)) {                                                                              \
-        break;                                                                                                                \
-      }                                                                                                                       \
-      if constexpr (CallValue == case_call_t::index) {                                                                        \
-        if constexpr (std::is_invocable_r_v<result_t, Lambda, std::integral_constant<std::size_t, val + Page>>) {             \
-          return detail::invoke_r<result_t>(std::forward<Lambda>(lambda), std::integral_constant<std::size_t, val + Page>{}); \
-        } else if constexpr (std::is_invocable_v<Lambda, std::integral_constant<std::size_t, val + Page>>) {                  \
-          MAGIC_ENUM_ASSERT(false && "magic_enum::detail::constexpr_switch wrong result type.");                                         \
-        }                                                                                                                     \
-      } else if constexpr (CallValue == case_call_t::value) {                                                                 \
-        if constexpr (std::is_invocable_r_v<result_t, Lambda, enum_constant<values[val + Page]>>) {                           \
-          return detail::invoke_r<result_t>(std::forward<Lambda>(lambda), enum_constant<values[val + Page]>{});               \
-        } else if constexpr (std::is_invocable_r_v<result_t, Lambda, enum_constant<values[val + Page]>>) {                    \
-          MAGIC_ENUM_ASSERT(false && "magic_enum::detail::constexpr_switch wrong result type.");                                         \
-        }                                                                                                                     \
-      }                                                                                                                       \
-      break;                                                                                                                  \
-    } else [[fallthrough]];
-
-template <auto* GlobValues,
-          case_call_t CallValue,
-          std::size_t Page = 0,
-          typename Hash = constexpr_hash_t<typename std::decay_t<decltype(*GlobValues)>::value_type>,
-          typename BinaryPredicate = std::equal_to<>,
-          typename Lambda,
-          typename ResultGetterType>
-constexpr decltype(auto) constexpr_switch(
-    Lambda&& lambda,
-    typename std::decay_t<decltype(*GlobValues)>::value_type searched,
-    ResultGetterType&& def,
-    BinaryPredicate&& pred = {}) {
-  using result_t = std::invoke_result_t<ResultGetterType>;
-  using hash_t = std::conditional_t<has_duplicate<GlobValues, Hash>(), Hash, typename Hash::secondary_hash>;
-  static_assert(has_duplicate<GlobValues, hash_t>(), "magic_enum::detail::constexpr_switch duplicated hash found, please report it: https://github.com/Neargye/magic_enum/issues.");
-  constexpr std::array values = *GlobValues;
-  constexpr std::size_t size = values.size();
-  constexpr std::array cases = calculate_cases<GlobValues, hash_t>(Page);
-
-  switch (hash_v<hash_t>(searched)) {
-    MAGIC_ENUM_FOR_EACH_256(MAGIC_ENUM_CASE)
-    default:
-      if constexpr (size > 256 + Page) {
-        return constexpr_switch<GlobValues, CallValue, Page + 256, Hash>(std::forward<Lambda>(lambda), searched, std::forward<ResultGetterType>(def));
-      }
-      break;
-  }
-  return def();
-}
-
-#undef MAGIC_ENUM_CASE
-
-#endif
-
-} // namespace magic_enum::detail
-
-// Checks is magic_enum supported compiler.
-inline constexpr bool is_magic_enum_supported = detail::supported<void>::value;
-
-template <typename T>
-using Enum = detail::enum_concept<T>;
-
-// Checks whether T is an Unscoped enumeration type.
-// Provides the member constant value which is equal to true, if T is an [Unscoped enumeration](https://en.cppreference.com/w/cpp/language/enum#Unscoped_enumeration) type. Otherwise, value is equal to false.
-template <typename T>
-struct is_unscoped_enum : detail::is_unscoped_enum<T> {};
-
-template <typename T>
-inline constexpr bool is_unscoped_enum_v = is_unscoped_enum<T>::value;
-
-// Checks whether T is an Scoped enumeration type.
-// Provides the member constant value which is equal to true, if T is an [Scoped enumeration](https://en.cppreference.com/w/cpp/language/enum#Scoped_enumerations) type. Otherwise, value is equal to false.
-template <typename T>
-struct is_scoped_enum : detail::is_scoped_enum<T> {};
-
-template <typename T>
-inline constexpr bool is_scoped_enum_v = is_scoped_enum<T>::value;
-
-// If T is a complete enumeration type, provides a member typedef type that names the underlying type of T.
-// Otherwise, if T is not an enumeration type, there is no member type. Otherwise (T is an incomplete enumeration type), the program is ill-formed.
-template <typename T>
-struct underlying_type : detail::underlying_type<T> {};
-
-template <typename T>
-using underlying_type_t = typename underlying_type<T>::type;
-
-template <auto V>
-using enum_constant = detail::enum_constant<V>;
-
-// Returns type name of enum.
-template <typename E>
-[[nodiscard]] constexpr auto enum_type_name() noexcept -> detail::enable_if_t<E, string_view> {
-  constexpr string_view name = detail::type_name_v<std::decay_t<E>>;
-  static_assert(!name.empty(), "magic_enum::enum_type_name enum type does not have a name.");
-
-  return name;
-}
-
-// Returns number of enum values.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_count() noexcept -> detail::enable_if_t<E, std::size_t> {
-  return detail::count_v<std::decay_t<E>, S>;
-}
-
-// Returns enum value at specified index.
-// No bounds checking is performed: the behavior is undefined if index >= number of enum values.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_value(std::size_t index) noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
-  using D = std::decay_t<E>;
-
-  if constexpr (detail::is_sparse_v<D, S>) {
-    return MAGIC_ENUM_ASSERT(index < detail::count_v<D, S>), detail::values_v<D, S>[index];
-  } else {
-    constexpr auto min = (S == detail::enum_subtype::flags) ? detail::log2(detail::min_v<D, S>) : detail::min_v<D, S>;
-
-    return MAGIC_ENUM_ASSERT(index < detail::count_v<D, S>), detail::value<D, min, S>(index);
-  }
-}
-
-// Returns enum value at specified index.
-template <typename E, std::size_t I, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_value() noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
-  using D = std::decay_t<E>;
-  static_assert(I < detail::count_v<D, S>, "magic_enum::enum_value out of range.");
-
-  return enum_value<D, S>(I);
-}
-
-// Returns std::array with enum values, sorted by enum value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_values() noexcept -> detail::enable_if_t<E, detail::values_t<E, S>> {
-  return detail::values_v<std::decay_t<E>, S>;
-}
-
-// Returns integer value from enum value.
-template <typename E>
-[[nodiscard]] constexpr auto enum_integer(E value) noexcept -> detail::enable_if_t<E, underlying_type_t<E>> {
-  return static_cast<underlying_type_t<E>>(value);
-}
-
-// Returns underlying value from enum value.
-template <typename E>
-[[nodiscard]] constexpr auto enum_underlying(E value) noexcept -> detail::enable_if_t<E, underlying_type_t<E>> {
-  return static_cast<underlying_type_t<E>>(value);
-}
-
-// Obtains index in enum values from enum value.
-// Returns optional with index.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_index(E value) noexcept -> detail::enable_if_t<E, optional<std::size_t>> {
-  using D = std::decay_t<E>;
-  using U = underlying_type_t<D>;
-
-  if constexpr (detail::count_v<D, S> == 0) {
-    static_cast<void>(value);
-    return {}; // Empty enum.
-  } else if constexpr (detail::is_sparse_v<D, S> || (S == detail::enum_subtype::flags)) {
-#if defined(MAGIC_ENUM_ENABLE_HASH)
-    return detail::constexpr_switch<&detail::values_v<D, S>, detail::case_call_t::index>(
-        [](std::size_t i) { return optional<std::size_t>{i}; },
-        value,
-        detail::default_result_type_lambda<optional<std::size_t>>);
-#else
-    for (std::size_t i = 0; i < detail::count_v<D, S>; ++i) {
-      if (enum_value<D, S>(i) == value) {
-        return i;
-      }
-    }
-    return {}; // Invalid value or out of range.
-#endif
-  } else {
-    const auto v = static_cast<U>(value);
-    if (v >= detail::min_v<D, S> && v <= detail::max_v<D, S>) {
-      return static_cast<std::size_t>(v - detail::min_v<D, S>);
-    }
-    return {}; // Invalid value or out of range.
-  }
-}
-
-// Obtains index in enum values from enum value.
-// Returns optional with index.
-template <detail::enum_subtype S, typename E>
-[[nodiscard]] constexpr auto enum_index(E value) noexcept -> detail::enable_if_t<E, optional<std::size_t>> {
-  using D = std::decay_t<E>;
-
-  return enum_index<D, S>(value);
-}
-
-// Obtains index in enum values from static storage enum variable.
-template <auto V, detail::enum_subtype S = detail::subtype_v<std::decay_t<decltype(V)>>>
-[[nodiscard]] constexpr auto enum_index() noexcept -> detail::enable_if_t<decltype(V), std::size_t> {
-  constexpr auto index = enum_index<std::decay_t<decltype(V)>, S>(V);
-  static_assert(index, "magic_enum::enum_index enum value does not have a index.");
-
-  return *index;
-}
-
-// Returns name from static storage enum variable.
-// This version is much lighter on the compile times and is not restricted to the enum_range limitation.
-template <auto V>
-[[nodiscard]] constexpr auto enum_name() noexcept -> detail::enable_if_t<decltype(V), string_view> {
-  constexpr string_view name = detail::enum_name_v<std::decay_t<decltype(V)>, V>;
-  static_assert(!name.empty(), "magic_enum::enum_name enum value does not have a name.");
-
-  return name;
-}
-
-// Returns name from enum value.
-// If enum value does not have name or value out of range, returns empty string.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_name(E value) noexcept -> detail::enable_if_t<E, string_view> {
-  using D = std::decay_t<E>;
-
-  if (const auto i = enum_index<D, S>(value)) {
-    return detail::names_v<D, S>[*i];
-  }
-  return {};
-}
-
-// Returns name from enum value.
-// If enum value does not have name or value out of range, returns empty string.
-template <detail::enum_subtype S, typename E>
-[[nodiscard]] constexpr auto enum_name(E value) -> detail::enable_if_t<E, string_view> {
-  using D = std::decay_t<E>;
-
-  return enum_name<D, S>(value);
-}
-
-// Returns std::array with names, sorted by enum value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_names() noexcept -> detail::enable_if_t<E, detail::names_t<E, S>> {
-  return detail::names_v<std::decay_t<E>, S>;
-}
-
-// Returns std::array with pairs (value, name), sorted by enum value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_entries() noexcept -> detail::enable_if_t<E, detail::entries_t<E, S>> {
-  return detail::entries_v<std::decay_t<E>, S>;
-}
-
-// Allows you to write magic_enum::enum_cast<foo>("bar", magic_enum::case_insensitive);
-inline constexpr auto case_insensitive = detail::case_insensitive<>{};
-
-// Obtains enum value from integer value.
-// Returns optional with enum value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_cast(underlying_type_t<E> value) noexcept -> detail::enable_if_t<E, optional<std::decay_t<E>>> {
-  using D = std::decay_t<E>;
-
-  if constexpr (detail::count_v<D, S> == 0) {
-    static_cast<void>(value);
-    return {}; // Empty enum.
-  } else {
-    if constexpr (detail::is_sparse_v<D, S> || (S == detail::enum_subtype::flags)) {
-#if defined(MAGIC_ENUM_ENABLE_HASH)
-      return detail::constexpr_switch<&detail::values_v<D, S>, detail::case_call_t::value>(
-          [](D v) { return optional<D>{v}; },
-          static_cast<D>(value),
-          detail::default_result_type_lambda<optional<D>>);
-#else
-      for (std::size_t i = 0; i < detail::count_v<D, S>; ++i) {
-        if (value == static_cast<underlying_type_t<D>>(enum_value<D, S>(i))) {
-          return static_cast<D>(value);
+    if (i < len) {
+        *p++ = basis_64[(string[i] >> 2) & 0x3F];
+        if (i == (len - 1)) {
+            *p++ = basis_64[((string[i] & 0x3) << 4)];
+            *p++ = '=';
         }
-      }
-      return {}; // Invalid value or out of range.
-#endif
-    } else {
-      if (value >= detail::min_v<D, S> && value <= detail::max_v<D, S>) {
-        return static_cast<D>(value);
-      }
-      return {}; // Invalid value or out of range.
+        else {
+            *p++ = basis_64[((string[i] & 0x3) << 4) | ((string[i + 1] & 0xF0) >> 4)];
+            *p++ = basis_64[((string[i + 1] & 0xF) << 2)];
+        }
+        *p++ = '=';
     }
-  }
+
+    *p++ = '\0';
+    return static_cast<int>(p - encoded);
 }
 
-// Obtains enum value from name.
-// Returns optional with enum value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>, typename BinaryPredicate = std::equal_to<>>
-[[nodiscard]] constexpr auto enum_cast(string_view value, [[maybe_unused]] BinaryPredicate p = {}) noexcept(detail::is_nothrow_invocable<BinaryPredicate>()) -> detail::enable_if_t<E, optional<std::decay_t<E>>, BinaryPredicate> {
-  using D = std::decay_t<E>;
-
-  if constexpr (detail::count_v<D, S> == 0) {
-    static_cast<void>(value);
-    return {}; // Empty enum.
-#if defined(MAGIC_ENUM_ENABLE_HASH)
-    } else if constexpr (detail::is_default_predicate<BinaryPredicate>()) {
-      return detail::constexpr_switch<&detail::names_v<D, S>, detail::case_call_t::index>(
-          [](std::size_t i) { return optional<D>{detail::values_v<D, S>[i]}; },
-          value,
-          detail::default_result_type_lambda<optional<D>>,
-          [&p](string_view lhs, string_view rhs) { return detail::cmp_equal(lhs, rhs, p); });
-#endif
-    } else {
-    for (std::size_t i = 0; i < detail::count_v<D, S>; ++i) {
-      if (detail::cmp_equal(value, detail::names_v<D, S>[i], p)) {
-        return enum_value<D, S>(i);
-      }
-    }
-    return {}; // Invalid value or out of range.
-  }
+#ifdef __cplusplus
 }
-
-// Checks whether enum contains value with such value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_contains(E value) noexcept -> detail::enable_if_t<E, bool> {
-  using D = std::decay_t<E>;
-  using U = underlying_type_t<D>;
-
-  return static_cast<bool>(enum_cast<D, S>(static_cast<U>(value)));
-}
-
-// Checks whether enum contains value with such value.
-template <detail::enum_subtype S, typename E>
-[[nodiscard]] constexpr auto enum_contains(E value) noexcept -> detail::enable_if_t<E, bool> {
-  using D = std::decay_t<E>;
-  using U = underlying_type_t<D>;
-
-  return static_cast<bool>(enum_cast<D, S>(static_cast<U>(value)));
-}
-
-// Checks whether enum contains value with such integer value.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_contains(underlying_type_t<E> value) noexcept -> detail::enable_if_t<E, bool> {
-  using D = std::decay_t<E>;
-
-  return static_cast<bool>(enum_cast<D, S>(value));
-}
-
-// Checks whether enum contains enumerator with such name.
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>, typename BinaryPredicate = std::equal_to<>>
-[[nodiscard]] constexpr auto enum_contains(string_view value, BinaryPredicate p = {}) noexcept(detail::is_nothrow_invocable<BinaryPredicate>()) -> detail::enable_if_t<E, bool, BinaryPredicate> {
-  using D = std::decay_t<E>;
-
-  return static_cast<bool>(enum_cast<D, S>(value, std::move(p)));
-}
-
-template <bool AsFlags = true>
-inline constexpr auto as_flags = AsFlags ? detail::enum_subtype::flags : detail::enum_subtype::common;
-
-template <bool AsFlags = true>
-inline constexpr auto as_common = AsFlags ? detail::enum_subtype::common : detail::enum_subtype::flags;
-
-namespace bitwise_operators {
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E operator~(E rhs) noexcept {
-  return static_cast<E>(~static_cast<underlying_type_t<E>>(rhs));
-}
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E operator|(E lhs, E rhs) noexcept {
-  return static_cast<E>(static_cast<underlying_type_t<E>>(lhs) | static_cast<underlying_type_t<E>>(rhs));
-}
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E operator&(E lhs, E rhs) noexcept {
-  return static_cast<E>(static_cast<underlying_type_t<E>>(lhs) & static_cast<underlying_type_t<E>>(rhs));
-}
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E operator^(E lhs, E rhs) noexcept {
-  return static_cast<E>(static_cast<underlying_type_t<E>>(lhs) ^ static_cast<underlying_type_t<E>>(rhs));
-}
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E& operator|=(E& lhs, E rhs) noexcept {
-  return lhs = (lhs | rhs);
-}
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E& operator&=(E& lhs, E rhs) noexcept {
-  return lhs = (lhs & rhs);
-}
-
-template <typename E, detail::enable_if_t<E, int> = 0>
-constexpr E& operator^=(E& lhs, E rhs) noexcept {
-  return lhs = (lhs ^ rhs);
-}
-
-} // namespace magic_enum::bitwise_operators
-
-} // namespace magic_enum
-
-#if defined(__clang__)
-#  pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#  pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
-#  pragma warning(pop)
 #endif
 
-#undef MAGIC_ENUM_GET_ENUM_NAME_BUILTIN
-#undef MAGIC_ENUM_GET_TYPE_NAME_BUILTIN
-#undef MAGIC_ENUM_VS_2017_WORKAROUND
-#undef MAGIC_ENUM_ARRAY_CONSTEXPR
-#undef MAGIC_ENUM_FOR_EACH_256
+#endif //_BASE64_H_
+// #include <pmtv/type_helpers.hpp>
 
-#endif // NEARGYE_MAGIC_ENUM_HPP
-
-// #include <magic_enum_utility.hpp>
-//  __  __             _        ______                          _____
-// |  \/  |           (_)      |  ____|                        / ____|_     _
-// | \  / | __ _  __ _ _  ___  | |__   _ __  _   _ _ __ ___   | |   _| |_ _| |_
-// | |\/| |/ _` |/ _` | |/ __| |  __| | '_ \| | | | '_ ` _ \  | |  |_   _|_   _|
-// | |  | | (_| | (_| | | (__  | |____| | | | |_| | | | | | | | |____|_|   |_|
-// |_|  |_|\__,_|\__, |_|\___| |______|_| |_|\__,_|_| |_| |_|  \_____|
-//                __/ | https://github.com/Neargye/magic_enum
-//               |___/  version 0.9.3
-//
-// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
-// SPDX-License-Identifier: MIT
-// Copyright (c) 2019 - 2023 Daniil Goncharov <neargye@gmail.com>.
-//
-// Permission is hereby  granted, free of charge, to any  person obtaining a copy
-// of this software and associated  documentation files (the "Software"), to deal
-// in the Software  without restriction, including without  limitation the rights
-// to  use, copy,  modify, merge,  publish, distribute,  sublicense, and/or  sell
-// copies  of  the Software,  and  to  permit persons  to  whom  the Software  is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE  IS PROVIDED "AS  IS", WITHOUT WARRANTY  OF ANY KIND,  EXPRESS OR
-// IMPLIED,  INCLUDING BUT  NOT  LIMITED TO  THE  WARRANTIES OF  MERCHANTABILITY,
-// FITNESS FOR  A PARTICULAR PURPOSE AND  NONINFRINGEMENT. IN NO EVENT  SHALL THE
-// AUTHORS  OR COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM,  DAMAGES OR  OTHER
-// LIABILITY, WHETHER IN AN ACTION OF  CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
-#ifndef NEARGYE_MAGIC_ENUM_UTILITY_HPP
-#define NEARGYE_MAGIC_ENUM_UTILITY_HPP
-
-// #include "magic_enum.hpp"
-
-
-namespace magic_enum {
-
-namespace detail {
-
-template <typename E, enum_subtype S, typename F, std::size_t... I>
-constexpr auto for_each(F&& f, std::index_sequence<I...>) {
-  constexpr bool has_void_return = (std::is_void_v<std::invoke_result_t<F, enum_constant<values_v<E, S>[I]>>> || ...);
-  constexpr bool all_same_return = (std::is_same_v<std::invoke_result_t<F, enum_constant<values_v<E, S>[0]>>, std::invoke_result_t<F, enum_constant<values_v<E, S>[I]>>> && ...);
-
-  if constexpr (has_void_return) {
-    (f(enum_constant<values_v<E, S>[I]>{}), ...);
-  } else if constexpr (all_same_return) {
-    return std::array{f(enum_constant<values_v<E, S>[I]>{})...};
-  } else {
-    return std::tuple{f(enum_constant<values_v<E, S>[I]>{})...};
-  }
-}
-
-template <typename E, enum_subtype S, typename F,std::size_t... I>
-constexpr bool all_invocable(std::index_sequence<I...>) {
-  if constexpr (count_v<E, S> == 0) {
-    return false;
-  } else {
-    return (std::is_invocable_v<F, enum_constant<values_v<E, S>[I]>> && ...);
-  }
-}
-
-} // namespace magic_enum::detail
-
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>, typename F, detail::enable_if_t<E, int> = 0>
-constexpr auto enum_for_each(F&& f) {
-  using D = std::decay_t<E>;
-  static_assert(std::is_enum_v<D>, "magic_enum::enum_for_each requires enum type.");
-  constexpr auto sep = std::make_index_sequence<detail::count_v<D, S>>{};
-
-  if constexpr (detail::all_invocable<D, S, F>(sep)) {
-    return detail::for_each<D, S>(std::forward<F>(f), sep);
-  } else {
-    static_assert(detail::always_false_v<D>, "magic_enum::enum_for_each requires invocable of all enum value.");
-  }
-}
-
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_next_value(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, optional<std::decay_t<E>>> {
-  using D = std::decay_t<E>;
-  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
-
-  if (const auto i = enum_index<D, S>(value)) {
-    const std::ptrdiff_t index = (static_cast<std::ptrdiff_t>(*i) + n);
-    if (index >= 0 && index < count) {
-      return enum_value<D, S>(index);
-    }
-  }
-  return {};
-}
-
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_next_value_circular(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
-  using D = std::decay_t<E>;
-  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
-
-  if (const auto i = enum_index<D, S>(value)) {
-    const std::ptrdiff_t index = ((((static_cast<std::ptrdiff_t>(*i) + n) % count) + count) % count);
-    if (index >= 0 && index < count) {
-      return enum_value<D, S>(index);
-    }
-  }
-  return MAGIC_ENUM_ASSERT(false), value;
-}
-
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_prev_value(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, optional<std::decay_t<E>>> {
-  using D = std::decay_t<E>;
-  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
-
-  if (const auto i = enum_index<D, S>(value)) {
-    const std::ptrdiff_t index = (static_cast<std::ptrdiff_t>(*i) - n);
-    if (index >= 0 && index < count) {
-      return enum_value<D, S>(index);
-    }
-  }
-  return {};
-}
-
-template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
-[[nodiscard]] constexpr auto enum_prev_value_circular(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
-  using D = std::decay_t<E>;
-  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
-
-  if (const auto i = enum_index<D, S>(value)) {
-    const std::ptrdiff_t index = ((((static_cast<std::ptrdiff_t>(*i) - n) % count) + count) % count);
-    if (index >= 0 && index < count) {
-      return enum_value<D, S>(index);
-    }
-  }
-  return MAGIC_ENUM_ASSERT(false), value;
-}
-
-} // namespace magic_enum
-
-#endif // NEARGYE_MAGIC_ENUM_UTILITY_HPP
-
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-
-// #include <gnuradio-4.0/meta/typelist.hpp>
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-#ifndef GNURADIO_GRAPH_UTILS_HPP
-#define GNURADIO_GRAPH_UTILS_HPP
 
 #include <complex>
-#include <functional>
-#include <iostream>
+#include <concepts>
 #include <map>
-#include <new>
+#include <memory>
 #include <ranges>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <unordered_map>
-
-#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
-// #include <vir/simd.h>
-/* SPDX-License-Identifier: LGPL-3.0-or-later */
-/* Copyright © 2022-2023 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
- *                       Matthias Kretz <m.kretz@gsi.de>
- */
-
-#ifndef VIR_SIMD_H_
-#define VIR_SIMD_H_
-
-#if __cplusplus < 201703L
-#error "simd requires C++17 or later"
-#endif
-
-#if __has_include (<experimental/simd>) && !defined VIR_DISABLE_STDX_SIMD && !defined __clang__
-#include <experimental/simd>
-#endif
-
-#if defined __cpp_lib_experimental_parallel_simd && __cpp_lib_experimental_parallel_simd >= 201803
-
-namespace vir::stdx
-{
-  using namespace std::experimental::parallelism_v2;
-  using namespace std::experimental::parallelism_v2::__proposed;
-}
-
-#else
-
-#include <cmath>
-#include <cstring>
-#ifdef _GLIBCXX_DEBUG_UB
-#include <cstdio>
-#endif
-#include <functional>
-#include <limits>
-#include <tuple>
-#include <type_traits>
-#include <utility>
-
-#ifdef VIR_SIMD_TS_DROPIN
-namespace std::experimental
-{
-  inline namespace [[gnu::diagnose_as("virx")]] parallelism_v2
-#else
-namespace vir::stdx
-#endif
-{
-  using std::size_t;
-
-  namespace detail
-  {
-    template <typename T>
-      struct type_identity
-      { using type = T; };
-
-    template <typename T>
-      using type_identity_t = typename type_identity<T>::type;
-
-    constexpr size_t
-    bit_ceil(size_t x)
-    {
-      size_t r = 1;
-      while (r < x)
-        r <<= 1;
-      return r;
-    }
-
-    constexpr size_t
-    bit_floor(size_t x)
-    {
-      size_t r = x;
-      do {
-        r = x;
-        x &= x - 1;
-      } while (x);
-      return r;
-    }
-
-    template <typename T>
-      typename T::value_type
-      value_type_or_identity_impl(int);
-
-    template <typename T>
-      T
-      value_type_or_identity_impl(float);
-
-    template <typename T>
-      using value_type_or_identity_t
-        = decltype(value_type_or_identity_impl<T>(int()));
-
-    class ExactBool
-    {
-      const bool data;
-
-    public:
-      constexpr ExactBool(bool b) : data(b) {}
-
-      ExactBool(int) = delete;
-
-      constexpr operator bool() const { return data; }
-    };
-
-    template <typename... Args>
-      [[noreturn]] [[gnu::always_inline]] inline void
-      invoke_ub([[maybe_unused]] const char* msg,
-                [[maybe_unused]] const Args&... args)
-      {
-#ifdef _GLIBCXX_DEBUG_UB
-        std::fprintf(stderr, msg, args...);
-        __builtin_trap();
-#else
-        __builtin_unreachable();
-#endif
-      }
-
-    template <typename T>
-      using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
-
-    template <typename T>
-      using L = std::numeric_limits<T>;
-
-    template <bool B>
-      using BoolConstant = std::integral_constant<bool, B>;
-
-    template <size_t X>
-      using SizeConstant = std::integral_constant<size_t, X>;
-
-    template <size_t I, typename T, typename... Ts>
-      constexpr auto
-      pack_simd_subscript(const T& x0, const Ts&... xs)
-      {
-        if constexpr (I >= T::size())
-          return pack_simd_subscript<I - T::size()>(xs...);
-        else
-          return x0[I];
-      }
-
-    template <class T>
-      struct is_vectorizable : std::is_arithmetic<T>
-      {};
-
-    template <>
-      struct is_vectorizable<bool> : std::false_type
-      {};
-
-    template <class T>
-      inline constexpr bool is_vectorizable_v = is_vectorizable<T>::value;
-
-    template <class T, typename = void>
-      struct only_vectorizable
-      {
-        only_vectorizable() = delete;
-        only_vectorizable(const only_vectorizable&) = delete;
-        only_vectorizable(only_vectorizable&&) = delete;
-        ~only_vectorizable() = delete;
-      };
-
-    template <class T>
-      struct only_vectorizable<T, std::enable_if_t<is_vectorizable_v<T>>>
-      {
-      };
-
-    // Deduces to a vectorizable type
-    template <typename T, typename = std::enable_if_t<is_vectorizable_v<T>>>
-      using Vectorizable = T;
-
-    // Deduces to a floating-point type
-    template <typename T, typename = std::enable_if_t<std::is_floating_point_v<T>>>
-      using FloatingPoint = T;
-
-    // Deduces to a signed integer type
-    template <typename T, typename = std::enable_if_t<std::conjunction_v<std::is_integral<T>,
-                                                                         std::is_signed<T>>>>
-      using SignedIntegral = T;
-
-    // is_higher_integer_rank<T, U> (T has higher or equal integer rank than U)
-    template <typename T, typename U, bool = (sizeof(T) > sizeof(U)),
-              bool = (sizeof(T) == sizeof(U))>
-      struct is_higher_integer_rank;
-
-    template <typename T>
-      struct is_higher_integer_rank<T, T, false, true>
-      : public std::true_type
-      {};
-
-    template <typename T, typename U>
-      struct is_higher_integer_rank<T, U, true, false>
-      : public std::true_type
-      {};
-
-    template <typename T, typename U>
-      struct is_higher_integer_rank<T, U, false, false>
-      : public std::false_type
-      {};
-
-    // this may fail for char -> short if sizeof(char) == sizeof(short)
-    template <typename T, typename U>
-      struct is_higher_integer_rank<T, U, false, true>
-      : public std::is_same<decltype(std::declval<T>() + std::declval<U>()), T>
-      {};
-
-    // is_value_preserving<From, To>
-    template <typename From, typename To, bool = std::is_arithmetic_v<From>,
-              bool = std::is_arithmetic_v<To>>
-      struct is_value_preserving;
-
-    // ignore "signed/unsigned mismatch" in the following trait.
-    // The implicit conversions will do the right thing here.
-    template <typename From, typename To>
-      struct is_value_preserving<From, To, true, true>
-      : public BoolConstant<L<From>::digits <= L<To>::digits
-                              && L<From>::max() <= L<To>::max()
-                              && L<From>::lowest() >= L<To>::lowest()
-                              && !(std::is_signed_v<From> && std::is_unsigned_v<To>)> {};
-
-    template <typename T>
-      struct is_value_preserving<T, bool, true, true>
-      : public std::false_type {};
-
-    template <>
-      struct is_value_preserving<bool, bool, true, true>
-      : public std::true_type {};
-
-    template <typename T>
-      struct is_value_preserving<T, T, true, true>
-      : public std::true_type {};
-
-    template <typename From, typename To>
-      struct is_value_preserving<From, To, false, true>
-      : public std::is_convertible<From, To> {};
-
-    template <typename From, typename To,
-              typename = std::enable_if_t<is_value_preserving<remove_cvref_t<From>, To>::value>>
-      using ValuePreserving = From;
-
-    template <typename From, typename To,
-              typename DecayedFrom = remove_cvref_t<From>,
-              typename = std::enable_if_t<std::conjunction<
-                                            std::is_convertible<From, To>,
-                                            std::disjunction<
-                                              std::is_same<DecayedFrom, To>,
-                                              std::is_same<DecayedFrom, int>,
-                                              std::conjunction<std::is_same<DecayedFrom, unsigned>,
-                                                               std::is_unsigned<To>>,
-                                              is_value_preserving<DecayedFrom, To>>>::value>>
-      using ValuePreservingOrInt = From;
-
-    // LoadStorePtr / is_possible_loadstore_conversion
-    template <typename Ptr, typename ValueType>
-      struct is_possible_loadstore_conversion
-      : std::conjunction<is_vectorizable<Ptr>, is_vectorizable<ValueType>>
-      {};
-
-    template <>
-      struct is_possible_loadstore_conversion<bool, bool> : std::true_type {};
-
-    // Deduces to a type allowed for load/store with the given value type.
-    template <typename Ptr, typename ValueType,
-              typename = std::enable_if_t<
-                           is_possible_loadstore_conversion<Ptr, ValueType>::value>>
-      using LoadStorePtr = Ptr;
-  }
-
-  namespace simd_abi
-  {
-    struct scalar
-    {};
-
-    template <typename>
-      inline constexpr int max_fixed_size = 32;
-
-    template <int N>
-      struct fixed_size
-      {};
-
-    template <class T>
-      using native =
-        std::conditional_t<(sizeof(T) > 8),
-                           scalar,
-                           fixed_size<
-#ifdef __AVX512F__
-                             64
-#elif defined __AVX2__
-                             32
-#elif defined __AVX__
-                             std::is_floating_point_v<T> ? 32 : 16
-#else
-                             16
-#endif
-                               / sizeof(T)
-                           >
-                          >;
-
-    template <class T>
-      using compatible = std::conditional_t<(sizeof(T) > 8),
-                                            scalar,
-                                            fixed_size<16 / sizeof(T)>>;
-
-    template <typename T, size_t N, typename...>
-      struct deduce
-      { using type = std::conditional_t<N == 1, scalar, fixed_size<int(N)>>; };
-
-    template <typename T, size_t N, typename... Abis>
-      using deduce_t = typename deduce<T, N, Abis...>::type;
-  }
-
-  // flags //
-  struct element_aligned_tag
-  {};
-
-  struct vector_aligned_tag
-  {};
-
-  template <size_t>
-    struct overaligned_tag
-    {};
-
-  inline constexpr element_aligned_tag element_aligned{};
-
-  inline constexpr vector_aligned_tag vector_aligned{};
-
-  template <size_t N>
-    inline constexpr overaligned_tag<N> overaligned{};
-
-  // fwd decls //
-  template <class T, class A = simd_abi::compatible<T>>
-    class simd
-    {
-      simd() = delete;
-      simd(const simd&) = delete;
-      ~simd() = delete;
-    };
-
-  template <class T, class A = simd_abi::compatible<T>>
-    class simd_mask
-    {
-      simd_mask() = delete;
-      simd_mask(const simd_mask&) = delete;
-      ~simd_mask() = delete;
-    };
-
-  // aliases //
-  template <class T>
-    using native_simd = simd<T, simd_abi::native<T>>;
-
-  template <class T>
-    using native_simd_mask = simd_mask<T, simd_abi::native<T>>;
-
-  template <class T, int N>
-    using fixed_size_simd = simd<T, simd_abi::fixed_size<N>>;
-
-  template <class T, int N>
-    using fixed_size_simd_mask = simd_mask<T, simd_abi::fixed_size<N>>;
-
-  // Traits //
-  template <class T>
-    struct is_abi_tag : std::false_type
-    {};
-
-  template <class T>
-    inline constexpr bool is_abi_tag_v = is_abi_tag<T>::value;
-
-  template <>
-    struct is_abi_tag<simd_abi::scalar> : std::true_type
-    {};
-
-  template <int N>
-    struct is_abi_tag<simd_abi::fixed_size<N>> : std::true_type
-    {};
-
-  template <class T>
-    struct is_simd : std::false_type
-    {};
-
-  template <class T>
-    inline constexpr bool is_simd_v = is_simd<T>::value;
-
-  template <class T, class A>
-    struct is_simd<simd<T, A>>
-    : std::conjunction<detail::is_vectorizable<T>, is_abi_tag<A>>
-    {};
-
-  template <class T>
-    struct is_simd_mask : std::false_type
-    {};
-
-  template <class T>
-    inline constexpr bool is_simd_mask_v = is_simd_mask<T>::value;
-
-  template <class T, class A>
-    struct is_simd_mask<simd_mask<T, A>>
-    : std::conjunction<detail::is_vectorizable<T>, is_abi_tag<A>>
-    {};
-
-  template <class T>
-    struct is_simd_flag_type : std::false_type
-    {};
-
-  template <class T>
-    inline constexpr bool is_simd_flag_type_v = is_simd_flag_type<T>::value;
-
-  template <class T, class A = simd_abi::compatible<T>>
-    struct simd_size;
-
-  template <class T, class A = simd_abi::compatible<T>>
-    inline constexpr size_t simd_size_v = simd_size<T, A>::value;
-
-  template <class T>
-    struct simd_size<detail::Vectorizable<T>, simd_abi::scalar>
-    : std::integral_constant<size_t, 1>
-    {};
-
-  template <class T, int N>
-    struct simd_size<detail::Vectorizable<T>, simd_abi::fixed_size<N>>
-    : std::integral_constant<size_t, N>
-    {};
-
-  template <class T, class U = typename T::value_type>
-    struct memory_alignment;
-
-  template <class T, class U = typename T::value_type>
-    inline constexpr size_t memory_alignment_v = memory_alignment<T, U>::value;
-
-  template <class T, class A, class U>
-    struct memory_alignment<simd<T, A>, detail::Vectorizable<U>>
-    : std::integral_constant<size_t, alignof(U)>
-    {};
-
-  template <class T, class A>
-    struct memory_alignment<simd_mask<T, A>, bool>
-    : std::integral_constant<size_t, alignof(bool)>
-    {};
-
-  template <class T, class V,
-            class = typename std::conjunction<detail::is_vectorizable<T>,
-                                              std::disjunction<is_simd<V>, is_simd_mask<V>>>::type>
-    struct rebind_simd;
-
-  template <class T, class V>
-    using rebind_simd_t = typename rebind_simd<T, V>::type;
-
-  template <class T, class U, class A>
-    struct rebind_simd<T, simd<U, A>, std::true_type>
-    { using type = simd<T, A>; };
-
-  template <class T, class U, class A>
-    struct rebind_simd<T, simd_mask<U, A>, std::true_type>
-    { using type = simd_mask<T, A>; };
-
-  template <int N, class V,
-            class = typename std::conjunction<
-                               detail::BoolConstant<(N > 0)>,
-                               std::disjunction<is_simd<V>, is_simd_mask<V>>
-                             >::type>
-    struct resize_simd;
-
-  template <int N, class V>
-    using resize_simd_t = typename resize_simd<N, V>::type;
-
-  template <int N, class T, class A>
-    struct resize_simd<N, simd<T, A>, std::true_type>
-    {
-      using type = simd<T, std::conditional_t<N == 1, simd_abi::scalar, simd_abi::fixed_size<N>>>;
-    };
-
-  template <int N, class T, class A>
-    struct resize_simd<N, simd_mask<T, A>, std::true_type>
-    {
-      using type = simd_mask<T, std::conditional_t<
-                                  N == 1, simd_abi::scalar, simd_abi::fixed_size<N>>>;
-    };
-
-  // simd_mask (scalar)
-  template <class T>
-    class simd_mask<detail::Vectorizable<T>, simd_abi::scalar>
-    : public detail::only_vectorizable<T>
-    {
-      bool data;
-
-    public:
-      using value_type = bool;
-      using reference = bool&;
-      using abi_type = simd_abi::scalar;
-      using simd_type = simd<T, abi_type>;
-
-      static constexpr size_t size() noexcept
-      { return 1; }
-
-      constexpr simd_mask() = default;
-      constexpr simd_mask(const simd_mask&) = default;
-      constexpr simd_mask(simd_mask&&) noexcept = default;
-      constexpr simd_mask& operator=(const simd_mask&) = default;
-      constexpr simd_mask& operator=(simd_mask&&) noexcept = default;
-
-      // explicit broadcast constructor
-      explicit constexpr
-      simd_mask(bool x)
-      : data(x) {}
-
-      template <typename F>
-        explicit constexpr
-        simd_mask(F&& gen, std::enable_if_t<
-                             std::is_same_v<decltype(std::declval<F>()(detail::SizeConstant<0>())),
-                                            value_type>>* = nullptr)
-        : data(gen(detail::SizeConstant<0>()))
-        {}
-
-      // load constructor
-      template <typename Flags>
-        simd_mask(const value_type* mem, Flags)
-        : data(mem[0])
-        {}
-
-      template <typename Flags>
-        simd_mask(const value_type* mem, simd_mask k, Flags)
-        : data(k ? mem[0] : false)
-        {}
-
-      // loads [simd_mask.load]
-      template <typename Flags>
-        void
-        copy_from(const value_type* mem, Flags)
-        { data = mem[0]; }
-
-      // stores [simd_mask.store]
-      template <typename Flags>
-        void
-        copy_to(value_type* mem, Flags) const
-        { mem[0] = data; }
-
-      // scalar access
-      constexpr reference
-      operator[](size_t i)
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data;
-      }
-
-      constexpr value_type
-      operator[](size_t i) const
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data;
-      }
-
-      // negation
-      constexpr simd_mask
-      operator!() const
-      { return simd_mask(not data); }
-
-      // simd_mask binary operators [simd_mask.binary]
-      friend constexpr simd_mask
-      operator&&(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data && y.data); }
-
-      friend constexpr simd_mask
-      operator||(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data || y.data); }
-
-      friend constexpr simd_mask
-      operator&(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data & y.data); }
-
-      friend constexpr simd_mask
-      operator|(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data | y.data); }
-
-      friend constexpr simd_mask
-      operator^(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data ^ y.data); }
-
-      friend constexpr simd_mask&
-      operator&=(simd_mask& x, const simd_mask& y)
-      {
-        x.data &= y.data;
-        return x;
-      }
-
-      friend constexpr simd_mask&
-      operator|=(simd_mask& x, const simd_mask& y)
-      {
-        x.data |= y.data;
-        return x;
-      }
-
-      friend constexpr simd_mask&
-      operator^=(simd_mask& x, const simd_mask& y)
-      {
-        x.data ^= y.data;
-        return x;
-      }
-
-      // simd_mask compares [simd_mask.comparison]
-      friend constexpr simd_mask
-      operator==(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data == y.data); }
-
-      friend constexpr simd_mask
-      operator!=(const simd_mask& x, const simd_mask& y)
-      { return simd_mask(x.data != y.data); }
-    };
-
-  // simd_mask (fixed_size)
-  template <class T, int N>
-    class simd_mask<detail::Vectorizable<T>, simd_abi::fixed_size<N>>
-    : public detail::only_vectorizable<T>
-    {
-    private:
-      template <typename V, int M, size_t Parts>
-        friend std::enable_if_t<M == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
-        split(const simd_mask<typename V::simd_type::value_type, simd_abi::fixed_size<M>>&);
-
-      bool data[N];
-
-      template <typename F, size_t... Is>
-        constexpr
-        simd_mask(std::index_sequence<Is...>, F&& init)
-        : data {init(detail::SizeConstant<Is>())...}
-        {}
-
-    public:
-      using value_type = bool;
-      using reference = bool&;
-      using abi_type = simd_abi::fixed_size<N>;
-      using simd_type = simd<T, abi_type>;
-
-      static constexpr size_t size() noexcept
-      { return N; }
-
-      constexpr simd_mask() = default;
-      constexpr simd_mask(const simd_mask&) = default;
-      constexpr simd_mask(simd_mask&&) noexcept = default;
-      constexpr simd_mask& operator=(const simd_mask&) = default;
-      constexpr simd_mask& operator=(simd_mask&&) noexcept = default;
-
-      // explicit broadcast constructor
-      explicit constexpr
-      simd_mask(bool x)
-      : simd_mask([x](size_t) { return x; })
-      {}
-
-      template <typename F>
-        explicit constexpr
-        simd_mask(F&& gen, std::enable_if_t<
-                             std::is_same_v<decltype(std::declval<F>()(detail::SizeConstant<0>())),
-                                            value_type>>* = nullptr)
-        : simd_mask(std::make_index_sequence<N>(), std::forward<F>(gen))
-        {}
-
-      // implicit conversions
-      template <typename U>
-        constexpr
-        simd_mask(const simd_mask<U, abi_type>& x)
-        : simd_mask([&x](auto i) { return x[i]; })
-        {}
-
-      // load constructor
-      template <typename Flags>
-        simd_mask(const value_type* mem, Flags)
-        : simd_mask([mem](size_t i) { return mem[i]; })
-        {}
-
-      template <typename Flags>
-        simd_mask(const value_type* mem, const simd_mask& k, Flags)
-        : simd_mask([mem, &k](size_t i) { return k[i] ? mem[i] : false; })
-        {}
-
-      // loads [simd_mask.load]
-      template <typename Flags>
-        void
-        copy_from(const value_type* mem, Flags)
-        { std::memcpy(data, mem, N * sizeof(bool)); }
-
-      // stores [simd_mask.store]
-      template <typename Flags>
-        void
-        copy_to(value_type* mem, Flags) const
-        { std::memcpy(mem, data, N * sizeof(bool)); }
-
-      // scalar access
-      constexpr reference
-      operator[](size_t i)
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data[i];
-      }
-
-      constexpr value_type
-      operator[](size_t i) const
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data[i];
-      }
-
-      // negation
-      constexpr simd_mask
-      operator!() const
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = !data[i];
-        return r;
-      }
-
-      // simd_mask binary operators [simd_mask.binary]
-      friend constexpr simd_mask
-      operator&&(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] & y.data[i];
-        return r;
-      }
-
-      friend constexpr simd_mask
-      operator||(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] | y.data[i];
-        return r;
-      }
-
-      friend constexpr simd_mask
-      operator&(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] & y.data[i];
-        return r;
-      }
-
-      friend constexpr simd_mask
-      operator|(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] | y.data[i];
-        return r;
-      }
-
-      friend constexpr simd_mask
-      operator^(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] ^ y.data[i];
-        return r;
-      }
-
-      friend constexpr simd_mask&
-      operator&=(simd_mask& x, const simd_mask& y)
-      {
-        for (int i = 0; i < N; ++i)
-          x.data[i] &= y.data[i];
-        return x;
-      }
-
-      friend constexpr simd_mask&
-      operator|=(simd_mask& x, const simd_mask& y)
-      {
-        for (int i = 0; i < N; ++i)
-          x.data[i] |= y.data[i];
-        return x;
-      }
-
-      friend constexpr simd_mask&
-      operator^=(simd_mask& x, const simd_mask& y)
-      {
-        for (int i = 0; i < N; ++i)
-          x.data[i] ^= y.data[i];
-        return x;
-      }
-
-      // simd_mask compares [simd_mask.comparison]
-      friend constexpr simd_mask
-      operator==(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] == y.data[i];
-        return r;
-      }
-
-      friend constexpr simd_mask
-      operator!=(const simd_mask& x, const simd_mask& y)
-      {
-        simd_mask r {};
-        for (int i = 0; i < N; ++i)
-          r.data[i] = x.data[i] != y.data[i];
-        return r;
-      }
-    };
-
-  // simd_mask reductions [simd_mask.reductions]
-  template <typename T>
-    constexpr bool
-    all_of(simd_mask<T, simd_abi::scalar> k) noexcept
-    { return k[0]; }
-
-  template <typename T>
-    constexpr bool
-    any_of(simd_mask<T, simd_abi::scalar> k) noexcept
-    { return k[0]; }
-
-  template <typename T>
-    constexpr bool
-    none_of(simd_mask<T, simd_abi::scalar> k) noexcept
-    { return not k[0]; }
-
-  template <typename T>
-    constexpr bool
-    some_of(simd_mask<T, simd_abi::scalar>) noexcept
-    { return false; }
-
-  template <typename T>
-    constexpr int
-    popcount(simd_mask<T, simd_abi::scalar> k) noexcept
-    { return static_cast<int>(k[0]); }
-
-  template <typename T>
-    constexpr int
-    find_first_set(simd_mask<T, simd_abi::scalar> k) noexcept
-    {
-      if (not k[0])
-        detail::invoke_ub("find_first_set(empty mask) is UB");
-      return 0;
-    }
-
-  template <typename T>
-    constexpr int
-    find_last_set(simd_mask<T, simd_abi::scalar> k) noexcept
-    {
-      if (not k[0])
-        detail::invoke_ub("find_last_set(empty mask) is UB");
-      return 0;
-    }
-
-  template <typename T, int N>
-    constexpr bool
-    all_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      for (int i = 0; i < N; ++i)
-        {
-          if (not k[i])
-            return false;
-        }
-      return true;
-    }
-
-  template <typename T, int N>
-    constexpr bool
-    any_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      for (int i = 0; i < N; ++i)
-        {
-          if (k[i])
-            return true;
-        }
-      return false;
-    }
-
-  template <typename T, int N>
-    constexpr bool
-    none_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      for (int i = 0; i < N; ++i)
-        {
-          if (k[i])
-            return false;
-        }
-      return true;
-    }
-
-  template <typename T, int N>
-    constexpr bool
-    some_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      bool last = k[0];
-      for (int i = 1; i < N; ++i)
-        {
-          if (last != k[i])
-            return true;
-        }
-      return false;
-    }
-
-  template <typename T, int N>
-    constexpr int
-    popcount(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      int cnt = k[0];
-      for (int i = 1; i < N; ++i)
-        cnt += k[i];
-      return cnt;
-    }
-
-  template <typename T, int N>
-    constexpr int
-    find_first_set(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      for (int i = 0; i < N; ++i)
-        {
-          if (k[i])
-            return i;
-        }
-      detail::invoke_ub("find_first_set(empty mask) is UB");
-    }
-
-  template <typename T, int N>
-    constexpr int
-    find_last_set(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
-    {
-      for (int i = N - 1; i >= 0; --i)
-        {
-          if (k[i])
-            return i;
-        }
-      detail::invoke_ub("find_last_set(empty mask) is UB");
-    }
-
-  constexpr bool
-  all_of(detail::ExactBool x) noexcept
-  { return x; }
-
-  constexpr bool
-  any_of(detail::ExactBool x) noexcept
-  { return x; }
-
-  constexpr bool
-  none_of(detail::ExactBool x) noexcept
-  { return !x; }
-
-  constexpr bool
-  some_of(detail::ExactBool) noexcept
-  { return false; }
-
-  constexpr int
-  popcount(detail::ExactBool x) noexcept
-  { return x; }
-
-  constexpr int
-  find_first_set(detail::ExactBool)
-  { return 0; }
-
-  constexpr int
-  find_last_set(detail::ExactBool)
-  { return 0; }
-
-  // scalar_simd_int_base
-  template <class T, bool = std::is_integral_v<T>>
-    class scalar_simd_int_base
-    {};
-
-  template <class T>
-    class scalar_simd_int_base<T, true>
-    {
-      using Derived = simd<T, simd_abi::scalar>;
-
-      constexpr T&
-      d() noexcept
-      { return static_cast<Derived*>(this)->data; }
-
-      constexpr const T&
-      d() const noexcept
-      { return static_cast<const Derived*>(this)->data; }
-
-    public:
-      friend constexpr Derived&
-      operator%=(Derived& lhs, Derived x)
-      {
-        lhs.d() %= x.d();
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator&=(Derived& lhs, Derived x)
-      {
-        lhs.d() &= x.d();
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator|=(Derived& lhs, Derived x)
-      {
-        lhs.d() |= x.d();
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator^=(Derived& lhs, Derived x)
-      {
-        lhs.d() ^= x.d();
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator<<=(Derived& lhs, Derived x)
-      {
-        lhs.d() <<= x.d();
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator>>=(Derived& lhs, Derived x)
-      {
-        lhs.d() >>= x.d();
-        return lhs;
-      }
-
-      friend constexpr Derived
-      operator%(Derived x, Derived y)
-      {
-        x.d() %= y.d();
-        return x;
-      }
-
-      friend constexpr Derived
-      operator&(Derived x, Derived y)
-      {
-        x.d() &= y.d();
-        return x;
-      }
-
-      friend constexpr Derived
-      operator|(Derived x, Derived y)
-      {
-        x.d() |= y.d();
-        return x;
-      }
-
-      friend constexpr Derived
-      operator^(Derived x, Derived y)
-      {
-        x.d() ^= y.d();
-        return x;
-      }
-
-      friend constexpr Derived
-      operator<<(Derived x, Derived y)
-      {
-        x.d() <<= y.d();
-        return x;
-      }
-
-      friend constexpr Derived
-      operator>>(Derived x, Derived y)
-      {
-        x.d() >>= y.d();
-        return x;
-      }
-
-      friend constexpr Derived
-      operator<<(Derived x, int y)
-      {
-        x.d() <<= y;
-        return x;
-      }
-
-      friend constexpr Derived
-      operator>>(Derived x, int y)
-      {
-        x.d() >>= y;
-        return x;
-      }
-
-      constexpr Derived
-      operator~() const
-      { return Derived(static_cast<T>(~d())); }
-    };
-
-  // simd (scalar)
-  template <class T>
-    class simd<T, simd_abi::scalar>
-    : public scalar_simd_int_base<T>, public detail::only_vectorizable<T>
-    {
-      friend class scalar_simd_int_base<T>;
-
-      T data;
-
-    public:
-      using value_type = T;
-      using reference = T&;
-      using abi_type = simd_abi::scalar;
-      using mask_type = simd_mask<T, abi_type>;
-
-      static constexpr size_t size() noexcept
-      { return 1; }
-
-      constexpr simd() = default;
-      constexpr simd(const simd&) = default;
-      constexpr simd(simd&&) noexcept = default;
-      constexpr simd& operator=(const simd&) = default;
-      constexpr simd& operator=(simd&&) noexcept = default;
-
-      // simd constructors
-      template <typename U>
-        constexpr
-        simd(detail::ValuePreservingOrInt<U, value_type>&& value) noexcept
-        : data(value)
-        {}
-
-      // generator constructor
-      template <typename F>
-        explicit constexpr
-        simd(F&& gen, detail::ValuePreservingOrInt<
-                        decltype(std::declval<F>()(std::declval<detail::SizeConstant<0>&>())),
-                        value_type>* = nullptr)
-        : data(gen(detail::SizeConstant<0>()))
-        {}
-
-      // load constructor
-      template <typename U, typename Flags>
-        simd(const U* mem, Flags)
-        : data(mem[0])
-        {}
-
-      // loads [simd.load]
-      template <typename U, typename Flags>
-        void
-        copy_from(const detail::Vectorizable<U>* mem, Flags)
-        { data = mem[0]; }
-
-      // stores [simd.store]
-      template <typename U, typename Flags>
-        void
-        copy_to(detail::Vectorizable<U>* mem, Flags) const
-        { mem[0] = data; }
-
-      // scalar access
-      constexpr reference
-      operator[](size_t i)
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data;
-      }
-
-      constexpr value_type
-      operator[](size_t i) const
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data;
-      }
-
-      // increment and decrement:
-      constexpr simd&
-      operator++()
-      {
-        ++data;
-        return *this;
-      }
-
-      constexpr simd
-      operator++(int)
-      {
-        simd r = *this;
-        ++data;
-        return r;
-      }
-
-      constexpr simd&
-      operator--()
-      {
-        --data;
-        return *this;
-      }
-
-      constexpr simd
-      operator--(int)
-      {
-        simd r = *this;
-        --data;
-        return r;
-      }
-
-      // unary operators
-      constexpr mask_type
-      operator!() const
-      { return mask_type(not data); }
-
-      constexpr simd
-      operator+() const
-      { return *this; }
-
-      constexpr simd
-      operator-() const
-      { return -data; }
-
-      // compound assignment [simd.cassign]
-      constexpr friend simd&
-      operator+=(simd& lhs, const simd& x)
-      { return lhs = lhs + x; }
-
-      constexpr friend simd&
-      operator-=(simd& lhs, const simd& x)
-      { return lhs = lhs - x; }
-
-      constexpr friend simd&
-      operator*=(simd& lhs, const simd& x)
-      { return lhs = lhs * x; }
-
-      constexpr friend simd&
-        operator/=(simd& lhs, const simd& x)
-      { return lhs = lhs / x; }
-
-      // binary operators [simd.binary]
-      constexpr friend simd
-      operator+(const simd& x, const simd& y)
-      { simd r = x; r.data += y.data; return r; }
-
-      constexpr friend simd
-      operator-(const simd& x, const simd& y)
-      { simd r = x; r.data -= y.data; return r; }
-
-      constexpr friend simd
-      operator*(const simd& x, const simd& y)
-      { simd r = x; r.data *= y.data; return r; }
-
-      constexpr friend simd
-      operator/(const simd& x, const simd& y)
-      { simd r = x; r.data /= y.data; return r; }
-
-      // compares [simd.comparison]
-      constexpr friend mask_type
-      operator==(const simd& x, const simd& y)
-      { return mask_type(x.data == y.data); }
-
-      constexpr friend mask_type
-      operator!=(const simd& x, const simd& y)
-      { return mask_type(x.data != y.data); }
-
-      constexpr friend mask_type
-      operator<(const simd& x, const simd& y)
-      { return mask_type(x.data < y.data); }
-
-      constexpr friend mask_type
-      operator<=(const simd& x, const simd& y)
-      { return mask_type(x.data <= y.data); }
-
-      constexpr friend mask_type
-      operator>(const simd& x, const simd& y)
-      { return mask_type(x.data > y.data); }
-
-      constexpr friend mask_type
-      operator>=(const simd& x, const simd& y)
-      { return mask_type(x.data >= y.data); }
-    };
-
-  // fixed_simd_int_base
-  template <class T, int N, bool = std::is_integral_v<T>>
-    class fixed_simd_int_base
-    {};
-
-  template <class T, int N>
-    class fixed_simd_int_base<T, N, true>
-    {
-      using Derived = simd<T, simd_abi::fixed_size<N>>;
-
-      constexpr T&
-      d(int i) noexcept
-      { return static_cast<Derived*>(this)->data[i]; }
-
-      constexpr const T&
-      d(int i) const noexcept
-      { return static_cast<const Derived*>(this)->data[i]; }
-
-    public:
-      friend constexpr Derived&
-      operator%=(Derived& lhs, const Derived& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.d(i) %= x.d(i);
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator&=(Derived& lhs, const Derived& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.d(i) &= x.d(i);
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator|=(Derived& lhs, const Derived& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.d(i) |= x.d(i);
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator^=(Derived& lhs, const Derived& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.d(i) ^= x.d(i);
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator<<=(Derived& lhs, const Derived& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.d(i) <<= x.d(i);
-        return lhs;
-      }
-
-      friend constexpr Derived&
-      operator>>=(Derived& lhs, const Derived& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.d(i) >>= x.d(i);
-        return lhs;
-      }
-
-      friend constexpr Derived
-      operator%(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] % y[i]; }); }
-
-      friend constexpr Derived
-      operator&(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] & y[i]; }); }
-
-      friend constexpr Derived
-      operator|(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] | y[i]; }); }
-
-      friend constexpr Derived
-      operator^(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] ^ y[i]; }); }
-
-      friend constexpr Derived
-      operator<<(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] << y[i]; }); }
-
-      friend constexpr Derived
-      operator>>(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] >> y[i]; }); }
-
-      friend constexpr Derived
-      operator<<(const Derived& x, int y)
-      { return Derived([&](auto i) -> T { return x[i] << y; }); }
-
-      friend constexpr Derived
-      operator>>(const Derived& x, int y)
-      { return Derived([&](auto i) -> T { return x[i] >> y; }); }
-
-      constexpr Derived
-      operator~() const
-      { return Derived([&](auto i) -> T { return ~d(i); }); }
-    };
-
-  // simd (fixed_size)
-  template <class T, int N>
-    class simd<T, simd_abi::fixed_size<N>>
-    : public fixed_simd_int_base<T, N>, public detail::only_vectorizable<T>
-    {
-    private:
-      friend class fixed_simd_int_base<T, N>;
-
-      template <typename V, int M, size_t Parts>
-        friend std::enable_if_t<M == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
-        split(const simd<typename V::value_type, simd_abi::fixed_size<M>>&);
-
-      template <size_t... Sizes, typename U>
-        friend std::tuple<simd<U, simd_abi::deduce_t<U, int(Sizes)>>...>
-        split(const simd<U, simd_abi::fixed_size<int((Sizes + ...))>>&);
-
-      T data[N];
-
-      template <typename F, size_t... Is>
-        constexpr
-        simd(std::index_sequence<Is...>, F&& init)
-        : data {static_cast<value_type>(init(detail::SizeConstant<Is>()))...}
-        {}
-
-    public:
-      using value_type = T;
-      using reference = T&;
-      using abi_type = simd_abi::fixed_size<N>;
-      using mask_type = simd_mask<T, abi_type>;
-
-      static constexpr size_t size() noexcept
-      { return N; }
-
-      constexpr simd() = default;
-      constexpr simd(const simd&) = default;
-      constexpr simd(simd&&) noexcept = default;
-      constexpr simd& operator=(const simd&) = default;
-      constexpr simd& operator=(simd&&) noexcept = default;
-
-      // simd constructors
-      template <typename U>
-        constexpr
-        simd(detail::ValuePreservingOrInt<U, value_type>&& value) noexcept
-        : simd([v = static_cast<value_type>(value)](size_t) { return v; })
-        {}
-
-      // conversion constructors
-      template <typename U,
-                typename = std::enable_if_t<
-                             std::conjunction_v<detail::is_value_preserving<U, value_type>,
-                                                detail::is_higher_integer_rank<value_type, U>>>>
-        constexpr
-        simd(const simd<U, abi_type>& x)
-        : simd([&x](auto i) { return static_cast<value_type>(x[i]); })
-        {}
-
-      // generator constructor
-      template <typename F>
-        explicit constexpr
-        simd(F&& gen, detail::ValuePreservingOrInt<
-                        decltype(std::declval<F>()(std::declval<detail::SizeConstant<0>&>())),
-                        value_type>* = nullptr)
-        : simd(std::make_index_sequence<N>(), std::forward<F>(gen))
-        {}
-
-      // load constructor
-      template <typename U, typename Flags>
-        simd(const U* mem, Flags)
-        : simd([mem](auto i) -> value_type { return mem[i]; })
-        {}
-
-      // loads [simd.load]
-      template <typename U, typename Flags>
-        void
-        copy_from(const detail::Vectorizable<U>* mem, Flags)
-        {
-          for (int i = 0; i < N; ++i)
-            data[i] = mem[i];
-        }
-
-      // stores [simd.store]
-      template <typename U, typename Flags>
-        void
-        copy_to(detail::Vectorizable<U>* mem, Flags) const
-        {
-          for (int i = 0; i < N; ++i)
-            mem[i] = data[i];
-        }
-
-      // scalar access
-      constexpr reference
-      operator[](size_t i)
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data[i];
-      }
-
-      constexpr value_type
-      operator[](size_t i) const
-      {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
-        return data[i];
-      }
-
-      // increment and decrement:
-      constexpr simd&
-      operator++()
-      {
-        for (int i = 0; i < N; ++i)
-          ++data[i];
-        return *this;
-      }
-
-      constexpr simd
-      operator++(int)
-      {
-        simd r = *this;
-        for (int i = 0; i < N; ++i)
-          ++data[i];
-        return r;
-      }
-
-      constexpr simd&
-      operator--()
-      {
-        for (int i = 0; i < N; ++i)
-          --data[i];
-        return *this;
-      }
-
-      constexpr simd
-      operator--(int)
-      {
-        simd r = *this;
-        for (int i = 0; i < N; ++i)
-          --data[i];
-        return r;
-      }
-
-      // unary operators
-      constexpr mask_type
-      operator!() const
-      { return mask_type([&](auto i) { return !data[i]; }); }
-
-      constexpr simd
-      operator+() const
-      { return *this; }
-
-      constexpr simd
-      operator-() const
-      { return simd([&](auto i) -> value_type { return -data[i]; }); }
-
-      // compound assignment [simd.cassign]
-      constexpr friend simd&
-      operator+=(simd& lhs, const simd& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.data[i] += x.data[i];
-        return lhs;
-      }
-
-      constexpr friend simd&
-      operator-=(simd& lhs, const simd& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.data[i] -= x.data[i];
-        return lhs;
-      }
-
-      constexpr friend simd&
-      operator*=(simd& lhs, const simd& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.data[i] *= x.data[i];
-        return lhs;
-      }
-
-      constexpr friend simd&
-      operator/=(simd& lhs, const simd& x)
-      {
-        for (int i = 0; i < N; ++i)
-          lhs.data[i] /= x.data[i];
-        return lhs;
-      }
-
-      // binary operators [simd.binary]
-      constexpr friend simd
-      operator+(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] + y.data[i]; }); }
-
-      constexpr friend simd
-      operator-(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] - y.data[i]; }); }
-
-      constexpr friend simd
-      operator*(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] * y.data[i]; }); }
-
-      constexpr friend simd
-      operator/(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] / y.data[i]; }); }
-
-      // compares [simd.comparison]
-      constexpr friend mask_type
-      operator==(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] == y.data[i]; }); }
-
-      constexpr friend mask_type
-      operator!=(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] != y.data[i]; }); }
-
-      constexpr friend mask_type
-      operator<(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] < y.data[i]; }); }
-
-      constexpr friend mask_type
-      operator<=(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] <= y.data[i]; }); }
-
-      constexpr friend mask_type
-      operator>(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] > y.data[i]; }); }
-
-      constexpr friend mask_type
-      operator>=(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] >= y.data[i]; }); }
-    };
-
-  // casts [simd.casts]
-  // static_simd_cast
-  template <typename T, typename U, typename A,
-            typename = std::enable_if_t<detail::is_vectorizable_v<T>>>
-    constexpr simd<T, A>
-    static_simd_cast(const simd<U, A>& x)
-    { return simd<T, A>([&x](auto i) { return static_cast<T>(x[i]); }); }
-
-  template <typename V, typename U, typename A,
-            typename = std::enable_if_t<is_simd_v<V>>>
-    constexpr V
-    static_simd_cast(const simd<U, A>& x)
-    { return V([&x](auto i) { return static_cast<typename V::value_type>(x[i]); }); }
-
-  template <typename T, typename U, typename A,
-            typename = std::enable_if_t<detail::is_vectorizable_v<T>>>
-    constexpr simd_mask<T, A>
-    static_simd_cast(const simd_mask<U, A>& x)
-    { return simd_mask<T, A>([&x](auto i) { return x[i]; }); }
-
-  template <typename M, typename U, typename A,
-            typename = std::enable_if_t<M::size() == simd_size_v<U, A>>>
-    constexpr M
-    static_simd_cast(const simd_mask<U, A>& x)
-    { return M([&x](auto i) { return x[i]; }); }
-
-  // simd_cast
-  template <typename T, typename U, typename A,
-            typename To = detail::value_type_or_identity_t<T>>
-    constexpr auto
-    simd_cast(const simd<detail::ValuePreserving<U, To>, A>& x)
-    -> decltype(static_simd_cast<T>(x))
-    { return static_simd_cast<T>(x); }
-
-  // to_fixed_size
-  template <typename T, int N>
-    constexpr fixed_size_simd<T, N>
-    to_fixed_size(const fixed_size_simd<T, N>& x)
-    { return x; }
-
-  template <typename T, int N>
-    constexpr fixed_size_simd_mask<T, N>
-    to_fixed_size(const fixed_size_simd_mask<T, N>& x)
-    { return x; }
-
-  template <typename T>
-    constexpr fixed_size_simd<T, 1>
-    to_fixed_size(const simd<T> x)
-    { return x[0]; }
-
-  template <typename T>
-    constexpr fixed_size_simd_mask<T, 1>
-    to_fixed_size(const simd_mask<T> x)
-    { return fixed_size_simd_mask<T, 1>(x[0]); }
-
-  // to_native
-  template <typename T>
-    constexpr simd<T>
-    to_native(const fixed_size_simd<T, 1> x)
-    { return x[0]; }
-
-  template <typename T>
-    constexpr simd_mask<T>
-    to_native(const fixed_size_simd_mask<T, 1> x)
-    { return simd_mask<T>(x[0]); }
-
-  // to_compatible
-  template <typename T>
-    constexpr simd<T>
-    to_compatible(const fixed_size_simd<T, 1> x)
-    { return x[0]; }
-
-  template <typename T>
-    constexpr simd_mask<T>
-    to_compatible(const fixed_size_simd_mask<T, 1> x)
-    { return simd_mask<T>(x[0]); }
-
-  // split(simd)
-  template <typename V, int N, size_t Parts = N / V::size()>
-    std::enable_if_t<N == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
-    split(const simd<typename V::value_type, simd_abi::fixed_size<N>>& x)
-    {
-      const auto* data = x.data;
-      return [&]<size_t... Is>(std::index_sequence<Is...>)
-               -> std::array<V, Parts> {
-                 return {V(data + Is * V::size(), element_aligned)...};
-               }(std::make_index_sequence<Parts>());
-    }
-
-  // split(simd_mask)
-  template <typename V, int N, size_t Parts = N / V::size()>
-    std::enable_if_t<N == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
-    split(const simd_mask<typename V::simd_type::value_type, simd_abi::fixed_size<N>>& x)
-    {
-      const auto* data = x.data;
-      return [&]<size_t... Is>(std::index_sequence<Is...>)
-               -> std::array<V, Parts> {
-                 return {V(data + Is * V::size(), element_aligned)...};
-               }(std::make_index_sequence<Parts>());
-    }
-
-  // split<Sizes...>
-  template <size_t... Sizes, typename T>
-    std::tuple<simd<T, simd_abi::deduce_t<T, int(Sizes)>>...>
-    split(const simd<T, simd_abi::fixed_size<int((Sizes + ...))>>& x)
-    {
-      using R = std::tuple<simd<T, simd_abi::deduce_t<T, int(Sizes)>>...>;
-      const auto* data = x.data;
-      return [&]<size_t... Is>(std::index_sequence<Is...>) -> R {
-        constexpr size_t offsets[sizeof...(Sizes)] = {
-          []<size_t... Js>(std::index_sequence<Js...>) {
-            constexpr size_t sizes[sizeof...(Sizes)] = {Sizes...};
-            return (sizes[Js] + ... + 0);
-          }(std::make_index_sequence<Is>())...
-        };
-        return {simd<T, simd_abi::deduce_t<T, int(Sizes)>>(data + offsets[Is],
-                                                           element_aligned)...};
-      }(std::make_index_sequence<sizeof...(Sizes)>());
-    }
-
-  // split<V>(V)
-  template <typename V>
-    std::enable_if_t<std::disjunction_v<is_simd<V>, is_simd_mask<V>>, std::array<V, 1>>
-    split(const V& x)
-    { return {x}; }
-
-  // concat(simd...)
-  template <typename T, typename... As>
-    inline constexpr
-    simd<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>
-    concat(const simd<T, As>&... xs)
-    {
-      using R = simd<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>;
-      return R([&](auto i) {
-               return detail::pack_simd_subscript<i>(xs...);
-             });
-    }
-
-  // concat(simd_mask...)
-  template <typename T, typename... As>
-    inline constexpr
-    simd_mask<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>
-    concat(const simd_mask<T, As>&... xs)
-    {
-      using R = simd_mask<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>;
-      return R([&](auto i) -> bool {
-               return detail::pack_simd_subscript<i>(xs...);
-             });
-    }
-
-  // concat(array<simd>)
-  template <typename T, typename A, size_t N>
-    inline constexpr
-    simd<T, simd_abi::deduce_t<T, N * simd_size_v<T, A>>>
-    concat(const std::array<simd<T, A>, N>& x)
-    {
-      constexpr int K = simd_size_v<T, A>;
-      using R = simd<T, simd_abi::deduce_t<T, N * K>>;
-      return R([&](auto i) {
-               return x[i / K][i % K];
-             });
-    }
-
-  // concat(array<simd_mask>)
-  template <typename T, typename A, size_t N>
-    inline constexpr
-    simd_mask<T, simd_abi::deduce_t<T, N * simd_size_v<T, A>>>
-    concat(const std::array<simd_mask<T, A>, N>& x)
-    {
-      constexpr int K = simd_size_v<T, A>;
-      using R = simd_mask<T, simd_abi::deduce_t<T, N * K>>;
-      return R([&](auto i) -> bool {
-               return x[i / K][i % K];
-             });
-    }
-
-  // const_where_expression<M, T>
-  template <typename M, typename V>
-    class const_where_expression
-    {
-      static_assert(std::is_same_v<V, detail::remove_cvref_t<V>>);
-
-      struct Wrapper { using value_type = V; };
-
-    protected:
-      using value_type =
-        typename std::conditional_t<std::is_arithmetic_v<V>, Wrapper, V>::value_type;
-
-      friend const M&
-      get_mask(const const_where_expression& x)
-      { return x.m_k; }
-
-      friend const V&
-      get_lvalue(const const_where_expression& x)
-      { return x.m_value; }
-
-      const M& m_k;
-      V& m_value;
-
-    public:
-      const_where_expression(const const_where_expression&) = delete;
-      const_where_expression& operator=(const const_where_expression&) = delete;
-
-      constexpr const_where_expression(const M& kk, const V& dd)
-      : m_k(kk), m_value(const_cast<V&>(dd)) {}
-
-      constexpr V
-      operator-() const &&
-      {
-        return V([&](auto i) {
-                 return m_k[i] ? static_cast<value_type>(-m_value[i]) : m_value[i];
-               });
-      }
-
-      template <typename Up, typename Flags>
-        [[nodiscard]] constexpr V
-        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
-        {
-          return V([&](auto i) {
-                   return m_k[i] ? static_cast<value_type>(mem[i]) : m_value[i];
-                 });
-        }
-
-      template <typename Up, typename Flags>
-        constexpr void
-        copy_to(detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
-        {
-          for (size_t i = 0; i < V::size(); ++i)
-            {
-              if (m_k[i])
-                mem[i] = static_cast<Up>(m_value[i]);
-            }
-        }
-    };
-
-  // const_where_expression<bool, T>
-  template <typename V>
-    class const_where_expression<bool, V>
-    {
-      using M = bool;
-
-      static_assert(std::is_same_v<V, detail::remove_cvref_t<V>>);
-
-      struct Wrapper { using value_type = V; };
-
-    protected:
-      using value_type =
-        typename std::conditional_t<std::is_arithmetic_v<V>, Wrapper, V>::value_type;
-
-      friend const M&
-      get_mask(const const_where_expression& x)
-      { return x.m_k; }
-
-      friend const V&
-      get_lvalue(const const_where_expression& x)
-      { return x.m_value; }
-
-      const bool m_k;
-      V& m_value;
-
-    public:
-      const_where_expression(const const_where_expression&) = delete;
-      const_where_expression& operator=(const const_where_expression&) = delete;
-
-      constexpr const_where_expression(const bool kk, const V& dd)
-      : m_k(kk), m_value(const_cast<V&>(dd)) {}
-
-      constexpr V
-      operator-() const &&
-      { return m_k ? -m_value : m_value; }
-
-      template <typename Up, typename Flags>
-        [[nodiscard]] constexpr V
-        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
-        { return m_k ? static_cast<V>(mem[0]) : m_value; }
-
-      template <typename Up, typename Flags>
-        constexpr void
-        copy_to(detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
-        {
-          if (m_k)
-            mem[0] = m_value;
-        }
-    };
-
-  // where_expression<M, T>
-  template <typename M, typename V>
-    class where_expression : public const_where_expression<M, V>
-    {
-      static_assert(not std::is_const_v<V>,
-                    "where_expression may only be instantiated with a non-const V parameter");
-
-      using typename const_where_expression<M, V>::value_type;
-      using const_where_expression<M, V>::m_k;
-      using const_where_expression<M, V>::m_value;
-
-      static_assert(std::is_same_v<typename M::abi_type, typename V::abi_type>);
-      static_assert(M::size() == V::size());
-
-      friend V&
-      get_lvalue(where_expression& x)
-      { return x.m_value; }
-
-      template <typename Up>
-        constexpr auto
-        as_simd(Up&& x)
-        {
-          using UU = detail::remove_cvref_t<Up>;
-          if constexpr (std::is_same_v<V, UU>)
-            return x;
-          else if constexpr (std::is_convertible_v<Up&&, value_type>)
-            return V(static_cast<value_type>(static_cast<Up&&>(x)));
-          else if constexpr (std::is_convertible_v<Up&&, V>)
-            return static_cast<V>(static_cast<Up&&>(x));
-          else
-            return static_simd_cast<V>(static_cast<Up&&>(x));
-        }
-
-    public:
-      where_expression(const where_expression&) = delete;
-      where_expression& operator=(const where_expression&) = delete;
-
-      constexpr where_expression(const M& kk, V& dd)
-      : const_where_expression<M, V>(kk, dd)
-      {}
-
-      template <typename Up>
-        constexpr void
-        operator=(Up&& x) &&
-        {
-          const V& rhs = as_simd(x);
-          for (size_t i = 0; i < V::size(); ++i)
-            {
-              if (m_k[i])
-                m_value[i] = rhs[i];
-            }
-        }
-
-#define SIMD_OP_(op)                              \
-      template <typename Up>                      \
-        constexpr void                            \
-        operator op##=(Up&& x) &&                 \
-        {                                         \
-          const V& rhs = as_simd(x);              \
-          for (size_t i = 0; i < V::size(); ++i)  \
-            {                                     \
-              if (m_k[i])                         \
-                m_value[i] op##= rhs[i];          \
-            }                                     \
-        }                                         \
-      static_assert(true)
-      SIMD_OP_(+);
-      SIMD_OP_(-);
-      SIMD_OP_(*);
-      SIMD_OP_(/);
-      SIMD_OP_(%);
-      SIMD_OP_(&);
-      SIMD_OP_(|);
-      SIMD_OP_(^);
-      SIMD_OP_(<<);
-      SIMD_OP_(>>);
-#undef SIMD_OP_
-
-      constexpr void operator++() &&
-      {
-        for (size_t i = 0; i < V::size(); ++i)
-          {
-            if (m_k[i])
-              ++m_value[i];
-          }
-      }
-
-      constexpr void operator++(int) &&
-      {
-        for (size_t i = 0; i < V::size(); ++i)
-          {
-            if (m_k[i])
-              ++m_value[i];
-          }
-      }
-
-      constexpr void operator--() &&
-      {
-        for (size_t i = 0; i < V::size(); ++i)
-          {
-            if (m_k[i])
-              --m_value[i];
-          }
-      }
-
-      constexpr void operator--(int) &&
-      {
-        for (size_t i = 0; i < V::size(); ++i)
-          {
-            if (m_k[i])
-              --m_value[i];
-          }
-      }
-
-      // intentionally hides const_where_expression::copy_from
-      template <typename Up, typename Flags>
-        constexpr void
-        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) &&
-        {
-          for (size_t i = 0; i < V::size(); ++i)
-            {
-              if (m_k[i])
-                m_value[i] = mem[i];
-            }
-        }
-    };
-
-  // where_expression<bool, T>
-  template <typename V>
-    class where_expression<bool, V> : public const_where_expression<bool, V>
-    {
-      using M = bool;
-      using typename const_where_expression<M, V>::value_type;
-      using const_where_expression<M, V>::m_k;
-      using const_where_expression<M, V>::m_value;
-
-    public:
-      where_expression(const where_expression&) = delete;
-      where_expression& operator=(const where_expression&) = delete;
-
-      constexpr where_expression(const M& kk, V& dd)
-      : const_where_expression<M, V>(kk, dd) {}
-
-#define SIMD_OP_(op)                                \
-      template <typename Up>                        \
-        constexpr void operator op(Up&& x) &&       \
-        { if (m_k) m_value op static_cast<Up&&>(x); }
-
-      SIMD_OP_(=)
-      SIMD_OP_(+=)
-      SIMD_OP_(-=)
-      SIMD_OP_(*=)
-      SIMD_OP_(/=)
-      SIMD_OP_(%=)
-      SIMD_OP_(&=)
-      SIMD_OP_(|=)
-      SIMD_OP_(^=)
-      SIMD_OP_(<<=)
-      SIMD_OP_(>>=)
-#undef SIMD_OP_
-
-      constexpr void operator++() &&
-      { if (m_k) ++m_value; }
-
-      constexpr void operator++(int) &&
-      { if (m_k) ++m_value; }
-
-      constexpr void operator--() &&
-      { if (m_k) --m_value; }
-
-      constexpr void operator--(int) &&
-      { if (m_k) --m_value; }
-
-      // intentionally hides const_where_expression::copy_from
-      template <typename Up, typename Flags>
-        constexpr void
-        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) &&
-        { if (m_k) m_value = mem[0]; }
-    };
-
-  // where
-  template <typename Tp, typename Ap>
-    constexpr where_expression<simd_mask<Tp, Ap>, simd<Tp, Ap>>
-    where(const typename simd<Tp, Ap>::mask_type& k, simd<Tp, Ap>& value)
-    { return {k, value}; }
-
-  template <typename Tp, typename Ap>
-    constexpr const_where_expression<simd_mask<Tp, Ap>, simd<Tp, Ap>>
-    where(const typename simd<Tp, Ap>::mask_type& k,
-          const simd<Tp, Ap>& value)
-    { return {k, value}; }
-
-  template <typename Tp, typename Ap>
-    constexpr where_expression<simd_mask<Tp, Ap>, simd_mask<Tp, Ap>>
-    where(const std::remove_const_t<simd_mask<Tp, Ap>>& k,
-          simd_mask<Tp, Ap>& value)
-    { return {k, value}; }
-
-  template <typename Tp, typename Ap>
-    constexpr const_where_expression<simd_mask<Tp, Ap>, simd_mask<Tp, Ap>>
-    where(const std::remove_const_t<simd_mask<Tp, Ap>>& k,
-          const simd_mask<Tp, Ap>& value)
-    { return {k, value}; }
-
-  template <typename Tp>
-    constexpr where_expression<bool, Tp>
-    where(detail::ExactBool k, Tp& value)
-    { return {k, value}; }
-
-  template <typename Tp>
-    constexpr const_where_expression<bool, Tp>
-    where(detail::ExactBool k, const Tp& value)
-    { return {k, value}; }
-
-  template <typename Tp, typename Ap>
-    constexpr void
-    where(bool k, simd<Tp, Ap>& value) = delete;
-
-  template <typename Tp, typename Ap>
-    constexpr void
-    where(bool k, const simd<Tp, Ap>& value) = delete;
-
-  // reductions [simd.reductions]
-  template <typename T, typename A, typename BinaryOperation = std::plus<>>
-    constexpr T
-    reduce(const simd<T, A>& v,
-           BinaryOperation binary_op = BinaryOperation())
-    {
-      constexpr int N = simd_size_v<T, A>;
-      if constexpr (N > 3)
-        {
-          constexpr int N2 = detail::bit_floor(N / 2);
-          constexpr int NRem = N - 2 * N2;
-          if constexpr (NRem > 0)
-            {
-              const auto [l, r, rem] = split<N2, N2, N - 2 * N2>(v);
-              return binary_op(reduce(binary_op(l, r), binary_op), reduce(rem, binary_op));
-            }
-          else
-            {
-              const auto [l, r] = split<N2, N2>(v);
-              return reduce(binary_op(l, r), binary_op);
-            }
-        }
-      else
-        {
-          T r = v[0];
-          for (size_t i = 1; i < simd_size_v<T, A>; ++i)
-            r = binary_op(r, v[i]);
-          return r;
-        }
-    }
-
-  template <typename M, typename V, typename BinaryOperation = std::plus<>>
-    typename V::value_type
-    reduce(const const_where_expression<M, V>& x,
-        typename V::value_type identity_element,
-        BinaryOperation binary_op)
-    {
-      const M& k = get_mask(x);
-      const V& v = get_lvalue(x);
-      auto r = identity_element;
-      if (any_of(k)) [[likely]]
-        {
-          for (size_t i = 0; i < V::size(); ++i)
-            if (k[i])
-              r = binary_op(r, v[i]);
-        }
-      return r;
-    }
-
-  template <typename M, typename V>
-    typename V::value_type
-    reduce(const const_where_expression<M, V>& x, std::plus<> binary_op = {})
-    { return reduce(x, 0, binary_op); }
-
-  template <typename M, typename V>
-    typename V::value_type
-    reduce(const const_where_expression<M, V>& x, std::multiplies<> binary_op)
-    { return reduce(x, 1, binary_op); }
-
-  template <typename M, typename V>
-    typename V::value_type
-    reduce(const const_where_expression<M, V>& x, std::bit_and<> binary_op)
-    { return reduce(x, ~typename V::value_type(), binary_op); }
-
-  template <typename M, typename V>
-    typename V::value_type
-    reduce(const const_where_expression<M, V>& x, std::bit_or<> binary_op)
-    { return reduce(x, 0, binary_op); }
-
-  template <typename M, typename V>
-    typename V::value_type
-    reduce(const const_where_expression<M, V>& x, std::bit_xor<> binary_op)
-    { return reduce(x, 0, binary_op); }
-
-  template <typename T, typename A>
-    constexpr T
-    hmin(const simd<T, A>& v) noexcept
-    {
-      return reduce(v, [](const auto& l, const auto& r) {
-               using std::min;
-               return min(l, r);
-             });
-    }
-
-  template <typename T, typename A>
-    constexpr T
-    hmax(const simd<T, A>& v) noexcept
-    {
-      return reduce(v, [](const auto& l, const auto& r) {
-               using std::max;
-               return max(l, r);
-             });
-    }
-
-  template <typename M, typename V>
-    constexpr typename V::value_type
-    hmin(const const_where_expression<M, V>& x) noexcept
-    {
-      using T = typename V::value_type;
-      constexpr T id_elem =
-#ifdef __FINITE_MATH_ONLY__
-        std::numeric_limits<T>::max();
-#else
-        std::numeric_limits<T>::infinity();
-#endif
-      return reduce(x, id_elem, [](const auto& l, const auto& r) {
-               using std::min;
-               return min(l, r);
-             });
-    }
-
-  template <typename M, typename V>
-    constexpr
-    typename V::value_type
-    hmax(const const_where_expression<M, V>& x) noexcept
-    {
-      using T = typename V::value_type;
-      constexpr T id_elem =
-#ifdef __FINITE_MATH_ONLY__
-        std::numeric_limits<T>::lowest();
-#else
-        -std::numeric_limits<T>::infinity();
-#endif
-      return reduce(x, id_elem, [](const auto& l, const auto& r) {
-               using std::max;
-               return max(l, r);
-             });
-    }
-
-  // algorithms [simd.alg]
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    min(const simd<T, A>& a, const simd<T, A>& b)
-    { return simd<T, A>([&](auto i) { return std::min(a[i], b[i]); }); }
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    max(const simd<T, A>& a, const simd<T, A>& b)
-    { return simd<T, A>([&](auto i) { return std::max(a[i], b[i]); }); }
-
-  template <typename T, typename A>
-    constexpr
-    std::pair<simd<T, A>, simd<T, A>>
-    minmax(const simd<T, A>& a, const simd<T, A>& b)
-    { return {min(a, b), max(a, b)}; }
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    clamp(const simd<T, A>& v, const simd<T, A>& lo,
-        const simd<T, A>& hi)
-    { return simd<T, A>([&](auto i) { return std::clamp(v[i], lo[i], hi[i]); }); }
-
-  // math
-#define SIMD_MATH_1ARG(name, return_temp)                                                          \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const simd<detail::FloatingPoint<T>, A>& x) noexcept                                      \
-    { return return_temp<T, A>([&x](auto i) { return std::name(x[i]); }); }
-
-#define SIMD_MATH_1ARG_FIXED(name, R)                                                              \
-  template <typename T, typename A>                                                                \
-    constexpr fixed_size_simd<R, simd_size_v<T, A>>                                                \
-    name(const simd<detail::FloatingPoint<T>, A>& x) noexcept                                      \
-    { return fixed_size_simd<R, simd_size_v<T, A>>([&x](auto i) { return std::name(x[i]); }); }
-
-#define SIMD_MATH_2ARG(name, return_temp)                                                          \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const simd<detail::FloatingPoint<T>, A>& x, const simd<T, A>& y) noexcept                 \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }                   \
-                                                                                                   \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
-         const detail::type_identity_t<simd<T, A>>& y) noexcept                                    \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }                   \
-                                                                                                   \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const detail::type_identity_t<simd<T, A>>& x,                                             \
-         const simd<detail::FloatingPoint<T>, A>& y) noexcept                                      \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }
-
-#define SIMD_MATH_3ARG(name, return_temp)                                                          \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
-         const simd<T, A>& y, const simd<T, A> &z) noexcept                                        \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
-                                                                                                   \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
-         const detail::type_identity_t<simd<T, A>>& y,                                             \
-         const detail::type_identity_t<simd<T, A>> &z) noexcept                                    \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
-                                                                                                   \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const detail::type_identity_t<simd<T, A>>& x,                                             \
-         const simd<detail::FloatingPoint<T>, A>& y,                                               \
-         const detail::type_identity_t<simd<T, A>> &z) noexcept                                    \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
-                                                                                                   \
-  template <typename T, typename A>                                                                \
-    constexpr return_temp<T, A>                                                                    \
-    name(const detail::type_identity_t<simd<T, A>>& x,                                             \
-         const detail::type_identity_t<simd<T, A>>& y,                                             \
-         const simd<detail::FloatingPoint<T>, A> &z) noexcept                                      \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }
-
-  template <typename T, typename A, typename U = detail::SignedIntegral<T>>
-    constexpr simd<T, A>
-    abs(const simd<T, A>& x) noexcept
-    { return simd<T, A>([&x](auto i) { return std::abs(x[i]); }); }
-
-  SIMD_MATH_1ARG(abs, simd)
-  SIMD_MATH_1ARG(isnan, simd_mask)
-  SIMD_MATH_1ARG(isfinite, simd_mask)
-  SIMD_MATH_1ARG(isinf, simd_mask)
-  SIMD_MATH_1ARG(isnormal, simd_mask)
-  SIMD_MATH_1ARG(signbit, simd_mask)
-  SIMD_MATH_1ARG_FIXED(fpclassify, int)
-
-  SIMD_MATH_2ARG(hypot, simd)
-  SIMD_MATH_3ARG(hypot, simd)
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    remquo(const simd<T, A>& x, const simd<T, A>& y,
-           fixed_size_simd<int, simd_size_v<T, A>>* quo) noexcept
-    { return simd<T, A>([&x, &y, quo](auto i) { return std::remquo(x[i], y[i], &(*quo)[i]); }); }
-
-  SIMD_MATH_1ARG(erf, simd)
-  SIMD_MATH_1ARG(erfc, simd)
-  SIMD_MATH_1ARG(tgamma, simd)
-  SIMD_MATH_1ARG(lgamma, simd)
-
-  SIMD_MATH_2ARG(pow, simd)
-  SIMD_MATH_2ARG(fmod, simd)
-  SIMD_MATH_2ARG(remainder, simd)
-  SIMD_MATH_2ARG(nextafter, simd)
-  SIMD_MATH_2ARG(copysign, simd)
-  SIMD_MATH_2ARG(fdim, simd)
-  SIMD_MATH_2ARG(fmax, simd)
-  SIMD_MATH_2ARG(fmin, simd)
-  SIMD_MATH_2ARG(isgreater, simd_mask)
-  SIMD_MATH_2ARG(isgreaterequal, simd_mask)
-  SIMD_MATH_2ARG(isless, simd_mask)
-  SIMD_MATH_2ARG(islessequal, simd_mask)
-  SIMD_MATH_2ARG(islessgreater, simd_mask)
-  SIMD_MATH_2ARG(isunordered, simd_mask)
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    modf(const simd<detail::FloatingPoint<T>, A>& x, simd<T, A>* iptr) noexcept
-    { return simd<T, A>([&x, iptr](auto i) { return std::modf(x[i], &(*iptr)[i]); }); }
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    frexp(const simd<detail::FloatingPoint<T>, A>& x,
-          fixed_size_simd<int, simd_size_v<T, A>>* exp) noexcept
-    { return simd<T, A>([&x, exp](auto i) { return std::frexp(x[i], &(*exp)[i]); }); }
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    scalbln(const simd<detail::FloatingPoint<T>, A>& x,
-            const fixed_size_simd<long int, simd_size_v<T, A>>& exp) noexcept
-    { return simd<T, A>([&x, &exp](auto i) { return std::scalbln(x[i], exp[i]); }); }
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    scalbn(const simd<detail::FloatingPoint<T>, A>& x,
-           const fixed_size_simd<int, simd_size_v<T, A>>& exp) noexcept
-    { return simd<T, A>([&x, &exp](auto i) { return std::scalbn(x[i], exp[i]); }); }
-
-  template <typename T, typename A>
-    constexpr simd<T, A>
-    ldexp(const simd<detail::FloatingPoint<T>, A>& x,
-          const fixed_size_simd<int, simd_size_v<T, A>>& exp) noexcept
-    { return simd<T, A>([&x, &exp](auto i) { return std::ldexp(x[i], exp[i]); }); }
-
-  SIMD_MATH_1ARG(sqrt, simd)
-
-  SIMD_MATH_3ARG(fma, simd)
-
-  SIMD_MATH_1ARG(trunc, simd)
-  SIMD_MATH_1ARG(ceil, simd)
-  SIMD_MATH_1ARG(floor, simd)
-  SIMD_MATH_1ARG(round, simd)
-  SIMD_MATH_1ARG_FIXED(lround, long)
-  SIMD_MATH_1ARG_FIXED(llround, long long)
-  SIMD_MATH_1ARG(nearbyint, simd)
-  SIMD_MATH_1ARG(rint, simd)
-  SIMD_MATH_1ARG_FIXED(lrint, long)
-  SIMD_MATH_1ARG_FIXED(llrint, long long)
-  SIMD_MATH_1ARG_FIXED(ilogb, int)
-
-  // trig functions
-  SIMD_MATH_1ARG(sin, simd)
-  SIMD_MATH_1ARG(cos, simd)
-  SIMD_MATH_1ARG(tan, simd)
-  SIMD_MATH_1ARG(asin, simd)
-  SIMD_MATH_1ARG(acos, simd)
-  SIMD_MATH_1ARG(atan, simd)
-  SIMD_MATH_2ARG(atan2, simd)
-  SIMD_MATH_1ARG(sinh, simd)
-  SIMD_MATH_1ARG(cosh, simd)
-  SIMD_MATH_1ARG(tanh, simd)
-  SIMD_MATH_1ARG(asinh, simd)
-  SIMD_MATH_1ARG(acosh, simd)
-  SIMD_MATH_1ARG(atanh, simd)
-
-  // logarithms
-  SIMD_MATH_1ARG(log, simd)
-  SIMD_MATH_1ARG(log10, simd)
-  SIMD_MATH_1ARG(log1p, simd)
-  SIMD_MATH_1ARG(log2, simd)
-  SIMD_MATH_1ARG(logb, simd)
-
-#undef SIMD_MATH_1ARG
-#undef SIMD_MATH_1ARG_FIXED
-#undef SIMD_MATH_2ARG
-#undef SIMD_MATH_3ARG
-}
-#ifdef VIR_SIMD_TS_DROPIN
-}
-
-namespace vir::stdx
-{
-  using namespace std::experimental::parallelism_v2;
-}
-#endif
-
-#endif
-#endif  // VIR_SIMD_H_
-
-
-// #include "typelist.hpp"
-
-
-#ifndef __EMSCRIPTEN__
-#include <cxxabi.h>
-#include <iostream>
-#include <typeinfo>
-#endif
-
-#ifndef DISABLE_SIMD
-#define DISABLE_SIMD 0
-#endif
-
-namespace gr::meta {
-
-struct null_type {};
-
-template<typename... Ts>
-struct print_types;
-
-template<typename CharT, std::size_t SIZE>
-struct fixed_string {
-    constexpr static std::size_t N              = SIZE;
-    CharT                        _data[N + 1UZ] = {};
-
-    constexpr fixed_string() = default;
-
-    constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
-        if constexpr (N != 0)
-            for (std::size_t i = 0; i < N; ++i) _data[i] = str[i];
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    size() const noexcept {
-        return N;
-    }
-
-    [[nodiscard]] constexpr bool
-    empty() const noexcept {
-        return N == 0;
-    }
-
-    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return { _data, N }; }
-
-    [[nodiscard]] explicit
-    operator std::string() const noexcept {
-        return { _data, N };
-    }
-
-    [[nodiscard]] explicit
-    operator const char *() const noexcept {
-        return _data;
-    }
-
-    [[nodiscard]] constexpr bool
-    operator==(const fixed_string &other) const noexcept {
-        return std::string_view{ _data, N } == std::string_view(other);
-    }
-
-    template<std::size_t N2>
-    [[nodiscard]] friend constexpr bool
-    operator==(const fixed_string &, const fixed_string<CharT, N2> &) {
-        return false;
-    }
-
-    constexpr auto
-    operator<=>(const fixed_string &other) const noexcept
-            = default;
-
-    friend constexpr auto
-    operator<=>(const fixed_string &fs, std::string_view sv) noexcept {
-        return std::string_view(fs) <=> sv;
-    }
-
-    friend constexpr auto
-    operator<=>(const fixed_string &fs, const std::string &str) noexcept {
-        return std::string(fs) <=> str;
-    }
-};
-
-template<typename CharT, std::size_t N>
-fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
-
-template<typename T>
-struct is_fixed_string : std::false_type {};
-
-template<typename CharT, std::size_t N>
-struct is_fixed_string<gr::meta::fixed_string<CharT, N>> : std::true_type {};
-
-template<typename T>
-concept FixedString = is_fixed_string<T>::value;
-
-template<typename CharT, std::size_t N1, std::size_t N2>
-constexpr fixed_string<CharT, N1 + N2>
-operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
-    meta::fixed_string<CharT, N1 + N2> result{};
-    for (std::size_t i = 0; i < N1; ++i) {
-        result._data[i] = lhs._data[i];
-    }
-    for (std::size_t i = 0; i < N2; ++i) {
-        result._data[N1 + i] = rhs._data[i];
-    }
-    result._data[N1 + N2] = '\0';
-    return result;
-}
-
-namespace detail {
-constexpr int
-log10(int n) noexcept {
-    if (n < 10) return 0;
-    return 1 + log10(n / 10);
-}
-
-constexpr int
-pow10(int n) noexcept {
-    if (n == 0) return 1;
-    return 10 * pow10(n - 1);
-}
-
-template<int N, std::size_t... Idx>
-constexpr fixed_string<char, sizeof...(Idx)>
-make_fixed_string_impl(std::index_sequence<Idx...>) {
-    constexpr auto numDigits = sizeof...(Idx);
-    return { { ('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0 } };
-}
-} // namespace detail
-
-template<int N>
-constexpr auto
-make_fixed_string() noexcept {
-    if constexpr (N == 0) {
-        return fixed_string{ "0" };
-    } else {
-        constexpr std::size_t digits = 1U + static_cast<std::size_t>(detail::log10(N));
-        return detail::make_fixed_string_impl<N>(std::make_index_sequence<digits>());
-    }
-}
-
-static_assert(fixed_string("0") == make_fixed_string<0>());
-static_assert(fixed_string("1") == make_fixed_string<1>());
-static_assert(fixed_string("2") == make_fixed_string<2>());
-static_assert(fixed_string("123") == make_fixed_string<123>());
-static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("out123"));
-
-template<typename T>
-[[nodiscard]] std::string
-type_name() noexcept {
-#if !defined(__EMSCRIPTEN__)
-    std::string type_name = typeid(T).name();
-    int         status;
-    char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
-    if (status == 0) {
-        std::string ret(demangled_name);
-        free(demangled_name);
-        return ret;
-    } else {
-        free(demangled_name);
-        return typeid(T).name();
-    }
-#else
-    return typeid(T).name(); // TODO: to be replaced by refl-cpp
-#endif
-}
-
-template<fixed_string val>
-struct message_type {};
-
-template<class... T>
-constexpr bool always_false = false;
-
-constexpr std::size_t invalid_index = -1UZ;
-
-#if HAVE_SOURCE_LOCATION
-[[gnu::always_inline]] inline void
-precondition(bool cond, const std::source_location loc = std::source_location::current()) {
-    struct handle {
-        [[noreturn]] static void
-        failure(std::source_location const &loc) {
-            std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':' << loc.column() << ": `" << loc.function_name() << "`\n";
-            __builtin_trap();
-        }
-    };
-
-    if (not cond) [[unlikely]]
-        handle::failure(loc);
-}
-#else
-[[gnu::always_inline]] inline void
-precondition(bool cond) {
-    struct handle {
-        [[noreturn]] static void
-        failure() {
-            std::clog << "failed precondition\n";
-            __builtin_trap();
-        }
-    };
-
-    if (not cond) [[unlikely]]
-        handle::failure();
-}
-#endif
-
-/**
- * T is tuple-like if it implements std::tuple_size, std::tuple_element, and std::get.
- * Tuples with size 0 are excluded.
- */
-template<typename T>
-concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
-    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
-};
-
-template<template<typename...> class Template, typename Class>
-struct is_instantiation : std::false_type {};
-
-template<template<typename...> class Template, typename... Args>
-struct is_instantiation<Template, Template<Args...>> : std::true_type {};
-template<typename Class, template<typename...> class Template>
-concept is_instantiation_of = is_instantiation<Template, Class>::value;
-
-template<typename T>
-concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
-
-template<typename T>
-concept vector_type = is_instantiation_of<std::remove_cv_t<T>, std::vector>;
-
-template<typename T>
-struct is_std_array_type : std::false_type {};
-
-template<typename T, std::size_t N>
-struct is_std_array_type<std::array<T, N>> : std::true_type {};
-
-template<typename T>
-concept array_type = is_std_array_type<std::remove_cv_t<T>>::value;
-
-template<typename T, typename V = void>
-concept array_or_vector_type = (vector_type<T> || array_type<T>) &&(std::same_as<V, void> || std::same_as<typename T::value_type, V>);
-
-namespace stdx = vir::stdx;
-
-template<typename V, typename T = void>
-concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
-
-template<typename V, typename T>
-concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
-
-template<typename T>
-concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
-
-template<typename T>
-using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
-
-template<typename T>
-concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
-
-/**
- * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
- * tuple-like of stdx::simd (recursively). The latter requires that the SIMD width is homogeneous.
- * If T is not a simd (or tuple thereof), value is 0.
- */
-template<typename T>
-struct simdize_size : std::integral_constant<std::size_t, 0> {};
-
-template<typename T, typename A>
-struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
-
-template<tuple_like Tup>
-struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
-    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...);
-    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
-};
-
-template<typename T>
-inline constexpr std::size_t simdize_size_v = simdize_size<T>::value;
-
-namespace detail {
-/**
- * Shortcut to determine the stdx::simd specialization with the most efficient ABI tag for the
- * requested element type T and width N.
- */
-template<typename T, std::size_t N>
-using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
-
-template<typename T, std::size_t N>
-struct simdize_impl {
-    using type = T;
-};
-
-template<vectorizable_v T, std::size_t N>
-    requires requires { typename stdx::native_simd<T>; }
-struct simdize_impl<T, N> {
-    using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
-};
-
-template<std::size_t N>
-struct simdize_impl<std::tuple<>, N> {
-    using type = std::tuple<>;
-};
-
-template<tuple_like Tup, std::size_t N>
-    requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
-struct simdize_impl<Tup, N> {
-    static inline constexpr std::size_t size
-            = N > 0 ? N
-                    : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr { return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... }); }
-
-                      (std::make_index_sequence<std::tuple_size_v<Tup>>());
-
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
-        return {};
-    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
-};
-} // namespace detail
-
-/**
- * Meta-function that turns a vectorizable type or a tuple-like (recursively) of vectorizable types
- * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
- * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
- * stdx::native_simd<U>::size() determines the resulting SIMD width.
- * If T is neither vectorizable nor a std::tuple with at least one member, simdize produces T.
- */
-template<typename T, std::size_t N = 0>
-using simdize = typename detail::simdize_impl<T, N>::type;
-
-static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
-                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>,
-                                      std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
-
-template<fixed_string Name, typename PortList>
-consteval int
-indexForName() {
-    auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
-        auto static_name_for_index = []<std::size_t Id> {
-            using Port = typename PortList::template at<Id>;
-            if constexpr (requires(Port port) {
-                              { port.static_name() };
-                          }) {
-                return Port::Name;
-            } else {
-                return Port::value_type::Name;
-            }
-        };
-
-        constexpr int n_matches = ((static_name_for_index.template operator()<Ids>() == Name) + ...);
-        static_assert(n_matches <= 1, "Multiple ports with that name were found. The name must be unique. You can "
-                                      "still use a port index instead.");
-        static_assert(n_matches == 1, "No port with the given name exists.");
-        int result = -1;
-        ((static_name_for_index.template operator()<Ids>() == Name ? (result = Ids) : 0), ...);
-        return result;
-    };
-    return helper(std::make_index_sequence<PortList::size>());
-}
-
-// template<template<typename...> typename Type, typename... Items>
-// using find_type = decltype(std::tuple_cat(std::declval<std::conditional_t<is_instantiation_of<Items, Type>, std::tuple<Items>, std::tuple<>>>()...));
-
-template<template<typename> typename Pred, typename... Items>
-struct find_type;
-
-template<template<typename> typename Pred>
-struct find_type<Pred> {
-    using type = std::tuple<>;
-};
-
-template<template<typename> typename Pred, typename First, typename... Rest>
-struct find_type<Pred, First, Rest...> {
-    using type = decltype(std::tuple_cat(std::conditional_t<Pred<First>::value, std::tuple<First>, std::tuple<>>(), typename find_type<Pred, Rest...>::type()));
-};
-
-template<template<typename> typename Pred, typename... Items>
-using find_type_t = typename find_type<Pred, Items...>::type;
-
-template<typename Tuple, typename Default = void>
-struct get_first_or_default;
-
-template<typename First, typename... Rest, typename Default>
-struct get_first_or_default<std::tuple<First, Rest...>, Default> {
-    using type = First;
-};
-
-template<typename Default>
-struct get_first_or_default<std::tuple<>, Default> {
-    using type = Default;
-};
-
-template<typename Tuple, typename Default = void>
-using get_first_or_default_t = typename get_first_or_default<Tuple, Default>::type;
-
-template<typename... Lambdas>
-struct overloaded : Lambdas... {
-    using Lambdas::operator()...;
-};
-
-template<typename... Lambdas>
-overloaded(Lambdas...) -> overloaded<Lambdas...>;
-
-namespace detail {
-template<template<typename...> typename Mapper, template<typename...> typename Wrapper, typename... Args>
-Wrapper<Mapper<Args>...> *
-type_transform_impl(Wrapper<Args...> *);
-
-template<template<typename...> typename Mapper, typename T>
-Mapper<T> *
-type_transform_impl(T *);
-
-template<template<typename...> typename Mapper>
-void *
-type_transform_impl(void *);
-} // namespace detail
-
-template<template<typename...> typename Mapper, typename T>
-using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
-
-template<typename Arg, typename... Args>
-auto
-safe_min(Arg &&arg, Args &&...args) {
-    if constexpr (sizeof...(Args) == 0) {
-        return arg;
-    } else {
-        return std::min(std::forward<Arg>(arg), std::forward<Args>(args)...);
-    }
-}
-
-template<typename Arg, typename... Args>
-auto
-safe_pair_min(Arg &&arg, Args &&...args) {
-    if constexpr (sizeof...(Args) == 0) {
-        return arg;
-    } else {
-        return std::make_pair(std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first...), std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second...));
-    }
-}
-
-template<typename Function, typename Tuple, typename... Tuples>
-auto
-tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
-}
-
-template<typename Function, typename Tuple, typename... Tuples>
-void
-tuple_for_each_enumerate(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        ([&function](auto I, auto &&t0, auto &&...ts) { function(I, std::get<I>(t0), std::get<I>(ts)...); }(std::integral_constant<std::size_t, Idx>{}, tuple, tuples...), ...);
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
-}
-
-template<typename Function, typename Tuple, typename... Tuples>
-auto
-tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
-}
-
-template<typename Function, typename Tuple, typename... Tuples>
-auto
-tuple_transform_enumerated(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(I, std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
-}
-
-static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
-static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
-static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
-
-#ifdef __cpp_lib_hardware_interference_size
-static inline constexpr const std::size_t kCacheLine = std::hardware_destructive_interference_size;
-#else
-static inline constexpr const std::size_t kCacheLine = 64;
-#endif
-
-namespace detail {
-
-template<typename T>
-concept HasValueType = requires { typename T::value_type; };
-
-template<typename T, typename = void>
-struct fundamental_base_value_type {
-    using type = T;
-};
-
-template<HasValueType T>
-struct fundamental_base_value_type<T> {
-    using type = typename fundamental_base_value_type<typename T::value_type>::type;
-};
-
-} // namespace detail
-
-template<typename T>
-using fundamental_base_value_type_t = typename detail::fundamental_base_value_type<T>::type;
-
-static_assert(std::is_same_v<fundamental_base_value_type_t<int>, int>);
-static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<float>>, float>);
-static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<std::complex<double>>>, double>);
-
-template<typename T>
-concept string_like = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> || std::is_convertible_v<T, std::string_view>;
-
-namespace detail {
-template<typename T>
-struct is_const_member_function : std::false_type {};
-
-template<typename T, typename U, typename... args>
-struct is_const_member_function<U (T::*)(args...) const> : std::true_type {};
-} // namespace detail
-
-template<typename T>
-inline constexpr bool
-is_const_member_function(T) noexcept {
-    return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
-}
-
-} // namespace gr::meta
-
-#endif // include guard
-
-
-// #include "BlockTraits.hpp"
-#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
-#define GNURADIO_NODE_NODE_TRAITS_HPP
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-// #include "Port.hpp"
-#ifndef GNURADIO_PORT_HPP
-#define GNURADIO_PORT_HPP
-
-#include <complex>
-#include <span>
+#include <variant>
+#include <vector>
+
+// #include <pmtv/rva_variant.hpp>
+/*
+From https://github.com/codeinred/recursive-variant
+
+Note that is may not be needed anymore in c++23.  
+See https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2162r0.html
+
+Boost Software License - Version 1.0 - August 17th, 2003
+
+© 2021 Alecto Irene Perez
+
+Permission is hereby granted, free of charge, to any person or organization
+obtaining a copy of the software and accompanying documentation covered by this
+license (the "Software") to use, reproduce, display, distribute, execute, and
+transmit the Software, and to prepare derivative works of the Software, and to
+permit third-parties to whom the Software is furnished to do so, all subject to
+the following:
+
+The copyright notices in the Software and this entire statement, including the
+above license grant, this restriction and the following disclaimer, must be
+included in all copies of the Software, in whole or in part, and all derivative
+works of the Software, especially those created in whole or in part by Deep
+Neural Networks, Language Models, or other such programs advertised as "AI" or
+as "Artificial Intelligence" or as "Machine Learning", either with or without
+human input or intervention, unless such copies or derivative works are solely
+in the form of machine-executable object code generated by a source language
+processor.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES
+OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+#ifndef RECURSIVE_VARIANT_AUTHORITY_VARIANT_HPP
+#define RECURSIVE_VARIANT_AUTHORITY_VARIANT_HPP
+#include <cstdint>
 #include <variant>
 
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-// #include "annotated.hpp"
-#ifndef GNURADIO_ANNOTATED_HPP
-#define GNURADIO_ANNOTATED_HPP
-
-#include <string_view>
-#include <type_traits>
-#include <utility>
-
-#include <fmt/format.h>
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-namespace gr {
-
+namespace rva {
 /**
- * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
- * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ * @brief replace is a template type used to implement replace_t. It provides
+ * member, a using declaration named `type`.
+ *
+ * @tparam T the type to transform.
+ * @tparam Find the type to find
+ * @tparam Replace the type to replace it with.
  */
-template<gr::meta::fixed_string doc_string>
-struct Doc {
-    static constexpr gr::meta::fixed_string value = doc_string;
+template <class T, class Find, class Replace>
+struct replace;
+/**
+ * @brief replace is a template that takes a type T (which itself might be a
+ * template), and replaces all instances of *Find* with *Replace*. For example:
+ *
+ * - `replace_t<char, char, int>` -> `int`
+ * - `replace_t<std::vector<char>, char, int>` -> `std::vector<int>`
+ *
+ * @tparam T the type to transform.
+ * @tparam Find the type to find
+ * @tparam Replace the type to replace it with.
+ */
+template <class T, class Find, class Replace>
+using replace_t = typename replace<T, Find, Replace>::type;
+
+struct self_t {
 };
 
-using EmptyDoc = Doc<"">; // nomen-est-omen
+// See: https://en.cppreference.com/w/cpp/utility/variant
+template <class... T>
+class variant : public std::variant<replace_t<T, self_t, variant<T...>>...>
+{
+public:
+    using base_type = std::variant<replace_t<T, self_t, variant<T...>>...>;
+    constexpr static bool nothrow_swappable = std::is_nothrow_swappable_v<base_type>;
 
-template<typename T>
-struct is_doc : std::false_type {};
+    using base_type::base_type;
 
-template<gr::meta::fixed_string N>
-struct is_doc<Doc<N>> : std::true_type {};
+    // Observers
+    using base_type::index;
+    using base_type::valueless_by_exception;
 
-template<typename T>
-concept Documentation = is_doc<T>::value;
+    // Modifiers
+    using base_type::operator=;
+    using base_type::emplace;
+    using base_type::swap;
 
-/**
- * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
- * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
- */
-template<gr::meta::fixed_string doc_string>
-struct Unit {
-    static constexpr gr::meta::fixed_string value = doc_string;
-};
+    variant() = default;
+    variant(variant const&) = default;
+    variant(variant&&) = default;
 
-using EmptyUnit = Unit<"">; // nomen-est-omen
+    variant& operator=(variant const&) = default;
+    variant& operator=(variant&&) = default;
 
-template<typename T>
-struct is_unit : std::false_type {};
-
-template<gr::meta::fixed_string N>
-struct is_unit<Unit<N>> : std::true_type {};
-
-template<typename T>
-concept UnitType = is_unit<T>::value;
-
-static_assert(Documentation<EmptyDoc>);
-static_assert(UnitType<EmptyUnit>);
-static_assert(!UnitType<EmptyDoc>);
-static_assert(!Documentation<EmptyUnit>);
-
-/**
- * @brief Annotates field etc. that the entity is visible from a UI perspective.
- */
-struct Visible {};
-
-/**
- * @brief Annotates block, indicating to calling schedulers that it may block due IO.
- */
-template<bool UseIoThread = true>
-struct BlockingIO {
-    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
-};
-
-/**
- * @brief Annotates block, indicating to perform resampling based on the provided ratio.
- *
- * The ratio between numerator and denominator defines the number of samples to be interpolated or decimated.
- * - If the ratio is greater than 1, interpolation occurs.
- * - If the ratio is less than 1, decimation occurs.
- * - If the ratio is 1, no effect on the sampling rate.
- *
- * @tparam numerator Top number in the input-to-output sample ratio.
- * @tparam denominator Bottom number in the input-to-output sample ratio.
- * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
- */
-template<std::size_t numerator = 1LU, std::size_t denominator = 1LU, bool isConst = false>
-struct ResamplingRatio {
-    static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
-    static constexpr std::size_t kNumerator   = numerator;
-    static constexpr std::size_t kDenominator = denominator;
-    static constexpr bool        kIsConst     = isConst;
-    static constexpr bool        kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
-};
-
-template<typename T>
-concept IsResamplingRatio = requires {
-    T::kNumerator;
-    T::kDenominator;
-    T::kIsConst;
-    T::kEnabled;
-} && std::is_base_of_v<ResamplingRatio<T::kNumerator, T::kDenominator, T::kIsConst>, T>;
-
-template<typename T>
-using is_resampling_ratio = std::bool_constant<IsResamplingRatio<T>>;
-
-static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
-static_assert(!is_resampling_ratio<int>::value);
-
-/**
- * @brief Annotates block, indicating the stride control for data processing.
- *
- * Stride determines the number of samples between consecutive data processing events:
- * - If stride is less than N, it indicates overlap.
- * - If stride is greater than N, it indicates skipped samples.
- * - If stride is equal to 0, it indicates back-to-back processing without skipping.
- *
- * @tparam stride The number of samples between data processing events.
- * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
- */
-template<std::size_t stride = 0LU, bool isConst = false>
-struct Stride {
-    static_assert(stride >= 0, "Stride must be >= 0");
-
-    static constexpr std::size_t kStride  = stride;
-    static constexpr bool        kIsConst = isConst;
-    static constexpr bool        kEnabled = !isConst || (stride > 0);
-};
-
-template<typename T>
-concept IsStride = requires {
-    T::kStride;
-    T::kIsConst;
-    T::kEnabled;
-} && std::is_base_of_v<Stride<T::kStride, T::kIsConst>, T>;
-
-template<typename T>
-using is_stride = std::bool_constant<IsStride<T>>;
-
-static_assert(is_stride<Stride<10, true>>::value);
-static_assert(!is_stride<int>::value);
-
-/**
- * @brief Annotates templated block, indicating which port data types are supported.
- */
-template<typename... Ts>
-struct SupportedTypes {};
-
-template<typename T>
-struct is_supported_types : std::false_type {};
-
-template<typename... Ts>
-struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
-
-using DefaultSupportedTypes = SupportedTypes<>;
-
-static_assert(gr::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
-static_assert(gr::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
-
-/**
- * @brief Represents limits and optional validation for an Annotated<..> type.
- *
- * The `Limits` structure defines lower and upper bounds for a value of type `T`.
- * Additionally, it allows for an optional custom validation function to be provided.
- * This function should take a value of type `T` and return a `bool`, indicating
- * whether the value passes the custom validation or not.
- *
- * Example:
- * ```
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
- * // or:
- * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
- * // or:
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
- * ```
- */
-template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
-    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
-        { f(v) } -> std::same_as<bool>;
-    } || Validator == nullptr)
-struct Limits {
-    using ValueType                                    = decltype(LowerLimit);
-    static constexpr ValueType           MinRange      = LowerLimit;
-    static constexpr ValueType           MaxRange      = UpperLimit;
-    static constexpr decltype(Validator) ValidatorFunc = Validator;
-
-    static constexpr bool
-    validate(const ValueType &value) noexcept {
-        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
-            if constexpr (Validator != nullptr) {
-                try {
-                    return Validator(value);
-                } catch (...) {
-                    return false;
-                }
-            } else {
-                return true; // if no validator and limits are same, return true by default
-            }
-        }
-        if constexpr (Validator != nullptr) {
-            try {
-                return value >= LowerLimit && value <= UpperLimit && Validator(value);
-            } catch (...) {
-                return false;
-            }
-        } else {
-            return value >= LowerLimit && value <= UpperLimit;
-        }
-        return true;
-    }
-};
-
-template<typename T>
-struct is_limits : std::false_type {};
-
-template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
-struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
-
-template<typename T>
-concept Limit    = is_limits<T>::value;
-
-using EmptyLimit = Limits<0, 0>; // nomen-est-omen
-
-static_assert(Limit<EmptyLimit>);
-
-/**
- * @brief Annotated is a template class that acts as a transparent wrapper around another type.
- * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
- * The meta-information is supplied as template parameters.
- */
-template<typename T, gr::meta::fixed_string description_ = "", typename... Arguments>
-struct Annotated {
-    using value_type = T;
-    using LimitType  = typename gr::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
-    T value;
-
-    Annotated() = default;
-
-    template<typename U>
-        requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false)
-    Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
-
-    template<typename U>
-        requires std::assignable_from<T &, U>
-    Annotated &
-    operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
-        value = std::forward<U>(input);
-        return *this;
-    }
-
-    inline explicit(false) constexpr
-    operator T &() noexcept {
-        return value;
-    }
-
-    inline explicit(false) constexpr
-    operator const T &() const noexcept {
-        return value;
-    }
-
-    constexpr bool
-    operator==(const Annotated &other) const noexcept {
-        return value == other.value;
-    }
-
-    template<typename U>
-    constexpr bool
-    operator==(const U &other) const noexcept {
-        if constexpr (requires { other.value; }) {
-            return value == other.value;
-        } else {
-            return value == other;
-        }
-    }
-
-    template<typename U>
-        requires std::is_same_v<std::remove_cvref_t<U>, T>
-    [[nodiscard]] constexpr bool
-    validate_and_set(U &&value_) {
-        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
-            value = std::forward<U>(value_);
-            return true;
-        } else {
-            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
-                value = std::forward<U>(value_);
-                return true;
-            } else {
-                return false;
-            }
-        }
-    }
-
-    operator std::string_view() const noexcept
-        requires std::is_same_v<T, std::string>
+    constexpr void swap(variant& other) noexcept(nothrow_swappable)
     {
-        return std::string_view(value); // Convert from std::string to std::string_view
+        base_type::swap(other);
     }
+    constexpr base_type& get_base() & noexcept { return *this; }
+    constexpr base_type const& get_base() const& noexcept { return *this; }
+    constexpr base_type&& get_base() && noexcept { return *this; }
+    constexpr base_type const&& get_base() const&& noexcept { return *this; }
 
-    // meta-information
-    inline static constexpr std::string_view
-    description() noexcept {
-        return std::string_view{ description_ };
-    }
+    constexpr base_type* get_pointer_to_base() noexcept { return this; }
+    constexpr base_type const* get_pointer_to_base() const noexcept { return this; }
 
-    inline static constexpr std::string_view
-    documentation() noexcept {
-        using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
-        return std::string_view{ Documentation::value };
-    }
+    auto operator<=>(variant const&) const = default;
+    bool operator==(variant const&) const = default;
 
-    inline static constexpr std::string_view
-    unit() noexcept {
-        using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
-        return std::string_view{ PhysicalUnit::value };
-    }
-
-    inline static constexpr bool
-    visible() noexcept {
-        return gr::meta::typelist<Arguments...>::template contains<Visible>;
+    size_t size()
+    {
+        return std::visit(
+            [](const auto& arg) -> size_t {
+                using TYPE = std::decay_t<decltype(arg)>;
+                if constexpr (std::same_as<std::monostate, TYPE>)
+                    return 0;
+                else if constexpr (std::ranges::range<TYPE>)
+                    return arg.size();
+                return 1;
+            },
+            get_base());
     }
 };
 
-template<typename T>
-struct is_annotated : std::false_type {};
+// See: https://en.cppreference.com/w/cpp/utility/variant/visit
+template <class Visitor, class... Variants>
+constexpr decltype(auto) visit(Visitor&& visitor, Variants&&... variants)
+{
+    return std::visit(std::forward<Visitor>(visitor),
+                      std::forward<Variants>(variants).get_base()...);
+}
+template <class R, class Visitor, class... Variants>
+constexpr R visit(Visitor&& visitor, Variants&&... variants)
+{
+    return std::visit<R>(std::forward<Visitor>(visitor),
+                         std::forward<Variants>(variants).get_base()...);
+}
 
-template<typename T, gr::meta::fixed_string str, typename... Args>
-struct is_annotated<gr::Annotated<T, str, Args...>> : std::true_type {};
+// See: https://en.cppreference.com/w/cpp/utility/variant/get
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(rva::variant<Types...>& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(rva::variant<Types...>&& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(const rva::variant<Types...>& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <std::size_t I, class... Types>
+constexpr decltype(auto) get(const rva::variant<Types...>&& v)
+{
+    return std::get<I>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr T& get(rva::variant<Types...>& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr T&& get(rva::variant<Types...>&& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr const T& get(const rva::variant<Types...>& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
+template <class T, class... Types>
+constexpr const T&& get(const rva::variant<Types...>&& v)
+{
+    return std::get<T>(std::forward<decltype(v)>(v).get_base());
+}
 
-template<typename T>
-concept AnnotatedType = is_annotated<T>::value;
+// See: https://en.cppreference.com/w/cpp/utility/variant/get_if
+template <std::size_t I, class... Types>
+constexpr auto* get_if(rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<I>(pv->get_pointer_to_base());
+}
+template <std::size_t I, class... Types>
+constexpr auto const* get_if(const rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<I>(pv->get_pointer_to_base());
+}
+template <class T, class... Types>
+constexpr auto* get_if(rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<T>(pv->get_pointer_to_base());
+}
+template <class T, class... Types>
+constexpr auto const* get_if(const rva::variant<Types...>* pv) noexcept
+{
+    return std::get_if<T>(pv->get_pointer_to_base());
+}
 
-template<typename T>
-struct unwrap_if_wrapped {
+template <class T, class... Types>
+constexpr bool holds_alternative(const rva::variant<Types...>& v) noexcept
+{
+    return std::holds_alternative(v.get_base());
+}
+} // namespace rva
+
+template <class... T>
+struct std::hash<rva::variant<T...>> : std::hash<std::variant<T...>> {
+    using base_type = std::hash<std::variant<T...>>;
+    using base_type::base_type;
+    hash() = default;
+    hash(hash const&) = default;
+    hash(hash&&) = default;
+    size_t operator()(rva::variant<T...> const& v) const
+    {
+        return base_type::operator()(v.get_base());
+    }
+};
+
+template <class... Types>
+struct std::variant_size<rva::variant<Types...>>
+    : std::integral_constant<std::size_t, sizeof...(Types)> {
+};
+template <class... Types>
+struct std::variant_size<const rva::variant<Types...>>
+    : std::integral_constant<std::size_t, sizeof...(Types)> {
+};
+
+template <std::size_t I, class... Types>
+struct std::variant_alternative<I, rva::variant<Types...>>
+    : std::variant_alternative<I, typename rva::variant<Types...>::base_type> {
+};
+template <std::size_t I, class... Types>
+struct std::variant_alternative<I, const rva::variant<Types...>>
+    : std::variant_alternative<I, typename rva::variant<Types...>::base_type> {
+};
+
+// Implementation for replace
+namespace rva {
+template <class T, class Find, class Replace>
+struct replace {
     using type = T;
 };
-
-template<typename U, gr::meta::fixed_string str, typename... Args>
-struct unwrap_if_wrapped<gr::Annotated<U, str, Args...>> {
-    using type = U;
+template <class Find, class Replace>
+struct replace<Find, Find, Replace> {
+    using type = Replace;
+};
+template <class Find, class Replace>
+struct replace<Find*, Find, Replace> {
+    using type = Replace*;
+};
+template <class Find, class Replace>
+struct replace<Find&, Find, Replace> {
+    using type = Replace&;
+};
+template <class Find, class Replace>
+struct replace<Find&&, Find, Replace> {
+    using type = Replace&&;
+};
+template <class Find, class Replace>
+struct replace<Find[], Find, Replace> {
+    using type = Replace[];
+};
+template <class Find, class Replace, std::size_t N>
+struct replace<Find[N], Find, Replace> {
+    using type = Replace[N];
+};
+template <class Find, class Replace>
+struct replace<const Find, Find, Replace> {
+    using type = const Replace;
+};
+template <class Find, class Replace>
+struct replace<const Find*, Find, Replace> {
+    using type = const Replace*;
+};
+template <class Find, class Replace>
+struct replace<const Find&, Find, Replace> {
+    using type = const Replace&;
+};
+template <class Find, class Replace>
+struct replace<const Find[], Find, Replace> {
+    using type = const Replace[];
+};
+template <class Find, class Replace, std::size_t N>
+struct replace<const Find[N], Find, Replace> {
+    using type = const Replace[N];
+};
+template <class T, class Find, class Replace>
+struct replace<T*, Find, Replace> {
+    using type = replace_t<T, Find, Replace>*;
+};
+template <class T, class Find, class Replace>
+struct replace<T&, Find, Replace> {
+    using type = replace_t<T, Find, Replace>&;
+};
+template <class T, class Find, class Replace>
+struct replace<T&&, Find, Replace> {
+    using type = replace_t<T, Find, Replace>&&;
+};
+template <class T, class Find, class Replace>
+struct replace<T[], Find, Replace> {
+    using type = replace_t<T, Find, Replace>[];
+};
+template <class T, class Find, class Replace, std::size_t N>
+struct replace<T[N], Find, Replace> {
+    using type = replace_t<T, Find, Replace>[N];
+};
+template <class T, class Find, class Replace>
+struct replace<const T, Find, Replace> {
+    using type = replace_t<T, Find, Replace> const;
+};
+template <class T, class Find, class Replace>
+struct replace<const T*, Find, Replace> {
+    using type = replace_t<T, Find, Replace> const*;
+};
+template <class T, class Find, class Replace>
+struct replace<const T&, Find, Replace> {
+    using type = replace_t<T, Find, Replace> const&;
+};
+template <class T, class Find, class Replace>
+struct replace<const T[], Find, Replace> {
+    using type = replace_t<T, Find, Replace> const[];
+};
+template <class T, class Find, class Replace, std::size_t N>
+struct replace<const T[N], Find, Replace> {
+    using type = replace_t<T, Find, Replace> const[N];
 };
 
-/**
- * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
- * If the given type is not an `Annotated`, it returns the type itself.
- */
-template<typename T>
-using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
-
-} // namespace gr
-
-template<typename... Ts>
-struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
-
-template<typename T, gr::meta::fixed_string description, typename... Arguments>
-struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
-    using Type = std::remove_const_t<T>;
-    fmt::formatter<Type> value_formatter;
-
-    template<typename FormatContext>
-    constexpr auto
-    parse(FormatContext &ctx) {
-        return value_formatter.parse(ctx);
-    }
-
-    template<typename FormatContext>
-    constexpr auto
-    format(const gr::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
-        // TODO: add switch for printing only brief and/or meta-information
-        return value_formatter.format(annotated.value, ctx);
-    }
+template <template <class...> class T, class... Ts, class Find, class Replace>
+struct replace<T<Ts...>, Find, Replace> {
+    using type = T<replace_t<Ts, Find, Replace>...>;
 };
 
-namespace gr {
-template<typename T, gr::meta::fixed_string description, typename... Arguments>
-inline std::ostream &
-operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &v) {
-    // TODO: add switch for printing only brief and/or meta-information
-    return os << fmt::format("{}", v.value);
-}
-} // namespace gr
+// Add shortcut for rva::variant to avoid replacing into instances of an
+// rva::variant that's given as a template parameter to another rva::variant
+template <class... Ts, class Find, class Replace>
+struct replace<rva::variant<Ts...>, Find, Replace> {
+    using type = rva::variant<Ts...>;
+};
+} // namespace rva
 
-#endif // GNURADIO_ANNOTATED_HPP
-
-// #include "CircularBuffer.hpp"
-#ifndef GNURADIO_CIRCULARBUFFER_HPP
-#define GNURADIO_CIRCULARBUFFER_HPP
-
-#if defined(_LIBCPP_VERSION) and _LIBCPP_VERSION < 16000
-#include <experimental/memory_resource>
-
-namespace std::pmr {
-using memory_resource = std::experimental::pmr::memory_resource;
-template<typename T>
-using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
-} // namespace std::pmr
-#else
-#include <memory_resource>
-#endif
-#include <algorithm>
-#include <bit>
-#include <cassert> // to assert if compiled for debugging
-#include <functional>
-#include <numeric>
-#include <ranges>
-#include <span>
-#include <stdexcept>
-#include <system_error>
-
-#include <fmt/format.h>
-
-// header for creating/opening or POSIX shared memory objects
-#include <cerrno>
-#include <fcntl.h>
-#if defined __has_include && not __EMSCRIPTEN__
-#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
-
-#ifdef __NR_memfd_create
-namespace gr {
-static constexpr bool has_posix_mmap_interface = true;
-}
-
-#define HAS_POSIX_MAP_INTERFACE
-#else
-namespace gr {
-static constexpr bool has_posix_mmap_interface = false;
-}
-#endif
-#else // #if defined __has_include -- required for portability
-namespace gr {
-static constexpr bool has_posix_mmap_interface = false;
-}
 #endif
 
-// #include "Buffer.hpp"
-#ifndef GNURADIO_BUFFER2_H
-#define GNURADIO_BUFFER2_H
 
-#include <bit>
-#include <concepts>
-#include <cstdint>
-#include <span>
-#include <type_traits>
+namespace pmtv {
 
-namespace gr {
-namespace util {
-template<typename T, typename...>
-struct first_template_arg_helper;
+namespace detail {
 
-template<template<typename...> class TemplateType, typename ValueType, typename... OtherTypes>
-struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
-    using value_type = ValueType;
+// Convert a list of types to the full set used for the pmt.
+template<template<typename... > class VariantType, typename... Args>
+struct as_pmt {
+    using type = VariantType<std::monostate,
+                             Args...,
+                             std::vector<Args>...,
+                             std::string,
+                             std::vector<std::string>,
+                             std::vector<rva::self_t>,
+                             std::map<std::string, rva::self_t, std::less<>>
+                             >;
 };
 
-template<typename T>
-constexpr auto *
-value_type_helper() {
-    if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type *>(nullptr);
-    } else {
-        return static_cast<typename first_template_arg_helper<T>::value_type *>(nullptr);
-    }
+template<template<typename... > class TemplateType, typename ...T>
+struct as_pmt<TemplateType, std::tuple<T...>> {
+    using type = typename as_pmt<TemplateType, T...>::type;
+};
 }
 
-template<typename T>
-using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
 
-template<typename... A>
-struct test_fallback {};
+template<template<typename... > class VariantType, class... Args>
+using as_pmt_t = typename detail::as_pmt<VariantType, Args...>::type;
 
-template<typename, typename ValueType>
-struct test_value_type {
-    using value_type = ValueType;
-};
+// Check if `std::size_t` has the same type as `uint16_t` or `uint32_t` or `uint64_t`.
+// If it has the same type, then there is no need to add `std::size_t` the supported types.
+// Otherwise, `std::size_t` is added to the supported types.
+// This can happen if one builds using Emscripten where `std::size_t` is defined as `unsigned long` and
+// `uint32_t` and `uint64_t` are defined as `unsigned int` and `unsigned long long`, respectively.
+static constexpr bool support_size_t = !std::is_same_v<std::size_t, uint16_t> && !std::is_same_v<std::size_t, uint32_t> && !std::is_same_v<std::size_t, uint64_t>;
 
-static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
-static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
-static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
-static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
+// Note that per the spec, std::complex is undefined for any type other than float, double, or long_double
+using default_supported_types_without_size_t = std::tuple<bool,
+        uint8_t, uint16_t, uint32_t, uint64_t,
+        int8_t, int16_t, int32_t, int64_t,
+        float, double, std::complex<float>, std::complex<double>>;
 
-} // namespace util
+// Add std::size_t to default_supported_types_without_size_t
+using default_supported_types_with_size_t = decltype(std::tuple_cat(std::declval<default_supported_types_without_size_t>(), std::declval<std::tuple<std::size_t>>()));
 
-// clang-format off
-// disable formatting until clang-format (v16) supporting concepts
-template<class T>
-concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
-    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
-    { t.consume(n_items) } -> std::same_as<bool>;
-    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.available() }      -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
+using default_supported_types = typename std::conditional_t<support_size_t, default_supported_types_with_size_t, default_supported_types_without_size_t>;
 
-template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::make_signed_t<std::size_t>, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+// initialisation via type list stored in tuple (N.B. tuple could be extended by user with custom OOT types)
+using pmt_var_t = as_pmt_t<rva::variant, default_supported_types>;
 
-template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::make_signed_t<std::size_t>> token, Args ...args) {
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
-    { t.reserve_output_range(n_items) };
-    { t.available() }         -> std::same_as<std::size_t>;
-    { t.buffer() };
-};
+using pmt_null = std::monostate;
 
-template<class T, typename ...Args>
-concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
-    { T(min_size, args...) };
-    { t.size() }       -> std::same_as<std::size_t>;
-    { t.new_reader() } -> BufferReader;
-    { t.new_writer() } -> BufferWriter;
-};
 
-// compile-time unit-tests
-namespace test {
 template <typename T>
-struct non_compliant_class {
-};
-template <typename T, typename... Args>
-using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
-template <typename T, typename... Args>
-using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
-} // namespace test
+concept PmtNull = std::is_same_v<T, std::monostate>;
 
-static_assert(!Buffer<test::non_compliant_class<int>>);
-static_assert(!BufferReader<test::non_compliant_class<int>>);
-static_assert(!BufferWriter<test::non_compliant_class<int>>);
+template <typename T>
+concept Complex =
+    std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
 
-static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-// clang-format on
-} // namespace gr
+template <typename T>
+concept Scalar = std::same_as<T, bool> || std::integral<T> || std::floating_point<T> || Complex<T>;
 
-#endif // GNURADIO_BUFFER2_H
+template <typename T>
+concept UniformVector =
+    std::ranges::contiguous_range<T> && Scalar<typename T::value_type>;
 
-// #include "ClaimStrategy.hpp"
-#ifndef GNURADIO_CLAIMSTRATEGY_HPP
-#define GNURADIO_CLAIMSTRATEGY_HPP
+// A vector of bool can be optimized to one bit per element, so it doesn't satisfy UniformVector
+template <typename T>
+concept UniformBoolVector = 
+    std::ranges::range<T> && std::same_as<typename T::value_type, bool>;
 
-#include <cassert>
-#include <concepts>
-#include <cstdint>
-#include <memory>
-#include <span>
-#include <stdexcept>
-#include <vector>
+template <typename T>
+concept UniformStringVector =
+    std::ranges::range<T> && std::same_as<typename T::value_type, std::string>;
 
-// #include <gnuradio-4.0/meta/utils.hpp>
+template <typename T>
+concept PmtMap = std::is_same_v<T, std::map<std::string, pmt_var_t, std::less<>>>;
+
+template <typename T>
+concept String = std::is_same_v<T, std::string>;
+
+template <typename T>
+concept PmtVector =
+    std::ranges::range<T> && std::is_same_v<typename T::value_type, pmt_var_t>;
+
+} // namespace pmtv
+
+// #include <pmtv/version.hpp>
 
 
-// #include "Sequence.hpp"
-#ifndef GNURADIO_SEQUENCE_HPP
-#define GNURADIO_SEQUENCE_HPP
+#include <stdint.h>
 
-#include <algorithm>
-#include <atomic>
-#include <cstdint>
-#include <limits>
-#include <memory>
+namespace pmtv {
+static const uint16_t pmt_version = 1;
+}
+#include <complex>
+#include <cstddef>
 #include <ranges>
-#include <vector>
+#include <span>
 
-#include <fmt/format.h>
-
-namespace gr {
-
-#ifndef forceinline
-// use this for hot-spots only <-> may bloat code size, not fit into cache and
-// consequently slow down execution
-#define forceinline inline __attribute__((always_inline))
-#endif
-
-#ifdef __cpp_lib_hardware_interference_size
-using std::hardware_constructive_interference_size;
-using std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t hardware_destructive_interference_size  = 64;
-inline constexpr std::size_t hardware_constructive_interference_size = 64;
-#endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
-
-/**
- * Concurrent sequence class used for tracking the progress of the ring buffer and event
- * processors. Support a number of concurrent operations including CAS and order writes.
- * Also attempts to be more efficient with regards to false sharing by adding padding
- * around the volatile field.
- */
-class Sequence {
-public:
-    using signed_index_type = std::make_signed_t<std::size_t>;
-
-private:
-    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
-
-public:
-    Sequence(const Sequence &)  = delete;
-    Sequence(const Sequence &&) = delete;
-    void
-    operator=(const Sequence &)
-            = delete;
-
-    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
-
-    [[nodiscard]] forceinline signed_index_type
-    value() const noexcept {
-        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
-    }
-
-    forceinline void
-    setValue(const signed_index_type value) noexcept {
-        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
-    }
-
-    [[nodiscard]] forceinline bool
-    compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
-        // atomically set the value to the given updated value if the current value == the
-        // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
-    }
-
-    [[nodiscard]] forceinline signed_index_type
-    incrementAndGet() noexcept {
-        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
-    }
-
-    [[nodiscard]] forceinline signed_index_type
-    addAndGet(signed_index_type value) noexcept {
-        return std::atomic_fetch_add(&_fieldsValue, value) + value;
-    }
-
-    void
-    wait(signed_index_type oldValue) const noexcept {
-        atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire);
-    }
-
-    void
-    notify_all() noexcept {
-        _fieldsValue.notify_all();
-    }
-};
-
-namespace detail {
-
-using signed_index_type = Sequence::signed_index_type;
-
-/**
- * Get the minimum sequence from an array of Sequences.
- *
- * \param sequences sequences to compare.
- * \param minimum an initial default minimum.  If the array is empty this value will
- * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
- */
-inline signed_index_type
-getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
-    // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
-    // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
-    for (const auto &s : sequences) {
-        const signed_index_type v = s->value();
-        if (v < minimum) {
-            minimum = v;
-        }
-    }
-    return minimum;
-}
-
-inline void
-addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &sequencesToAdd) {
-    signed_index_type                                       cursorSequence;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
-
-    do {
-        currentSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
-        updatedSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(currentSequences->size() + sequencesToAdd.size());
-
-#if not defined(_LIBCPP_VERSION)
-        std::ranges::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
-#else
-        std::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
-#endif
-
-        cursorSequence = cursor.value();
-
-        auto index     = currentSequences->size();
-        for (auto &&sequence : sequencesToAdd) {
-            sequence->setValue(cursorSequence);
-            (*updatedSequences)[index] = sequence;
-            index++;
-        }
-    } while (!std::atomic_compare_exchange_weak(&sequences, &currentSequences, updatedSequences)); // xTODO: explicit memory order
-
-    cursorSequence = cursor.value();
-
-    for (auto &&sequence : sequencesToAdd) {
-        sequence->setValue(cursorSequence);
-    }
-}
-
-inline bool
-removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const std::shared_ptr<Sequence> &sequence) {
-    std::uint32_t                                           numToRemove;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
-
-    do {
-        oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
-#if not defined(_LIBCPP_VERSION)
-        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
-#else
-        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
-#endif
-        if (numToRemove == 0) {
-            break;
-        }
-
-        auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
-        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(oldSize - numToRemove);
-
-        for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto &testSequence = (*oldSequences)[i];
-            if (sequence != testSequence) {
-                (*newSequences)[pos] = testSequence;
-                pos++;
-            }
-        }
-    } while (!std::atomic_compare_exchange_weak(&sequences, &oldSequences, newSequences));
-
-    return numToRemove != 0;
-}
-
-} // namespace detail
-
-} // namespace gr
-
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-
-template<>
-struct fmt::formatter<gr::Sequence> {
-    template<typename ParseContext>
-    constexpr auto
-    parse(ParseContext &ctx) {
-        return ctx.begin();
-    }
-
-    template<typename FormatContext>
-    auto
-    format(gr::Sequence const &value, FormatContext &ctx) {
-        return fmt::format_to(ctx.out(), "{}", value.value());
-    }
-};
-
-namespace gr {
-inline std::ostream &
-operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v.value());
-}
-} // namespace gr
-
-#endif // GNURADIO_SEQUENCE_HPP
-
-// #include "WaitStrategy.hpp"
-#ifndef GNURADIO_WAITSTRATEGY_HPP
-#define GNURADIO_WAITSTRATEGY_HPP
-
-#include <condition_variable>
-#include <atomic>
-#include <chrono>
-#include <concepts>
-#include <cstdint>
-#include <memory>
-#include <mutex>
-#include <thread>
-#include <vector>
-
-// #include "Sequence.hpp"
-
-
-namespace gr {
-// clang-format off
-/**
- * Wait for the given sequence to be available.  It is possible for this method to return a value less than the sequence number supplied depending on the implementation of the WaitStrategy.
- * A common use for this is to signal a timeout.Any EventProcessor that is using a WaitStrategy to get notifications about message becoming available should remember to handle this case.
- * The BatchEventProcessor<T> explicitly handles this case and will signal a timeout if required.
- *
- * \param sequence sequence to be waited on.
- * \param cursor Ring buffer cursor on which to wait.
- * \param dependentSequence on which to wait.
- * \param barrier barrier the IEventProcessor is waiting on.
- * \returns the sequence that is available which may be greater than the requested sequence.
- */
-template<typename T>
-inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
-};
-static_assert(!isWaitStrategy<int>);
-
-/**
- * signal those waiting that the cursor has advanced.
- */
-template<typename T>
-inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
-    { t.signalAllWhenBlocking() } -> std::same_as<void>;
-};
-static_assert(!hasSignalAllWhenBlocking<int>);
-
-template<typename T>
-concept WaitStrategy = isWaitStrategy<T>;
-
-
-
-/**
- * Blocking strategy that uses a lock and condition variable for IEventProcessor's waiting on a barrier.
- * This strategy should be used when performance and low-latency are not as important as CPU resource.
- */
-class BlockingWaitStrategy {
-    std::recursive_mutex        _gate;
-    std::condition_variable_any _conditionVariable;
-
-public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        if (cursor.value() < sequence) {
-            std::unique_lock uniqueLock(_gate);
-
-            while (cursor.value() < sequence) {
-                // optional: barrier check alert
-                _conditionVariable.wait(uniqueLock);
-            }
-        }
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-
-        return availableSequence;
-    }
-
-    void signalAllWhenBlocking() {
-        std::unique_lock uniqueLock(_gate);
-        _conditionVariable.notify_all();
-    }
-};
-static_assert(WaitStrategy<BlockingWaitStrategy>);
-
-/**
- * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
- * This strategy will use CPU resource to avoid syscalls which can introduce latency jitter.
- * It is best used when threads can be bound to specific CPU cores.
- */
-struct BusySpinWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<BusySpinWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
-
-/**
- * Sleeping strategy that initially spins, then uses a std::this_thread::yield(), and eventually sleep. T
- * his strategy is a good compromise between performance and CPU resource.
- * Latency spikes can occur after quiet periods.
- */
-class SleepingWaitStrategy {
-    static const std::int32_t _defaultRetries = 200;
-    std::int32_t              _retries        = 0;
-
-public:
-    explicit SleepingWaitStrategy(std::int32_t retries = _defaultRetries)
-        : _retries(retries) {
-    }
-
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        auto       counter    = _retries;
-        const auto waitMethod = [&counter]() {
-            // optional: barrier check alert
-
-            if (counter > 100) {
-                --counter;
-            } else if (counter > 0) {
-                --counter;
-                std::this_thread::yield();
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(0));
-            }
-        };
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            waitMethod();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<SleepingWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
-
-struct TimeoutException : public std::runtime_error {
-    TimeoutException() : std::runtime_error("TimeoutException") {}
-};
-
-class TimeoutBlockingWaitStrategy {
-    using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
-    Clock::duration             _timeout;
-    std::recursive_mutex        _gate;
-    std::condition_variable_any _conditionVariable;
-
-public:
-    explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
-        : _timeout(timeout) {}
-
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
-
-        if (cursor.value() < sequence) {
-            std::unique_lock uniqueLock(_gate);
-
-            while (cursor.value() < sequence) {
-                // optional: barrier check alert
-
-                if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
-                    throw TimeoutException();
-                }
-            }
-        }
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            // optional: barrier check alert
-        }
-
-        return availableSequence;
-    }
-
-    void signalAllWhenBlocking() {
-        std::unique_lock uniqueLock(_gate);
-        _conditionVariable.notify_all();
-    }
-};
-static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
-static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
-
-/**
- * Yielding strategy that uses a Thread.Yield() for IEventProcessors waiting on a barrier after an initially spinning.
- * This strategy is a good compromise between performance and CPU resource without incurring significant latency spikes.
- */
-class YieldingWaitStrategy {
-    const std::size_t _spinTries = 100;
-
-public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        auto       counter    = _spinTries;
-        const auto waitMethod = [&counter]() {
-            // optional: barrier check alert
-
-            if (counter == 0) {
-                std::this_thread::yield();
-            } else {
-                --counter;
-            }
-        };
-
-        std::int64_t availableSequence;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
-            waitMethod();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<YieldingWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
-
-struct NoWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
-        // wait for nothing
-        return sequence;
-    }
-};
-static_assert(WaitStrategy<NoWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
-
-
-/**
- *
- * SpinWait is meant to be used as a tool for waiting in situations where the thread is not allowed to block.
- *
- * In order to get the maximum performance, the implementation first spins for `YIELD_THRESHOLD` times, and then
- * alternates between yielding, spinning and putting the thread to sleep, to allow other threads to be scheduled
- * by the kernel to avoid potential CPU contention.
- *
- * The number of spins, yielding, and sleeping for either '0 ms' or '1 ms' is controlled by the NTTP constants
- * @tparam YIELD_THRESHOLD
- * @tparam SLEEP_0_EVERY_HOW_MANY_TIMES
- * @tparam SLEEP_1_EVERY_HOW_MANY_TIMES
- */
-template<std::int32_t YIELD_THRESHOLD = 10, std::int32_t SLEEP_0_EVERY_HOW_MANY_TIMES = 5, std::int32_t SLEEP_1_EVERY_HOW_MANY_TIMES = 20>
-class SpinWait {
-    using Clock         = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
-    std::int32_t _count = 0;
-    static void  spinWaitInternal(std::int32_t iterationCount) noexcept {
-        for (auto i = 0; i < iterationCount; i++) {
-            yieldProcessor();
-        }
-    }
-#ifndef __EMSCRIPTEN__
-    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
-#else
-    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-#endif
-
-public:
-    SpinWait() = default;
-
-    [[nodiscard]] std::int32_t count() const noexcept { return _count; }
-    [[nodiscard]] bool         nextSpinWillYield() const noexcept { return _count > YIELD_THRESHOLD; }
-
-    void                       spinOnce() {
-        if (nextSpinWillYield()) {
-            auto num = _count >= YIELD_THRESHOLD ? _count - 10 : _count;
-            if (num % SLEEP_1_EVERY_HOW_MANY_TIMES == SLEEP_1_EVERY_HOW_MANY_TIMES - 1) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            } else {
-                if (num % SLEEP_0_EVERY_HOW_MANY_TIMES == SLEEP_0_EVERY_HOW_MANY_TIMES - 1) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(0));
-                } else {
-                    std::this_thread::yield();
-                }
-            }
-        } else {
-            spinWaitInternal(4 << _count);
-        }
-
-        if (_count == std::numeric_limits<std::int32_t>::max()) {
-            _count = YIELD_THRESHOLD;
-        } else {
-            ++_count;
-        }
-    }
-
-    void reset() noexcept { _count = 0; }
-
-    template<typename T>
-    requires std::is_nothrow_invocable_r_v<bool, T>
-    bool
-    spinUntil(const T &condition) const { return spinUntil(condition, -1); }
-
-    template<typename T>
-    requires std::is_nothrow_invocable_r_v<bool, T>
-    bool
-    spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
-        if (millisecondsTimeout < -1) {
-            throw std::out_of_range("Timeout value is out of range");
-        }
-
-        std::int64_t num = 0;
-        if (millisecondsTimeout != 0 && millisecondsTimeout != -1) {
-            num = getTickCount();
-        }
-
-        SpinWait spinWait;
-        while (!condition()) {
-            if (millisecondsTimeout == 0) {
-                return false;
-            }
-
-            spinWait.spinOnce();
-
-            if (millisecondsTimeout != 1 && spinWait.nextSpinWillYield() && millisecondsTimeout <= (getTickCount() - num)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    [[nodiscard]] static std::int64_t getTickCount() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
-};
-
-/**
- * Spin strategy that uses a SpinWait for IEventProcessors waiting on a barrier.
- * This strategy is a good compromise between performance and CPU resource.
- * Latency spikes can occur after quiet periods.
- */
-struct SpinWaitWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
-        std::int64_t availableSequence;
-
-        SpinWait     spinWait;
-        while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
-            // optional: barrier check alert
-            spinWait.spinOnce();
-        }
-
-        return availableSequence;
-    }
-};
-static_assert(WaitStrategy<SpinWaitWaitStrategy>);
-static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
-
-struct NO_SPIN_WAIT {};
-
-template<typename SPIN_WAIT = NO_SPIN_WAIT>
-class AtomicMutex {
-    std::atomic_flag _lock{};
-    SPIN_WAIT        _spin_wait;
-
-public:
-    AtomicMutex()                    = default;
-    AtomicMutex(const AtomicMutex &) = delete;
-    AtomicMutex &operator=(const AtomicMutex &) = delete;
-
-    //
-    void lock() {
-        while (_lock.test_and_set(std::memory_order_acquire)) {
-            if constexpr (requires { _spin_wait.spin_once(); }) {
-                _spin_wait.spin_once();
-            }
-        }
-        if constexpr (requires { _spin_wait.spin_once(); }) {
-            _spin_wait.reset();
-        }
-    }
-    void unlock() { _lock.clear(std::memory_order::release); }
-};
-
-
-// clang-format on
-} // namespace gr
-
-
-#endif // GNURADIO_WAITSTRATEGY_HPP
-
-
-namespace gr {
-
-struct NoCapacityException : public std::runtime_error {
-    NoCapacityException() : std::runtime_error("NoCapacityException"){};
-};
-
-// clang-format off
-
-template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
-        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
-    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.publish(sequence) } -> std::same_as<void>;
-    { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
-};
-
-namespace claim_strategy::util {
-constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-}
-
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
-    using signed_index_type = Sequence::signed_index_type;
-    const std::size_t _size;
-    Sequence &_cursor;
-    WAIT_STRATEGY &_waitStrategy;
-    signed_index_type _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    mutable signed_index_type _cachedValue{ kInitialCursorValue };
-
-public:
-    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
-    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
-    void operator=(const SingleThreadedStrategy &) = delete;
-
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type/*cursorValue*/) const noexcept {
-        if (const signed_index_type wrapPoint = (_nextValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
-            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
-            _cachedValue     = minSequence;
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= _size) && "n_slots_to_claim must be > 0 and <= bufferSize");
-
-        auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
-        auto wrapPoint    = nextSequence - static_cast<signed_index_type>(_size);
-
-        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            SpinWait     spinWait;
-            signed_index_type minSequence;
-            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
-                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                    _waitStrategy.signalAllWhenBlocking();
-                }
-                spinWait.spinOnce();
-            }
-            _cachedValue = minSequence;
-        }
-        _nextValue = nextSequence;
-
-        return nextSequence;
-    }
-
-    signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
-            throw NoCapacityException();
-        }
-
-        const auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
-        _nextValue              = nextSequence;
-
-        return nextSequence;
-    }
-
-    signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
-        const auto produced = _nextValue;
-
-        return static_cast<signed_index_type>(_size) - (produced - consumed);
-    }
-
-    void publish(signed_index_type sequence) {
-        _cursor.setValue(sequence);
-        _nextValue = sequence;
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] signed_index_type getHighestPublishedSequence(signed_index_type /*nextSequence*/, signed_index_type availableSequence) const noexcept { return availableSequence; }
-};
-
-static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
-
-template <std::size_t Size>
-struct MultiThreadedStrategySizeMembers
-{
-    static constexpr std::int32_t _size = Size;
-    static constexpr std::int32_t _indexShift = std::bit_width(Size);
-};
-
-template <>
-struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
-    const std::int32_t _size;
-    const std::int32_t _indexShift;
-
-    #ifdef __clang__
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
-    #else
-    #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
-    #pragma GCC diagnostic ignored "-Wuseless-cast"
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
-    #pragma GCC diagnostic pop
-    #endif
-};
-
-/**
- * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
- * Suitable for use for sequencing across multiple publisher threads.
- * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
- * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
- *
- * The size argument (compile-time and run-time) must be a power-of-2 value.
- */
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
-class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
-: private MultiThreadedStrategySizeMembers<SIZE> {
-    Sequence &_cursor;
-    WAIT_STRATEGY &_waitStrategy;
-    std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-    std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    using MultiThreadedStrategySizeMembers<SIZE>::_size;
-    using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
-    using signed_index_type = Sequence::signed_index_type;
-
-public:
-    MultiThreadedStrategy() = delete;
-
-    explicit
-    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
-    : _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(SIZE, -1) {
-    }
-
-    explicit
-    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
-    requires (SIZE == std::dynamic_extent)
-    : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
-      _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(buffer_size, -1) {
-    }
-
-    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
-    void               operator=(const MultiThreadedStrategy &) = delete;
-
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size);
-
-        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
-            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
-            _gatingSequenceCache->setValue(minSequence);
-
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    [[nodiscard]] signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        signed_index_type current;
-        signed_index_type next;
-
-        SpinWait     spinWait;
-        do {
-            current = _cursor.value();
-            next = current + static_cast<signed_index_type>(n_slots_to_claim);
-
-            signed_index_type wrapPoint            = next - static_cast<signed_index_type>(_size);
-            signed_index_type cachedGatingSequence = _gatingSequenceCache->value();
-
-            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                signed_index_type gatingSequence = detail::getMinimumSequence(dependents, current);
-
-                if (wrapPoint > gatingSequence) {
-                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                        _waitStrategy.signalAllWhenBlocking();
-                    }
-                    spinWait.spinOnce();
-                    continue;
-                }
-
-                _gatingSequenceCache->setValue(gatingSequence);
-            } else if (_cursor.compareAndSet(current, next)) {
-                break;
-            }
-        } while (true);
-
-        return next;
-    }
-
-    [[nodiscard]] signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        signed_index_type current;
-        signed_index_type next;
-
-        do {
-            current = _cursor.value();
-            next    = current + static_cast<signed_index_type>(n_slots_to_claim);
-
-            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
-                throw NoCapacityException();
-            }
-        } while (!_cursor.compareAndSet(current, next));
-
-        return next;
-    }
-
-    [[nodiscard]] signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto produced = _cursor.value();
-        const auto consumed = detail::getMinimumSequence(dependents, produced);
-
-        return static_cast<signed_index_type>(_size) - (produced - consumed);
-    }
-
-    void publish(signed_index_type sequence) {
-        setAvailable(sequence);
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-            _waitStrategy.signalAllWhenBlocking();
-        }
-    }
-
-    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
-        const auto index = calculateIndex(sequence);
-        const auto flag  = calculateAvailabilityFlag(sequence);
-
-        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
-    }
-
-    [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
-        for (signed_index_type sequence = lowerBound; sequence <= availableSequence; sequence++) {
-            if (!isAvailable(sequence)) {
-                return sequence - 1;
-            }
-        }
-
-        return availableSequence;
-    }
-
-private:
-    void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(static_cast<signed_index_type>(sequence) >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
-};
-
-static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
-// clang-format on
-
-enum class ProducerType {
-    /**
-     * creates a buffer assuming a single producer-thread and multiple consumer
-     */
-    Single,
-
-    /**
-     * creates a buffer assuming multiple producer-threads and multiple consumer
-     */
-    Multi
-};
-
-namespace detail {
-template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-struct producer_type;
-
-template<std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
-    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
-};
-
-template<std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
-    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
-};
-
-template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
-
-} // namespace detail
-
-} // namespace gr
-
-#endif // GNURADIO_CLAIMSTRATEGY_HPP
-
-// #include "Sequence.hpp"
-
-// #include "WaitStrategy.hpp"
-
-
-namespace gr {
-
-namespace util {
-constexpr std::size_t
-round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
-    if (multiple == 0) {
-        return num_to_round;
-    }
-    const auto remainder = num_to_round % multiple;
-    if (remainder == 0) {
-        return num_to_round;
-    }
-    return num_to_round + multiple - remainder;
-}
-} // namespace util
-
-// clang-format off
-class double_mapped_memory_resource : public std::pmr::memory_resource {
-    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
-        // the 2nd double mapped memory call mmap may fail and/or return an unsuitable return address which is unavoidable
-        // this workaround retries to get a more favourable allocation up to three times before it throws the regular exception
-        for (int retry_attempt=0; retry_attempt < 3; retry_attempt++) {
-            try {
-                return do_allocate_internal(required_size, alignment);
-            } catch (std::system_error& e) { // explicitly caught for retry
-                fmt::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
-            } catch (std::invalid_argument& e) { // explicitly caught for retry
-                fmt::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
-            }
-        }
-        return do_allocate_internal(required_size, alignment);
-    }
-#ifdef HAS_POSIX_MAP_INTERFACE
-    [[nodiscard]] static void* do_allocate_internal(const std::size_t required_size, std::size_t alignment) { //NOSONAR
-
-        const std::size_t size = 2 * required_size;
-        if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            throw std::invalid_argument(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
-        }
-        const std::size_t size_half = size/2;
-
-        static std::size_t _counter;
-        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
-        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) {
-            return syscall(__NR_memfd_create, name, flags);
-        };
-        auto shm_fd = static_cast<int>(memfd_create(0));
-        if (shm_fd < 0) {
-            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
-            std::error_code errorCode(errno, std::system_category());
-            close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
-        if (first_copy == MAP_FAILED) {
-            std::error_code errorCode(errno, std::system_category());
-            close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        // unmap the 2nd half
-        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
-            std::error_code errorCode(errno, std::system_category());
-            close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
-        }
-
-        // Map the first half into the now available hole.
-        // Note that the second_copy_addr mmap argument is only a hint and mmap might place the
-        // mapping somewhere else: "If addr is not NULL, then the kernel takes it as  a hint about
-        // where to place the mapping". The returned pointer therefore must equal second_copy_addr
-        // for our contiguous mapping to work as intended.
-        void* second_copy_addr = static_cast<char*> (first_copy) + size_half;
-        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); result != second_copy_addr) {
-            std::error_code errorCode(errno, std::system_category());
-            close(shm_fd);
-            if (result == MAP_FAILED) {
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
-            } else {
-                ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
-                ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}",
-                                                     buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2*size_half));
-            }
-        }
-
-        close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
-        return first_copy;
-}
-#else
-    [[nodiscard]] static void* do_allocate_internal(const std::size_t, std::size_t) { //NOSONAR
-        throw std::invalid_argument("OS does not provide POSIX interface for mmap(...) and munmao(...)");
-        // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
-    }
-#endif
-
-
-#ifdef HAS_POSIX_MAP_INTERFACE
-    void  do_deallocate(void* p, std::size_t size, size_t alignment) override { //NOSONAR
-
-        if (munmap(p, size) == -1) {
-            throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
-        }
-    }
-#else
-    void  do_deallocate(void*, std::size_t, size_t) override { }
-#endif
-
-    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
-
-public:
-    static inline double_mapped_memory_resource* defaultAllocator() {
-        static auto instance = double_mapped_memory_resource();
-        return &instance;
-    }
-
-    template<typename T>
-    static inline std::pmr::polymorphic_allocator<T> allocator()
-    {
-        return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
-    }
-};
-
-
-
-/**
- * @brief circular buffer implementation using double-mapped memory allocations
- * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
- * free bulk memory access. The buffer keeps a list of indices (using 'Sequence')
- * to keep track of which parts can be tread-safely read and/or written
- *
- *                          wrap-around point
- *                                 |
- *                                 v
- *  | buffer segment #1 (original) | buffer segment #2 (copy of #1) |
- *  0                            SIZE                            2*SIZE
- *                      writeIndex
- *                          v
- *  wrap-free write access  |<-  N_1 < SIZE   ->|
- *
- *  readIndex < writeIndex-N_2
- *      v
- *      |<- N_2 < SIZE ->|
- *
- * N.B N_AVAILABLE := (SIZE + writeIndex - readIndex ) % SIZE
- *
- * citation: <find appropriate first and educational reference>
- *
- * This implementation provides single- as well as multi-producer/consumer buffer
- * combinations for thread-safe CPU-to-CPU data transfer (optionally) using either
- * a) the POSIX mmaped(..)/munmapped(..) MMU interface, if available, and/or
- * b) the guaranteed portable standard C/C++ (de-)allocators as a fall-back.
- *
- * for more details see
- */
-template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-class CircularBuffer
-{
-    using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = CircularBuffer<T, SIZE, producer_type, WAIT_STRATEGY>;
-    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
-    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
-    using signed_index_type = Sequence::signed_index_type;
-
-    struct buffer_impl {
-        Sequence                    _cursor;
-        Allocator                   _allocator{};
-        const bool                  _is_mmap_allocated;
-        const std::size_t             _size; // pre-condition: std::has_single_bit(_size)
-        std::vector<T, Allocator>   _data;
-        WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
-        ClaimType                   _claim_strategy;
-        // list of dependent reader indices
-        DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
-
-        buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
-            _size(align_with_page_size(std::bit_ceil(min_size), _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
-        }
-
-#ifdef HAS_POSIX_MAP_INTERFACE
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
-            if (_is_mmap_allocated) {
-                const std::size_t pageSize = static_cast<std::size_t>(getpagesize());
-                const std::size_t elementSize = sizeof(T);
-                // least common multiple (lcm) of elementSize and pageSize
-                std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
-
-                // adjust lcmValue to be larger than min_size
-                while (lcmValue < min_size) {
-                    lcmValue += lcmValue;
-                }
-                return lcmValue;
-            } else {
-                return min_size;
-            }
-        }
-#else
-        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
-            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
-        }
-#endif
-
-        static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
-            // double-mmaped behaviour requires the different size/alloc strategy
-            // i.e. the second buffer half may not default-constructed as it's identical to the first one
-            // and would result in a double dealloc during the default destruction
-            return _is_mmap_allocated ? size : 2 * size;
-        }
-    };
-
-    template <typename U = T>
-    class buffer_writer {
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-
-        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        bool                        _is_mmap_allocated;
-        std::size_t                   _size;
-        ClaimType*                  _claim_strategy;
-
-    class ReservedOutputRange {
-        buffer_writer<U>* _parent = nullptr;
-        std::size_t       _index = 0;
-        std::size_t       _n_slots_to_claim = 0;
-        signed_index_type      _offset = 0;
-        bool              _published_data = false;
-        std::span<T>      _internal_span{};
-    public:
-    using element_type = T;
-    using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<T>::iterator;
-    using reverse_iterator = typename std::span<T>::reverse_iterator;
-    using pointer = typename std::span<T>::reverse_iterator;
-
-    explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
-    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t n_slots_to_claim) noexcept :
-        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data.data()[_index], _n_slots_to_claim }) { }
-    ReservedOutputRange(const ReservedOutputRange&) = delete;
-    ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
-    ReservedOutputRange(ReservedOutputRange&& other) noexcept
-        : _parent(std::exchange(other._parent, nullptr))
-        , _index(std::exchange(other._index, 0))
-        , _n_slots_to_claim(std::exchange(other._n_slots_to_claim, 0))
-        , _offset(std::exchange(other._offset, 0))
-        , _published_data(std::exchange(other._published_data, 0))
-        , _internal_span(std::exchange(other._internal_span, std::span<T>{})) {
-    };
-    ReservedOutputRange& operator=(ReservedOutputRange&& other) noexcept {
-        auto tmp = std::move(other);
-        std::swap(_parent, tmp._parent);
-        std::swap(_index, tmp._index);
-        std::swap(_n_slots_to_claim, tmp._n_slots_to_claim);
-        std::swap(_offset, tmp._offset);
-        std::swap(_published_data, tmp._published_data);
-        std::swap(_internal_span, tmp._internal_span);
-        return *this;
-    };
-    ~ReservedOutputRange() {
-        if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
-            if (_n_slots_to_claim) {
-                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples\n", _n_slots_to_claim);
-                std::abort();
-            }
-
-        } else {
-            if (_n_slots_to_claim && not _published_data) {
-                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples\n", _n_slots_to_claim);
-                std::abort();
-            }
-        }
-    }
-
-    constexpr bool
-    is_published() const noexcept {
-        return _published_data;
-    }
-
-    constexpr std::size_t size() const noexcept { return _n_slots_to_claim; };
-    constexpr std::size_t size_bytes() const noexcept { return _n_slots_to_claim * sizeof(T); };
-    constexpr bool empty() const noexcept { return _n_slots_to_claim == 0; }
-    constexpr iterator begin() const noexcept { return _internal_span.begin(); }
-    constexpr iterator end() const noexcept { return _internal_span.end(); }
-    constexpr reverse_iterator rbegin() const noexcept { return _internal_span.rbegin(); }
-    constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
-    constexpr T* data() const noexcept { return _internal_span.data(); }
-
-    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data.data()[_index + i]; }
-    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data.data()[_index + i]; }
-    operator std::span<T>&() const noexcept { return _internal_span; }
-    operator std::span<T>&() noexcept { return _internal_span; }
-
-    constexpr void publish(std::size_t n_produced) noexcept {
-        assert(n_produced <= _n_slots_to_claim && "n_produced must be <= than claimed slots");
-        if (!_parent->_is_mmap_allocated) {
-            const std::size_t size = _parent->_size;
-            // mirror samples below/above the buffer's wrap-around point
-            const size_t nFirstHalf = std::min(size - _index, n_produced);
-            const size_t nSecondHalf = n_produced - nFirstHalf;
-
-            auto &data = _parent->_buffer->_data;
-            std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
-            std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
-        }
-        _parent->_claim_strategy->publish(_offset + static_cast<signed_index_type>(n_produced));
-        _n_slots_to_claim -= n_produced;
-        _published_data = true;
-    }
-    };
-
-    public:
-        buffer_writer() = delete;
-        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
-            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
-            _size(_buffer->_size), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer(buffer_writer&& other) noexcept
-            : _buffer(std::move(other._buffer))
-            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
-            , _size(_buffer->_size)
-            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
-        buffer_writer& operator=(buffer_writer tmp) noexcept {
-            std::swap(_buffer, tmp._buffer);
-            _is_mmap_allocated = _buffer->_is_mmap_allocated;
-            _size = _buffer->_size;
-            _claim_strategy = std::addressof(_buffer->_claim_strategy);
-
-            return *this;
-        }
-
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
-
-        [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
-            try {
-                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
-                const std::size_t index = (static_cast<std::size_t>(sequence) + _size - n_slots_to_claim) % _size;
-                return ReservedOutputRange(this, index, sequence, n_slots_to_claim);
-            } catch (const NoCapacityException &) {
-                return ReservedOutputRange(this);
-            }
-        }
-
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
-                return;
-            }
-            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
-            translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-        } // blocks until elements are available
-
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
-            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
-                return true;
-            }
-            try {
-                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
-                translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
-                return true;
-            } catch (const NoCapacityException &) {
-                return false;
-            }
-        }
-
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return static_cast<std::size_t>(_claim_strategy->getRemainingCapacity(*_buffer->_read_indices));
-        }
-
-        private:
-        template <typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
-            try {
-                auto& data = _buffer->_data;
-                const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
-                std::span<U> writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), writable_data, publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
-                } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), writable_data, args...);
-                } else {
-                    static_assert(gr::meta::always_false<Translator>, "Translator does not provide a matching signature");
-                }
-
-                if (!_is_mmap_allocated) {
-                    // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
-                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
-
-                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
-                }
-                _claim_strategy->publish(publishSequence); // points at first non-writable index
-            } catch (const std::exception&) {
-                throw;
-            } catch (...) {
-                throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
-            }
-        }
-    };
-
-    template<typename U = T>
-    class buffer_reader
-    {
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
-
-        std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        signed_index_type                _read_index_cached;
-        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        std::size_t                   _size; // pre-condition: std::has_single_bit(_size)
-
-        std::size_t
-        buffer_index() const noexcept {
-            const auto bitmask = _size - 1;
-            return static_cast<std::size_t>(_read_index_cached) & bitmask;
-        }
-
-    public:
-        buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept :
-            _buffer(buffer), _size(buffer->_size) {
-            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
-            _read_index_cached = _read_index->value();
-        }
-        buffer_reader(buffer_reader&& other) noexcept
-            : _read_index(std::move(other._read_index))
-            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
-            , _buffer(other._buffer)
-            , _size(_buffer->_size) {
-        }
-        buffer_reader& operator=(buffer_reader tmp) noexcept {
-            std::swap(_read_index, tmp._read_index);
-            std::swap(_read_index_cached, tmp._read_index_cached);
-            std::swap(_buffer, tmp._buffer);
-            _size = _buffer->_size;
-            return *this;
-        };
-        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
-
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
-            const auto& data = _buffer->_data;
-            if constexpr (strict_check) {
-                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &data[buffer_index()], n };
-            }
-            const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &data[buffer_index()], n };
-        }
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
-            if constexpr (strict_check) {
-                if (n_elements <= 0) {
-                    return true;
-                }
-                if (n_elements > available()) {
-                    return false;
-                }
-            }
-            _read_index_cached = _read_index->addAndGet(static_cast<signed_index_type>(n_elements));
-            return true;
-        }
-
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _read_index_cached; }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return static_cast<std::size_t>(_buffer->_cursor.value() - _read_index_cached);
-        }
-    };
-
-    [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
-            return double_mapped_memory_resource::allocator<T>();
-        } else {
-            return Allocator();
-        }
-    }
-
-    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    explicit CircularBuffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
-
-public:
-    CircularBuffer() = delete;
-    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
-        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
-    ~CircularBuffer() = default;
-
-    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
-    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
-    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
-
-    // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] auto n_readers()              { return _shared_buffer_ptr->_read_indices->size(); }
-    [[nodiscard]] const auto &claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
-    [[nodiscard]] const auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
-
-};
-static_assert(Buffer<CircularBuffer<int32_t>>);
-// clang-format on
-
-} // namespace gr
-
-#endif // GNURADIO_CIRCULARBUFFER_HPP
-
-// #include "DataSet.hpp"
-#ifndef GNURADIO_DATASET_HPP
-#define GNURADIO_DATASET_HPP
-
-// #include "reflection.hpp"
-#ifndef GNURADIO_REFLECTION_HPP
-#define GNURADIO_REFLECTION_HPP
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+
 // #include <refl.hpp>
 // The MIT License (MIT)
 //
@@ -11832,781 +5929,6 @@ REFL_END
 #endif // REFL_INCLUDE_HPP
 
 
-/**
- * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp
- * The are basically needed to do a struct member-field introspections, to support
- *   a) compile-time serialiser generation between std::map<std::string, pmt::pmtv> <-> user-defined settings structs
- *   b) allow for block ports being defined a member fields rather than as NTTPs of the node<T, ...> template
-
- * Their use is limited to the namespace scope where the block is defined (i.e. not across .so boundaries) and will be
- * supplanted once the compile-time reflection language feature is merged with the C++ standard, e.g.
- * Matúš Chochlík, Axel Naumann, David Sankel: Static reflection, P0194R3, ISO/IEC JTC1 SC22 WG21
- *    https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0194r3.html
- *
- *  These macros need to be defined in a global scope due to relying on template specialisation that cannot be done in
- *  any other namespace than the one they were declared -- for illustration see, for example:
- *  https://github.com/veselink1/refl-cpp/issues/59
- *  https://compiler-explorer.com/z/MG7fxzK4j
- *
- *  For practical purposes, the macro can be defined either at the end of the struct declaring namespace or the specific
- *  namespace exited/re-enteres such as
- *  @code
- *  namespace private::library {
- *     struct my_struct {
- *         int field_a;
- *         std::string field_b;
- *     };
- *  }
- *  ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
- *  namespace private::library {
- *   // ...
- *  @endcode
- *
- *  And please, if you want to accelerator the compile-time reflection process, please give your support and shout-out
- *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
- */
-
-/**
- * This macro can be used for simple non-templated structs and classes, e.g.
- * @code
- * struct my_struct {
- *     int field_a;
- *      std::string field_b;
- * };
- * ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
- */
-#define ENABLE_REFLECTION(TypeName, ...) \
-    REFL_TYPE(TypeName __VA_OPT__(, )) \
-    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
-    REFL_END
-
-/**
- * This macro can be used for arbitrary templated structs and classes, that depend
- * on mixed typename and NTTP parameters
- * @code
- * template<typename T, std::size_t size>
- * struct custom_struct {
- *     T field_a;
- *     T field_b;
- *
- *     [[nodiscard]] constexpr std::size_t size() const noexcept { return size; }
- * };
- * ENABLE_REFLECTION_FOR_TEMPLATE_FULL(typename T, std::size_t size), (custom_struct<T, size>), field_a, field_a);
- */
-#define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
-    REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
-    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
-    REFL_END
-
-/**
- * This macro can be used for simple templated structs and classes, that depend
- * only on pure typename-template lists
- * @code
- * template<typename T>
- * struct my_templated_struct {
- *     T field_a;
- *     T field_b;
- * };
- * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
- */
-#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
-
-#define GP_CONCAT_IMPL(x, y) x##y
-#define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
-
-#define GP_REGISTER_NODE_IMPL(Register, Name, ...) gr::detail::RegisterBlock<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_NODE_, __COUNTER__)(Register, #Name);
-#define GP_REGISTER_NODE(Register, Name, ...) \
-    namespace { \
-    using gr::detail::BlockParameters; \
-    GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
-    }
-#define GP_REGISTER_NODE_RUNTIME(Register, Name, ...) \
-    { \
-        using gr::detail::BlockParameters; \
-        GP_REGISTER_NODE_IMPL(Register, Name, __VA_ARGS__); \
-    }
-
-#pragma GCC diagnostic pop
-#endif // GNURADIO_REFLECTION_HPP
-
-// #include "Tag.hpp"
-#ifndef GNURADIO_TAG_HPP
-#define GNURADIO_TAG_HPP
-
-#include <map>
-
-// #include <pmtv/pmt.hpp>
-
-
-
-// #include "base64/base64.h"
-/*
- * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
- *
- * @APPLE_LICENSE_HEADER_START@
- *
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
- *
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- *
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
- *
- * @APPLE_LICENSE_HEADER_END@
- */
-/* ====================================================================
- * Copyright (c) 1995-1999 The Apache Group.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * 4. The names "Apache Server" and "Apache Group" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    apache@apache.org.
- *
- * 5. Products derived from this software may not be called "Apache"
- *    nor may "Apache" appear in their names without prior written
- *    permission of the Apache Group.
- *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the Apache Group
- *    for use in the Apache HTTP server project (http://www.apache.org/)."
- *
- * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
- * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
- * ====================================================================
- *
- * This software consists of voluntary contributions made by many
- * individuals on behalf of the Apache Group and was originally based
- * on public domain software written at the National Center for
- * Supercomputing Applications, University of Illinois, Urbana-Champaign.
- * For more information on the Apache Group and the Apache HTTP server
- * project, please see <http://www.apache.org/>.
- *
- */
-
-
-#ifndef _BASE64_H_
-#define _BASE64_H_
-
-#include <string.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// int Base64encode_len(int len);
-// int Base64encode(char* coded_dst, const char* plain_src, int len_plain_src);
-
-// int Base64decode_len(const char* coded_src);
-// int Base64decode(char* plain_dst, const char* coded_src);
-
-// #ifdef __cplusplus
-// }
-// #endif
-
-/* Base64 encoder/decoder. Originally Apache file ap_base64.c
- */
-
-/* aaaack but it's fast and const should make it shared text page. */
-static const unsigned char pr2six[256] = {
-    /* ASCII table */
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 62, 64, 64, 64, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64,
-    64, 64, 64, 64, 64, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
-    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64, 64, 26, 27, 28,
-    29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
-    49, 50, 51, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64
-};
-
-static inline int Base64decode_len(const char* bufcoded)
-{
-    const auto* bufin {reinterpret_cast<const unsigned char*>(bufcoded)};
-    while (pr2six[*(bufin++)] <= 63)
-        ;
-    auto nprbytes {static_cast<int>(bufin - reinterpret_cast<const unsigned char*>(bufcoded)) - 1};
-    return ((nprbytes + 3) / 4) * 3 + 1;
-}
-
-static inline int Base64decode(char* bufplain, const char* bufcoded)
-{
-    const auto* bufin {reinterpret_cast<const unsigned char*>(bufcoded)};
-    while (pr2six[*(bufin++)] <= 63)
-        ;
-    auto nprbytes {static_cast<int>(bufin - reinterpret_cast<const unsigned char*>(bufcoded)) - 1};
-
-    auto* bufout {reinterpret_cast<unsigned char*>(bufplain)};
-    bufin = reinterpret_cast<const unsigned char*>(bufcoded);
-
-    while (nprbytes > 4) {
-        *(bufout++) = static_cast<unsigned char>(pr2six[*bufin] << 2 | pr2six[bufin[1]] >> 4);
-        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[1]] << 4 | pr2six[bufin[2]] >> 2);
-        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[2]] << 6 | pr2six[bufin[3]]);
-        bufin += 4;
-        nprbytes -= 4;
-    }
-
-    /* Note: (nprbytes == 1) would be an error, so just ingore that case */
-    if (nprbytes > 1) {
-        *(bufout++) = static_cast<unsigned char>(pr2six[*bufin] << 2 | pr2six[bufin[1]] >> 4);
-    }
-    if (nprbytes > 2) {
-        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[1]] << 4 | pr2six[bufin[2]] >> 2);
-    }
-    if (nprbytes > 3) {
-        *(bufout++) = static_cast<unsigned char>(pr2six[bufin[2]] << 6 | pr2six[bufin[3]]);
-    }
-
-    *(bufout++) = '\0';
-    return ((nprbytes + 3) / 4) * 3 - ((4 - nprbytes) & 3);
-}
-
-static const char basis_64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static inline int Base64encode_len(int len) { return ((len + 2) / 3 * 4) + 1; }
-
-static inline int Base64encode(char* encoded, const char* string, int len)
-{
-    int i {0};
-    char* p {encoded};
-    for (i = 0; i < len - 2; i += 3) {
-        *p++ = basis_64[(string[i] >> 2) & 0x3F];
-        *p++ = basis_64[((string[i] & 0x3) << 4) | ((string[i + 1] & 0xF0) >> 4)];
-        *p++ = basis_64[((string[i + 1] & 0xF) << 2) | ((string[i + 2] & 0xC0) >> 6)];
-        *p++ = basis_64[string[i + 2] & 0x3F];
-    }
-    if (i < len) {
-        *p++ = basis_64[(string[i] >> 2) & 0x3F];
-        if (i == (len - 1)) {
-            *p++ = basis_64[((string[i] & 0x3) << 4)];
-            *p++ = '=';
-        }
-        else {
-            *p++ = basis_64[((string[i] & 0x3) << 4) | ((string[i + 1] & 0xF0) >> 4)];
-            *p++ = basis_64[((string[i + 1] & 0xF) << 2)];
-        }
-        *p++ = '=';
-    }
-
-    *p++ = '\0';
-    return static_cast<int>(p - encoded);
-}
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif //_BASE64_H_
-// #include <pmtv/type_helpers.hpp>
-
-
-#include <complex>
-#include <concepts>
-#include <map>
-#include <memory>
-#include <ranges>
-#include <variant>
-#include <vector>
-
-// #include <pmtv/rva_variant.hpp>
-/*
-From https://github.com/codeinred/recursive-variant
-
-Note that is may not be needed anymore in c++23.  
-See https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2162r0.html
-
-Boost Software License - Version 1.0 - August 17th, 2003
-
-© 2021 Alecto Irene Perez
-
-Permission is hereby granted, free of charge, to any person or organization
-obtaining a copy of the software and accompanying documentation covered by this
-license (the "Software") to use, reproduce, display, distribute, execute, and
-transmit the Software, and to prepare derivative works of the Software, and to
-permit third-parties to whom the Software is furnished to do so, all subject to
-the following:
-
-The copyright notices in the Software and this entire statement, including the
-above license grant, this restriction and the following disclaimer, must be
-included in all copies of the Software, in whole or in part, and all derivative
-works of the Software, especially those created in whole or in part by Deep
-Neural Networks, Language Models, or other such programs advertised as "AI" or
-as "Artificial Intelligence" or as "Machine Learning", either with or without
-human input or intervention, unless such copies or derivative works are solely
-in the form of machine-executable object code generated by a source language
-processor.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
-COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES
-OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
-OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-#ifndef RECURSIVE_VARIANT_AUTHORITY_VARIANT_HPP
-#define RECURSIVE_VARIANT_AUTHORITY_VARIANT_HPP
-#include <cstdint>
-#include <variant>
-
-namespace rva {
-/**
- * @brief replace is a template type used to implement replace_t. It provides
- * member, a using declaration named `type`.
- *
- * @tparam T the type to transform.
- * @tparam Find the type to find
- * @tparam Replace the type to replace it with.
- */
-template <class T, class Find, class Replace>
-struct replace;
-/**
- * @brief replace is a template that takes a type T (which itself might be a
- * template), and replaces all instances of *Find* with *Replace*. For example:
- *
- * - `replace_t<char, char, int>` -> `int`
- * - `replace_t<std::vector<char>, char, int>` -> `std::vector<int>`
- *
- * @tparam T the type to transform.
- * @tparam Find the type to find
- * @tparam Replace the type to replace it with.
- */
-template <class T, class Find, class Replace>
-using replace_t = typename replace<T, Find, Replace>::type;
-
-struct self_t {
-};
-
-// See: https://en.cppreference.com/w/cpp/utility/variant
-template <class... T>
-class variant : public std::variant<replace_t<T, self_t, variant<T...>>...>
-{
-public:
-    using base_type = std::variant<replace_t<T, self_t, variant<T...>>...>;
-    constexpr static bool nothrow_swappable = std::is_nothrow_swappable_v<base_type>;
-
-    using base_type::base_type;
-
-    // Observers
-    using base_type::index;
-    using base_type::valueless_by_exception;
-
-    // Modifiers
-    using base_type::operator=;
-    using base_type::emplace;
-    using base_type::swap;
-
-    variant() = default;
-    variant(variant const&) = default;
-    variant(variant&&) = default;
-
-    variant& operator=(variant const&) = default;
-    variant& operator=(variant&&) = default;
-
-    constexpr void swap(variant& other) noexcept(nothrow_swappable)
-    {
-        base_type::swap(other);
-    }
-    constexpr base_type& get_base() & noexcept { return *this; }
-    constexpr base_type const& get_base() const& noexcept { return *this; }
-    constexpr base_type&& get_base() && noexcept { return *this; }
-    constexpr base_type const&& get_base() const&& noexcept { return *this; }
-
-    constexpr base_type* get_pointer_to_base() noexcept { return this; }
-    constexpr base_type const* get_pointer_to_base() const noexcept { return this; }
-
-    auto operator<=>(variant const&) const = default;
-    bool operator==(variant const&) const = default;
-
-    size_t size()
-    {
-        return std::visit(
-            [](const auto& arg) -> size_t {
-                using TYPE = std::decay_t<decltype(arg)>;
-                if constexpr (std::same_as<std::monostate, TYPE>)
-                    return 0;
-                else if constexpr (std::ranges::range<TYPE>)
-                    return arg.size();
-                return 1;
-            },
-            get_base());
-    }
-};
-
-// See: https://en.cppreference.com/w/cpp/utility/variant/visit
-template <class Visitor, class... Variants>
-constexpr decltype(auto) visit(Visitor&& visitor, Variants&&... variants)
-{
-    return std::visit(std::forward<Visitor>(visitor),
-                      std::forward<Variants>(variants).get_base()...);
-}
-template <class R, class Visitor, class... Variants>
-constexpr R visit(Visitor&& visitor, Variants&&... variants)
-{
-    return std::visit<R>(std::forward<Visitor>(visitor),
-                         std::forward<Variants>(variants).get_base()...);
-}
-
-// See: https://en.cppreference.com/w/cpp/utility/variant/get
-template <std::size_t I, class... Types>
-constexpr decltype(auto) get(rva::variant<Types...>& v)
-{
-    return std::get<I>(std::forward<decltype(v)>(v).get_base());
-}
-template <std::size_t I, class... Types>
-constexpr decltype(auto) get(rva::variant<Types...>&& v)
-{
-    return std::get<I>(std::forward<decltype(v)>(v).get_base());
-}
-template <std::size_t I, class... Types>
-constexpr decltype(auto) get(const rva::variant<Types...>& v)
-{
-    return std::get<I>(std::forward<decltype(v)>(v).get_base());
-}
-template <std::size_t I, class... Types>
-constexpr decltype(auto) get(const rva::variant<Types...>&& v)
-{
-    return std::get<I>(std::forward<decltype(v)>(v).get_base());
-}
-template <class T, class... Types>
-constexpr T& get(rva::variant<Types...>& v)
-{
-    return std::get<T>(std::forward<decltype(v)>(v).get_base());
-}
-template <class T, class... Types>
-constexpr T&& get(rva::variant<Types...>&& v)
-{
-    return std::get<T>(std::forward<decltype(v)>(v).get_base());
-}
-template <class T, class... Types>
-constexpr const T& get(const rva::variant<Types...>& v)
-{
-    return std::get<T>(std::forward<decltype(v)>(v).get_base());
-}
-template <class T, class... Types>
-constexpr const T&& get(const rva::variant<Types...>&& v)
-{
-    return std::get<T>(std::forward<decltype(v)>(v).get_base());
-}
-
-// See: https://en.cppreference.com/w/cpp/utility/variant/get_if
-template <std::size_t I, class... Types>
-constexpr auto* get_if(rva::variant<Types...>* pv) noexcept
-{
-    return std::get_if<I>(pv->get_pointer_to_base());
-}
-template <std::size_t I, class... Types>
-constexpr auto const* get_if(const rva::variant<Types...>* pv) noexcept
-{
-    return std::get_if<I>(pv->get_pointer_to_base());
-}
-template <class T, class... Types>
-constexpr auto* get_if(rva::variant<Types...>* pv) noexcept
-{
-    return std::get_if<T>(pv->get_pointer_to_base());
-}
-template <class T, class... Types>
-constexpr auto const* get_if(const rva::variant<Types...>* pv) noexcept
-{
-    return std::get_if<T>(pv->get_pointer_to_base());
-}
-
-template <class T, class... Types>
-constexpr bool holds_alternative(const rva::variant<Types...>& v) noexcept
-{
-    return std::holds_alternative(v.get_base());
-}
-} // namespace rva
-
-template <class... T>
-struct std::hash<rva::variant<T...>> : std::hash<std::variant<T...>> {
-    using base_type = std::hash<std::variant<T...>>;
-    using base_type::base_type;
-    hash() = default;
-    hash(hash const&) = default;
-    hash(hash&&) = default;
-    size_t operator()(rva::variant<T...> const& v) const
-    {
-        return base_type::operator()(v.get_base());
-    }
-};
-
-template <class... Types>
-struct std::variant_size<rva::variant<Types...>>
-    : std::integral_constant<std::size_t, sizeof...(Types)> {
-};
-template <class... Types>
-struct std::variant_size<const rva::variant<Types...>>
-    : std::integral_constant<std::size_t, sizeof...(Types)> {
-};
-
-template <std::size_t I, class... Types>
-struct std::variant_alternative<I, rva::variant<Types...>>
-    : std::variant_alternative<I, typename rva::variant<Types...>::base_type> {
-};
-template <std::size_t I, class... Types>
-struct std::variant_alternative<I, const rva::variant<Types...>>
-    : std::variant_alternative<I, typename rva::variant<Types...>::base_type> {
-};
-
-// Implementation for replace
-namespace rva {
-template <class T, class Find, class Replace>
-struct replace {
-    using type = T;
-};
-template <class Find, class Replace>
-struct replace<Find, Find, Replace> {
-    using type = Replace;
-};
-template <class Find, class Replace>
-struct replace<Find*, Find, Replace> {
-    using type = Replace*;
-};
-template <class Find, class Replace>
-struct replace<Find&, Find, Replace> {
-    using type = Replace&;
-};
-template <class Find, class Replace>
-struct replace<Find&&, Find, Replace> {
-    using type = Replace&&;
-};
-template <class Find, class Replace>
-struct replace<Find[], Find, Replace> {
-    using type = Replace[];
-};
-template <class Find, class Replace, std::size_t N>
-struct replace<Find[N], Find, Replace> {
-    using type = Replace[N];
-};
-template <class Find, class Replace>
-struct replace<const Find, Find, Replace> {
-    using type = const Replace;
-};
-template <class Find, class Replace>
-struct replace<const Find*, Find, Replace> {
-    using type = const Replace*;
-};
-template <class Find, class Replace>
-struct replace<const Find&, Find, Replace> {
-    using type = const Replace&;
-};
-template <class Find, class Replace>
-struct replace<const Find[], Find, Replace> {
-    using type = const Replace[];
-};
-template <class Find, class Replace, std::size_t N>
-struct replace<const Find[N], Find, Replace> {
-    using type = const Replace[N];
-};
-template <class T, class Find, class Replace>
-struct replace<T*, Find, Replace> {
-    using type = replace_t<T, Find, Replace>*;
-};
-template <class T, class Find, class Replace>
-struct replace<T&, Find, Replace> {
-    using type = replace_t<T, Find, Replace>&;
-};
-template <class T, class Find, class Replace>
-struct replace<T&&, Find, Replace> {
-    using type = replace_t<T, Find, Replace>&&;
-};
-template <class T, class Find, class Replace>
-struct replace<T[], Find, Replace> {
-    using type = replace_t<T, Find, Replace>[];
-};
-template <class T, class Find, class Replace, std::size_t N>
-struct replace<T[N], Find, Replace> {
-    using type = replace_t<T, Find, Replace>[N];
-};
-template <class T, class Find, class Replace>
-struct replace<const T, Find, Replace> {
-    using type = replace_t<T, Find, Replace> const;
-};
-template <class T, class Find, class Replace>
-struct replace<const T*, Find, Replace> {
-    using type = replace_t<T, Find, Replace> const*;
-};
-template <class T, class Find, class Replace>
-struct replace<const T&, Find, Replace> {
-    using type = replace_t<T, Find, Replace> const&;
-};
-template <class T, class Find, class Replace>
-struct replace<const T[], Find, Replace> {
-    using type = replace_t<T, Find, Replace> const[];
-};
-template <class T, class Find, class Replace, std::size_t N>
-struct replace<const T[N], Find, Replace> {
-    using type = replace_t<T, Find, Replace> const[N];
-};
-
-template <template <class...> class T, class... Ts, class Find, class Replace>
-struct replace<T<Ts...>, Find, Replace> {
-    using type = T<replace_t<Ts, Find, Replace>...>;
-};
-
-// Add shortcut for rva::variant to avoid replacing into instances of an
-// rva::variant that's given as a template parameter to another rva::variant
-template <class... Ts, class Find, class Replace>
-struct replace<rva::variant<Ts...>, Find, Replace> {
-    using type = rva::variant<Ts...>;
-};
-} // namespace rva
-
-#endif
-
-
-namespace pmtv {
-
-namespace detail {
-
-// Convert a list of types to the full set used for the pmt.
-template<template<typename... > class VariantType, typename... Args>
-struct as_pmt {
-    using type = VariantType<std::monostate,
-                             Args...,
-                             std::vector<Args>...,
-                             std::string,
-                             std::vector<std::string>,
-                             std::vector<rva::self_t>,
-                             std::map<std::string, rva::self_t, std::less<>>
-                             >;
-};
-
-template<template<typename... > class TemplateType, typename ...T>
-struct as_pmt<TemplateType, std::tuple<T...>> {
-    using type = typename as_pmt<TemplateType, T...>::type;
-};
-}
-
-
-template<template<typename... > class VariantType, class... Args>
-using as_pmt_t = typename detail::as_pmt<VariantType, Args...>::type;
-
-// Check if `std::size_t` has the same type as `uint16_t` or `uint32_t` or `uint64_t`.
-// If it has the same type, then there is no need to add `std::size_t` the supported types.
-// Otherwise, `std::size_t` is added to the supported types.
-// This can happen if one builds using Emscripten where `std::size_t` is defined as `unsigned long` and
-// `uint32_t` and `uint64_t` are defined as `unsigned int` and `unsigned long long`, respectively.
-static constexpr bool support_size_t = !std::is_same_v<std::size_t, uint16_t> && !std::is_same_v<std::size_t, uint32_t> && !std::is_same_v<std::size_t, uint64_t>;
-
-// Note that per the spec, std::complex is undefined for any type other than float, double, or long_double
-using default_supported_types_without_size_t = std::tuple<bool,
-        uint8_t, uint16_t, uint32_t, uint64_t,
-        int8_t, int16_t, int32_t, int64_t,
-        float, double, std::complex<float>, std::complex<double>>;
-
-// Add std::size_t to default_supported_types_without_size_t
-using default_supported_types_with_size_t = decltype(std::tuple_cat(std::declval<default_supported_types_without_size_t>(), std::declval<std::tuple<std::size_t>>()));
-
-using default_supported_types = typename std::conditional_t<support_size_t, default_supported_types_with_size_t, default_supported_types_without_size_t>;
-
-// initialisation via type list stored in tuple (N.B. tuple could be extended by user with custom OOT types)
-using pmt_var_t = as_pmt_t<rva::variant, default_supported_types>;
-
-using pmt_null = std::monostate;
-
-
-template <typename T>
-concept PmtNull = std::is_same_v<T, std::monostate>;
-
-template <typename T>
-concept Complex =
-    std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
-
-template <typename T>
-concept Scalar = std::same_as<T, bool> || std::integral<T> || std::floating_point<T> || Complex<T>;
-
-template <typename T>
-concept UniformVector =
-    std::ranges::contiguous_range<T> && Scalar<typename T::value_type>;
-
-// A vector of bool can be optimized to one bit per element, so it doesn't satisfy UniformVector
-template <typename T>
-concept UniformBoolVector = 
-    std::ranges::range<T> && std::same_as<typename T::value_type, bool>;
-
-template <typename T>
-concept UniformStringVector =
-    std::ranges::range<T> && std::same_as<typename T::value_type, std::string>;
-
-template <typename T>
-concept PmtMap = std::is_same_v<T, std::map<std::string, pmt_var_t, std::less<>>>;
-
-template <typename T>
-concept String = std::is_same_v<T, std::string>;
-
-template <typename T>
-concept PmtVector =
-    std::ranges::range<T> && std::is_same_v<typename T::value_type, pmt_var_t>;
-
-} // namespace pmtv
-
-// #include <pmtv/version.hpp>
-
-
-#include <stdint.h>
-
-namespace pmtv {
-static const uint16_t pmt_version = 1;
-}
-#include <complex>
-#include <cstddef>
-#include <ranges>
-#include <span>
-
-#ifdef __GNUC__
-#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
-#pragma GCC diagnostic ignored "-Wshadow"
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#endif
-
-// #include <refl.hpp>
-
-
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
@@ -13259,6 +6581,6689 @@ namespace pmtv {
 
 
 
+#include <fmt/format.h>
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+// #include <magic_enum.hpp>
+//  __  __             _        ______                          _____
+// |  \/  |           (_)      |  ____|                        / ____|_     _
+// | \  / | __ _  __ _ _  ___  | |__   _ __  _   _ _ __ ___   | |   _| |_ _| |_
+// | |\/| |/ _` |/ _` | |/ __| |  __| | '_ \| | | | '_ ` _ \  | |  |_   _|_   _|
+// | |  | | (_| | (_| | | (__  | |____| | | | |_| | | | | | | | |____|_|   |_|
+// |_|  |_|\__,_|\__, |_|\___| |______|_| |_|\__,_|_| |_| |_|  \_____|
+//                __/ | https://github.com/Neargye/magic_enum
+//               |___/  version 0.9.3
+//
+// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2019 - 2023 Daniil Goncharov <neargye@gmail.com>.
+//
+// Permission is hereby  granted, free of charge, to any  person obtaining a copy
+// of this software and associated  documentation files (the "Software"), to deal
+// in the Software  without restriction, including without  limitation the rights
+// to  use, copy,  modify, merge,  publish, distribute,  sublicense, and/or  sell
+// copies  of  the Software,  and  to  permit persons  to  whom  the Software  is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE  IS PROVIDED "AS  IS", WITHOUT WARRANTY  OF ANY KIND,  EXPRESS OR
+// IMPLIED,  INCLUDING BUT  NOT  LIMITED TO  THE  WARRANTIES OF  MERCHANTABILITY,
+// FITNESS FOR  A PARTICULAR PURPOSE AND  NONINFRINGEMENT. IN NO EVENT  SHALL THE
+// AUTHORS  OR COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM,  DAMAGES OR  OTHER
+// LIABILITY, WHETHER IN AN ACTION OF  CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#ifndef NEARGYE_MAGIC_ENUM_HPP
+#define NEARGYE_MAGIC_ENUM_HPP
+
+#define MAGIC_ENUM_VERSION_MAJOR 0
+#define MAGIC_ENUM_VERSION_MINOR 9
+#define MAGIC_ENUM_VERSION_PATCH 3
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <type_traits>
+#include <utility>
+
+#if defined(MAGIC_ENUM_CONFIG_FILE)
+#  include MAGIC_ENUM_CONFIG_FILE
+#endif
+
+#if !defined(MAGIC_ENUM_USING_ALIAS_OPTIONAL)
+#  include <optional>
+#endif
+#if !defined(MAGIC_ENUM_USING_ALIAS_STRING)
+#  include <string>
+#endif
+#if !defined(MAGIC_ENUM_USING_ALIAS_STRING_VIEW)
+#  include <string_view>
+#endif
+
+#if defined(MAGIC_ENUM_NO_ASSERT)
+#  define MAGIC_ENUM_ASSERT(...) static_cast<void>(0)
+#else
+#  include <cassert>
+#  define MAGIC_ENUM_ASSERT(...) assert((__VA_ARGS__))
+#endif
+
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wunknown-warning-option"
+#  pragma clang diagnostic ignored "-Wenum-constexpr-conversion"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wmaybe-uninitialized" // May be used uninitialized 'return {};'.
+#elif defined(_MSC_VER)
+#  pragma warning(push)
+#  pragma warning(disable : 26495) // Variable 'static_str<N>::chars_' is uninitialized.
+#  pragma warning(disable : 28020) // Arithmetic overflow: Using operator '-' on a 4 byte value and then casting the result to a 8 byte value.
+#  pragma warning(disable : 26451) // The expression '0<=_Param_(1)&&_Param_(1)<=1-1' is not true at this call.
+#  pragma warning(disable : 4514) // Unreferenced inline function has been removed.
+#endif
+
+// Checks magic_enum compiler compatibility.
+#if defined(__clang__) && __clang_major__ >= 5 || defined(__GNUC__) && __GNUC__ >= 9 || defined(_MSC_VER) && _MSC_VER >= 1910 || defined(__RESHARPER__)
+#  undef  MAGIC_ENUM_SUPPORTED
+#  define MAGIC_ENUM_SUPPORTED 1
+#endif
+
+// Checks magic_enum compiler aliases compatibility.
+#if defined(__clang__) && __clang_major__ >= 5 || defined(__GNUC__) && __GNUC__ >= 9 || defined(_MSC_VER) && _MSC_VER >= 1920
+#  undef  MAGIC_ENUM_SUPPORTED_ALIASES
+#  define MAGIC_ENUM_SUPPORTED_ALIASES 1
+#endif
+
+// Enum value must be greater or equals than MAGIC_ENUM_RANGE_MIN. By default MAGIC_ENUM_RANGE_MIN = -128.
+// If need another min range for all enum types by default, redefine the macro MAGIC_ENUM_RANGE_MIN.
+#if !defined(MAGIC_ENUM_RANGE_MIN)
+#  define MAGIC_ENUM_RANGE_MIN -128
+#endif
+
+// Enum value must be less or equals than MAGIC_ENUM_RANGE_MAX. By default MAGIC_ENUM_RANGE_MAX = 128.
+// If need another max range for all enum types by default, redefine the macro MAGIC_ENUM_RANGE_MAX.
+#if !defined(MAGIC_ENUM_RANGE_MAX)
+#  define MAGIC_ENUM_RANGE_MAX 127
+#endif
+
+// Improve ReSharper C++ intellisense performance with builtins, avoiding unnecessary template instantiations.
+#if defined(__RESHARPER__)
+#  undef MAGIC_ENUM_GET_ENUM_NAME_BUILTIN
+#  undef MAGIC_ENUM_GET_TYPE_NAME_BUILTIN
+#  if __RESHARPER__ >= 20230100
+#    define MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V) __rscpp_enumerator_name(V)
+#    define MAGIC_ENUM_GET_TYPE_NAME_BUILTIN(T) __rscpp_type_name<T>()
+#  else
+#    define MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V) nullptr
+#    define MAGIC_ENUM_GET_TYPE_NAME_BUILTIN(T) nullptr
+#  endif
+#endif
+
+namespace magic_enum {
+
+// If need another optional type, define the macro MAGIC_ENUM_USING_ALIAS_OPTIONAL.
+#if defined(MAGIC_ENUM_USING_ALIAS_OPTIONAL)
+MAGIC_ENUM_USING_ALIAS_OPTIONAL
+#else
+using std::optional;
+#endif
+
+// If need another string_view type, define the macro MAGIC_ENUM_USING_ALIAS_STRING_VIEW.
+#if defined(MAGIC_ENUM_USING_ALIAS_STRING_VIEW)
+MAGIC_ENUM_USING_ALIAS_STRING_VIEW
+#else
+using std::string_view;
+#endif
+
+// If need another string type, define the macro MAGIC_ENUM_USING_ALIAS_STRING.
+#if defined(MAGIC_ENUM_USING_ALIAS_STRING)
+MAGIC_ENUM_USING_ALIAS_STRING
+#else
+using std::string;
+#endif
+
+using char_type = string_view::value_type;
+static_assert(std::is_same_v<string_view::value_type, string::value_type>, "magic_enum::customize requires same string_view::value_type and string::value_type");
+static_assert([] {
+  if constexpr (std::is_same_v<char_type, wchar_t>) {
+    constexpr const char     c[] =  "abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789|";
+    constexpr const wchar_t wc[] = L"abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789|";
+    static_assert(std::size(c) == std::size(wc), "magic_enum::customize identifier characters are multichars in wchar_t.");
+
+    for (std::size_t i = 0; i < std::size(c); ++i) {
+      if (c[i] != wc[i]) {
+        return false;
+      }
+    }
+  }
+  return true;
+} (), "magic_enum::customize wchar_t is not compatible with ASCII.");
+
+namespace customize {
+
+// Enum value must be in range [MAGIC_ENUM_RANGE_MIN, MAGIC_ENUM_RANGE_MAX]. By default MAGIC_ENUM_RANGE_MIN = -128, MAGIC_ENUM_RANGE_MAX = 128.
+// If need another range for all enum types by default, redefine the macro MAGIC_ENUM_RANGE_MIN and MAGIC_ENUM_RANGE_MAX.
+// If need another range for specific enum type, add specialization enum_range for necessary enum type.
+template <typename E>
+struct enum_range {
+  static_assert(std::is_enum_v<E>, "magic_enum::customize::enum_range requires enum type.");
+  static constexpr int min = MAGIC_ENUM_RANGE_MIN;
+  static constexpr int max = MAGIC_ENUM_RANGE_MAX;
+  static_assert(max > min, "magic_enum::customize::enum_range requires max > min.");
+};
+
+static_assert(MAGIC_ENUM_RANGE_MAX > MAGIC_ENUM_RANGE_MIN, "MAGIC_ENUM_RANGE_MAX must be greater than MAGIC_ENUM_RANGE_MIN.");
+static_assert((MAGIC_ENUM_RANGE_MAX - MAGIC_ENUM_RANGE_MIN) < (std::numeric_limits<std::uint16_t>::max)(), "MAGIC_ENUM_RANGE must be less than UINT16_MAX.");
+
+namespace detail {
+
+enum class customize_tag {
+  default_tag,
+  invalid_tag,
+  custom_tag
+};
+
+} // namespace magic_enum::customize::detail
+
+class customize_t : public std::pair<detail::customize_tag, string_view> {
+ public:
+  constexpr customize_t(string_view srt) : std::pair<detail::customize_tag, string_view>{detail::customize_tag::custom_tag, srt} {}
+  constexpr customize_t(const char_type* srt) : customize_t{string_view{srt}} {}
+  constexpr customize_t(detail::customize_tag tag) : std::pair<detail::customize_tag, string_view>{tag, string_view{}} {
+    MAGIC_ENUM_ASSERT(tag != detail::customize_tag::custom_tag);
+  }
+};
+
+// Default customize.
+inline constexpr auto default_tag = customize_t{detail::customize_tag::default_tag};
+// Invalid customize.
+inline constexpr auto invalid_tag = customize_t{detail::customize_tag::invalid_tag};
+
+// If need custom names for enum, add specialization enum_name for necessary enum type.
+template <typename E>
+constexpr customize_t enum_name(E) noexcept {
+  return default_tag;
+}
+
+// If need custom type name for enum, add specialization enum_type_name for necessary enum type.
+template <typename E>
+constexpr customize_t enum_type_name() noexcept {
+  return default_tag;
+}
+
+} // namespace magic_enum::customize
+
+namespace detail {
+
+template <typename T>
+struct supported
+#if defined(MAGIC_ENUM_SUPPORTED) && MAGIC_ENUM_SUPPORTED || defined(MAGIC_ENUM_NO_CHECK_SUPPORT)
+    : std::true_type {};
+#else
+    : std::false_type {};
+#endif
+
+template <auto V, typename E = std::decay_t<decltype(V)>, std::enable_if_t<std::is_enum_v<E>, int> = 0>
+using enum_constant = std::integral_constant<E, V>;
+
+template <typename... T>
+inline constexpr bool always_false_v = false;
+
+template <typename T, typename = void>
+struct has_is_flags : std::false_type {};
+
+template <typename T>
+struct has_is_flags<T, std::void_t<decltype(customize::enum_range<T>::is_flags)>> : std::bool_constant<std::is_same_v<bool, std::decay_t<decltype(customize::enum_range<T>::is_flags)>>> {};
+
+template <typename T, typename = void>
+struct range_min : std::integral_constant<int, MAGIC_ENUM_RANGE_MIN> {};
+
+template <typename T>
+struct range_min<T, std::void_t<decltype(customize::enum_range<T>::min)>> : std::integral_constant<decltype(customize::enum_range<T>::min), customize::enum_range<T>::min> {};
+
+template <typename T, typename = void>
+struct range_max : std::integral_constant<int, MAGIC_ENUM_RANGE_MAX> {};
+
+template <typename T>
+struct range_max<T, std::void_t<decltype(customize::enum_range<T>::max)>> : std::integral_constant<decltype(customize::enum_range<T>::max), customize::enum_range<T>::max> {};
+
+struct str_view {
+  const char* str_ = nullptr;
+  std::size_t size_ = 0;
+};
+
+template <std::uint16_t N>
+class static_str {
+ public:
+  constexpr explicit static_str(str_view str) noexcept : static_str{str.str_, std::make_integer_sequence<std::uint16_t, N>{}} {
+    MAGIC_ENUM_ASSERT(str.size_ == N);
+  }
+
+  constexpr explicit static_str(string_view str) noexcept : static_str{str.data(), std::make_integer_sequence<std::uint16_t, N>{}} {
+    MAGIC_ENUM_ASSERT(str.size() == N);
+  }
+
+  constexpr const char_type* data() const noexcept { return chars_; }
+
+  constexpr std::uint16_t size() const noexcept { return N; }
+
+  constexpr operator string_view() const noexcept { return {data(), size()}; }
+
+ private:
+  template <std::uint16_t... I>
+  constexpr static_str(const char* str, std::integer_sequence<std::uint16_t, I...>) noexcept : chars_{static_cast<char_type>(str[I])..., static_cast<char_type>('\0')} {}
+
+  template <std::uint16_t... I>
+  constexpr static_str(string_view str, std::integer_sequence<std::uint16_t, I...>) noexcept : chars_{str[I]..., static_cast<char_type>('\0')} {}
+
+  char_type chars_[static_cast<std::size_t>(N) + 1];
+};
+
+template <>
+class static_str<0> {
+ public:
+  constexpr explicit static_str() = default;
+
+  constexpr explicit static_str(str_view) noexcept {}
+
+  constexpr explicit static_str(string_view) noexcept {}
+
+  constexpr const char_type* data() const noexcept { return nullptr; }
+
+  constexpr std::uint16_t size() const noexcept { return 0; }
+
+  constexpr operator string_view() const noexcept { return {}; }
+};
+
+template <typename Op = std::equal_to<>>
+class case_insensitive {
+  static constexpr char_type to_lower(char_type c) noexcept {
+    return (c >= static_cast<char_type>('A') && c <= static_cast<char_type>('Z')) ? static_cast<char_type>(c + (static_cast<char_type>('a') - static_cast<char_type>('A'))) : c;
+  }
+
+ public:
+  template <typename L, typename R>
+  constexpr auto operator()(L lhs,R rhs) const noexcept -> std::enable_if_t<std::is_same_v<std::decay_t<L>, char_type> && std::is_same_v<std::decay_t<R>, char_type>, bool> {
+    return Op{}(to_lower(lhs), to_lower(rhs));
+  }
+};
+
+constexpr std::size_t find(string_view str, char_type c) noexcept {
+#if defined(__clang__) && __clang_major__ < 9 && defined(__GLIBCXX__) || defined(_MSC_VER) && _MSC_VER < 1920 && !defined(__clang__)
+// https://stackoverflow.com/questions/56484834/constexpr-stdstring-viewfind-last-of-doesnt-work-on-clang-8-with-libstdc
+// https://developercommunity.visualstudio.com/content/problem/360432/vs20178-regression-c-failed-in-test.html
+  constexpr bool workaround = true;
+#else
+  constexpr bool workaround = false;
+#endif
+
+  if constexpr (workaround) {
+    for (std::size_t i = 0; i < str.size(); ++i) {
+      if (str[i] == c) {
+        return i;
+      }
+    }
+
+    return string_view::npos;
+  } else {
+    return str.find(c);
+  }
+}
+
+template <typename BinaryPredicate>
+constexpr bool is_default_predicate() noexcept {
+  return std::is_same_v<std::decay_t<BinaryPredicate>, std::equal_to<string_view::value_type>> ||
+         std::is_same_v<std::decay_t<BinaryPredicate>, std::equal_to<>>;
+}
+
+template <typename BinaryPredicate>
+constexpr bool is_nothrow_invocable() {
+  return is_default_predicate<BinaryPredicate>() ||
+         std::is_nothrow_invocable_r_v<bool, BinaryPredicate, char_type, char_type>;
+}
+
+template <typename BinaryPredicate>
+constexpr bool cmp_equal(string_view lhs, string_view rhs, [[maybe_unused]] BinaryPredicate&& p) noexcept(is_nothrow_invocable<BinaryPredicate>()) {
+#if defined(_MSC_VER) && _MSC_VER < 1920 && !defined(__clang__)
+  // https://developercommunity.visualstudio.com/content/problem/360432/vs20178-regression-c-failed-in-test.html
+  // https://developercommunity.visualstudio.com/content/problem/232218/c-constexpr-string-view.html
+  constexpr bool workaround = true;
+#else
+  constexpr bool workaround = false;
+#endif
+
+  if constexpr (!is_default_predicate<BinaryPredicate>() || workaround) {
+    if (lhs.size() != rhs.size()) {
+      return false;
+    }
+
+    const auto size = lhs.size();
+    for (std::size_t i = 0; i < size; ++i) {
+      if (!p(lhs[i], rhs[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  } else {
+    return lhs == rhs;
+  }
+}
+
+template <typename L, typename R>
+constexpr bool cmp_less(L lhs, R rhs) noexcept {
+  static_assert(std::is_integral_v<L> && std::is_integral_v<R>, "magic_enum::detail::cmp_less requires integral type.");
+
+  if constexpr (std::is_signed_v<L> == std::is_signed_v<R>) {
+    // If same signedness (both signed or both unsigned).
+    return lhs < rhs;
+  } else if constexpr (std::is_same_v<L, bool>) { // bool special case
+      return static_cast<R>(lhs) < rhs;
+  } else if constexpr (std::is_same_v<R, bool>) { // bool special case
+      return lhs < static_cast<L>(rhs);
+  } else if constexpr (std::is_signed_v<R>) {
+    // If 'right' is negative, then result is 'false', otherwise cast & compare.
+    return rhs > 0 && lhs < static_cast<std::make_unsigned_t<R>>(rhs);
+  } else {
+    // If 'left' is negative, then result is 'true', otherwise cast & compare.
+    return lhs < 0 || static_cast<std::make_unsigned_t<L>>(lhs) < rhs;
+  }
+}
+
+template <typename I>
+constexpr I log2(I value) noexcept {
+  static_assert(std::is_integral_v<I>, "magic_enum::detail::log2 requires integral type.");
+
+  if constexpr (std::is_same_v<I, bool>) { // bool special case
+    return MAGIC_ENUM_ASSERT(false), value;
+  } else {
+    auto ret = I{0};
+    for (; value > I{1}; value >>= I{1}, ++ret) {}
+
+    return ret;
+  }
+}
+
+#if defined(__cpp_lib_array_constexpr) && __cpp_lib_array_constexpr >= 201603L
+#  define MAGIC_ENUM_ARRAY_CONSTEXPR 1
+#else
+template <typename T, std::size_t N, std::size_t... I>
+constexpr std::array<std::remove_cv_t<T>, N> to_array(T (&a)[N], std::index_sequence<I...>) noexcept {
+  return {{a[I]...}};
+}
+#endif
+
+template <typename T>
+inline constexpr bool is_enum_v = std::is_enum_v<T> && std::is_same_v<T, std::decay_t<T>>;
+
+template <typename E>
+constexpr auto n() noexcept {
+  static_assert(is_enum_v<E>, "magic_enum::detail::n requires enum type.");
+
+  if constexpr (supported<E>::value) {
+#if defined(MAGIC_ENUM_GET_TYPE_NAME_BUILTIN)
+    constexpr auto name_ptr = MAGIC_ENUM_GET_TYPE_NAME_BUILTIN(E);
+    constexpr auto name = name_ptr ? str_view{name_ptr, std::char_traits<char>::length(name_ptr)} : str_view{};
+#elif defined(__clang__)
+    auto name = str_view{__PRETTY_FUNCTION__ + 34, sizeof(__PRETTY_FUNCTION__) - 36};
+#elif defined(__GNUC__)
+    auto name = str_view{__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1};
+    if (name.str_[name.size_ - 1] == ']') {
+      name.size_ -= 50;
+      name.str_ += 49;
+    } else {
+      name.size_ -= 40;
+      name.str_ += 37;
+    }
+#elif defined(_MSC_VER)
+    auto name = str_view{__FUNCSIG__ + 40, sizeof(__FUNCSIG__) - 57};
+#else
+    auto name = str_view{};
+#endif
+    std::size_t p = 0;
+    for (std::size_t i = name.size_; i > 0; --i) {
+      if (name.str_[i] == ':') {
+        p = i + 1;
+        break;
+      }
+    }
+    if (p > 0) {
+      name.size_ -= p;
+      name.str_ += p;
+    }
+    return name;
+  } else {
+    return str_view{}; // Unsupported compiler or Invalid customize.
+  }
+}
+
+template <typename E>
+constexpr auto type_name() noexcept {
+  [[maybe_unused]] constexpr auto custom = customize::enum_type_name<E>();
+  static_assert(std::is_same_v<std::decay_t<decltype(custom)>, customize::customize_t>, "magic_enum::customize requires customize_t type.");
+  if constexpr (custom.first == customize::detail::customize_tag::custom_tag) {
+    constexpr auto name = custom.second;
+    static_assert(!name.empty(), "magic_enum::customize requires not empty string.");
+    return static_str<name.size()>{name};
+  } else if constexpr (custom.first == customize::detail::customize_tag::invalid_tag) {
+    return static_str<0>{};
+  } else if constexpr (custom.first == customize::detail::customize_tag::default_tag) {
+    constexpr auto name = n<E>();
+    return static_str<name.size_>{name};
+  } else {
+    static_assert(always_false_v<E>, "magic_enum::customize invalid.");
+  }
+}
+
+template <typename E>
+inline constexpr auto type_name_v = type_name<E>();
+
+template <auto V>
+constexpr auto n() noexcept {
+  static_assert(is_enum_v<decltype(V)>, "magic_enum::detail::n requires enum type.");
+
+  if constexpr (supported<decltype(V)>::value) {
+#if defined(MAGIC_ENUM_GET_ENUM_NAME_BUILTIN)
+    constexpr auto name_ptr = MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V);
+    auto name = name_ptr ? str_view{name_ptr, std::char_traits<char>::length(name_ptr)} : str_view{};
+#elif defined(__clang__)
+    auto name = str_view{__PRETTY_FUNCTION__ + 34, sizeof(__PRETTY_FUNCTION__) - 36};
+    if (name.size_ > 22 && name.str_[0] == '(' && name.str_[1] == 'a' && name.str_[10] == ' ' && name.str_[22] == ':') {
+      name.size_ -= 23;
+      name.str_ += 23;
+    }
+    if (name.str_[0] == '(' || name.str_[0] == '-' || (name.str_[0] >= '0' && name.str_[0] <= '9')) {
+      name = str_view{};
+    }
+#elif defined(__GNUC__)
+    auto name = str_view{__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__) - 1};
+    if (name.str_[name.size_ - 1] == ']') {
+      name.size_ -= 55;
+      name.str_ += 54;
+    } else {
+      name.size_ -= 40;
+      name.str_ += 37;
+    }
+    if (name.str_[0] == '(') {
+      name = str_view{};
+    }
+#elif defined(_MSC_VER)
+    str_view name;
+    if ((__FUNCSIG__[5] == '_' && __FUNCSIG__[35] != '(') || (__FUNCSIG__[5] == 'c' && __FUNCSIG__[41] != '(')) {
+      name = str_view{__FUNCSIG__ + 35, sizeof(__FUNCSIG__) - 52};
+    }
+#else
+    auto name = str_view{};
+#endif
+    std::size_t p = 0;
+    for (std::size_t i = name.size_; i > 0; --i) {
+      if (name.str_[i] == ':') {
+        p = i + 1;
+        break;
+      }
+    }
+    if (p > 0) {
+      name.size_ -= p;
+      name.str_ += p;
+    }
+    return name;
+  } else {
+    return str_view{}; // Unsupported compiler or Invalid customize.
+  }
+}
+
+#if defined(_MSC_VER) && !defined(__clang__) && _MSC_VER < 1920
+#  define MAGIC_ENUM_VS_2017_WORKAROUND 1
+#endif
+
+#if defined(MAGIC_ENUM_VS_2017_WORKAROUND)
+template <typename E, E V>
+constexpr auto n() noexcept {
+  static_assert(is_enum_v<E>, "magic_enum::detail::n requires enum type.");
+
+#  if defined(MAGIC_ENUM_GET_ENUM_NAME_BUILTIN)
+  constexpr auto name_ptr = MAGIC_ENUM_GET_ENUM_NAME_BUILTIN(V);
+  auto name = name_ptr ? str_view{name_ptr, std::char_traits<char>::length(name_ptr)} : str_view{};
+#  else
+  str_view name = str_view{__FUNCSIG__, sizeof(__FUNCSIG__) - 17};
+  std::size_t p = 0;
+  for (std::size_t i = name.size_; i > 0; --i) {
+    if (name.str_[i] == ',' || name.str_[i] == ':') {
+      p = i + 1;
+      break;
+    }
+  }
+  if (p > 0) {
+    name.size_ -= p;
+    name.str_ += p;
+  }
+  if (name.str_[0] == '(' || name.str_[0] == '-' || (name.str_[0] >= '0' && name.str_[0] <= '9')) {
+    name = str_view{};
+  }
+  return name;
+#  endif
+}
+#endif
+
+template <typename E, E V>
+constexpr auto enum_name() noexcept {
+  [[maybe_unused]] constexpr auto custom = customize::enum_name<E>(V);
+  static_assert(std::is_same_v<std::decay_t<decltype(custom)>, customize::customize_t>, "magic_enum::customize requires customize_t type.");
+  if constexpr (custom.first == customize::detail::customize_tag::custom_tag) {
+    constexpr auto name = custom.second;
+    static_assert(!name.empty(), "magic_enum::customize requires not empty string.");
+    return static_str<name.size()>{name};
+  } else if constexpr (custom.first == customize::detail::customize_tag::invalid_tag) {
+    return static_str<0>{};
+  } else if constexpr (custom.first == customize::detail::customize_tag::default_tag) {
+#if defined(MAGIC_ENUM_VS_2017_WORKAROUND)
+    constexpr auto name = n<E, V>();
+#else
+    constexpr auto name = n<V>();
+#endif
+    return static_str<name.size_>{name};
+  } else {
+    static_assert(always_false_v<E>, "magic_enum::customize invalid.");
+  }
+}
+
+template <typename E, E V>
+inline constexpr auto enum_name_v = enum_name<E, V>();
+
+template <typename E, auto V>
+constexpr bool is_valid() noexcept {
+#if defined(__clang__) && __clang_major__ >= 16
+  // https://reviews.llvm.org/D130058, https://reviews.llvm.org/D131307
+  constexpr E v = __builtin_bit_cast(E, V);
+#else
+  constexpr E v = static_cast<E>(V);
+#endif
+  [[maybe_unused]] constexpr auto custom = customize::enum_name<E>(v);
+  static_assert(std::is_same_v<std::decay_t<decltype(custom)>, customize::customize_t>, "magic_enum::customize requires customize_t type.");
+  if constexpr (custom.first == customize::detail::customize_tag::custom_tag) {
+    constexpr auto name = custom.second;
+    static_assert(!name.empty(), "magic_enum::customize requires not empty string.");
+    return name.size() != 0;
+  } else if constexpr (custom.first == customize::detail::customize_tag::default_tag) {
+#if defined(MAGIC_ENUM_VS_2017_WORKAROUND)
+    return n<E, v>().size_ != 0;
+#else
+    return n<v>().size_ != 0;
+#endif
+  } else {
+    return false;
+  }
+}
+
+enum class enum_subtype {
+  common,
+  flags
+};
+
+template <typename E, int O, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr U ualue(std::size_t i) noexcept {
+  if constexpr (std::is_same_v<U, bool>) { // bool special case
+    static_assert(O == 0, "magic_enum::detail::ualue requires valid offset.");
+
+    return static_cast<U>(i);
+  } else if constexpr (S == enum_subtype::flags) {
+    return static_cast<U>(U{1} << static_cast<U>(static_cast<int>(i) + O));
+  } else {
+    return static_cast<U>(static_cast<int>(i) + O);
+  }
+}
+
+template <typename E, int O, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr E value(std::size_t i) noexcept {
+  return static_cast<E>(ualue<E, O, S>(i));
+}
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr int reflected_min() noexcept {
+  if constexpr (S == enum_subtype::flags) {
+    return 0;
+  } else {
+    constexpr auto lhs = range_min<E>::value;
+    constexpr auto rhs = (std::numeric_limits<U>::min)();
+
+    if constexpr (cmp_less(rhs, lhs)) {
+      return lhs;
+    } else {
+      return rhs;
+    }
+  }
+}
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr int reflected_max() noexcept {
+  if constexpr (S == enum_subtype::flags) {
+    return std::numeric_limits<U>::digits - 1;
+  } else {
+    constexpr auto lhs = range_max<E>::value;
+    constexpr auto rhs = (std::numeric_limits<U>::max)();
+
+    if constexpr (cmp_less(lhs, rhs)) {
+      return lhs;
+    } else {
+      return rhs;
+    }
+  }
+}
+
+#define MAGIC_ENUM_FOR_EACH_256(T)                                                                                                                                                                 \
+  T(  0)T(  1)T(  2)T(  3)T(  4)T(  5)T(  6)T(  7)T(  8)T(  9)T( 10)T( 11)T( 12)T( 13)T( 14)T( 15)T( 16)T( 17)T( 18)T( 19)T( 20)T( 21)T( 22)T( 23)T( 24)T( 25)T( 26)T( 27)T( 28)T( 29)T( 30)T( 31) \
+  T( 32)T( 33)T( 34)T( 35)T( 36)T( 37)T( 38)T( 39)T( 40)T( 41)T( 42)T( 43)T( 44)T( 45)T( 46)T( 47)T( 48)T( 49)T( 50)T( 51)T( 52)T( 53)T( 54)T( 55)T( 56)T( 57)T( 58)T( 59)T( 60)T( 61)T( 62)T( 63) \
+  T( 64)T( 65)T( 66)T( 67)T( 68)T( 69)T( 70)T( 71)T( 72)T( 73)T( 74)T( 75)T( 76)T( 77)T( 78)T( 79)T( 80)T( 81)T( 82)T( 83)T( 84)T( 85)T( 86)T( 87)T( 88)T( 89)T( 90)T( 91)T( 92)T( 93)T( 94)T( 95) \
+  T( 96)T( 97)T( 98)T( 99)T(100)T(101)T(102)T(103)T(104)T(105)T(106)T(107)T(108)T(109)T(110)T(111)T(112)T(113)T(114)T(115)T(116)T(117)T(118)T(119)T(120)T(121)T(122)T(123)T(124)T(125)T(126)T(127) \
+  T(128)T(129)T(130)T(131)T(132)T(133)T(134)T(135)T(136)T(137)T(138)T(139)T(140)T(141)T(142)T(143)T(144)T(145)T(146)T(147)T(148)T(149)T(150)T(151)T(152)T(153)T(154)T(155)T(156)T(157)T(158)T(159) \
+  T(160)T(161)T(162)T(163)T(164)T(165)T(166)T(167)T(168)T(169)T(170)T(171)T(172)T(173)T(174)T(175)T(176)T(177)T(178)T(179)T(180)T(181)T(182)T(183)T(184)T(185)T(186)T(187)T(188)T(189)T(190)T(191) \
+  T(192)T(193)T(194)T(195)T(196)T(197)T(198)T(199)T(200)T(201)T(202)T(203)T(204)T(205)T(206)T(207)T(208)T(209)T(210)T(211)T(212)T(213)T(214)T(215)T(216)T(217)T(218)T(219)T(220)T(221)T(222)T(223) \
+  T(224)T(225)T(226)T(227)T(228)T(229)T(230)T(231)T(232)T(233)T(234)T(235)T(236)T(237)T(238)T(239)T(240)T(241)T(242)T(243)T(244)T(245)T(246)T(247)T(248)T(249)T(250)T(251)T(252)T(253)T(254)T(255)
+
+template <typename E, enum_subtype S, std::size_t Size, int Min, std::size_t I>
+constexpr void valid_count(bool* valid, std::size_t& count) noexcept {
+#define MAGIC_ENUM_V(O)                                     \
+  if constexpr ((I + O) < Size) {                           \
+    if constexpr (is_valid<E, ualue<E, Min, S>(I + O)>()) { \
+      valid[I + O] = true;                                  \
+      ++count;                                              \
+    }                                                       \
+  }
+
+  MAGIC_ENUM_FOR_EACH_256(MAGIC_ENUM_V);
+
+  if constexpr ((I + 256) < Size) {
+    valid_count<E, S, Size, Min, I + 256>(valid, count);
+  }
+#undef MAGIC_ENUM_V
+}
+
+template <std::size_t N>
+struct valid_count_t {
+  std::size_t count = 0;
+  bool valid[N] = {};
+};
+
+template <typename E, enum_subtype S, std::size_t Size, int Min>
+constexpr auto valid_count() noexcept {
+  valid_count_t<Size> vc;
+  valid_count<E, S, Size, Min, 0>(vc.valid, vc.count);
+  return vc;
+}
+
+template <typename E, enum_subtype S, std::size_t Size, int Min>
+constexpr auto values() noexcept {
+  constexpr auto vc = valid_count<E, S, Size, Min>();
+
+  if constexpr (vc.count > 0) {
+#if defined(MAGIC_ENUM_ARRAY_CONSTEXPR)
+    std::array<E, vc.count> values = {};
+#else
+    E values[vc.count] = {};
+#endif
+    for (std::size_t i = 0, v = 0; v < vc.count; ++i) {
+      if (vc.valid[i]) {
+        values[v++] = value<E, Min, S>(i);
+      }
+    }
+#if defined(MAGIC_ENUM_ARRAY_CONSTEXPR)
+    return values;
+#else
+    return to_array(values, std::make_index_sequence<vc.count>{});
+#endif
+  } else {
+    return std::array<E, 0>{};
+  }
+}
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr auto values() noexcept {
+  constexpr auto min = reflected_min<E, S>();
+  constexpr auto max = reflected_max<E, S>();
+  constexpr auto range_size = max - min + 1;
+  static_assert(range_size > 0, "magic_enum::enum_range requires valid size.");
+  static_assert(range_size < (std::numeric_limits<std::uint16_t>::max)(), "magic_enum::enum_range requires valid size.");
+
+  return values<E, S, range_size, min>();
+}
+
+template <typename E, typename U = std::underlying_type_t<E>>
+constexpr enum_subtype subtype(std::true_type) noexcept {
+  if constexpr (std::is_same_v<U, bool>) { // bool special case
+    return enum_subtype::common;
+  } else if constexpr (has_is_flags<E>::value) {
+    return customize::enum_range<E>::is_flags ? enum_subtype::flags : enum_subtype::common;
+  } else {
+#if defined(MAGIC_ENUM_AUTO_IS_FLAGS)
+    constexpr auto flags_values = values<E, enum_subtype::flags>();
+    constexpr auto default_values = values<E, enum_subtype::common>();
+    if (flags_values.size() == 0 || default_values.size() > flags_values.size()) {
+      return enum_subtype::common;
+    }
+    for (std::size_t i = 0; i < default_values.size(); ++i) {
+      const auto v = static_cast<U>(default_values[i]);
+      if (v != 0 && (v & (v - 1)) != 0) {
+        return enum_subtype::common;
+      }
+    }
+    return enum_subtype::flags;
+#else
+    return enum_subtype::common;
+#endif
+  }
+}
+
+template <typename T>
+constexpr enum_subtype subtype(std::false_type) noexcept {
+  // For non-enum type return default common subtype.
+  return enum_subtype::common;
+}
+
+template <typename E, typename D = std::decay_t<E>>
+inline constexpr auto subtype_v = subtype<D>(std::is_enum<D>{});
+
+template <typename E, enum_subtype S>
+inline constexpr auto values_v = values<E, S>();
+
+template <typename E, enum_subtype S, typename D = std::decay_t<E>>
+using values_t = decltype((values_v<D, S>));
+
+template <typename E, enum_subtype S>
+inline constexpr auto count_v = values_v<E, S>.size();
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+inline constexpr auto min_v = (count_v<E, S> > 0) ? static_cast<U>(values_v<E, S>.front()) : U{0};
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+inline constexpr auto max_v = (count_v<E, S> > 0) ? static_cast<U>(values_v<E, S>.back()) : U{0};
+
+template <typename E, enum_subtype S, std::size_t... I>
+constexpr auto names(std::index_sequence<I...>) noexcept {
+  return std::array<string_view, sizeof...(I)>{{enum_name_v<E, values_v<E, S>[I]>...}};
+}
+
+template <typename E, enum_subtype S>
+inline constexpr auto names_v = names<E, S>(std::make_index_sequence<count_v<E, S>>{});
+
+template <typename E, enum_subtype S, typename D = std::decay_t<E>>
+using names_t = decltype((names_v<D, S>));
+
+template <typename E, enum_subtype S, std::size_t... I>
+constexpr auto entries(std::index_sequence<I...>) noexcept {
+  return std::array<std::pair<E, string_view>, sizeof...(I)>{{{values_v<E, S>[I], enum_name_v<E, values_v<E, S>[I]>}...}};
+}
+
+template <typename E, enum_subtype S>
+inline constexpr auto entries_v = entries<E, S>(std::make_index_sequence<count_v<E, S>>{});
+
+template <typename E, enum_subtype S, typename D = std::decay_t<E>>
+using entries_t = decltype((entries_v<D, S>));
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr bool is_sparse() noexcept {
+  if constexpr (count_v<E, S> == 0) {
+    return false;
+  } else if constexpr (std::is_same_v<U, bool>) { // bool special case
+    return false;
+  } else {
+    constexpr auto max = (S == enum_subtype::flags) ? log2(max_v<E, S>) : max_v<E, S>;
+    constexpr auto min = (S == enum_subtype::flags) ? log2(min_v<E, S>) : min_v<E, S>;
+    constexpr auto range_size = max - min + 1;
+
+    return range_size != count_v<E, S>;
+  }
+}
+
+template <typename E, enum_subtype S = subtype_v<E>>
+inline constexpr bool is_sparse_v = is_sparse<E, S>();
+
+template <typename E, enum_subtype S, typename U = std::underlying_type_t<E>>
+constexpr U values_ors() noexcept {
+  static_assert(S == enum_subtype::flags, "magic_enum::detail::values_ors requires valid subtype.");
+
+  auto ors = U{0};
+  for (std::size_t i = 0; i < count_v<E, S>; ++i) {
+    ors |= static_cast<U>(values_v<E, S>[i]);
+  }
+
+  return ors;
+}
+
+template <bool, typename R>
+struct enable_if_enum {};
+
+template <typename R>
+struct enable_if_enum<true, R> {
+  using type = R;
+  static_assert(supported<R>::value, "magic_enum unsupported compiler (https://github.com/Neargye/magic_enum#compiler-compatibility).");
+};
+
+template <typename T, typename R, typename BinaryPredicate = std::equal_to<>, typename D = std::decay_t<T>>
+using enable_if_t = typename enable_if_enum<std::is_enum_v<D> && std::is_invocable_r_v<bool, BinaryPredicate, char_type, char_type>, R>::type;
+
+template <typename T, std::enable_if_t<std::is_enum_v<std::decay_t<T>>, int> = 0>
+using enum_concept = T;
+
+template <typename T, bool = std::is_enum_v<T>>
+struct is_scoped_enum : std::false_type {};
+
+template <typename T>
+struct is_scoped_enum<T, true> : std::bool_constant<!std::is_convertible_v<T, std::underlying_type_t<T>>> {};
+
+template <typename T, bool = std::is_enum_v<T>>
+struct is_unscoped_enum : std::false_type {};
+
+template <typename T>
+struct is_unscoped_enum<T, true> : std::bool_constant<std::is_convertible_v<T, std::underlying_type_t<T>>> {};
+
+template <typename T, bool = std::is_enum_v<std::decay_t<T>>>
+struct underlying_type {};
+
+template <typename T>
+struct underlying_type<T, true> : std::underlying_type<std::decay_t<T>> {};
+
+#if defined(MAGIC_ENUM_ENABLE_HASH) || defined(MAGIC_ENUM_ENABLE_HASH_SWITCH)
+
+template <typename Value, typename = void>
+struct constexpr_hash_t;
+
+template <typename Value>
+struct constexpr_hash_t<Value, std::enable_if_t<is_enum_v<Value>>> {
+  constexpr auto operator()(Value value) const noexcept {
+    using U = typename underlying_type<Value>::type;
+    if constexpr (std::is_same_v<U, bool>) { // bool special case
+      return static_cast<std::size_t>(value);
+    } else {
+      return static_cast<U>(value);
+    }
+  }
+  using secondary_hash = constexpr_hash_t;
+};
+
+template <typename Value>
+struct constexpr_hash_t<Value, std::enable_if_t<std::is_same_v<Value, string_view>>> {
+  static constexpr std::uint32_t crc_table[256] {
+    0x00000000L, 0x77073096L, 0xee0e612cL, 0x990951baL, 0x076dc419L, 0x706af48fL, 0xe963a535L, 0x9e6495a3L,
+    0x0edb8832L, 0x79dcb8a4L, 0xe0d5e91eL, 0x97d2d988L, 0x09b64c2bL, 0x7eb17cbdL, 0xe7b82d07L, 0x90bf1d91L,
+    0x1db71064L, 0x6ab020f2L, 0xf3b97148L, 0x84be41deL, 0x1adad47dL, 0x6ddde4ebL, 0xf4d4b551L, 0x83d385c7L,
+    0x136c9856L, 0x646ba8c0L, 0xfd62f97aL, 0x8a65c9ecL, 0x14015c4fL, 0x63066cd9L, 0xfa0f3d63L, 0x8d080df5L,
+    0x3b6e20c8L, 0x4c69105eL, 0xd56041e4L, 0xa2677172L, 0x3c03e4d1L, 0x4b04d447L, 0xd20d85fdL, 0xa50ab56bL,
+    0x35b5a8faL, 0x42b2986cL, 0xdbbbc9d6L, 0xacbcf940L, 0x32d86ce3L, 0x45df5c75L, 0xdcd60dcfL, 0xabd13d59L,
+    0x26d930acL, 0x51de003aL, 0xc8d75180L, 0xbfd06116L, 0x21b4f4b5L, 0x56b3c423L, 0xcfba9599L, 0xb8bda50fL,
+    0x2802b89eL, 0x5f058808L, 0xc60cd9b2L, 0xb10be924L, 0x2f6f7c87L, 0x58684c11L, 0xc1611dabL, 0xb6662d3dL,
+    0x76dc4190L, 0x01db7106L, 0x98d220bcL, 0xefd5102aL, 0x71b18589L, 0x06b6b51fL, 0x9fbfe4a5L, 0xe8b8d433L,
+    0x7807c9a2L, 0x0f00f934L, 0x9609a88eL, 0xe10e9818L, 0x7f6a0dbbL, 0x086d3d2dL, 0x91646c97L, 0xe6635c01L,
+    0x6b6b51f4L, 0x1c6c6162L, 0x856530d8L, 0xf262004eL, 0x6c0695edL, 0x1b01a57bL, 0x8208f4c1L, 0xf50fc457L,
+    0x65b0d9c6L, 0x12b7e950L, 0x8bbeb8eaL, 0xfcb9887cL, 0x62dd1ddfL, 0x15da2d49L, 0x8cd37cf3L, 0xfbd44c65L,
+    0x4db26158L, 0x3ab551ceL, 0xa3bc0074L, 0xd4bb30e2L, 0x4adfa541L, 0x3dd895d7L, 0xa4d1c46dL, 0xd3d6f4fbL,
+    0x4369e96aL, 0x346ed9fcL, 0xad678846L, 0xda60b8d0L, 0x44042d73L, 0x33031de5L, 0xaa0a4c5fL, 0xdd0d7cc9L,
+    0x5005713cL, 0x270241aaL, 0xbe0b1010L, 0xc90c2086L, 0x5768b525L, 0x206f85b3L, 0xb966d409L, 0xce61e49fL,
+    0x5edef90eL, 0x29d9c998L, 0xb0d09822L, 0xc7d7a8b4L, 0x59b33d17L, 0x2eb40d81L, 0xb7bd5c3bL, 0xc0ba6cadL,
+    0xedb88320L, 0x9abfb3b6L, 0x03b6e20cL, 0x74b1d29aL, 0xead54739L, 0x9dd277afL, 0x04db2615L, 0x73dc1683L,
+    0xe3630b12L, 0x94643b84L, 0x0d6d6a3eL, 0x7a6a5aa8L, 0xe40ecf0bL, 0x9309ff9dL, 0x0a00ae27L, 0x7d079eb1L,
+    0xf00f9344L, 0x8708a3d2L, 0x1e01f268L, 0x6906c2feL, 0xf762575dL, 0x806567cbL, 0x196c3671L, 0x6e6b06e7L,
+    0xfed41b76L, 0x89d32be0L, 0x10da7a5aL, 0x67dd4accL, 0xf9b9df6fL, 0x8ebeeff9L, 0x17b7be43L, 0x60b08ed5L,
+    0xd6d6a3e8L, 0xa1d1937eL, 0x38d8c2c4L, 0x4fdff252L, 0xd1bb67f1L, 0xa6bc5767L, 0x3fb506ddL, 0x48b2364bL,
+    0xd80d2bdaL, 0xaf0a1b4cL, 0x36034af6L, 0x41047a60L, 0xdf60efc3L, 0xa867df55L, 0x316e8eefL, 0x4669be79L,
+    0xcb61b38cL, 0xbc66831aL, 0x256fd2a0L, 0x5268e236L, 0xcc0c7795L, 0xbb0b4703L, 0x220216b9L, 0x5505262fL,
+    0xc5ba3bbeL, 0xb2bd0b28L, 0x2bb45a92L, 0x5cb36a04L, 0xc2d7ffa7L, 0xb5d0cf31L, 0x2cd99e8bL, 0x5bdeae1dL,
+    0x9b64c2b0L, 0xec63f226L, 0x756aa39cL, 0x026d930aL, 0x9c0906a9L, 0xeb0e363fL, 0x72076785L, 0x05005713L,
+    0x95bf4a82L, 0xe2b87a14L, 0x7bb12baeL, 0x0cb61b38L, 0x92d28e9bL, 0xe5d5be0dL, 0x7cdcefb7L, 0x0bdbdf21L,
+    0x86d3d2d4L, 0xf1d4e242L, 0x68ddb3f8L, 0x1fda836eL, 0x81be16cdL, 0xf6b9265bL, 0x6fb077e1L, 0x18b74777L,
+    0x88085ae6L, 0xff0f6a70L, 0x66063bcaL, 0x11010b5cL, 0x8f659effL, 0xf862ae69L, 0x616bffd3L, 0x166ccf45L,
+    0xa00ae278L, 0xd70dd2eeL, 0x4e048354L, 0x3903b3c2L, 0xa7672661L, 0xd06016f7L, 0x4969474dL, 0x3e6e77dbL,
+    0xaed16a4aL, 0xd9d65adcL, 0x40df0b66L, 0x37d83bf0L, 0xa9bcae53L, 0xdebb9ec5L, 0x47b2cf7fL, 0x30b5ffe9L,
+    0xbdbdf21cL, 0xcabac28aL, 0x53b39330L, 0x24b4a3a6L, 0xbad03605L, 0xcdd70693L, 0x54de5729L, 0x23d967bfL,
+    0xb3667a2eL, 0xc4614ab8L, 0x5d681b02L, 0x2a6f2b94L, 0xb40bbe37L, 0xc30c8ea1L, 0x5a05df1bL, 0x2d02ef8dL
+  };
+  constexpr std::uint32_t operator()(string_view value) const noexcept {
+    auto crc = static_cast<std::uint32_t>(0xffffffffL);
+    for (const auto c : value) {
+      crc = (crc >> 8) ^ crc_table[(crc ^ static_cast<std::uint32_t>(c)) & 0xff];
+    }
+    return crc ^ 0xffffffffL;
+  }
+
+  struct secondary_hash {
+    constexpr std::uint32_t operator()(string_view value) const noexcept {
+      auto acc = static_cast<std::uint64_t>(2166136261ULL);
+      for (const auto c : value) {
+        acc = ((acc ^ static_cast<std::uint64_t>(c)) * static_cast<std::uint64_t>(16777619ULL)) & (std::numeric_limits<std::uint32_t>::max)();
+      }
+      return static_cast<std::uint32_t>(acc);
+    }
+  };
+};
+
+template <typename Hash>
+inline constexpr Hash hash_v{};
+
+template <auto* GlobValues, typename Hash>
+constexpr auto calculate_cases(std::size_t Page) noexcept {
+  constexpr std::array values = *GlobValues;
+  constexpr std::size_t size = values.size();
+
+  using switch_t = std::invoke_result_t<Hash, typename decltype(values)::value_type>;
+  static_assert(std::is_integral_v<switch_t> && !std::is_same_v<switch_t, bool>);
+  const std::size_t values_to = (std::min)(static_cast<std::size_t>(256), size - Page);
+
+  std::array<switch_t, 256> result{};
+  auto fill = result.begin();
+  {
+    auto first = values.begin() + static_cast<std::ptrdiff_t>(Page);
+    auto last = values.begin() + static_cast<std::ptrdiff_t>(Page + values_to);
+    while (first != last) {
+      *fill++ = hash_v<Hash>(*first++);
+    }
+  }
+
+  // dead cases, try to avoid case collisions
+  for (switch_t last_value = result[values_to - 1]; fill != result.end() && last_value != (std::numeric_limits<switch_t>::max)(); *fill++ = ++last_value) {
+  }
+
+  {
+    auto it = result.begin();
+    auto last_value = (std::numeric_limits<switch_t>::min)();
+    for (; fill != result.end(); *fill++ = last_value++) {
+      while (last_value == *it) {
+        ++last_value, ++it;
+      }
+    }
+  }
+
+  return result;
+}
+
+template <typename R, typename F, typename... Args>
+constexpr R invoke_r(F&& f, Args&&... args) noexcept(std::is_nothrow_invocable_r_v<R, F, Args...>) {
+  if constexpr (std::is_void_v<R>) {
+    std::forward<F>(f)(std::forward<Args>(args)...);
+  } else {
+    return static_cast<R>(std::forward<F>(f)(std::forward<Args>(args)...));
+  }
+}
+
+enum class case_call_t {
+  index,
+  value
+};
+
+template <typename T = void>
+inline constexpr auto default_result_type_lambda = []() noexcept(std::is_nothrow_default_constructible_v<T>) { return T{}; };
+
+template <>
+inline constexpr auto default_result_type_lambda<void> = []() noexcept {};
+
+template <auto* Arr, typename Hash>
+constexpr bool has_duplicate() noexcept {
+  using value_t = std::decay_t<decltype((*Arr)[0])>;
+  using hash_value_t = std::invoke_result_t<Hash, value_t>;
+  std::array<hash_value_t, Arr->size()> hashes{};
+  std::size_t size = 0;
+  for (auto elem : *Arr) {
+    hashes[size] = hash_v<Hash>(elem);
+    for (auto i = size++; i > 0; --i) {
+      if (hashes[i] < hashes[i - 1]) {
+        auto tmp = hashes[i];
+        hashes[i] = hashes[i - 1];
+        hashes[i - 1] = tmp;
+      } else if (hashes[i] == hashes[i - 1]) {
+        return false;
+      } else {
+        break;
+      }
+    }
+  }
+  return true;
+}
+
+#define MAGIC_ENUM_CASE(val)                                                                                                  \
+  case cases[val]:                                                                                                            \
+    if constexpr ((val) + Page < size) {                                                                                      \
+      if (!pred(values[val + Page], searched)) {                                                                              \
+        break;                                                                                                                \
+      }                                                                                                                       \
+      if constexpr (CallValue == case_call_t::index) {                                                                        \
+        if constexpr (std::is_invocable_r_v<result_t, Lambda, std::integral_constant<std::size_t, val + Page>>) {             \
+          return detail::invoke_r<result_t>(std::forward<Lambda>(lambda), std::integral_constant<std::size_t, val + Page>{}); \
+        } else if constexpr (std::is_invocable_v<Lambda, std::integral_constant<std::size_t, val + Page>>) {                  \
+          MAGIC_ENUM_ASSERT(false && "magic_enum::detail::constexpr_switch wrong result type.");                                         \
+        }                                                                                                                     \
+      } else if constexpr (CallValue == case_call_t::value) {                                                                 \
+        if constexpr (std::is_invocable_r_v<result_t, Lambda, enum_constant<values[val + Page]>>) {                           \
+          return detail::invoke_r<result_t>(std::forward<Lambda>(lambda), enum_constant<values[val + Page]>{});               \
+        } else if constexpr (std::is_invocable_r_v<result_t, Lambda, enum_constant<values[val + Page]>>) {                    \
+          MAGIC_ENUM_ASSERT(false && "magic_enum::detail::constexpr_switch wrong result type.");                                         \
+        }                                                                                                                     \
+      }                                                                                                                       \
+      break;                                                                                                                  \
+    } else [[fallthrough]];
+
+template <auto* GlobValues,
+          case_call_t CallValue,
+          std::size_t Page = 0,
+          typename Hash = constexpr_hash_t<typename std::decay_t<decltype(*GlobValues)>::value_type>,
+          typename BinaryPredicate = std::equal_to<>,
+          typename Lambda,
+          typename ResultGetterType>
+constexpr decltype(auto) constexpr_switch(
+    Lambda&& lambda,
+    typename std::decay_t<decltype(*GlobValues)>::value_type searched,
+    ResultGetterType&& def,
+    BinaryPredicate&& pred = {}) {
+  using result_t = std::invoke_result_t<ResultGetterType>;
+  using hash_t = std::conditional_t<has_duplicate<GlobValues, Hash>(), Hash, typename Hash::secondary_hash>;
+  static_assert(has_duplicate<GlobValues, hash_t>(), "magic_enum::detail::constexpr_switch duplicated hash found, please report it: https://github.com/Neargye/magic_enum/issues.");
+  constexpr std::array values = *GlobValues;
+  constexpr std::size_t size = values.size();
+  constexpr std::array cases = calculate_cases<GlobValues, hash_t>(Page);
+
+  switch (hash_v<hash_t>(searched)) {
+    MAGIC_ENUM_FOR_EACH_256(MAGIC_ENUM_CASE)
+    default:
+      if constexpr (size > 256 + Page) {
+        return constexpr_switch<GlobValues, CallValue, Page + 256, Hash>(std::forward<Lambda>(lambda), searched, std::forward<ResultGetterType>(def));
+      }
+      break;
+  }
+  return def();
+}
+
+#undef MAGIC_ENUM_CASE
+
+#endif
+
+} // namespace magic_enum::detail
+
+// Checks is magic_enum supported compiler.
+inline constexpr bool is_magic_enum_supported = detail::supported<void>::value;
+
+template <typename T>
+using Enum = detail::enum_concept<T>;
+
+// Checks whether T is an Unscoped enumeration type.
+// Provides the member constant value which is equal to true, if T is an [Unscoped enumeration](https://en.cppreference.com/w/cpp/language/enum#Unscoped_enumeration) type. Otherwise, value is equal to false.
+template <typename T>
+struct is_unscoped_enum : detail::is_unscoped_enum<T> {};
+
+template <typename T>
+inline constexpr bool is_unscoped_enum_v = is_unscoped_enum<T>::value;
+
+// Checks whether T is an Scoped enumeration type.
+// Provides the member constant value which is equal to true, if T is an [Scoped enumeration](https://en.cppreference.com/w/cpp/language/enum#Scoped_enumerations) type. Otherwise, value is equal to false.
+template <typename T>
+struct is_scoped_enum : detail::is_scoped_enum<T> {};
+
+template <typename T>
+inline constexpr bool is_scoped_enum_v = is_scoped_enum<T>::value;
+
+// If T is a complete enumeration type, provides a member typedef type that names the underlying type of T.
+// Otherwise, if T is not an enumeration type, there is no member type. Otherwise (T is an incomplete enumeration type), the program is ill-formed.
+template <typename T>
+struct underlying_type : detail::underlying_type<T> {};
+
+template <typename T>
+using underlying_type_t = typename underlying_type<T>::type;
+
+template <auto V>
+using enum_constant = detail::enum_constant<V>;
+
+// Returns type name of enum.
+template <typename E>
+[[nodiscard]] constexpr auto enum_type_name() noexcept -> detail::enable_if_t<E, string_view> {
+  constexpr string_view name = detail::type_name_v<std::decay_t<E>>;
+  static_assert(!name.empty(), "magic_enum::enum_type_name enum type does not have a name.");
+
+  return name;
+}
+
+// Returns number of enum values.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_count() noexcept -> detail::enable_if_t<E, std::size_t> {
+  return detail::count_v<std::decay_t<E>, S>;
+}
+
+// Returns enum value at specified index.
+// No bounds checking is performed: the behavior is undefined if index >= number of enum values.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_value(std::size_t index) noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
+  using D = std::decay_t<E>;
+
+  if constexpr (detail::is_sparse_v<D, S>) {
+    return MAGIC_ENUM_ASSERT(index < detail::count_v<D, S>), detail::values_v<D, S>[index];
+  } else {
+    constexpr auto min = (S == detail::enum_subtype::flags) ? detail::log2(detail::min_v<D, S>) : detail::min_v<D, S>;
+
+    return MAGIC_ENUM_ASSERT(index < detail::count_v<D, S>), detail::value<D, min, S>(index);
+  }
+}
+
+// Returns enum value at specified index.
+template <typename E, std::size_t I, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_value() noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
+  using D = std::decay_t<E>;
+  static_assert(I < detail::count_v<D, S>, "magic_enum::enum_value out of range.");
+
+  return enum_value<D, S>(I);
+}
+
+// Returns std::array with enum values, sorted by enum value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_values() noexcept -> detail::enable_if_t<E, detail::values_t<E, S>> {
+  return detail::values_v<std::decay_t<E>, S>;
+}
+
+// Returns integer value from enum value.
+template <typename E>
+[[nodiscard]] constexpr auto enum_integer(E value) noexcept -> detail::enable_if_t<E, underlying_type_t<E>> {
+  return static_cast<underlying_type_t<E>>(value);
+}
+
+// Returns underlying value from enum value.
+template <typename E>
+[[nodiscard]] constexpr auto enum_underlying(E value) noexcept -> detail::enable_if_t<E, underlying_type_t<E>> {
+  return static_cast<underlying_type_t<E>>(value);
+}
+
+// Obtains index in enum values from enum value.
+// Returns optional with index.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_index(E value) noexcept -> detail::enable_if_t<E, optional<std::size_t>> {
+  using D = std::decay_t<E>;
+  using U = underlying_type_t<D>;
+
+  if constexpr (detail::count_v<D, S> == 0) {
+    static_cast<void>(value);
+    return {}; // Empty enum.
+  } else if constexpr (detail::is_sparse_v<D, S> || (S == detail::enum_subtype::flags)) {
+#if defined(MAGIC_ENUM_ENABLE_HASH)
+    return detail::constexpr_switch<&detail::values_v<D, S>, detail::case_call_t::index>(
+        [](std::size_t i) { return optional<std::size_t>{i}; },
+        value,
+        detail::default_result_type_lambda<optional<std::size_t>>);
+#else
+    for (std::size_t i = 0; i < detail::count_v<D, S>; ++i) {
+      if (enum_value<D, S>(i) == value) {
+        return i;
+      }
+    }
+    return {}; // Invalid value or out of range.
+#endif
+  } else {
+    const auto v = static_cast<U>(value);
+    if (v >= detail::min_v<D, S> && v <= detail::max_v<D, S>) {
+      return static_cast<std::size_t>(v - detail::min_v<D, S>);
+    }
+    return {}; // Invalid value or out of range.
+  }
+}
+
+// Obtains index in enum values from enum value.
+// Returns optional with index.
+template <detail::enum_subtype S, typename E>
+[[nodiscard]] constexpr auto enum_index(E value) noexcept -> detail::enable_if_t<E, optional<std::size_t>> {
+  using D = std::decay_t<E>;
+
+  return enum_index<D, S>(value);
+}
+
+// Obtains index in enum values from static storage enum variable.
+template <auto V, detail::enum_subtype S = detail::subtype_v<std::decay_t<decltype(V)>>>
+[[nodiscard]] constexpr auto enum_index() noexcept -> detail::enable_if_t<decltype(V), std::size_t> {
+  constexpr auto index = enum_index<std::decay_t<decltype(V)>, S>(V);
+  static_assert(index, "magic_enum::enum_index enum value does not have a index.");
+
+  return *index;
+}
+
+// Returns name from static storage enum variable.
+// This version is much lighter on the compile times and is not restricted to the enum_range limitation.
+template <auto V>
+[[nodiscard]] constexpr auto enum_name() noexcept -> detail::enable_if_t<decltype(V), string_view> {
+  constexpr string_view name = detail::enum_name_v<std::decay_t<decltype(V)>, V>;
+  static_assert(!name.empty(), "magic_enum::enum_name enum value does not have a name.");
+
+  return name;
+}
+
+// Returns name from enum value.
+// If enum value does not have name or value out of range, returns empty string.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_name(E value) noexcept -> detail::enable_if_t<E, string_view> {
+  using D = std::decay_t<E>;
+
+  if (const auto i = enum_index<D, S>(value)) {
+    return detail::names_v<D, S>[*i];
+  }
+  return {};
+}
+
+// Returns name from enum value.
+// If enum value does not have name or value out of range, returns empty string.
+template <detail::enum_subtype S, typename E>
+[[nodiscard]] constexpr auto enum_name(E value) -> detail::enable_if_t<E, string_view> {
+  using D = std::decay_t<E>;
+
+  return enum_name<D, S>(value);
+}
+
+// Returns std::array with names, sorted by enum value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_names() noexcept -> detail::enable_if_t<E, detail::names_t<E, S>> {
+  return detail::names_v<std::decay_t<E>, S>;
+}
+
+// Returns std::array with pairs (value, name), sorted by enum value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_entries() noexcept -> detail::enable_if_t<E, detail::entries_t<E, S>> {
+  return detail::entries_v<std::decay_t<E>, S>;
+}
+
+// Allows you to write magic_enum::enum_cast<foo>("bar", magic_enum::case_insensitive);
+inline constexpr auto case_insensitive = detail::case_insensitive<>{};
+
+// Obtains enum value from integer value.
+// Returns optional with enum value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_cast(underlying_type_t<E> value) noexcept -> detail::enable_if_t<E, optional<std::decay_t<E>>> {
+  using D = std::decay_t<E>;
+
+  if constexpr (detail::count_v<D, S> == 0) {
+    static_cast<void>(value);
+    return {}; // Empty enum.
+  } else {
+    if constexpr (detail::is_sparse_v<D, S> || (S == detail::enum_subtype::flags)) {
+#if defined(MAGIC_ENUM_ENABLE_HASH)
+      return detail::constexpr_switch<&detail::values_v<D, S>, detail::case_call_t::value>(
+          [](D v) { return optional<D>{v}; },
+          static_cast<D>(value),
+          detail::default_result_type_lambda<optional<D>>);
+#else
+      for (std::size_t i = 0; i < detail::count_v<D, S>; ++i) {
+        if (value == static_cast<underlying_type_t<D>>(enum_value<D, S>(i))) {
+          return static_cast<D>(value);
+        }
+      }
+      return {}; // Invalid value or out of range.
+#endif
+    } else {
+      if (value >= detail::min_v<D, S> && value <= detail::max_v<D, S>) {
+        return static_cast<D>(value);
+      }
+      return {}; // Invalid value or out of range.
+    }
+  }
+}
+
+// Obtains enum value from name.
+// Returns optional with enum value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>, typename BinaryPredicate = std::equal_to<>>
+[[nodiscard]] constexpr auto enum_cast(string_view value, [[maybe_unused]] BinaryPredicate p = {}) noexcept(detail::is_nothrow_invocable<BinaryPredicate>()) -> detail::enable_if_t<E, optional<std::decay_t<E>>, BinaryPredicate> {
+  using D = std::decay_t<E>;
+
+  if constexpr (detail::count_v<D, S> == 0) {
+    static_cast<void>(value);
+    return {}; // Empty enum.
+#if defined(MAGIC_ENUM_ENABLE_HASH)
+    } else if constexpr (detail::is_default_predicate<BinaryPredicate>()) {
+      return detail::constexpr_switch<&detail::names_v<D, S>, detail::case_call_t::index>(
+          [](std::size_t i) { return optional<D>{detail::values_v<D, S>[i]}; },
+          value,
+          detail::default_result_type_lambda<optional<D>>,
+          [&p](string_view lhs, string_view rhs) { return detail::cmp_equal(lhs, rhs, p); });
+#endif
+    } else {
+    for (std::size_t i = 0; i < detail::count_v<D, S>; ++i) {
+      if (detail::cmp_equal(value, detail::names_v<D, S>[i], p)) {
+        return enum_value<D, S>(i);
+      }
+    }
+    return {}; // Invalid value or out of range.
+  }
+}
+
+// Checks whether enum contains value with such value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_contains(E value) noexcept -> detail::enable_if_t<E, bool> {
+  using D = std::decay_t<E>;
+  using U = underlying_type_t<D>;
+
+  return static_cast<bool>(enum_cast<D, S>(static_cast<U>(value)));
+}
+
+// Checks whether enum contains value with such value.
+template <detail::enum_subtype S, typename E>
+[[nodiscard]] constexpr auto enum_contains(E value) noexcept -> detail::enable_if_t<E, bool> {
+  using D = std::decay_t<E>;
+  using U = underlying_type_t<D>;
+
+  return static_cast<bool>(enum_cast<D, S>(static_cast<U>(value)));
+}
+
+// Checks whether enum contains value with such integer value.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_contains(underlying_type_t<E> value) noexcept -> detail::enable_if_t<E, bool> {
+  using D = std::decay_t<E>;
+
+  return static_cast<bool>(enum_cast<D, S>(value));
+}
+
+// Checks whether enum contains enumerator with such name.
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>, typename BinaryPredicate = std::equal_to<>>
+[[nodiscard]] constexpr auto enum_contains(string_view value, BinaryPredicate p = {}) noexcept(detail::is_nothrow_invocable<BinaryPredicate>()) -> detail::enable_if_t<E, bool, BinaryPredicate> {
+  using D = std::decay_t<E>;
+
+  return static_cast<bool>(enum_cast<D, S>(value, std::move(p)));
+}
+
+template <bool AsFlags = true>
+inline constexpr auto as_flags = AsFlags ? detail::enum_subtype::flags : detail::enum_subtype::common;
+
+template <bool AsFlags = true>
+inline constexpr auto as_common = AsFlags ? detail::enum_subtype::common : detail::enum_subtype::flags;
+
+namespace bitwise_operators {
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E operator~(E rhs) noexcept {
+  return static_cast<E>(~static_cast<underlying_type_t<E>>(rhs));
+}
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E operator|(E lhs, E rhs) noexcept {
+  return static_cast<E>(static_cast<underlying_type_t<E>>(lhs) | static_cast<underlying_type_t<E>>(rhs));
+}
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E operator&(E lhs, E rhs) noexcept {
+  return static_cast<E>(static_cast<underlying_type_t<E>>(lhs) & static_cast<underlying_type_t<E>>(rhs));
+}
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E operator^(E lhs, E rhs) noexcept {
+  return static_cast<E>(static_cast<underlying_type_t<E>>(lhs) ^ static_cast<underlying_type_t<E>>(rhs));
+}
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E& operator|=(E& lhs, E rhs) noexcept {
+  return lhs = (lhs | rhs);
+}
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E& operator&=(E& lhs, E rhs) noexcept {
+  return lhs = (lhs & rhs);
+}
+
+template <typename E, detail::enable_if_t<E, int> = 0>
+constexpr E& operator^=(E& lhs, E rhs) noexcept {
+  return lhs = (lhs ^ rhs);
+}
+
+} // namespace magic_enum::bitwise_operators
+
+} // namespace magic_enum
+
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#  pragma warning(pop)
+#endif
+
+#undef MAGIC_ENUM_GET_ENUM_NAME_BUILTIN
+#undef MAGIC_ENUM_GET_TYPE_NAME_BUILTIN
+#undef MAGIC_ENUM_VS_2017_WORKAROUND
+#undef MAGIC_ENUM_ARRAY_CONSTEXPR
+#undef MAGIC_ENUM_FOR_EACH_256
+
+#endif // NEARGYE_MAGIC_ENUM_HPP
+
+// #include <magic_enum_utility.hpp>
+//  __  __             _        ______                          _____
+// |  \/  |           (_)      |  ____|                        / ____|_     _
+// | \  / | __ _  __ _ _  ___  | |__   _ __  _   _ _ __ ___   | |   _| |_ _| |_
+// | |\/| |/ _` |/ _` | |/ __| |  __| | '_ \| | | | '_ ` _ \  | |  |_   _|_   _|
+// | |  | | (_| | (_| | | (__  | |____| | | | |_| | | | | | | | |____|_|   |_|
+// |_|  |_|\__,_|\__, |_|\___| |______|_| |_|\__,_|_| |_| |_|  \_____|
+//                __/ | https://github.com/Neargye/magic_enum
+//               |___/  version 0.9.3
+//
+// Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2019 - 2023 Daniil Goncharov <neargye@gmail.com>.
+//
+// Permission is hereby  granted, free of charge, to any  person obtaining a copy
+// of this software and associated  documentation files (the "Software"), to deal
+// in the Software  without restriction, including without  limitation the rights
+// to  use, copy,  modify, merge,  publish, distribute,  sublicense, and/or  sell
+// copies  of  the Software,  and  to  permit persons  to  whom  the Software  is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE  IS PROVIDED "AS  IS", WITHOUT WARRANTY  OF ANY KIND,  EXPRESS OR
+// IMPLIED,  INCLUDING BUT  NOT  LIMITED TO  THE  WARRANTIES OF  MERCHANTABILITY,
+// FITNESS FOR  A PARTICULAR PURPOSE AND  NONINFRINGEMENT. IN NO EVENT  SHALL THE
+// AUTHORS  OR COPYRIGHT  HOLDERS  BE  LIABLE FOR  ANY  CLAIM,  DAMAGES OR  OTHER
+// LIABILITY, WHETHER IN AN ACTION OF  CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#ifndef NEARGYE_MAGIC_ENUM_UTILITY_HPP
+#define NEARGYE_MAGIC_ENUM_UTILITY_HPP
+
+// #include "magic_enum.hpp"
+
+
+namespace magic_enum {
+
+namespace detail {
+
+template <typename E, enum_subtype S, typename F, std::size_t... I>
+constexpr auto for_each(F&& f, std::index_sequence<I...>) {
+  constexpr bool has_void_return = (std::is_void_v<std::invoke_result_t<F, enum_constant<values_v<E, S>[I]>>> || ...);
+  constexpr bool all_same_return = (std::is_same_v<std::invoke_result_t<F, enum_constant<values_v<E, S>[0]>>, std::invoke_result_t<F, enum_constant<values_v<E, S>[I]>>> && ...);
+
+  if constexpr (has_void_return) {
+    (f(enum_constant<values_v<E, S>[I]>{}), ...);
+  } else if constexpr (all_same_return) {
+    return std::array{f(enum_constant<values_v<E, S>[I]>{})...};
+  } else {
+    return std::tuple{f(enum_constant<values_v<E, S>[I]>{})...};
+  }
+}
+
+template <typename E, enum_subtype S, typename F,std::size_t... I>
+constexpr bool all_invocable(std::index_sequence<I...>) {
+  if constexpr (count_v<E, S> == 0) {
+    return false;
+  } else {
+    return (std::is_invocable_v<F, enum_constant<values_v<E, S>[I]>> && ...);
+  }
+}
+
+} // namespace magic_enum::detail
+
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>, typename F, detail::enable_if_t<E, int> = 0>
+constexpr auto enum_for_each(F&& f) {
+  using D = std::decay_t<E>;
+  static_assert(std::is_enum_v<D>, "magic_enum::enum_for_each requires enum type.");
+  constexpr auto sep = std::make_index_sequence<detail::count_v<D, S>>{};
+
+  if constexpr (detail::all_invocable<D, S, F>(sep)) {
+    return detail::for_each<D, S>(std::forward<F>(f), sep);
+  } else {
+    static_assert(detail::always_false_v<D>, "magic_enum::enum_for_each requires invocable of all enum value.");
+  }
+}
+
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_next_value(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, optional<std::decay_t<E>>> {
+  using D = std::decay_t<E>;
+  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
+
+  if (const auto i = enum_index<D, S>(value)) {
+    const std::ptrdiff_t index = (static_cast<std::ptrdiff_t>(*i) + n);
+    if (index >= 0 && index < count) {
+      return enum_value<D, S>(index);
+    }
+  }
+  return {};
+}
+
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_next_value_circular(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
+  using D = std::decay_t<E>;
+  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
+
+  if (const auto i = enum_index<D, S>(value)) {
+    const std::ptrdiff_t index = ((((static_cast<std::ptrdiff_t>(*i) + n) % count) + count) % count);
+    if (index >= 0 && index < count) {
+      return enum_value<D, S>(index);
+    }
+  }
+  return MAGIC_ENUM_ASSERT(false), value;
+}
+
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_prev_value(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, optional<std::decay_t<E>>> {
+  using D = std::decay_t<E>;
+  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
+
+  if (const auto i = enum_index<D, S>(value)) {
+    const std::ptrdiff_t index = (static_cast<std::ptrdiff_t>(*i) - n);
+    if (index >= 0 && index < count) {
+      return enum_value<D, S>(index);
+    }
+  }
+  return {};
+}
+
+template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
+[[nodiscard]] constexpr auto enum_prev_value_circular(E value, std::ptrdiff_t n = 1) noexcept -> detail::enable_if_t<E, std::decay_t<E>> {
+  using D = std::decay_t<E>;
+  constexpr std::ptrdiff_t count = detail::count_v<D, S>;
+
+  if (const auto i = enum_index<D, S>(value)) {
+    const std::ptrdiff_t index = ((((static_cast<std::ptrdiff_t>(*i) - n) % count) + count) % count);
+    if (index >= 0 && index < count) {
+      return enum_value<D, S>(index);
+    }
+  }
+  return MAGIC_ENUM_ASSERT(false), value;
+}
+
+} // namespace magic_enum
+
+#endif // NEARGYE_MAGIC_ENUM_UTILITY_HPP
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
+// #include <gnuradio-4.0/meta/typelist.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+#ifndef GNURADIO_GRAPH_UTILS_HPP
+#define GNURADIO_GRAPH_UTILS_HPP
+
+#include <complex>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <new>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
+
+#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
+// #include <vir/simd.h>
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2022-2023 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_SIMD_H_
+#define VIR_SIMD_H_
+
+#if __cplusplus < 201703L
+#error "simd requires C++17 or later"
+#endif
+
+#if __has_include (<experimental/simd>) && !defined VIR_DISABLE_STDX_SIMD && !defined __clang__
+#include <experimental/simd>
+#endif
+
+#if defined __cpp_lib_experimental_parallel_simd && __cpp_lib_experimental_parallel_simd >= 201803
+
+namespace vir::stdx
+{
+  using namespace std::experimental::parallelism_v2;
+  using namespace std::experimental::parallelism_v2::__proposed;
+}
+
+#else
+
+#include <cmath>
+#include <cstring>
+#ifdef _GLIBCXX_DEBUG_UB
+#include <cstdio>
+#endif
+#include <functional>
+#include <limits>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+#ifdef VIR_SIMD_TS_DROPIN
+namespace std::experimental
+{
+  inline namespace [[gnu::diagnose_as("virx")]] parallelism_v2
+#else
+namespace vir::stdx
+#endif
+{
+  using std::size_t;
+
+  namespace detail
+  {
+    template <typename T>
+      struct type_identity
+      { using type = T; };
+
+    template <typename T>
+      using type_identity_t = typename type_identity<T>::type;
+
+    constexpr size_t
+    bit_ceil(size_t x)
+    {
+      size_t r = 1;
+      while (r < x)
+        r <<= 1;
+      return r;
+    }
+
+    constexpr size_t
+    bit_floor(size_t x)
+    {
+      size_t r = x;
+      do {
+        r = x;
+        x &= x - 1;
+      } while (x);
+      return r;
+    }
+
+    template <typename T>
+      typename T::value_type
+      value_type_or_identity_impl(int);
+
+    template <typename T>
+      T
+      value_type_or_identity_impl(float);
+
+    template <typename T>
+      using value_type_or_identity_t
+        = decltype(value_type_or_identity_impl<T>(int()));
+
+    class ExactBool
+    {
+      const bool data;
+
+    public:
+      constexpr ExactBool(bool b) : data(b) {}
+
+      ExactBool(int) = delete;
+
+      constexpr operator bool() const { return data; }
+    };
+
+    template <typename... Args>
+      [[noreturn]] [[gnu::always_inline]] inline void
+      invoke_ub([[maybe_unused]] const char* msg,
+                [[maybe_unused]] const Args&... args)
+      {
+#ifdef _GLIBCXX_DEBUG_UB
+        std::fprintf(stderr, msg, args...);
+        __builtin_trap();
+#else
+        __builtin_unreachable();
+#endif
+      }
+
+    template <typename T>
+      using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
+
+    template <typename T>
+      using L = std::numeric_limits<T>;
+
+    template <bool B>
+      using BoolConstant = std::integral_constant<bool, B>;
+
+    template <size_t X>
+      using SizeConstant = std::integral_constant<size_t, X>;
+
+    template <size_t I, typename T, typename... Ts>
+      constexpr auto
+      pack_simd_subscript(const T& x0, const Ts&... xs)
+      {
+        if constexpr (I >= T::size())
+          return pack_simd_subscript<I - T::size()>(xs...);
+        else
+          return x0[I];
+      }
+
+    template <class T>
+      struct is_vectorizable : std::is_arithmetic<T>
+      {};
+
+    template <>
+      struct is_vectorizable<bool> : std::false_type
+      {};
+
+    template <class T>
+      inline constexpr bool is_vectorizable_v = is_vectorizable<T>::value;
+
+    template <class T, typename = void>
+      struct only_vectorizable
+      {
+        only_vectorizable() = delete;
+        only_vectorizable(const only_vectorizable&) = delete;
+        only_vectorizable(only_vectorizable&&) = delete;
+        ~only_vectorizable() = delete;
+      };
+
+    template <class T>
+      struct only_vectorizable<T, std::enable_if_t<is_vectorizable_v<T>>>
+      {
+      };
+
+    // Deduces to a vectorizable type
+    template <typename T, typename = std::enable_if_t<is_vectorizable_v<T>>>
+      using Vectorizable = T;
+
+    // Deduces to a floating-point type
+    template <typename T, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+      using FloatingPoint = T;
+
+    // Deduces to a signed integer type
+    template <typename T, typename = std::enable_if_t<std::conjunction_v<std::is_integral<T>,
+                                                                         std::is_signed<T>>>>
+      using SignedIntegral = T;
+
+    // is_higher_integer_rank<T, U> (T has higher or equal integer rank than U)
+    template <typename T, typename U, bool = (sizeof(T) > sizeof(U)),
+              bool = (sizeof(T) == sizeof(U))>
+      struct is_higher_integer_rank;
+
+    template <typename T>
+      struct is_higher_integer_rank<T, T, false, true>
+      : public std::true_type
+      {};
+
+    template <typename T, typename U>
+      struct is_higher_integer_rank<T, U, true, false>
+      : public std::true_type
+      {};
+
+    template <typename T, typename U>
+      struct is_higher_integer_rank<T, U, false, false>
+      : public std::false_type
+      {};
+
+    // this may fail for char -> short if sizeof(char) == sizeof(short)
+    template <typename T, typename U>
+      struct is_higher_integer_rank<T, U, false, true>
+      : public std::is_same<decltype(std::declval<T>() + std::declval<U>()), T>
+      {};
+
+    // is_value_preserving<From, To>
+    template <typename From, typename To, bool = std::is_arithmetic_v<From>,
+              bool = std::is_arithmetic_v<To>>
+      struct is_value_preserving;
+
+    // ignore "signed/unsigned mismatch" in the following trait.
+    // The implicit conversions will do the right thing here.
+    template <typename From, typename To>
+      struct is_value_preserving<From, To, true, true>
+      : public BoolConstant<L<From>::digits <= L<To>::digits
+                              && L<From>::max() <= L<To>::max()
+                              && L<From>::lowest() >= L<To>::lowest()
+                              && !(std::is_signed_v<From> && std::is_unsigned_v<To>)> {};
+
+    template <typename T>
+      struct is_value_preserving<T, bool, true, true>
+      : public std::false_type {};
+
+    template <>
+      struct is_value_preserving<bool, bool, true, true>
+      : public std::true_type {};
+
+    template <typename T>
+      struct is_value_preserving<T, T, true, true>
+      : public std::true_type {};
+
+    template <typename From, typename To>
+      struct is_value_preserving<From, To, false, true>
+      : public std::is_convertible<From, To> {};
+
+    template <typename From, typename To,
+              typename = std::enable_if_t<is_value_preserving<remove_cvref_t<From>, To>::value>>
+      using ValuePreserving = From;
+
+    template <typename From, typename To,
+              typename DecayedFrom = remove_cvref_t<From>,
+              typename = std::enable_if_t<std::conjunction<
+                                            std::is_convertible<From, To>,
+                                            std::disjunction<
+                                              std::is_same<DecayedFrom, To>,
+                                              std::is_same<DecayedFrom, int>,
+                                              std::conjunction<std::is_same<DecayedFrom, unsigned>,
+                                                               std::is_unsigned<To>>,
+                                              is_value_preserving<DecayedFrom, To>>>::value>>
+      using ValuePreservingOrInt = From;
+
+    // LoadStorePtr / is_possible_loadstore_conversion
+    template <typename Ptr, typename ValueType>
+      struct is_possible_loadstore_conversion
+      : std::conjunction<is_vectorizable<Ptr>, is_vectorizable<ValueType>>
+      {};
+
+    template <>
+      struct is_possible_loadstore_conversion<bool, bool> : std::true_type {};
+
+    // Deduces to a type allowed for load/store with the given value type.
+    template <typename Ptr, typename ValueType,
+              typename = std::enable_if_t<
+                           is_possible_loadstore_conversion<Ptr, ValueType>::value>>
+      using LoadStorePtr = Ptr;
+  }
+
+  namespace simd_abi
+  {
+    struct scalar
+    {};
+
+    template <typename>
+      inline constexpr int max_fixed_size = 32;
+
+    template <int N>
+      struct fixed_size
+      {};
+
+    template <class T>
+      using native =
+        std::conditional_t<(sizeof(T) > 8),
+                           scalar,
+                           fixed_size<
+#ifdef __AVX512F__
+                             64
+#elif defined __AVX2__
+                             32
+#elif defined __AVX__
+                             std::is_floating_point_v<T> ? 32 : 16
+#else
+                             16
+#endif
+                               / sizeof(T)
+                           >
+                          >;
+
+    template <class T>
+      using compatible = std::conditional_t<(sizeof(T) > 8),
+                                            scalar,
+                                            fixed_size<16 / sizeof(T)>>;
+
+    template <typename T, size_t N, typename...>
+      struct deduce
+      { using type = std::conditional_t<N == 1, scalar, fixed_size<int(N)>>; };
+
+    template <typename T, size_t N, typename... Abis>
+      using deduce_t = typename deduce<T, N, Abis...>::type;
+  }
+
+  // flags //
+  struct element_aligned_tag
+  {};
+
+  struct vector_aligned_tag
+  {};
+
+  template <size_t>
+    struct overaligned_tag
+    {};
+
+  inline constexpr element_aligned_tag element_aligned{};
+
+  inline constexpr vector_aligned_tag vector_aligned{};
+
+  template <size_t N>
+    inline constexpr overaligned_tag<N> overaligned{};
+
+  // fwd decls //
+  template <class T, class A = simd_abi::compatible<T>>
+    class simd
+    {
+      simd() = delete;
+      simd(const simd&) = delete;
+      ~simd() = delete;
+    };
+
+  template <class T, class A = simd_abi::compatible<T>>
+    class simd_mask
+    {
+      simd_mask() = delete;
+      simd_mask(const simd_mask&) = delete;
+      ~simd_mask() = delete;
+    };
+
+  // aliases //
+  template <class T>
+    using native_simd = simd<T, simd_abi::native<T>>;
+
+  template <class T>
+    using native_simd_mask = simd_mask<T, simd_abi::native<T>>;
+
+  template <class T, int N>
+    using fixed_size_simd = simd<T, simd_abi::fixed_size<N>>;
+
+  template <class T, int N>
+    using fixed_size_simd_mask = simd_mask<T, simd_abi::fixed_size<N>>;
+
+  // Traits //
+  template <class T>
+    struct is_abi_tag : std::false_type
+    {};
+
+  template <class T>
+    inline constexpr bool is_abi_tag_v = is_abi_tag<T>::value;
+
+  template <>
+    struct is_abi_tag<simd_abi::scalar> : std::true_type
+    {};
+
+  template <int N>
+    struct is_abi_tag<simd_abi::fixed_size<N>> : std::true_type
+    {};
+
+  template <class T>
+    struct is_simd : std::false_type
+    {};
+
+  template <class T>
+    inline constexpr bool is_simd_v = is_simd<T>::value;
+
+  template <class T, class A>
+    struct is_simd<simd<T, A>>
+    : std::conjunction<detail::is_vectorizable<T>, is_abi_tag<A>>
+    {};
+
+  template <class T>
+    struct is_simd_mask : std::false_type
+    {};
+
+  template <class T>
+    inline constexpr bool is_simd_mask_v = is_simd_mask<T>::value;
+
+  template <class T, class A>
+    struct is_simd_mask<simd_mask<T, A>>
+    : std::conjunction<detail::is_vectorizable<T>, is_abi_tag<A>>
+    {};
+
+  template <class T>
+    struct is_simd_flag_type : std::false_type
+    {};
+
+  template <class T>
+    inline constexpr bool is_simd_flag_type_v = is_simd_flag_type<T>::value;
+
+  template <class T, class A = simd_abi::compatible<T>>
+    struct simd_size;
+
+  template <class T, class A = simd_abi::compatible<T>>
+    inline constexpr size_t simd_size_v = simd_size<T, A>::value;
+
+  template <class T>
+    struct simd_size<detail::Vectorizable<T>, simd_abi::scalar>
+    : std::integral_constant<size_t, 1>
+    {};
+
+  template <class T, int N>
+    struct simd_size<detail::Vectorizable<T>, simd_abi::fixed_size<N>>
+    : std::integral_constant<size_t, N>
+    {};
+
+  template <class T, class U = typename T::value_type>
+    struct memory_alignment;
+
+  template <class T, class U = typename T::value_type>
+    inline constexpr size_t memory_alignment_v = memory_alignment<T, U>::value;
+
+  template <class T, class A, class U>
+    struct memory_alignment<simd<T, A>, detail::Vectorizable<U>>
+    : std::integral_constant<size_t, alignof(U)>
+    {};
+
+  template <class T, class A>
+    struct memory_alignment<simd_mask<T, A>, bool>
+    : std::integral_constant<size_t, alignof(bool)>
+    {};
+
+  template <class T, class V,
+            class = typename std::conjunction<detail::is_vectorizable<T>,
+                                              std::disjunction<is_simd<V>, is_simd_mask<V>>>::type>
+    struct rebind_simd;
+
+  template <class T, class V>
+    using rebind_simd_t = typename rebind_simd<T, V>::type;
+
+  template <class T, class U, class A>
+    struct rebind_simd<T, simd<U, A>, std::true_type>
+    { using type = simd<T, A>; };
+
+  template <class T, class U, class A>
+    struct rebind_simd<T, simd_mask<U, A>, std::true_type>
+    { using type = simd_mask<T, A>; };
+
+  template <int N, class V,
+            class = typename std::conjunction<
+                               detail::BoolConstant<(N > 0)>,
+                               std::disjunction<is_simd<V>, is_simd_mask<V>>
+                             >::type>
+    struct resize_simd;
+
+  template <int N, class V>
+    using resize_simd_t = typename resize_simd<N, V>::type;
+
+  template <int N, class T, class A>
+    struct resize_simd<N, simd<T, A>, std::true_type>
+    {
+      using type = simd<T, std::conditional_t<N == 1, simd_abi::scalar, simd_abi::fixed_size<N>>>;
+    };
+
+  template <int N, class T, class A>
+    struct resize_simd<N, simd_mask<T, A>, std::true_type>
+    {
+      using type = simd_mask<T, std::conditional_t<
+                                  N == 1, simd_abi::scalar, simd_abi::fixed_size<N>>>;
+    };
+
+  // simd_mask (scalar)
+  template <class T>
+    class simd_mask<detail::Vectorizable<T>, simd_abi::scalar>
+    : public detail::only_vectorizable<T>
+    {
+      bool data;
+
+    public:
+      using value_type = bool;
+      using reference = bool&;
+      using abi_type = simd_abi::scalar;
+      using simd_type = simd<T, abi_type>;
+
+      static constexpr size_t size() noexcept
+      { return 1; }
+
+      constexpr simd_mask() = default;
+      constexpr simd_mask(const simd_mask&) = default;
+      constexpr simd_mask(simd_mask&&) noexcept = default;
+      constexpr simd_mask& operator=(const simd_mask&) = default;
+      constexpr simd_mask& operator=(simd_mask&&) noexcept = default;
+
+      // explicit broadcast constructor
+      explicit constexpr
+      simd_mask(bool x)
+      : data(x) {}
+
+      template <typename F>
+        explicit constexpr
+        simd_mask(F&& gen, std::enable_if_t<
+                             std::is_same_v<decltype(std::declval<F>()(detail::SizeConstant<0>())),
+                                            value_type>>* = nullptr)
+        : data(gen(detail::SizeConstant<0>()))
+        {}
+
+      // load constructor
+      template <typename Flags>
+        simd_mask(const value_type* mem, Flags)
+        : data(mem[0])
+        {}
+
+      template <typename Flags>
+        simd_mask(const value_type* mem, simd_mask k, Flags)
+        : data(k ? mem[0] : false)
+        {}
+
+      // loads [simd_mask.load]
+      template <typename Flags>
+        void
+        copy_from(const value_type* mem, Flags)
+        { data = mem[0]; }
+
+      // stores [simd_mask.store]
+      template <typename Flags>
+        void
+        copy_to(value_type* mem, Flags) const
+        { mem[0] = data; }
+
+      // scalar access
+      constexpr reference
+      operator[](size_t i)
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data;
+      }
+
+      constexpr value_type
+      operator[](size_t i) const
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data;
+      }
+
+      // negation
+      constexpr simd_mask
+      operator!() const
+      { return simd_mask(not data); }
+
+      // simd_mask binary operators [simd_mask.binary]
+      friend constexpr simd_mask
+      operator&&(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data && y.data); }
+
+      friend constexpr simd_mask
+      operator||(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data || y.data); }
+
+      friend constexpr simd_mask
+      operator&(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data & y.data); }
+
+      friend constexpr simd_mask
+      operator|(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data | y.data); }
+
+      friend constexpr simd_mask
+      operator^(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data ^ y.data); }
+
+      friend constexpr simd_mask&
+      operator&=(simd_mask& x, const simd_mask& y)
+      {
+        x.data &= y.data;
+        return x;
+      }
+
+      friend constexpr simd_mask&
+      operator|=(simd_mask& x, const simd_mask& y)
+      {
+        x.data |= y.data;
+        return x;
+      }
+
+      friend constexpr simd_mask&
+      operator^=(simd_mask& x, const simd_mask& y)
+      {
+        x.data ^= y.data;
+        return x;
+      }
+
+      // simd_mask compares [simd_mask.comparison]
+      friend constexpr simd_mask
+      operator==(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data == y.data); }
+
+      friend constexpr simd_mask
+      operator!=(const simd_mask& x, const simd_mask& y)
+      { return simd_mask(x.data != y.data); }
+    };
+
+  // simd_mask (fixed_size)
+  template <class T, int N>
+    class simd_mask<detail::Vectorizable<T>, simd_abi::fixed_size<N>>
+    : public detail::only_vectorizable<T>
+    {
+    private:
+      template <typename V, int M, size_t Parts>
+        friend std::enable_if_t<M == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
+        split(const simd_mask<typename V::simd_type::value_type, simd_abi::fixed_size<M>>&);
+
+      bool data[N];
+
+      template <typename F, size_t... Is>
+        constexpr
+        simd_mask(std::index_sequence<Is...>, F&& init)
+        : data {init(detail::SizeConstant<Is>())...}
+        {}
+
+    public:
+      using value_type = bool;
+      using reference = bool&;
+      using abi_type = simd_abi::fixed_size<N>;
+      using simd_type = simd<T, abi_type>;
+
+      static constexpr size_t size() noexcept
+      { return N; }
+
+      constexpr simd_mask() = default;
+      constexpr simd_mask(const simd_mask&) = default;
+      constexpr simd_mask(simd_mask&&) noexcept = default;
+      constexpr simd_mask& operator=(const simd_mask&) = default;
+      constexpr simd_mask& operator=(simd_mask&&) noexcept = default;
+
+      // explicit broadcast constructor
+      explicit constexpr
+      simd_mask(bool x)
+      : simd_mask([x](size_t) { return x; })
+      {}
+
+      template <typename F>
+        explicit constexpr
+        simd_mask(F&& gen, std::enable_if_t<
+                             std::is_same_v<decltype(std::declval<F>()(detail::SizeConstant<0>())),
+                                            value_type>>* = nullptr)
+        : simd_mask(std::make_index_sequence<N>(), std::forward<F>(gen))
+        {}
+
+      // implicit conversions
+      template <typename U>
+        constexpr
+        simd_mask(const simd_mask<U, abi_type>& x)
+        : simd_mask([&x](auto i) { return x[i]; })
+        {}
+
+      // load constructor
+      template <typename Flags>
+        simd_mask(const value_type* mem, Flags)
+        : simd_mask([mem](size_t i) { return mem[i]; })
+        {}
+
+      template <typename Flags>
+        simd_mask(const value_type* mem, const simd_mask& k, Flags)
+        : simd_mask([mem, &k](size_t i) { return k[i] ? mem[i] : false; })
+        {}
+
+      // loads [simd_mask.load]
+      template <typename Flags>
+        void
+        copy_from(const value_type* mem, Flags)
+        { std::memcpy(data, mem, N * sizeof(bool)); }
+
+      // stores [simd_mask.store]
+      template <typename Flags>
+        void
+        copy_to(value_type* mem, Flags) const
+        { std::memcpy(mem, data, N * sizeof(bool)); }
+
+      // scalar access
+      constexpr reference
+      operator[](size_t i)
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data[i];
+      }
+
+      constexpr value_type
+      operator[](size_t i) const
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data[i];
+      }
+
+      // negation
+      constexpr simd_mask
+      operator!() const
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = !data[i];
+        return r;
+      }
+
+      // simd_mask binary operators [simd_mask.binary]
+      friend constexpr simd_mask
+      operator&&(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] & y.data[i];
+        return r;
+      }
+
+      friend constexpr simd_mask
+      operator||(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] | y.data[i];
+        return r;
+      }
+
+      friend constexpr simd_mask
+      operator&(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] & y.data[i];
+        return r;
+      }
+
+      friend constexpr simd_mask
+      operator|(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] | y.data[i];
+        return r;
+      }
+
+      friend constexpr simd_mask
+      operator^(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] ^ y.data[i];
+        return r;
+      }
+
+      friend constexpr simd_mask&
+      operator&=(simd_mask& x, const simd_mask& y)
+      {
+        for (int i = 0; i < N; ++i)
+          x.data[i] &= y.data[i];
+        return x;
+      }
+
+      friend constexpr simd_mask&
+      operator|=(simd_mask& x, const simd_mask& y)
+      {
+        for (int i = 0; i < N; ++i)
+          x.data[i] |= y.data[i];
+        return x;
+      }
+
+      friend constexpr simd_mask&
+      operator^=(simd_mask& x, const simd_mask& y)
+      {
+        for (int i = 0; i < N; ++i)
+          x.data[i] ^= y.data[i];
+        return x;
+      }
+
+      // simd_mask compares [simd_mask.comparison]
+      friend constexpr simd_mask
+      operator==(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] == y.data[i];
+        return r;
+      }
+
+      friend constexpr simd_mask
+      operator!=(const simd_mask& x, const simd_mask& y)
+      {
+        simd_mask r {};
+        for (int i = 0; i < N; ++i)
+          r.data[i] = x.data[i] != y.data[i];
+        return r;
+      }
+    };
+
+  // simd_mask reductions [simd_mask.reductions]
+  template <typename T>
+    constexpr bool
+    all_of(simd_mask<T, simd_abi::scalar> k) noexcept
+    { return k[0]; }
+
+  template <typename T>
+    constexpr bool
+    any_of(simd_mask<T, simd_abi::scalar> k) noexcept
+    { return k[0]; }
+
+  template <typename T>
+    constexpr bool
+    none_of(simd_mask<T, simd_abi::scalar> k) noexcept
+    { return not k[0]; }
+
+  template <typename T>
+    constexpr bool
+    some_of(simd_mask<T, simd_abi::scalar>) noexcept
+    { return false; }
+
+  template <typename T>
+    constexpr int
+    popcount(simd_mask<T, simd_abi::scalar> k) noexcept
+    { return static_cast<int>(k[0]); }
+
+  template <typename T>
+    constexpr int
+    find_first_set(simd_mask<T, simd_abi::scalar> k) noexcept
+    {
+      if (not k[0])
+        detail::invoke_ub("find_first_set(empty mask) is UB");
+      return 0;
+    }
+
+  template <typename T>
+    constexpr int
+    find_last_set(simd_mask<T, simd_abi::scalar> k) noexcept
+    {
+      if (not k[0])
+        detail::invoke_ub("find_last_set(empty mask) is UB");
+      return 0;
+    }
+
+  template <typename T, int N>
+    constexpr bool
+    all_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      for (int i = 0; i < N; ++i)
+        {
+          if (not k[i])
+            return false;
+        }
+      return true;
+    }
+
+  template <typename T, int N>
+    constexpr bool
+    any_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      for (int i = 0; i < N; ++i)
+        {
+          if (k[i])
+            return true;
+        }
+      return false;
+    }
+
+  template <typename T, int N>
+    constexpr bool
+    none_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      for (int i = 0; i < N; ++i)
+        {
+          if (k[i])
+            return false;
+        }
+      return true;
+    }
+
+  template <typename T, int N>
+    constexpr bool
+    some_of(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      bool last = k[0];
+      for (int i = 1; i < N; ++i)
+        {
+          if (last != k[i])
+            return true;
+        }
+      return false;
+    }
+
+  template <typename T, int N>
+    constexpr int
+    popcount(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      int cnt = k[0];
+      for (int i = 1; i < N; ++i)
+        cnt += k[i];
+      return cnt;
+    }
+
+  template <typename T, int N>
+    constexpr int
+    find_first_set(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      for (int i = 0; i < N; ++i)
+        {
+          if (k[i])
+            return i;
+        }
+      detail::invoke_ub("find_first_set(empty mask) is UB");
+    }
+
+  template <typename T, int N>
+    constexpr int
+    find_last_set(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
+    {
+      for (int i = N - 1; i >= 0; --i)
+        {
+          if (k[i])
+            return i;
+        }
+      detail::invoke_ub("find_last_set(empty mask) is UB");
+    }
+
+  constexpr bool
+  all_of(detail::ExactBool x) noexcept
+  { return x; }
+
+  constexpr bool
+  any_of(detail::ExactBool x) noexcept
+  { return x; }
+
+  constexpr bool
+  none_of(detail::ExactBool x) noexcept
+  { return !x; }
+
+  constexpr bool
+  some_of(detail::ExactBool) noexcept
+  { return false; }
+
+  constexpr int
+  popcount(detail::ExactBool x) noexcept
+  { return x; }
+
+  constexpr int
+  find_first_set(detail::ExactBool)
+  { return 0; }
+
+  constexpr int
+  find_last_set(detail::ExactBool)
+  { return 0; }
+
+  // scalar_simd_int_base
+  template <class T, bool = std::is_integral_v<T>>
+    class scalar_simd_int_base
+    {};
+
+  template <class T>
+    class scalar_simd_int_base<T, true>
+    {
+      using Derived = simd<T, simd_abi::scalar>;
+
+      constexpr T&
+      d() noexcept
+      { return static_cast<Derived*>(this)->data; }
+
+      constexpr const T&
+      d() const noexcept
+      { return static_cast<const Derived*>(this)->data; }
+
+    public:
+      friend constexpr Derived&
+      operator%=(Derived& lhs, Derived x)
+      {
+        lhs.d() %= x.d();
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator&=(Derived& lhs, Derived x)
+      {
+        lhs.d() &= x.d();
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator|=(Derived& lhs, Derived x)
+      {
+        lhs.d() |= x.d();
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator^=(Derived& lhs, Derived x)
+      {
+        lhs.d() ^= x.d();
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator<<=(Derived& lhs, Derived x)
+      {
+        lhs.d() <<= x.d();
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator>>=(Derived& lhs, Derived x)
+      {
+        lhs.d() >>= x.d();
+        return lhs;
+      }
+
+      friend constexpr Derived
+      operator%(Derived x, Derived y)
+      {
+        x.d() %= y.d();
+        return x;
+      }
+
+      friend constexpr Derived
+      operator&(Derived x, Derived y)
+      {
+        x.d() &= y.d();
+        return x;
+      }
+
+      friend constexpr Derived
+      operator|(Derived x, Derived y)
+      {
+        x.d() |= y.d();
+        return x;
+      }
+
+      friend constexpr Derived
+      operator^(Derived x, Derived y)
+      {
+        x.d() ^= y.d();
+        return x;
+      }
+
+      friend constexpr Derived
+      operator<<(Derived x, Derived y)
+      {
+        x.d() <<= y.d();
+        return x;
+      }
+
+      friend constexpr Derived
+      operator>>(Derived x, Derived y)
+      {
+        x.d() >>= y.d();
+        return x;
+      }
+
+      friend constexpr Derived
+      operator<<(Derived x, int y)
+      {
+        x.d() <<= y;
+        return x;
+      }
+
+      friend constexpr Derived
+      operator>>(Derived x, int y)
+      {
+        x.d() >>= y;
+        return x;
+      }
+
+      constexpr Derived
+      operator~() const
+      { return Derived(static_cast<T>(~d())); }
+    };
+
+  // simd (scalar)
+  template <class T>
+    class simd<T, simd_abi::scalar>
+    : public scalar_simd_int_base<T>, public detail::only_vectorizable<T>
+    {
+      friend class scalar_simd_int_base<T>;
+
+      T data;
+
+    public:
+      using value_type = T;
+      using reference = T&;
+      using abi_type = simd_abi::scalar;
+      using mask_type = simd_mask<T, abi_type>;
+
+      static constexpr size_t size() noexcept
+      { return 1; }
+
+      constexpr simd() = default;
+      constexpr simd(const simd&) = default;
+      constexpr simd(simd&&) noexcept = default;
+      constexpr simd& operator=(const simd&) = default;
+      constexpr simd& operator=(simd&&) noexcept = default;
+
+      // simd constructors
+      template <typename U>
+        constexpr
+        simd(detail::ValuePreservingOrInt<U, value_type>&& value) noexcept
+        : data(value)
+        {}
+
+      // generator constructor
+      template <typename F>
+        explicit constexpr
+        simd(F&& gen, detail::ValuePreservingOrInt<
+                        decltype(std::declval<F>()(std::declval<detail::SizeConstant<0>&>())),
+                        value_type>* = nullptr)
+        : data(gen(detail::SizeConstant<0>()))
+        {}
+
+      // load constructor
+      template <typename U, typename Flags>
+        simd(const U* mem, Flags)
+        : data(mem[0])
+        {}
+
+      // loads [simd.load]
+      template <typename U, typename Flags>
+        void
+        copy_from(const detail::Vectorizable<U>* mem, Flags)
+        { data = mem[0]; }
+
+      // stores [simd.store]
+      template <typename U, typename Flags>
+        void
+        copy_to(detail::Vectorizable<U>* mem, Flags) const
+        { mem[0] = data; }
+
+      // scalar access
+      constexpr reference
+      operator[](size_t i)
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data;
+      }
+
+      constexpr value_type
+      operator[](size_t i) const
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data;
+      }
+
+      // increment and decrement:
+      constexpr simd&
+      operator++()
+      {
+        ++data;
+        return *this;
+      }
+
+      constexpr simd
+      operator++(int)
+      {
+        simd r = *this;
+        ++data;
+        return r;
+      }
+
+      constexpr simd&
+      operator--()
+      {
+        --data;
+        return *this;
+      }
+
+      constexpr simd
+      operator--(int)
+      {
+        simd r = *this;
+        --data;
+        return r;
+      }
+
+      // unary operators
+      constexpr mask_type
+      operator!() const
+      { return mask_type(not data); }
+
+      constexpr simd
+      operator+() const
+      { return *this; }
+
+      constexpr simd
+      operator-() const
+      { return -data; }
+
+      // compound assignment [simd.cassign]
+      constexpr friend simd&
+      operator+=(simd& lhs, const simd& x)
+      { return lhs = lhs + x; }
+
+      constexpr friend simd&
+      operator-=(simd& lhs, const simd& x)
+      { return lhs = lhs - x; }
+
+      constexpr friend simd&
+      operator*=(simd& lhs, const simd& x)
+      { return lhs = lhs * x; }
+
+      constexpr friend simd&
+        operator/=(simd& lhs, const simd& x)
+      { return lhs = lhs / x; }
+
+      // binary operators [simd.binary]
+      constexpr friend simd
+      operator+(const simd& x, const simd& y)
+      { simd r = x; r.data += y.data; return r; }
+
+      constexpr friend simd
+      operator-(const simd& x, const simd& y)
+      { simd r = x; r.data -= y.data; return r; }
+
+      constexpr friend simd
+      operator*(const simd& x, const simd& y)
+      { simd r = x; r.data *= y.data; return r; }
+
+      constexpr friend simd
+      operator/(const simd& x, const simd& y)
+      { simd r = x; r.data /= y.data; return r; }
+
+      // compares [simd.comparison]
+      constexpr friend mask_type
+      operator==(const simd& x, const simd& y)
+      { return mask_type(x.data == y.data); }
+
+      constexpr friend mask_type
+      operator!=(const simd& x, const simd& y)
+      { return mask_type(x.data != y.data); }
+
+      constexpr friend mask_type
+      operator<(const simd& x, const simd& y)
+      { return mask_type(x.data < y.data); }
+
+      constexpr friend mask_type
+      operator<=(const simd& x, const simd& y)
+      { return mask_type(x.data <= y.data); }
+
+      constexpr friend mask_type
+      operator>(const simd& x, const simd& y)
+      { return mask_type(x.data > y.data); }
+
+      constexpr friend mask_type
+      operator>=(const simd& x, const simd& y)
+      { return mask_type(x.data >= y.data); }
+    };
+
+  // fixed_simd_int_base
+  template <class T, int N, bool = std::is_integral_v<T>>
+    class fixed_simd_int_base
+    {};
+
+  template <class T, int N>
+    class fixed_simd_int_base<T, N, true>
+    {
+      using Derived = simd<T, simd_abi::fixed_size<N>>;
+
+      constexpr T&
+      d(int i) noexcept
+      { return static_cast<Derived*>(this)->data[i]; }
+
+      constexpr const T&
+      d(int i) const noexcept
+      { return static_cast<const Derived*>(this)->data[i]; }
+
+    public:
+      friend constexpr Derived&
+      operator%=(Derived& lhs, const Derived& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.d(i) %= x.d(i);
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator&=(Derived& lhs, const Derived& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.d(i) &= x.d(i);
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator|=(Derived& lhs, const Derived& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.d(i) |= x.d(i);
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator^=(Derived& lhs, const Derived& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.d(i) ^= x.d(i);
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator<<=(Derived& lhs, const Derived& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.d(i) <<= x.d(i);
+        return lhs;
+      }
+
+      friend constexpr Derived&
+      operator>>=(Derived& lhs, const Derived& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.d(i) >>= x.d(i);
+        return lhs;
+      }
+
+      friend constexpr Derived
+      operator%(const Derived& x, const Derived& y)
+      { return Derived([&](auto i) -> T { return x[i] % y[i]; }); }
+
+      friend constexpr Derived
+      operator&(const Derived& x, const Derived& y)
+      { return Derived([&](auto i) -> T { return x[i] & y[i]; }); }
+
+      friend constexpr Derived
+      operator|(const Derived& x, const Derived& y)
+      { return Derived([&](auto i) -> T { return x[i] | y[i]; }); }
+
+      friend constexpr Derived
+      operator^(const Derived& x, const Derived& y)
+      { return Derived([&](auto i) -> T { return x[i] ^ y[i]; }); }
+
+      friend constexpr Derived
+      operator<<(const Derived& x, const Derived& y)
+      { return Derived([&](auto i) -> T { return x[i] << y[i]; }); }
+
+      friend constexpr Derived
+      operator>>(const Derived& x, const Derived& y)
+      { return Derived([&](auto i) -> T { return x[i] >> y[i]; }); }
+
+      friend constexpr Derived
+      operator<<(const Derived& x, int y)
+      { return Derived([&](auto i) -> T { return x[i] << y; }); }
+
+      friend constexpr Derived
+      operator>>(const Derived& x, int y)
+      { return Derived([&](auto i) -> T { return x[i] >> y; }); }
+
+      constexpr Derived
+      operator~() const
+      { return Derived([&](auto i) -> T { return ~d(i); }); }
+    };
+
+  // simd (fixed_size)
+  template <class T, int N>
+    class simd<T, simd_abi::fixed_size<N>>
+    : public fixed_simd_int_base<T, N>, public detail::only_vectorizable<T>
+    {
+    private:
+      friend class fixed_simd_int_base<T, N>;
+
+      template <typename V, int M, size_t Parts>
+        friend std::enable_if_t<M == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
+        split(const simd<typename V::value_type, simd_abi::fixed_size<M>>&);
+
+      template <size_t... Sizes, typename U>
+        friend std::tuple<simd<U, simd_abi::deduce_t<U, int(Sizes)>>...>
+        split(const simd<U, simd_abi::fixed_size<int((Sizes + ...))>>&);
+
+      T data[N];
+
+      template <typename F, size_t... Is>
+        constexpr
+        simd(std::index_sequence<Is...>, F&& init)
+        : data {static_cast<value_type>(init(detail::SizeConstant<Is>()))...}
+        {}
+
+    public:
+      using value_type = T;
+      using reference = T&;
+      using abi_type = simd_abi::fixed_size<N>;
+      using mask_type = simd_mask<T, abi_type>;
+
+      static constexpr size_t size() noexcept
+      { return N; }
+
+      constexpr simd() = default;
+      constexpr simd(const simd&) = default;
+      constexpr simd(simd&&) noexcept = default;
+      constexpr simd& operator=(const simd&) = default;
+      constexpr simd& operator=(simd&&) noexcept = default;
+
+      // simd constructors
+      template <typename U>
+        constexpr
+        simd(detail::ValuePreservingOrInt<U, value_type>&& value) noexcept
+        : simd([v = static_cast<value_type>(value)](size_t) { return v; })
+        {}
+
+      // conversion constructors
+      template <typename U,
+                typename = std::enable_if_t<
+                             std::conjunction_v<detail::is_value_preserving<U, value_type>,
+                                                detail::is_higher_integer_rank<value_type, U>>>>
+        constexpr
+        simd(const simd<U, abi_type>& x)
+        : simd([&x](auto i) { return static_cast<value_type>(x[i]); })
+        {}
+
+      // generator constructor
+      template <typename F>
+        explicit constexpr
+        simd(F&& gen, detail::ValuePreservingOrInt<
+                        decltype(std::declval<F>()(std::declval<detail::SizeConstant<0>&>())),
+                        value_type>* = nullptr)
+        : simd(std::make_index_sequence<N>(), std::forward<F>(gen))
+        {}
+
+      // load constructor
+      template <typename U, typename Flags>
+        simd(const U* mem, Flags)
+        : simd([mem](auto i) -> value_type { return mem[i]; })
+        {}
+
+      // loads [simd.load]
+      template <typename U, typename Flags>
+        void
+        copy_from(const detail::Vectorizable<U>* mem, Flags)
+        {
+          for (int i = 0; i < N; ++i)
+            data[i] = mem[i];
+        }
+
+      // stores [simd.store]
+      template <typename U, typename Flags>
+        void
+        copy_to(detail::Vectorizable<U>* mem, Flags) const
+        {
+          for (int i = 0; i < N; ++i)
+            mem[i] = data[i];
+        }
+
+      // scalar access
+      constexpr reference
+      operator[](size_t i)
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data[i];
+      }
+
+      constexpr value_type
+      operator[](size_t i) const
+      {
+        if (i >= size())
+          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        return data[i];
+      }
+
+      // increment and decrement:
+      constexpr simd&
+      operator++()
+      {
+        for (int i = 0; i < N; ++i)
+          ++data[i];
+        return *this;
+      }
+
+      constexpr simd
+      operator++(int)
+      {
+        simd r = *this;
+        for (int i = 0; i < N; ++i)
+          ++data[i];
+        return r;
+      }
+
+      constexpr simd&
+      operator--()
+      {
+        for (int i = 0; i < N; ++i)
+          --data[i];
+        return *this;
+      }
+
+      constexpr simd
+      operator--(int)
+      {
+        simd r = *this;
+        for (int i = 0; i < N; ++i)
+          --data[i];
+        return r;
+      }
+
+      // unary operators
+      constexpr mask_type
+      operator!() const
+      { return mask_type([&](auto i) { return !data[i]; }); }
+
+      constexpr simd
+      operator+() const
+      { return *this; }
+
+      constexpr simd
+      operator-() const
+      { return simd([&](auto i) -> value_type { return -data[i]; }); }
+
+      // compound assignment [simd.cassign]
+      constexpr friend simd&
+      operator+=(simd& lhs, const simd& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.data[i] += x.data[i];
+        return lhs;
+      }
+
+      constexpr friend simd&
+      operator-=(simd& lhs, const simd& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.data[i] -= x.data[i];
+        return lhs;
+      }
+
+      constexpr friend simd&
+      operator*=(simd& lhs, const simd& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.data[i] *= x.data[i];
+        return lhs;
+      }
+
+      constexpr friend simd&
+      operator/=(simd& lhs, const simd& x)
+      {
+        for (int i = 0; i < N; ++i)
+          lhs.data[i] /= x.data[i];
+        return lhs;
+      }
+
+      // binary operators [simd.binary]
+      constexpr friend simd
+      operator+(const simd& x, const simd& y)
+      { return simd([&](auto i) { return x.data[i] + y.data[i]; }); }
+
+      constexpr friend simd
+      operator-(const simd& x, const simd& y)
+      { return simd([&](auto i) { return x.data[i] - y.data[i]; }); }
+
+      constexpr friend simd
+      operator*(const simd& x, const simd& y)
+      { return simd([&](auto i) { return x.data[i] * y.data[i]; }); }
+
+      constexpr friend simd
+      operator/(const simd& x, const simd& y)
+      { return simd([&](auto i) { return x.data[i] / y.data[i]; }); }
+
+      // compares [simd.comparison]
+      constexpr friend mask_type
+      operator==(const simd& x, const simd& y)
+      { return mask_type([&](auto i) { return x.data[i] == y.data[i]; }); }
+
+      constexpr friend mask_type
+      operator!=(const simd& x, const simd& y)
+      { return mask_type([&](auto i) { return x.data[i] != y.data[i]; }); }
+
+      constexpr friend mask_type
+      operator<(const simd& x, const simd& y)
+      { return mask_type([&](auto i) { return x.data[i] < y.data[i]; }); }
+
+      constexpr friend mask_type
+      operator<=(const simd& x, const simd& y)
+      { return mask_type([&](auto i) { return x.data[i] <= y.data[i]; }); }
+
+      constexpr friend mask_type
+      operator>(const simd& x, const simd& y)
+      { return mask_type([&](auto i) { return x.data[i] > y.data[i]; }); }
+
+      constexpr friend mask_type
+      operator>=(const simd& x, const simd& y)
+      { return mask_type([&](auto i) { return x.data[i] >= y.data[i]; }); }
+    };
+
+  // casts [simd.casts]
+  // static_simd_cast
+  template <typename T, typename U, typename A,
+            typename = std::enable_if_t<detail::is_vectorizable_v<T>>>
+    constexpr simd<T, A>
+    static_simd_cast(const simd<U, A>& x)
+    { return simd<T, A>([&x](auto i) { return static_cast<T>(x[i]); }); }
+
+  template <typename V, typename U, typename A,
+            typename = std::enable_if_t<is_simd_v<V>>>
+    constexpr V
+    static_simd_cast(const simd<U, A>& x)
+    { return V([&x](auto i) { return static_cast<typename V::value_type>(x[i]); }); }
+
+  template <typename T, typename U, typename A,
+            typename = std::enable_if_t<detail::is_vectorizable_v<T>>>
+    constexpr simd_mask<T, A>
+    static_simd_cast(const simd_mask<U, A>& x)
+    { return simd_mask<T, A>([&x](auto i) { return x[i]; }); }
+
+  template <typename M, typename U, typename A,
+            typename = std::enable_if_t<M::size() == simd_size_v<U, A>>>
+    constexpr M
+    static_simd_cast(const simd_mask<U, A>& x)
+    { return M([&x](auto i) { return x[i]; }); }
+
+  // simd_cast
+  template <typename T, typename U, typename A,
+            typename To = detail::value_type_or_identity_t<T>>
+    constexpr auto
+    simd_cast(const simd<detail::ValuePreserving<U, To>, A>& x)
+    -> decltype(static_simd_cast<T>(x))
+    { return static_simd_cast<T>(x); }
+
+  // to_fixed_size
+  template <typename T, int N>
+    constexpr fixed_size_simd<T, N>
+    to_fixed_size(const fixed_size_simd<T, N>& x)
+    { return x; }
+
+  template <typename T, int N>
+    constexpr fixed_size_simd_mask<T, N>
+    to_fixed_size(const fixed_size_simd_mask<T, N>& x)
+    { return x; }
+
+  template <typename T>
+    constexpr fixed_size_simd<T, 1>
+    to_fixed_size(const simd<T> x)
+    { return x[0]; }
+
+  template <typename T>
+    constexpr fixed_size_simd_mask<T, 1>
+    to_fixed_size(const simd_mask<T> x)
+    { return fixed_size_simd_mask<T, 1>(x[0]); }
+
+  // to_native
+  template <typename T>
+    constexpr simd<T>
+    to_native(const fixed_size_simd<T, 1> x)
+    { return x[0]; }
+
+  template <typename T>
+    constexpr simd_mask<T>
+    to_native(const fixed_size_simd_mask<T, 1> x)
+    { return simd_mask<T>(x[0]); }
+
+  // to_compatible
+  template <typename T>
+    constexpr simd<T>
+    to_compatible(const fixed_size_simd<T, 1> x)
+    { return x[0]; }
+
+  template <typename T>
+    constexpr simd_mask<T>
+    to_compatible(const fixed_size_simd_mask<T, 1> x)
+    { return simd_mask<T>(x[0]); }
+
+  // split(simd)
+  template <typename V, int N, size_t Parts = N / V::size()>
+    std::enable_if_t<N == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
+    split(const simd<typename V::value_type, simd_abi::fixed_size<N>>& x)
+    {
+      const auto* data = x.data;
+      return [&]<size_t... Is>(std::index_sequence<Is...>)
+               -> std::array<V, Parts> {
+                 return {V(data + Is * V::size(), element_aligned)...};
+               }(std::make_index_sequence<Parts>());
+    }
+
+  // split(simd_mask)
+  template <typename V, int N, size_t Parts = N / V::size()>
+    std::enable_if_t<N == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
+    split(const simd_mask<typename V::simd_type::value_type, simd_abi::fixed_size<N>>& x)
+    {
+      const auto* data = x.data;
+      return [&]<size_t... Is>(std::index_sequence<Is...>)
+               -> std::array<V, Parts> {
+                 return {V(data + Is * V::size(), element_aligned)...};
+               }(std::make_index_sequence<Parts>());
+    }
+
+  // split<Sizes...>
+  template <size_t... Sizes, typename T>
+    std::tuple<simd<T, simd_abi::deduce_t<T, int(Sizes)>>...>
+    split(const simd<T, simd_abi::fixed_size<int((Sizes + ...))>>& x)
+    {
+      using R = std::tuple<simd<T, simd_abi::deduce_t<T, int(Sizes)>>...>;
+      const auto* data = x.data;
+      return [&]<size_t... Is>(std::index_sequence<Is...>) -> R {
+        constexpr size_t offsets[sizeof...(Sizes)] = {
+          []<size_t... Js>(std::index_sequence<Js...>) {
+            constexpr size_t sizes[sizeof...(Sizes)] = {Sizes...};
+            return (sizes[Js] + ... + 0);
+          }(std::make_index_sequence<Is>())...
+        };
+        return {simd<T, simd_abi::deduce_t<T, int(Sizes)>>(data + offsets[Is],
+                                                           element_aligned)...};
+      }(std::make_index_sequence<sizeof...(Sizes)>());
+    }
+
+  // split<V>(V)
+  template <typename V>
+    std::enable_if_t<std::disjunction_v<is_simd<V>, is_simd_mask<V>>, std::array<V, 1>>
+    split(const V& x)
+    { return {x}; }
+
+  // concat(simd...)
+  template <typename T, typename... As>
+    inline constexpr
+    simd<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>
+    concat(const simd<T, As>&... xs)
+    {
+      using R = simd<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>;
+      return R([&](auto i) {
+               return detail::pack_simd_subscript<i>(xs...);
+             });
+    }
+
+  // concat(simd_mask...)
+  template <typename T, typename... As>
+    inline constexpr
+    simd_mask<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>
+    concat(const simd_mask<T, As>&... xs)
+    {
+      using R = simd_mask<T, simd_abi::deduce_t<T, (simd_size_v<T, As> + ...)>>;
+      return R([&](auto i) -> bool {
+               return detail::pack_simd_subscript<i>(xs...);
+             });
+    }
+
+  // concat(array<simd>)
+  template <typename T, typename A, size_t N>
+    inline constexpr
+    simd<T, simd_abi::deduce_t<T, N * simd_size_v<T, A>>>
+    concat(const std::array<simd<T, A>, N>& x)
+    {
+      constexpr int K = simd_size_v<T, A>;
+      using R = simd<T, simd_abi::deduce_t<T, N * K>>;
+      return R([&](auto i) {
+               return x[i / K][i % K];
+             });
+    }
+
+  // concat(array<simd_mask>)
+  template <typename T, typename A, size_t N>
+    inline constexpr
+    simd_mask<T, simd_abi::deduce_t<T, N * simd_size_v<T, A>>>
+    concat(const std::array<simd_mask<T, A>, N>& x)
+    {
+      constexpr int K = simd_size_v<T, A>;
+      using R = simd_mask<T, simd_abi::deduce_t<T, N * K>>;
+      return R([&](auto i) -> bool {
+               return x[i / K][i % K];
+             });
+    }
+
+  // const_where_expression<M, T>
+  template <typename M, typename V>
+    class const_where_expression
+    {
+      static_assert(std::is_same_v<V, detail::remove_cvref_t<V>>);
+
+      struct Wrapper { using value_type = V; };
+
+    protected:
+      using value_type =
+        typename std::conditional_t<std::is_arithmetic_v<V>, Wrapper, V>::value_type;
+
+      friend const M&
+      get_mask(const const_where_expression& x)
+      { return x.m_k; }
+
+      friend const V&
+      get_lvalue(const const_where_expression& x)
+      { return x.m_value; }
+
+      const M& m_k;
+      V& m_value;
+
+    public:
+      const_where_expression(const const_where_expression&) = delete;
+      const_where_expression& operator=(const const_where_expression&) = delete;
+
+      constexpr const_where_expression(const M& kk, const V& dd)
+      : m_k(kk), m_value(const_cast<V&>(dd)) {}
+
+      constexpr V
+      operator-() const &&
+      {
+        return V([&](auto i) {
+                 return m_k[i] ? static_cast<value_type>(-m_value[i]) : m_value[i];
+               });
+      }
+
+      template <typename Up, typename Flags>
+        [[nodiscard]] constexpr V
+        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
+        {
+          return V([&](auto i) {
+                   return m_k[i] ? static_cast<value_type>(mem[i]) : m_value[i];
+                 });
+        }
+
+      template <typename Up, typename Flags>
+        constexpr void
+        copy_to(detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
+        {
+          for (size_t i = 0; i < V::size(); ++i)
+            {
+              if (m_k[i])
+                mem[i] = static_cast<Up>(m_value[i]);
+            }
+        }
+    };
+
+  // const_where_expression<bool, T>
+  template <typename V>
+    class const_where_expression<bool, V>
+    {
+      using M = bool;
+
+      static_assert(std::is_same_v<V, detail::remove_cvref_t<V>>);
+
+      struct Wrapper { using value_type = V; };
+
+    protected:
+      using value_type =
+        typename std::conditional_t<std::is_arithmetic_v<V>, Wrapper, V>::value_type;
+
+      friend const M&
+      get_mask(const const_where_expression& x)
+      { return x.m_k; }
+
+      friend const V&
+      get_lvalue(const const_where_expression& x)
+      { return x.m_value; }
+
+      const bool m_k;
+      V& m_value;
+
+    public:
+      const_where_expression(const const_where_expression&) = delete;
+      const_where_expression& operator=(const const_where_expression&) = delete;
+
+      constexpr const_where_expression(const bool kk, const V& dd)
+      : m_k(kk), m_value(const_cast<V&>(dd)) {}
+
+      constexpr V
+      operator-() const &&
+      { return m_k ? -m_value : m_value; }
+
+      template <typename Up, typename Flags>
+        [[nodiscard]] constexpr V
+        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
+        { return m_k ? static_cast<V>(mem[0]) : m_value; }
+
+      template <typename Up, typename Flags>
+        constexpr void
+        copy_to(detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
+        {
+          if (m_k)
+            mem[0] = m_value;
+        }
+    };
+
+  // where_expression<M, T>
+  template <typename M, typename V>
+    class where_expression : public const_where_expression<M, V>
+    {
+      static_assert(not std::is_const_v<V>,
+                    "where_expression may only be instantiated with a non-const V parameter");
+
+      using typename const_where_expression<M, V>::value_type;
+      using const_where_expression<M, V>::m_k;
+      using const_where_expression<M, V>::m_value;
+
+      static_assert(std::is_same_v<typename M::abi_type, typename V::abi_type>);
+      static_assert(M::size() == V::size());
+
+      friend V&
+      get_lvalue(where_expression& x)
+      { return x.m_value; }
+
+      template <typename Up>
+        constexpr auto
+        as_simd(Up&& x)
+        {
+          using UU = detail::remove_cvref_t<Up>;
+          if constexpr (std::is_same_v<V, UU>)
+            return x;
+          else if constexpr (std::is_convertible_v<Up&&, value_type>)
+            return V(static_cast<value_type>(static_cast<Up&&>(x)));
+          else if constexpr (std::is_convertible_v<Up&&, V>)
+            return static_cast<V>(static_cast<Up&&>(x));
+          else
+            return static_simd_cast<V>(static_cast<Up&&>(x));
+        }
+
+    public:
+      where_expression(const where_expression&) = delete;
+      where_expression& operator=(const where_expression&) = delete;
+
+      constexpr where_expression(const M& kk, V& dd)
+      : const_where_expression<M, V>(kk, dd)
+      {}
+
+      template <typename Up>
+        constexpr void
+        operator=(Up&& x) &&
+        {
+          const V& rhs = as_simd(x);
+          for (size_t i = 0; i < V::size(); ++i)
+            {
+              if (m_k[i])
+                m_value[i] = rhs[i];
+            }
+        }
+
+#define SIMD_OP_(op)                              \
+      template <typename Up>                      \
+        constexpr void                            \
+        operator op##=(Up&& x) &&                 \
+        {                                         \
+          const V& rhs = as_simd(x);              \
+          for (size_t i = 0; i < V::size(); ++i)  \
+            {                                     \
+              if (m_k[i])                         \
+                m_value[i] op##= rhs[i];          \
+            }                                     \
+        }                                         \
+      static_assert(true)
+      SIMD_OP_(+);
+      SIMD_OP_(-);
+      SIMD_OP_(*);
+      SIMD_OP_(/);
+      SIMD_OP_(%);
+      SIMD_OP_(&);
+      SIMD_OP_(|);
+      SIMD_OP_(^);
+      SIMD_OP_(<<);
+      SIMD_OP_(>>);
+#undef SIMD_OP_
+
+      constexpr void operator++() &&
+      {
+        for (size_t i = 0; i < V::size(); ++i)
+          {
+            if (m_k[i])
+              ++m_value[i];
+          }
+      }
+
+      constexpr void operator++(int) &&
+      {
+        for (size_t i = 0; i < V::size(); ++i)
+          {
+            if (m_k[i])
+              ++m_value[i];
+          }
+      }
+
+      constexpr void operator--() &&
+      {
+        for (size_t i = 0; i < V::size(); ++i)
+          {
+            if (m_k[i])
+              --m_value[i];
+          }
+      }
+
+      constexpr void operator--(int) &&
+      {
+        for (size_t i = 0; i < V::size(); ++i)
+          {
+            if (m_k[i])
+              --m_value[i];
+          }
+      }
+
+      // intentionally hides const_where_expression::copy_from
+      template <typename Up, typename Flags>
+        constexpr void
+        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) &&
+        {
+          for (size_t i = 0; i < V::size(); ++i)
+            {
+              if (m_k[i])
+                m_value[i] = mem[i];
+            }
+        }
+    };
+
+  // where_expression<bool, T>
+  template <typename V>
+    class where_expression<bool, V> : public const_where_expression<bool, V>
+    {
+      using M = bool;
+      using typename const_where_expression<M, V>::value_type;
+      using const_where_expression<M, V>::m_k;
+      using const_where_expression<M, V>::m_value;
+
+    public:
+      where_expression(const where_expression&) = delete;
+      where_expression& operator=(const where_expression&) = delete;
+
+      constexpr where_expression(const M& kk, V& dd)
+      : const_where_expression<M, V>(kk, dd) {}
+
+#define SIMD_OP_(op)                                \
+      template <typename Up>                        \
+        constexpr void operator op(Up&& x) &&       \
+        { if (m_k) m_value op static_cast<Up&&>(x); }
+
+      SIMD_OP_(=)
+      SIMD_OP_(+=)
+      SIMD_OP_(-=)
+      SIMD_OP_(*=)
+      SIMD_OP_(/=)
+      SIMD_OP_(%=)
+      SIMD_OP_(&=)
+      SIMD_OP_(|=)
+      SIMD_OP_(^=)
+      SIMD_OP_(<<=)
+      SIMD_OP_(>>=)
+#undef SIMD_OP_
+
+      constexpr void operator++() &&
+      { if (m_k) ++m_value; }
+
+      constexpr void operator++(int) &&
+      { if (m_k) ++m_value; }
+
+      constexpr void operator--() &&
+      { if (m_k) --m_value; }
+
+      constexpr void operator--(int) &&
+      { if (m_k) --m_value; }
+
+      // intentionally hides const_where_expression::copy_from
+      template <typename Up, typename Flags>
+        constexpr void
+        copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) &&
+        { if (m_k) m_value = mem[0]; }
+    };
+
+  // where
+  template <typename Tp, typename Ap>
+    constexpr where_expression<simd_mask<Tp, Ap>, simd<Tp, Ap>>
+    where(const typename simd<Tp, Ap>::mask_type& k, simd<Tp, Ap>& value)
+    { return {k, value}; }
+
+  template <typename Tp, typename Ap>
+    constexpr const_where_expression<simd_mask<Tp, Ap>, simd<Tp, Ap>>
+    where(const typename simd<Tp, Ap>::mask_type& k,
+          const simd<Tp, Ap>& value)
+    { return {k, value}; }
+
+  template <typename Tp, typename Ap>
+    constexpr where_expression<simd_mask<Tp, Ap>, simd_mask<Tp, Ap>>
+    where(const std::remove_const_t<simd_mask<Tp, Ap>>& k,
+          simd_mask<Tp, Ap>& value)
+    { return {k, value}; }
+
+  template <typename Tp, typename Ap>
+    constexpr const_where_expression<simd_mask<Tp, Ap>, simd_mask<Tp, Ap>>
+    where(const std::remove_const_t<simd_mask<Tp, Ap>>& k,
+          const simd_mask<Tp, Ap>& value)
+    { return {k, value}; }
+
+  template <typename Tp>
+    constexpr where_expression<bool, Tp>
+    where(detail::ExactBool k, Tp& value)
+    { return {k, value}; }
+
+  template <typename Tp>
+    constexpr const_where_expression<bool, Tp>
+    where(detail::ExactBool k, const Tp& value)
+    { return {k, value}; }
+
+  template <typename Tp, typename Ap>
+    constexpr void
+    where(bool k, simd<Tp, Ap>& value) = delete;
+
+  template <typename Tp, typename Ap>
+    constexpr void
+    where(bool k, const simd<Tp, Ap>& value) = delete;
+
+  // reductions [simd.reductions]
+  template <typename T, typename A, typename BinaryOperation = std::plus<>>
+    constexpr T
+    reduce(const simd<T, A>& v,
+           BinaryOperation binary_op = BinaryOperation())
+    {
+      constexpr int N = simd_size_v<T, A>;
+      if constexpr (N > 3)
+        {
+          constexpr int N2 = detail::bit_floor(N / 2);
+          constexpr int NRem = N - 2 * N2;
+          if constexpr (NRem > 0)
+            {
+              const auto [l, r, rem] = split<N2, N2, N - 2 * N2>(v);
+              return binary_op(reduce(binary_op(l, r), binary_op), reduce(rem, binary_op));
+            }
+          else
+            {
+              const auto [l, r] = split<N2, N2>(v);
+              return reduce(binary_op(l, r), binary_op);
+            }
+        }
+      else
+        {
+          T r = v[0];
+          for (size_t i = 1; i < simd_size_v<T, A>; ++i)
+            r = binary_op(r, v[i]);
+          return r;
+        }
+    }
+
+  template <typename M, typename V, typename BinaryOperation = std::plus<>>
+    typename V::value_type
+    reduce(const const_where_expression<M, V>& x,
+        typename V::value_type identity_element,
+        BinaryOperation binary_op)
+    {
+      const M& k = get_mask(x);
+      const V& v = get_lvalue(x);
+      auto r = identity_element;
+      if (any_of(k)) [[likely]]
+        {
+          for (size_t i = 0; i < V::size(); ++i)
+            if (k[i])
+              r = binary_op(r, v[i]);
+        }
+      return r;
+    }
+
+  template <typename M, typename V>
+    typename V::value_type
+    reduce(const const_where_expression<M, V>& x, std::plus<> binary_op = {})
+    { return reduce(x, 0, binary_op); }
+
+  template <typename M, typename V>
+    typename V::value_type
+    reduce(const const_where_expression<M, V>& x, std::multiplies<> binary_op)
+    { return reduce(x, 1, binary_op); }
+
+  template <typename M, typename V>
+    typename V::value_type
+    reduce(const const_where_expression<M, V>& x, std::bit_and<> binary_op)
+    { return reduce(x, ~typename V::value_type(), binary_op); }
+
+  template <typename M, typename V>
+    typename V::value_type
+    reduce(const const_where_expression<M, V>& x, std::bit_or<> binary_op)
+    { return reduce(x, 0, binary_op); }
+
+  template <typename M, typename V>
+    typename V::value_type
+    reduce(const const_where_expression<M, V>& x, std::bit_xor<> binary_op)
+    { return reduce(x, 0, binary_op); }
+
+  template <typename T, typename A>
+    constexpr T
+    hmin(const simd<T, A>& v) noexcept
+    {
+      return reduce(v, [](const auto& l, const auto& r) {
+               using std::min;
+               return min(l, r);
+             });
+    }
+
+  template <typename T, typename A>
+    constexpr T
+    hmax(const simd<T, A>& v) noexcept
+    {
+      return reduce(v, [](const auto& l, const auto& r) {
+               using std::max;
+               return max(l, r);
+             });
+    }
+
+  template <typename M, typename V>
+    constexpr typename V::value_type
+    hmin(const const_where_expression<M, V>& x) noexcept
+    {
+      using T = typename V::value_type;
+      constexpr T id_elem =
+#ifdef __FINITE_MATH_ONLY__
+        std::numeric_limits<T>::max();
+#else
+        std::numeric_limits<T>::infinity();
+#endif
+      return reduce(x, id_elem, [](const auto& l, const auto& r) {
+               using std::min;
+               return min(l, r);
+             });
+    }
+
+  template <typename M, typename V>
+    constexpr
+    typename V::value_type
+    hmax(const const_where_expression<M, V>& x) noexcept
+    {
+      using T = typename V::value_type;
+      constexpr T id_elem =
+#ifdef __FINITE_MATH_ONLY__
+        std::numeric_limits<T>::lowest();
+#else
+        -std::numeric_limits<T>::infinity();
+#endif
+      return reduce(x, id_elem, [](const auto& l, const auto& r) {
+               using std::max;
+               return max(l, r);
+             });
+    }
+
+  // algorithms [simd.alg]
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    min(const simd<T, A>& a, const simd<T, A>& b)
+    { return simd<T, A>([&](auto i) { return std::min(a[i], b[i]); }); }
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    max(const simd<T, A>& a, const simd<T, A>& b)
+    { return simd<T, A>([&](auto i) { return std::max(a[i], b[i]); }); }
+
+  template <typename T, typename A>
+    constexpr
+    std::pair<simd<T, A>, simd<T, A>>
+    minmax(const simd<T, A>& a, const simd<T, A>& b)
+    { return {min(a, b), max(a, b)}; }
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    clamp(const simd<T, A>& v, const simd<T, A>& lo,
+        const simd<T, A>& hi)
+    { return simd<T, A>([&](auto i) { return std::clamp(v[i], lo[i], hi[i]); }); }
+
+  // math
+#define SIMD_MATH_1ARG(name, return_temp)                                                          \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const simd<detail::FloatingPoint<T>, A>& x) noexcept                                      \
+    { return return_temp<T, A>([&x](auto i) { return std::name(x[i]); }); }
+
+#define SIMD_MATH_1ARG_FIXED(name, R)                                                              \
+  template <typename T, typename A>                                                                \
+    constexpr fixed_size_simd<R, simd_size_v<T, A>>                                                \
+    name(const simd<detail::FloatingPoint<T>, A>& x) noexcept                                      \
+    { return fixed_size_simd<R, simd_size_v<T, A>>([&x](auto i) { return std::name(x[i]); }); }
+
+#define SIMD_MATH_2ARG(name, return_temp)                                                          \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const simd<detail::FloatingPoint<T>, A>& x, const simd<T, A>& y) noexcept                 \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }                   \
+                                                                                                   \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
+         const detail::type_identity_t<simd<T, A>>& y) noexcept                                    \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }                   \
+                                                                                                   \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const detail::type_identity_t<simd<T, A>>& x,                                             \
+         const simd<detail::FloatingPoint<T>, A>& y) noexcept                                      \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }
+
+#define SIMD_MATH_3ARG(name, return_temp)                                                          \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
+         const simd<T, A>& y, const simd<T, A> &z) noexcept                                        \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
+                                                                                                   \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
+         const detail::type_identity_t<simd<T, A>>& y,                                             \
+         const detail::type_identity_t<simd<T, A>> &z) noexcept                                    \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
+                                                                                                   \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const detail::type_identity_t<simd<T, A>>& x,                                             \
+         const simd<detail::FloatingPoint<T>, A>& y,                                               \
+         const detail::type_identity_t<simd<T, A>> &z) noexcept                                    \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
+                                                                                                   \
+  template <typename T, typename A>                                                                \
+    constexpr return_temp<T, A>                                                                    \
+    name(const detail::type_identity_t<simd<T, A>>& x,                                             \
+         const detail::type_identity_t<simd<T, A>>& y,                                             \
+         const simd<detail::FloatingPoint<T>, A> &z) noexcept                                      \
+    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }
+
+  template <typename T, typename A, typename U = detail::SignedIntegral<T>>
+    constexpr simd<T, A>
+    abs(const simd<T, A>& x) noexcept
+    { return simd<T, A>([&x](auto i) { return std::abs(x[i]); }); }
+
+  SIMD_MATH_1ARG(abs, simd)
+  SIMD_MATH_1ARG(isnan, simd_mask)
+  SIMD_MATH_1ARG(isfinite, simd_mask)
+  SIMD_MATH_1ARG(isinf, simd_mask)
+  SIMD_MATH_1ARG(isnormal, simd_mask)
+  SIMD_MATH_1ARG(signbit, simd_mask)
+  SIMD_MATH_1ARG_FIXED(fpclassify, int)
+
+  SIMD_MATH_2ARG(hypot, simd)
+  SIMD_MATH_3ARG(hypot, simd)
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    remquo(const simd<T, A>& x, const simd<T, A>& y,
+           fixed_size_simd<int, simd_size_v<T, A>>* quo) noexcept
+    { return simd<T, A>([&x, &y, quo](auto i) { return std::remquo(x[i], y[i], &(*quo)[i]); }); }
+
+  SIMD_MATH_1ARG(erf, simd)
+  SIMD_MATH_1ARG(erfc, simd)
+  SIMD_MATH_1ARG(tgamma, simd)
+  SIMD_MATH_1ARG(lgamma, simd)
+
+  SIMD_MATH_2ARG(pow, simd)
+  SIMD_MATH_2ARG(fmod, simd)
+  SIMD_MATH_2ARG(remainder, simd)
+  SIMD_MATH_2ARG(nextafter, simd)
+  SIMD_MATH_2ARG(copysign, simd)
+  SIMD_MATH_2ARG(fdim, simd)
+  SIMD_MATH_2ARG(fmax, simd)
+  SIMD_MATH_2ARG(fmin, simd)
+  SIMD_MATH_2ARG(isgreater, simd_mask)
+  SIMD_MATH_2ARG(isgreaterequal, simd_mask)
+  SIMD_MATH_2ARG(isless, simd_mask)
+  SIMD_MATH_2ARG(islessequal, simd_mask)
+  SIMD_MATH_2ARG(islessgreater, simd_mask)
+  SIMD_MATH_2ARG(isunordered, simd_mask)
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    modf(const simd<detail::FloatingPoint<T>, A>& x, simd<T, A>* iptr) noexcept
+    { return simd<T, A>([&x, iptr](auto i) { return std::modf(x[i], &(*iptr)[i]); }); }
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    frexp(const simd<detail::FloatingPoint<T>, A>& x,
+          fixed_size_simd<int, simd_size_v<T, A>>* exp) noexcept
+    { return simd<T, A>([&x, exp](auto i) { return std::frexp(x[i], &(*exp)[i]); }); }
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    scalbln(const simd<detail::FloatingPoint<T>, A>& x,
+            const fixed_size_simd<long int, simd_size_v<T, A>>& exp) noexcept
+    { return simd<T, A>([&x, &exp](auto i) { return std::scalbln(x[i], exp[i]); }); }
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    scalbn(const simd<detail::FloatingPoint<T>, A>& x,
+           const fixed_size_simd<int, simd_size_v<T, A>>& exp) noexcept
+    { return simd<T, A>([&x, &exp](auto i) { return std::scalbn(x[i], exp[i]); }); }
+
+  template <typename T, typename A>
+    constexpr simd<T, A>
+    ldexp(const simd<detail::FloatingPoint<T>, A>& x,
+          const fixed_size_simd<int, simd_size_v<T, A>>& exp) noexcept
+    { return simd<T, A>([&x, &exp](auto i) { return std::ldexp(x[i], exp[i]); }); }
+
+  SIMD_MATH_1ARG(sqrt, simd)
+
+  SIMD_MATH_3ARG(fma, simd)
+
+  SIMD_MATH_1ARG(trunc, simd)
+  SIMD_MATH_1ARG(ceil, simd)
+  SIMD_MATH_1ARG(floor, simd)
+  SIMD_MATH_1ARG(round, simd)
+  SIMD_MATH_1ARG_FIXED(lround, long)
+  SIMD_MATH_1ARG_FIXED(llround, long long)
+  SIMD_MATH_1ARG(nearbyint, simd)
+  SIMD_MATH_1ARG(rint, simd)
+  SIMD_MATH_1ARG_FIXED(lrint, long)
+  SIMD_MATH_1ARG_FIXED(llrint, long long)
+  SIMD_MATH_1ARG_FIXED(ilogb, int)
+
+  // trig functions
+  SIMD_MATH_1ARG(sin, simd)
+  SIMD_MATH_1ARG(cos, simd)
+  SIMD_MATH_1ARG(tan, simd)
+  SIMD_MATH_1ARG(asin, simd)
+  SIMD_MATH_1ARG(acos, simd)
+  SIMD_MATH_1ARG(atan, simd)
+  SIMD_MATH_2ARG(atan2, simd)
+  SIMD_MATH_1ARG(sinh, simd)
+  SIMD_MATH_1ARG(cosh, simd)
+  SIMD_MATH_1ARG(tanh, simd)
+  SIMD_MATH_1ARG(asinh, simd)
+  SIMD_MATH_1ARG(acosh, simd)
+  SIMD_MATH_1ARG(atanh, simd)
+
+  // logarithms
+  SIMD_MATH_1ARG(log, simd)
+  SIMD_MATH_1ARG(log10, simd)
+  SIMD_MATH_1ARG(log1p, simd)
+  SIMD_MATH_1ARG(log2, simd)
+  SIMD_MATH_1ARG(logb, simd)
+
+#undef SIMD_MATH_1ARG
+#undef SIMD_MATH_1ARG_FIXED
+#undef SIMD_MATH_2ARG
+#undef SIMD_MATH_3ARG
+}
+#ifdef VIR_SIMD_TS_DROPIN
+}
+
+namespace vir::stdx
+{
+  using namespace std::experimental::parallelism_v2;
+}
+#endif
+
+#endif
+#endif  // VIR_SIMD_H_
+
+
+// #include "typelist.hpp"
+
+
+#ifndef __EMSCRIPTEN__
+#include <cxxabi.h>
+#include <iostream>
+#include <typeinfo>
+#endif
+
+#ifndef DISABLE_SIMD
+#define DISABLE_SIMD 0
+#endif
+
+namespace gr::meta {
+
+struct null_type {};
+
+template<typename... Ts>
+struct print_types;
+
+template<typename CharT, std::size_t SIZE>
+struct fixed_string {
+    constexpr static std::size_t N              = SIZE;
+    CharT                        _data[N + 1UZ] = {};
+
+    constexpr fixed_string() = default;
+
+    constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
+        if constexpr (N != 0)
+            for (std::size_t i = 0; i < N; ++i) _data[i] = str[i];
+    }
+
+    [[nodiscard]] constexpr std::size_t
+    size() const noexcept {
+        return N;
+    }
+
+    [[nodiscard]] constexpr bool
+    empty() const noexcept {
+        return N == 0;
+    }
+
+    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return { _data, N }; }
+
+    [[nodiscard]] explicit
+    operator std::string() const noexcept {
+        return { _data, N };
+    }
+
+    [[nodiscard]] explicit
+    operator const char *() const noexcept {
+        return _data;
+    }
+
+    [[nodiscard]] constexpr bool
+    operator==(const fixed_string &other) const noexcept {
+        return std::string_view{ _data, N } == std::string_view(other);
+    }
+
+    template<std::size_t N2>
+    [[nodiscard]] friend constexpr bool
+    operator==(const fixed_string &, const fixed_string<CharT, N2> &) {
+        return false;
+    }
+
+    constexpr auto
+    operator<=>(const fixed_string &other) const noexcept
+            = default;
+
+    friend constexpr auto
+    operator<=>(const fixed_string &fs, std::string_view sv) noexcept {
+        return std::string_view(fs) <=> sv;
+    }
+
+    friend constexpr auto
+    operator<=>(const fixed_string &fs, const std::string &str) noexcept {
+        return std::string(fs) <=> str;
+    }
+};
+
+template<typename CharT, std::size_t N>
+fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
+
+template<typename T>
+struct is_fixed_string : std::false_type {};
+
+template<typename CharT, std::size_t N>
+struct is_fixed_string<gr::meta::fixed_string<CharT, N>> : std::true_type {};
+
+template<typename T>
+concept FixedString = is_fixed_string<T>::value;
+
+template<typename CharT, std::size_t N1, std::size_t N2>
+constexpr fixed_string<CharT, N1 + N2>
+operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
+    meta::fixed_string<CharT, N1 + N2> result{};
+    for (std::size_t i = 0; i < N1; ++i) {
+        result._data[i] = lhs._data[i];
+    }
+    for (std::size_t i = 0; i < N2; ++i) {
+        result._data[N1 + i] = rhs._data[i];
+    }
+    result._data[N1 + N2] = '\0';
+    return result;
+}
+
+namespace detail {
+constexpr int
+log10(int n) noexcept {
+    if (n < 10) return 0;
+    return 1 + log10(n / 10);
+}
+
+constexpr int
+pow10(int n) noexcept {
+    if (n == 0) return 1;
+    return 10 * pow10(n - 1);
+}
+
+template<int N, std::size_t... Idx>
+constexpr fixed_string<char, sizeof...(Idx)>
+make_fixed_string_impl(std::index_sequence<Idx...>) {
+    constexpr auto numDigits = sizeof...(Idx);
+    return { { ('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0 } };
+}
+} // namespace detail
+
+template<int N>
+constexpr auto
+make_fixed_string() noexcept {
+    if constexpr (N == 0) {
+        return fixed_string{ "0" };
+    } else {
+        constexpr std::size_t digits = 1U + static_cast<std::size_t>(detail::log10(N));
+        return detail::make_fixed_string_impl<N>(std::make_index_sequence<digits>());
+    }
+}
+
+static_assert(fixed_string("0") == make_fixed_string<0>());
+static_assert(fixed_string("1") == make_fixed_string<1>());
+static_assert(fixed_string("2") == make_fixed_string<2>());
+static_assert(fixed_string("123") == make_fixed_string<123>());
+static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("out123"));
+
+template<typename T>
+[[nodiscard]] std::string
+type_name() noexcept {
+#if !defined(__EMSCRIPTEN__)
+    std::string type_name = typeid(T).name();
+    int         status;
+    char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
+    if (status == 0) {
+        std::string ret(demangled_name);
+        free(demangled_name);
+        return ret;
+    } else {
+        free(demangled_name);
+        return typeid(T).name();
+    }
+#else
+    return typeid(T).name(); // TODO: to be replaced by refl-cpp
+#endif
+}
+
+template<fixed_string val>
+struct message_type {};
+
+template<class... T>
+constexpr bool always_false = false;
+
+constexpr std::size_t invalid_index              = -1UZ;
+constexpr std::size_t default_message_port_index = -2UZ;
+
+#if HAVE_SOURCE_LOCATION
+[[gnu::always_inline]] inline void
+precondition(bool cond, const std::source_location loc = std::source_location::current()) {
+    struct handle {
+        [[noreturn]] static void
+        failure(std::source_location const &loc) {
+            std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':' << loc.column() << ": `" << loc.function_name() << "`\n";
+            __builtin_trap();
+        }
+    };
+
+    if (not cond) [[unlikely]]
+        handle::failure(loc);
+}
+#else
+[[gnu::always_inline]] inline void
+precondition(bool cond) {
+    struct handle {
+        [[noreturn]] static void
+        failure() {
+            std::clog << "failed precondition\n";
+            __builtin_trap();
+        }
+    };
+
+    if (not cond) [[unlikely]]
+        handle::failure();
+}
+#endif
+
+/**
+ * T is tuple-like if it implements std::tuple_size, std::tuple_element, and std::get.
+ * Tuples with size 0 are excluded.
+ */
+template<typename T>
+concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
+    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+};
+
+template<template<typename...> class Template, typename Class>
+struct is_instantiation : std::false_type {};
+
+template<template<typename...> class Template, typename... Args>
+struct is_instantiation<Template, Template<Args...>> : std::true_type {};
+template<typename Class, template<typename...> class Template>
+concept is_instantiation_of = is_instantiation<Template, Class>::value;
+
+template<typename T>
+concept map_type = is_instantiation_of<T, std::map> || is_instantiation_of<T, std::unordered_map>;
+
+template<typename T>
+concept vector_type = is_instantiation_of<std::remove_cv_t<T>, std::vector>;
+
+template<typename T>
+struct is_std_array_type : std::false_type {};
+
+template<typename T, std::size_t N>
+struct is_std_array_type<std::array<T, N>> : std::true_type {};
+
+template<typename T>
+concept array_type = is_std_array_type<std::remove_cv_t<T>>::value;
+
+template<typename T, typename V = void>
+concept array_or_vector_type = (vector_type<T> || array_type<T>) &&(std::same_as<V, void> || std::same_as<typename T::value_type, V>);
+
+namespace stdx = vir::stdx;
+
+template<typename V, typename T = void>
+concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<T, typename V::value_type>);
+
+template<typename V, typename T>
+concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
+
+template<typename T>
+concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
+
+template<typename T>
+using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
+
+template<typename T>
+concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
+
+/**
+ * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
+ * tuple-like of stdx::simd (recursively). The latter requires that the SIMD width is homogeneous.
+ * If T is not a simd (or tuple thereof), value is 0.
+ */
+template<typename T>
+struct simdize_size : std::integral_constant<std::size_t, 0> {};
+
+template<typename T, typename A>
+struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
+
+template<tuple_like Tup>
+struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
+    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...);
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+};
+
+template<typename T>
+inline constexpr std::size_t simdize_size_v = simdize_size<T>::value;
+
+namespace detail {
+/**
+ * Shortcut to determine the stdx::simd specialization with the most efficient ABI tag for the
+ * requested element type T and width N.
+ */
+template<typename T, std::size_t N>
+using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
+
+template<typename T, std::size_t N>
+struct simdize_impl {
+    using type = T;
+};
+
+template<vectorizable_v T, std::size_t N>
+    requires requires { typename stdx::native_simd<T>; }
+struct simdize_impl<T, N> {
+    using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
+};
+
+template<std::size_t N>
+struct simdize_impl<std::tuple<>, N> {
+    using type = std::tuple<>;
+};
+
+template<tuple_like Tup, std::size_t N>
+    requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
+struct simdize_impl<Tup, N> {
+    static inline constexpr std::size_t size
+            = N > 0 ? N
+                    : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr { return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... }); }
+
+                      (std::make_index_sequence<std::tuple_size_v<Tup>>());
+
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
+        return {};
+    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+};
+} // namespace detail
+
+/**
+ * Meta-function that turns a vectorizable type or a tuple-like (recursively) of vectorizable types
+ * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
+ * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
+ * stdx::native_simd<U>::size() determines the resulting SIMD width.
+ * If T is neither vectorizable nor a std::tuple with at least one member, simdize produces T.
+ */
+template<typename T, std::size_t N = 0>
+using simdize = typename detail::simdize_impl<T, N>::type;
+
+static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
+                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>,
+                                      std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
+
+template<fixed_string Name, typename PortList>
+consteval std::size_t
+indexForName() {
+    auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
+        auto static_name_for_index = []<std::size_t Id> {
+            using Port = typename PortList::template at<Id>;
+            if constexpr (requires(Port port) {
+                              { port.static_name() };
+                          }) {
+                return Port::Name;
+            } else {
+                return Port::value_type::Name;
+            }
+        };
+
+        constexpr int n_matches = ((static_name_for_index.template operator()<Ids>() == Name) + ...);
+        static_assert(n_matches <= 1, "Multiple ports with that name were found. The name must be unique. You can "
+                                      "still use a port index instead.");
+        static_assert(n_matches == 1, "No port with the given name exists.");
+        std::size_t result = meta::invalid_index;
+        ((static_name_for_index.template operator()<Ids>() == Name ? (result = Ids) : 0), ...);
+        return result;
+    };
+    return helper(std::make_index_sequence<PortList::size>());
+}
+
+// template<template<typename...> typename Type, typename... Items>
+// using find_type = decltype(std::tuple_cat(std::declval<std::conditional_t<is_instantiation_of<Items, Type>, std::tuple<Items>, std::tuple<>>>()...));
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = std::tuple<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = decltype(std::tuple_cat(std::conditional_t<Pred<First>::value, std::tuple<First>, std::tuple<>>(), typename find_type<Pred, Rest...>::type()));
+};
+
+template<template<typename> typename Pred, typename... Items>
+using find_type_t = typename find_type<Pred, Items...>::type;
+
+template<typename Tuple, typename Default = void>
+struct get_first_or_default;
+
+template<typename First, typename... Rest, typename Default>
+struct get_first_or_default<std::tuple<First, Rest...>, Default> {
+    using type = First;
+};
+
+template<typename Default>
+struct get_first_or_default<std::tuple<>, Default> {
+    using type = Default;
+};
+
+template<typename Tuple, typename Default = void>
+using get_first_or_default_t = typename get_first_or_default<Tuple, Default>::type;
+
+template<typename... Lambdas>
+struct overloaded : Lambdas... {
+    using Lambdas::operator()...;
+};
+
+template<typename... Lambdas>
+overloaded(Lambdas...) -> overloaded<Lambdas...>;
+
+namespace detail {
+template<template<typename...> typename Mapper, template<typename...> typename Wrapper, typename... Args>
+Wrapper<Mapper<Args>...> *
+type_transform_impl(Wrapper<Args...> *);
+
+template<template<typename...> typename Mapper, typename T>
+Mapper<T> *
+type_transform_impl(T *);
+
+template<template<typename...> typename Mapper>
+void *
+type_transform_impl(void *);
+} // namespace detail
+
+template<template<typename...> typename Mapper, typename T>
+using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
+
+template<typename Arg, typename... Args>
+auto
+safe_min(Arg &&arg, Args &&...args) {
+    if constexpr (sizeof...(Args) == 0) {
+        return arg;
+    } else {
+        return std::min(std::forward<Arg>(arg), std::forward<Args>(args)...);
+    }
+}
+
+template<typename Arg, typename... Args>
+auto
+safe_pair_min(Arg &&arg, Args &&...args) {
+    if constexpr (sizeof...(Args) == 0) {
+        return arg;
+    } else {
+        return std::make_pair(std::min(std::forward<Arg>(arg).first, std::forward<Args>(args).first...), std::min(std::forward<Arg>(arg).second, std::forward<Args>(args).second...));
+    }
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto
+tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+void
+tuple_for_each_enumerate(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        ([&function](auto I, auto &&t0, auto &&...ts) { function(I, std::get<I>(t0), std::get<I>(ts)...); }(std::integral_constant<std::size_t, Idx>{}, tuple, tuples...), ...);
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto
+tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+auto
+tuple_transform_enumerated(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(I, std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
+    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+}
+
+static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
+static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
+static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
+
+#ifdef __cpp_lib_hardware_interference_size
+static inline constexpr const std::size_t kCacheLine = std::hardware_destructive_interference_size;
+#else
+static inline constexpr const std::size_t kCacheLine = 64;
+#endif
+
+namespace detail {
+
+template<typename T>
+concept HasValueType = requires { typename T::value_type; };
+
+template<typename T, typename = void>
+struct fundamental_base_value_type {
+    using type = T;
+};
+
+template<HasValueType T>
+struct fundamental_base_value_type<T> {
+    using type = typename fundamental_base_value_type<typename T::value_type>::type;
+};
+
+} // namespace detail
+
+template<typename T>
+using fundamental_base_value_type_t = typename detail::fundamental_base_value_type<T>::type;
+
+static_assert(std::is_same_v<fundamental_base_value_type_t<int>, int>);
+static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<float>>, float>);
+static_assert(std::is_same_v<fundamental_base_value_type_t<std::vector<std::complex<double>>>, double>);
+
+template<typename T>
+concept string_like = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> || std::is_convertible_v<T, std::string_view>;
+
+namespace detail {
+template<typename T>
+struct is_const_member_function : std::false_type {};
+
+template<typename T, typename U, typename... args>
+struct is_const_member_function<U (T::*)(args...) const> : std::true_type {};
+} // namespace detail
+
+template<typename T>
+inline constexpr bool
+is_const_member_function(T) noexcept {
+    return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
+}
+
+} // namespace gr::meta
+
+#endif // include guard
+
+
+// #include "BlockTraits.hpp"
+#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
+#define GNURADIO_NODE_NODE_TRAITS_HPP
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+// #include "Port.hpp"
+#ifndef GNURADIO_PORT_HPP
+#define GNURADIO_PORT_HPP
+
+#include <complex>
+#include <span>
+#include <variant>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+// #include "annotated.hpp"
+#ifndef GNURADIO_ANNOTATED_HPP
+#define GNURADIO_ANNOTATED_HPP
+
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+#include <fmt/format.h>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+namespace gr {
+
+/**
+ * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<gr::meta::fixed_string doc_string>
+struct Doc {
+    static constexpr gr::meta::fixed_string value = doc_string;
+};
+
+using EmptyDoc = Doc<"">; // nomen-est-omen
+
+template<typename T>
+struct is_doc : std::false_type {};
+
+template<gr::meta::fixed_string N>
+struct is_doc<Doc<N>> : std::true_type {};
+
+template<typename T>
+concept Documentation = is_doc<T>::value;
+
+/**
+ * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<gr::meta::fixed_string doc_string>
+struct Unit {
+    static constexpr gr::meta::fixed_string value = doc_string;
+};
+
+using EmptyUnit = Unit<"">; // nomen-est-omen
+
+template<typename T>
+struct is_unit : std::false_type {};
+
+template<gr::meta::fixed_string N>
+struct is_unit<Unit<N>> : std::true_type {};
+
+template<typename T>
+concept UnitType = is_unit<T>::value;
+
+static_assert(Documentation<EmptyDoc>);
+static_assert(UnitType<EmptyUnit>);
+static_assert(!UnitType<EmptyDoc>);
+static_assert(!Documentation<EmptyUnit>);
+
+/**
+ * @brief Annotates field etc. that the entity is visible from a UI perspective.
+ */
+struct Visible {};
+
+/**
+ * @brief Annotates block, indicating to calling schedulers that it may block due IO.
+ */
+template<bool UseIoThread = true>
+struct BlockingIO {
+    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
+};
+
+/**
+ * @brief Annotates block, indicating to perform resampling based on the provided ratio.
+ *
+ * The ratio between numerator and denominator defines the number of samples to be interpolated or decimated.
+ * - If the ratio is greater than 1, interpolation occurs.
+ * - If the ratio is less than 1, decimation occurs.
+ * - If the ratio is 1, no effect on the sampling rate.
+ *
+ * @tparam numerator Top number in the input-to-output sample ratio.
+ * @tparam denominator Bottom number in the input-to-output sample ratio.
+ * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
+ */
+template<std::size_t numerator = 1LU, std::size_t denominator = 1LU, bool isConst = false>
+struct ResamplingRatio {
+    static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
+    static constexpr std::size_t kNumerator   = numerator;
+    static constexpr std::size_t kDenominator = denominator;
+    static constexpr bool        kIsConst     = isConst;
+    static constexpr bool        kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
+};
+
+template<typename T>
+concept IsResamplingRatio = requires {
+    T::kNumerator;
+    T::kDenominator;
+    T::kIsConst;
+    T::kEnabled;
+} && std::is_base_of_v<ResamplingRatio<T::kNumerator, T::kDenominator, T::kIsConst>, T>;
+
+template<typename T>
+using is_resampling_ratio = std::bool_constant<IsResamplingRatio<T>>;
+
+static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
+static_assert(!is_resampling_ratio<int>::value);
+
+/**
+ * @brief Annotates block, indicating the stride control for data processing.
+ *
+ * Stride determines the number of samples between consecutive data processing events:
+ * - If stride is less than N, it indicates overlap.
+ * - If stride is greater than N, it indicates skipped samples.
+ * - If stride is equal to 0, it indicates back-to-back processing without skipping.
+ *
+ * @tparam stride The number of samples between data processing events.
+ * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
+ */
+template<std::size_t stride = 0LU, bool isConst = false>
+struct Stride {
+    static_assert(stride >= 0, "Stride must be >= 0");
+
+    static constexpr std::size_t kStride  = stride;
+    static constexpr bool        kIsConst = isConst;
+    static constexpr bool        kEnabled = !isConst || (stride > 0);
+};
+
+template<typename T>
+concept IsStride = requires {
+    T::kStride;
+    T::kIsConst;
+    T::kEnabled;
+} && std::is_base_of_v<Stride<T::kStride, T::kIsConst>, T>;
+
+template<typename T>
+using is_stride = std::bool_constant<IsStride<T>>;
+
+static_assert(is_stride<Stride<10, true>>::value);
+static_assert(!is_stride<int>::value);
+
+/**
+ * @brief Annotates templated block, indicating which port data types are supported.
+ */
+template<typename... Ts>
+struct SupportedTypes {};
+
+template<typename T>
+struct is_supported_types : std::false_type {};
+
+template<typename... Ts>
+struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
+
+using DefaultSupportedTypes = SupportedTypes<>;
+
+static_assert(gr::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
+static_assert(gr::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
+
+/**
+ * @brief Represents limits and optional validation for an Annotated<..> type.
+ *
+ * The `Limits` structure defines lower and upper bounds for a value of type `T`.
+ * Additionally, it allows for an optional custom validation function to be provided.
+ * This function should take a value of type `T` and return a `bool`, indicating
+ * whether the value passes the custom validation or not.
+ *
+ * Example:
+ * ```
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
+ * // or:
+ * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
+ * // or:
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
+ * ```
+ */
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
+    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
+        { f(v) } -> std::same_as<bool>;
+    } || Validator == nullptr)
+struct Limits {
+    using ValueType                                    = decltype(LowerLimit);
+    static constexpr ValueType           MinRange      = LowerLimit;
+    static constexpr ValueType           MaxRange      = UpperLimit;
+    static constexpr decltype(Validator) ValidatorFunc = Validator;
+
+    static constexpr bool
+    validate(const ValueType &value) noexcept {
+        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
+            if constexpr (Validator != nullptr) {
+                try {
+                    return Validator(value);
+                } catch (...) {
+                    return false;
+                }
+            } else {
+                return true; // if no validator and limits are same, return true by default
+            }
+        }
+        if constexpr (Validator != nullptr) {
+            try {
+                return value >= LowerLimit && value <= UpperLimit && Validator(value);
+            } catch (...) {
+                return false;
+            }
+        } else {
+            return value >= LowerLimit && value <= UpperLimit;
+        }
+        return true;
+    }
+};
+
+template<typename T>
+struct is_limits : std::false_type {};
+
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
+struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
+
+template<typename T>
+concept Limit    = is_limits<T>::value;
+
+using EmptyLimit = Limits<0, 0>; // nomen-est-omen
+
+static_assert(Limit<EmptyLimit>);
+
+/**
+ * @brief Annotated is a template class that acts as a transparent wrapper around another type.
+ * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
+ * The meta-information is supplied as template parameters.
+ */
+template<typename T, gr::meta::fixed_string description_ = "", typename... Arguments>
+struct Annotated {
+    using value_type = T;
+    using LimitType  = typename gr::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
+    T value;
+
+    Annotated() = default;
+
+    template<typename U>
+        requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
+    explicit(false)
+    Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
+
+    template<typename U>
+        requires std::assignable_from<T &, U>
+    Annotated &
+    operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
+        value = std::forward<U>(input);
+        return *this;
+    }
+
+    inline explicit(false) constexpr
+    operator T &() noexcept {
+        return value;
+    }
+
+    inline explicit(false) constexpr
+    operator const T &() const noexcept {
+        return value;
+    }
+
+    constexpr bool
+    operator==(const Annotated &other) const noexcept {
+        return value == other.value;
+    }
+
+    template<typename U>
+    constexpr bool
+    operator==(const U &other) const noexcept {
+        if constexpr (requires { other.value; }) {
+            return value == other.value;
+        } else {
+            return value == other;
+        }
+    }
+
+    template<typename U>
+        requires std::is_same_v<std::remove_cvref_t<U>, T>
+    [[nodiscard]] constexpr bool
+    validate_and_set(U &&value_) {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value = std::forward<U>(value_);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
+                value = std::forward<U>(value_);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    operator std::string_view() const noexcept
+        requires std::is_same_v<T, std::string>
+    {
+        return std::string_view(value); // Convert from std::string to std::string_view
+    }
+
+    // meta-information
+    inline static constexpr std::string_view
+    description() noexcept {
+        return std::string_view{ description_ };
+    }
+
+    inline static constexpr std::string_view
+    documentation() noexcept {
+        using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
+        return std::string_view{ Documentation::value };
+    }
+
+    inline static constexpr std::string_view
+    unit() noexcept {
+        using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
+        return std::string_view{ PhysicalUnit::value };
+    }
+
+    inline static constexpr bool
+    visible() noexcept {
+        return gr::meta::typelist<Arguments...>::template contains<Visible>;
+    }
+};
+
+template<typename T>
+struct is_annotated : std::false_type {};
+
+template<typename T, gr::meta::fixed_string str, typename... Args>
+struct is_annotated<gr::Annotated<T, str, Args...>> : std::true_type {};
+
+template<typename T>
+concept AnnotatedType = is_annotated<T>::value;
+
+template<typename T>
+struct unwrap_if_wrapped {
+    using type = T;
+};
+
+template<typename U, gr::meta::fixed_string str, typename... Args>
+struct unwrap_if_wrapped<gr::Annotated<U, str, Args...>> {
+    using type = U;
+};
+
+/**
+ * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
+ * If the given type is not an `Annotated`, it returns the type itself.
+ */
+template<typename T>
+using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
+
+} // namespace gr
+
+template<typename... Ts>
+struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
+
+template<typename T, gr::meta::fixed_string description, typename... Arguments>
+struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
+    using Type = std::remove_const_t<T>;
+    fmt::formatter<Type> value_formatter;
+
+    template<typename FormatContext>
+    constexpr auto
+    parse(FormatContext &ctx) {
+        return value_formatter.parse(ctx);
+    }
+
+    template<typename FormatContext>
+    constexpr auto
+    format(const gr::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return value_formatter.format(annotated.value, ctx);
+    }
+};
+
+namespace gr {
+template<typename T, gr::meta::fixed_string description, typename... Arguments>
+inline std::ostream &
+operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &v) {
+    // TODO: add switch for printing only brief and/or meta-information
+    return os << fmt::format("{}", v.value);
+}
+} // namespace gr
+
+#endif // GNURADIO_ANNOTATED_HPP
+
+// #include "CircularBuffer.hpp"
+#ifndef GNURADIO_CIRCULARBUFFER_HPP
+#define GNURADIO_CIRCULARBUFFER_HPP
+
+#if defined(_LIBCPP_VERSION) and _LIBCPP_VERSION < 16000
+#include <experimental/memory_resource>
+
+namespace std::pmr {
+using memory_resource = std::experimental::pmr::memory_resource;
+template<typename T>
+using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
+} // namespace std::pmr
+#else
+#include <memory_resource>
+#endif
+#include <algorithm>
+#include <bit>
+#include <cassert> // to assert if compiled for debugging
+#include <functional>
+#include <numeric>
+#include <ranges>
+#include <span>
+#include <stdexcept>
+#include <system_error>
+
+#include <fmt/format.h>
+
+// header for creating/opening or POSIX shared memory objects
+#include <cerrno>
+#include <fcntl.h>
+#if defined __has_include && not __EMSCRIPTEN__
+#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+#ifdef __NR_memfd_create
+namespace gr {
+static constexpr bool has_posix_mmap_interface = true;
+}
+
+#define HAS_POSIX_MAP_INTERFACE
+#else
+namespace gr {
+static constexpr bool has_posix_mmap_interface = false;
+}
+#endif
+#else // #if defined __has_include -- required for portability
+namespace gr {
+static constexpr bool has_posix_mmap_interface = false;
+}
+#endif
+
+// #include "Buffer.hpp"
+#ifndef GNURADIO_BUFFER2_H
+#define GNURADIO_BUFFER2_H
+
+#include <bit>
+#include <concepts>
+#include <cstdint>
+#include <span>
+#include <type_traits>
+
+namespace gr {
+namespace util {
+template<typename T, typename...>
+struct first_template_arg_helper;
+
+template<template<typename...> class TemplateType, typename ValueType, typename... OtherTypes>
+struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
+    using value_type = ValueType;
+};
+
+template<typename T>
+constexpr auto *
+value_type_helper() {
+    if constexpr (requires { typename T::value_type; }) {
+        return static_cast<typename T::value_type *>(nullptr);
+    } else {
+        return static_cast<typename first_template_arg_helper<T>::value_type *>(nullptr);
+    }
+}
+
+template<typename T>
+using value_type_t = std::remove_pointer_t<decltype(value_type_helper<T>())>;
+
+template<typename... A>
+struct test_fallback {};
+
+template<typename, typename ValueType>
+struct test_value_type {
+    using value_type = ValueType;
+};
+
+static_assert(std::is_same_v<int, value_type_t<test_fallback<int, float, double>>>);
+static_assert(std::is_same_v<float, value_type_t<test_value_type<int, float>>>);
+static_assert(std::is_same_v<int, value_type_t<std::span<int>>>);
+static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
+
+} // namespace util
+
+// clang-format off
+// disable formatting until clang-format (v16) supporting concepts
+template<class T>
+concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
+    { t.get(n_items) }     -> std::same_as<std::span<const util::value_type_t<T>>>;
+    { t.consume(n_items) } -> std::same_as<bool>;
+    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.available() }      -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class Fn, typename T, typename ...Args>
+concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::make_signed_t<std::size_t>, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
+
+template<class T, typename ...Args>
+concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::make_signed_t<std::size_t>> token, Args ...args) {
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
+    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
+    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
+    { t.reserve_output_range(n_items) };
+    { t.available() }         -> std::same_as<std::size_t>;
+    { t.buffer() };
+};
+
+template<class T, typename ...Args>
+concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
+    { T(min_size, args...) };
+    { t.size() }       -> std::same_as<std::size_t>;
+    { t.new_reader() } -> BufferReader;
+    { t.new_writer() } -> BufferWriter;
+};
+
+// compile-time unit-tests
+namespace test {
+template <typename T>
+struct non_compliant_class {
+};
+template <typename T, typename... Args>
+using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
+template <typename T, typename... Args>
+using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
+} // namespace test
+
+static_assert(!Buffer<test::non_compliant_class<int>>);
+static_assert(!BufferReader<test::non_compliant_class<int>>);
+static_assert(!BufferWriter<test::non_compliant_class<int>>);
+
+static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
+static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
+static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+// clang-format on
+} // namespace gr
+
+#endif // GNURADIO_BUFFER2_H
+
+// #include "ClaimStrategy.hpp"
+#ifndef GNURADIO_CLAIMSTRATEGY_HPP
+#define GNURADIO_CLAIMSTRATEGY_HPP
+
+#include <cassert>
+#include <concepts>
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <vector>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+// #include "Sequence.hpp"
+#ifndef GNURADIO_SEQUENCE_HPP
+#define GNURADIO_SEQUENCE_HPP
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <ranges>
+#include <vector>
+
+#include <fmt/format.h>
+
+namespace gr {
+
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_constructive_interference_size;
+using std::hardware_destructive_interference_size;
+#else
+inline constexpr std::size_t hardware_destructive_interference_size  = 64;
+inline constexpr std::size_t hardware_constructive_interference_size = 64;
+#endif
+static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
+
+/**
+ * Concurrent sequence class used for tracking the progress of the ring buffer and event
+ * processors. Support a number of concurrent operations including CAS and order writes.
+ * Also attempts to be more efficient with regards to false sharing by adding padding
+ * around the volatile field.
+ */
+class Sequence {
+public:
+    using signed_index_type = std::make_signed_t<std::size_t>;
+
+private:
+    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
+
+public:
+    Sequence(const Sequence &)  = delete;
+    Sequence(const Sequence &&) = delete;
+    void
+    operator=(const Sequence &)
+            = delete;
+
+    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+
+    [[nodiscard]] forceinline signed_index_type
+    value() const noexcept {
+        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
+    }
+
+    forceinline void
+    setValue(const signed_index_type value) noexcept {
+        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
+    }
+
+    [[nodiscard]] forceinline bool
+    compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
+        // atomically set the value to the given updated value if the current value == the
+        // expected value (true, otherwise folse).
+        return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
+    }
+
+    [[nodiscard]] forceinline signed_index_type
+    incrementAndGet() noexcept {
+        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
+    }
+
+    [[nodiscard]] forceinline signed_index_type
+    addAndGet(signed_index_type value) noexcept {
+        return std::atomic_fetch_add(&_fieldsValue, value) + value;
+    }
+
+    void
+    wait(signed_index_type oldValue) const noexcept {
+        atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire);
+    }
+
+    void
+    notify_all() noexcept {
+        _fieldsValue.notify_all();
+    }
+};
+
+namespace detail {
+
+using signed_index_type = Sequence::signed_index_type;
+
+/**
+ * Get the minimum sequence from an array of Sequences.
+ *
+ * \param sequences sequences to compare.
+ * \param minimum an initial default minimum.  If the array is empty this value will
+ * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
+ */
+inline signed_index_type
+getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
+    // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
+    // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
+    for (const auto &s : sequences) {
+        const signed_index_type v = s->value();
+        if (v < minimum) {
+            minimum = v;
+        }
+    }
+    return minimum;
+}
+
+inline void
+addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &sequencesToAdd) {
+    signed_index_type                                       cursorSequence;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
+
+    do {
+        currentSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+        updatedSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(currentSequences->size() + sequencesToAdd.size());
+
+#if not defined(_LIBCPP_VERSION)
+        std::ranges::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
+#else
+        std::copy(currentSequences->begin(), currentSequences->end(), updatedSequences->begin());
+#endif
+
+        cursorSequence = cursor.value();
+
+        auto index     = currentSequences->size();
+        for (auto &&sequence : sequencesToAdd) {
+            sequence->setValue(cursorSequence);
+            (*updatedSequences)[index] = sequence;
+            index++;
+        }
+    } while (!std::atomic_compare_exchange_weak(&sequences, &currentSequences, updatedSequences)); // xTODO: explicit memory order
+
+    cursorSequence = cursor.value();
+
+    for (auto &&sequence : sequencesToAdd) {
+        sequence->setValue(cursorSequence);
+    }
+}
+
+inline bool
+removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const std::shared_ptr<Sequence> &sequence) {
+    std::uint32_t                                           numToRemove;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
+
+    do {
+        oldSequences = std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+#if not defined(_LIBCPP_VERSION)
+        numToRemove = static_cast<std::uint32_t>(std::ranges::count(*oldSequences, sequence)); // specifically uses identity
+#else
+        numToRemove = static_cast<std::uint32_t>(std::count((*oldSequences).begin(), (*oldSequences).end(), sequence)); // specifically uses identity
+#endif
+        if (numToRemove == 0) {
+            break;
+        }
+
+        auto oldSize = static_cast<std::uint32_t>(oldSequences->size());
+        newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(oldSize - numToRemove);
+
+        for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
+            const auto &testSequence = (*oldSequences)[i];
+            if (sequence != testSequence) {
+                (*newSequences)[pos] = testSequence;
+                pos++;
+            }
+        }
+    } while (!std::atomic_compare_exchange_weak(&sequences, &oldSequences, newSequences));
+
+    return numToRemove != 0;
+}
+
+} // namespace detail
+
+} // namespace gr
+
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+
+template<>
+struct fmt::formatter<gr::Sequence> {
+    template<typename ParseContext>
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    auto
+    format(gr::Sequence const &value, FormatContext &ctx) {
+        return fmt::format_to(ctx.out(), "{}", value.value());
+    }
+};
+
+namespace gr {
+inline std::ostream &
+operator<<(std::ostream &os, const Sequence &v) {
+    return os << fmt::format("{}", v.value());
+}
+} // namespace gr
+
+#endif // GNURADIO_SEQUENCE_HPP
+
+// #include "WaitStrategy.hpp"
+#ifndef GNURADIO_WAITSTRATEGY_HPP
+#define GNURADIO_WAITSTRATEGY_HPP
+
+#include <condition_variable>
+#include <atomic>
+#include <chrono>
+#include <concepts>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+// #include "Sequence.hpp"
+
+
+namespace gr {
+// clang-format off
+/**
+ * Wait for the given sequence to be available.  It is possible for this method to return a value less than the sequence number supplied depending on the implementation of the WaitStrategy.
+ * A common use for this is to signal a timeout.Any EventProcessor that is using a WaitStrategy to get notifications about message becoming available should remember to handle this case.
+ * The BatchEventProcessor<T> explicitly handles this case and will signal a timeout if required.
+ *
+ * \param sequence sequence to be waited on.
+ * \param cursor Ring buffer cursor on which to wait.
+ * \param dependentSequence on which to wait.
+ * \param barrier barrier the IEventProcessor is waiting on.
+ * \returns the sequence that is available which may be greater than the requested sequence.
+ */
+template<typename T>
+inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
+};
+static_assert(!isWaitStrategy<int>);
+
+/**
+ * signal those waiting that the cursor has advanced.
+ */
+template<typename T>
+inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
+    { t.signalAllWhenBlocking() } -> std::same_as<void>;
+};
+static_assert(!hasSignalAllWhenBlocking<int>);
+
+template<typename T>
+concept WaitStrategy = isWaitStrategy<T>;
+
+
+
+/**
+ * Blocking strategy that uses a lock and condition variable for IEventProcessor's waiting on a barrier.
+ * This strategy should be used when performance and low-latency are not as important as CPU resource.
+ */
+class BlockingWaitStrategy {
+    std::recursive_mutex        _gate;
+    std::condition_variable_any _conditionVariable;
+
+public:
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+        if (cursor.value() < sequence) {
+            std::unique_lock uniqueLock(_gate);
+
+            while (cursor.value() < sequence) {
+                // optional: barrier check alert
+                _conditionVariable.wait(uniqueLock);
+            }
+        }
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+
+        return availableSequence;
+    }
+
+    void signalAllWhenBlocking() {
+        std::unique_lock uniqueLock(_gate);
+        _conditionVariable.notify_all();
+    }
+};
+static_assert(WaitStrategy<BlockingWaitStrategy>);
+
+/**
+ * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
+ * This strategy will use CPU resource to avoid syscalls which can introduce latency jitter.
+ * It is best used when threads can be bound to specific CPU cores.
+ */
+struct BusySpinWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<BusySpinWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
+
+/**
+ * Sleeping strategy that initially spins, then uses a std::this_thread::yield(), and eventually sleep. T
+ * his strategy is a good compromise between performance and CPU resource.
+ * Latency spikes can occur after quiet periods.
+ */
+class SleepingWaitStrategy {
+    static const std::int32_t _defaultRetries = 200;
+    std::int32_t              _retries        = 0;
+
+public:
+    explicit SleepingWaitStrategy(std::int32_t retries = _defaultRetries)
+        : _retries(retries) {
+    }
+
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        auto       counter    = _retries;
+        const auto waitMethod = [&counter]() {
+            // optional: barrier check alert
+
+            if (counter > 100) {
+                --counter;
+            } else if (counter > 0) {
+                --counter;
+                std::this_thread::yield();
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(0));
+            }
+        };
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            waitMethod();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<SleepingWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
+
+struct TimeoutException : public std::runtime_error {
+    TimeoutException() : std::runtime_error("TimeoutException") {}
+};
+
+class TimeoutBlockingWaitStrategy {
+    using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
+    Clock::duration             _timeout;
+    std::recursive_mutex        _gate;
+    std::condition_variable_any _conditionVariable;
+
+public:
+    explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
+        : _timeout(timeout) {}
+
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+        auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
+
+        if (cursor.value() < sequence) {
+            std::unique_lock uniqueLock(_gate);
+
+            while (cursor.value() < sequence) {
+                // optional: barrier check alert
+
+                if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
+                    throw TimeoutException();
+                }
+            }
+        }
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            // optional: barrier check alert
+        }
+
+        return availableSequence;
+    }
+
+    void signalAllWhenBlocking() {
+        std::unique_lock uniqueLock(_gate);
+        _conditionVariable.notify_all();
+    }
+};
+static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
+static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
+
+/**
+ * Yielding strategy that uses a Thread.Yield() for IEventProcessors waiting on a barrier after an initially spinning.
+ * This strategy is a good compromise between performance and CPU resource without incurring significant latency spikes.
+ */
+class YieldingWaitStrategy {
+    const std::size_t _spinTries = 100;
+
+public:
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        auto       counter    = _spinTries;
+        const auto waitMethod = [&counter]() {
+            // optional: barrier check alert
+
+            if (counter == 0) {
+                std::this_thread::yield();
+            } else {
+                --counter;
+            }
+        };
+
+        std::int64_t availableSequence;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
+            waitMethod();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<YieldingWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
+
+struct NoWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
+        // wait for nothing
+        return sequence;
+    }
+};
+static_assert(WaitStrategy<NoWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
+
+
+/**
+ *
+ * SpinWait is meant to be used as a tool for waiting in situations where the thread is not allowed to block.
+ *
+ * In order to get the maximum performance, the implementation first spins for `YIELD_THRESHOLD` times, and then
+ * alternates between yielding, spinning and putting the thread to sleep, to allow other threads to be scheduled
+ * by the kernel to avoid potential CPU contention.
+ *
+ * The number of spins, yielding, and sleeping for either '0 ms' or '1 ms' is controlled by the NTTP constants
+ * @tparam YIELD_THRESHOLD
+ * @tparam SLEEP_0_EVERY_HOW_MANY_TIMES
+ * @tparam SLEEP_1_EVERY_HOW_MANY_TIMES
+ */
+template<std::int32_t YIELD_THRESHOLD = 10, std::int32_t SLEEP_0_EVERY_HOW_MANY_TIMES = 5, std::int32_t SLEEP_1_EVERY_HOW_MANY_TIMES = 20>
+class SpinWait {
+    using Clock         = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
+    std::int32_t _count = 0;
+    static void  spinWaitInternal(std::int32_t iterationCount) noexcept {
+        for (auto i = 0; i < iterationCount; i++) {
+            yieldProcessor();
+        }
+    }
+#ifndef __EMSCRIPTEN__
+    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
+#else
+    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+#endif
+
+public:
+    SpinWait() = default;
+
+    [[nodiscard]] std::int32_t count() const noexcept { return _count; }
+    [[nodiscard]] bool         nextSpinWillYield() const noexcept { return _count > YIELD_THRESHOLD; }
+
+    void                       spinOnce() {
+        if (nextSpinWillYield()) {
+            auto num = _count >= YIELD_THRESHOLD ? _count - 10 : _count;
+            if (num % SLEEP_1_EVERY_HOW_MANY_TIMES == SLEEP_1_EVERY_HOW_MANY_TIMES - 1) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } else {
+                if (num % SLEEP_0_EVERY_HOW_MANY_TIMES == SLEEP_0_EVERY_HOW_MANY_TIMES - 1) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(0));
+                } else {
+                    std::this_thread::yield();
+                }
+            }
+        } else {
+            spinWaitInternal(4 << _count);
+        }
+
+        if (_count == std::numeric_limits<std::int32_t>::max()) {
+            _count = YIELD_THRESHOLD;
+        } else {
+            ++_count;
+        }
+    }
+
+    void reset() noexcept { _count = 0; }
+
+    template<typename T>
+    requires std::is_nothrow_invocable_r_v<bool, T>
+    bool
+    spinUntil(const T &condition) const { return spinUntil(condition, -1); }
+
+    template<typename T>
+    requires std::is_nothrow_invocable_r_v<bool, T>
+    bool
+    spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
+        if (millisecondsTimeout < -1) {
+            throw std::out_of_range("Timeout value is out of range");
+        }
+
+        std::int64_t num = 0;
+        if (millisecondsTimeout != 0 && millisecondsTimeout != -1) {
+            num = getTickCount();
+        }
+
+        SpinWait spinWait;
+        while (!condition()) {
+            if (millisecondsTimeout == 0) {
+                return false;
+            }
+
+            spinWait.spinOnce();
+
+            if (millisecondsTimeout != 1 && spinWait.nextSpinWillYield() && millisecondsTimeout <= (getTickCount() - num)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    [[nodiscard]] static std::int64_t getTickCount() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
+};
+
+/**
+ * Spin strategy that uses a SpinWait for IEventProcessors waiting on a barrier.
+ * This strategy is a good compromise between performance and CPU resource.
+ * Latency spikes can occur after quiet periods.
+ */
+struct SpinWaitWaitStrategy {
+    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
+        std::int64_t availableSequence;
+
+        SpinWait     spinWait;
+        while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
+            // optional: barrier check alert
+            spinWait.spinOnce();
+        }
+
+        return availableSequence;
+    }
+};
+static_assert(WaitStrategy<SpinWaitWaitStrategy>);
+static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
+
+struct NO_SPIN_WAIT {};
+
+template<typename SPIN_WAIT = NO_SPIN_WAIT>
+class AtomicMutex {
+    std::atomic_flag _lock{};
+    SPIN_WAIT        _spin_wait;
+
+public:
+    AtomicMutex()                    = default;
+    AtomicMutex(const AtomicMutex &) = delete;
+    AtomicMutex &operator=(const AtomicMutex &) = delete;
+
+    //
+    void lock() {
+        while (_lock.test_and_set(std::memory_order_acquire)) {
+            if constexpr (requires { _spin_wait.spin_once(); }) {
+                _spin_wait.spin_once();
+            }
+        }
+        if constexpr (requires { _spin_wait.spin_once(); }) {
+            _spin_wait.reset();
+        }
+    }
+    void unlock() { _lock.clear(std::memory_order::release); }
+};
+
+
+// clang-format on
+} // namespace gr
+
+
+#endif // GNURADIO_WAITSTRATEGY_HPP
+
+
+namespace gr {
+
+struct NoCapacityException : public std::runtime_error {
+    NoCapacityException() : std::runtime_error("NoCapacityException"){};
+};
+
+// clang-format off
+
+template<typename T>
+concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
+        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
+    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
+    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.publish(sequence) } -> std::same_as<void>;
+    { t.isAvailable(sequence) } -> std::same_as<bool>;
+    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
+};
+
+namespace claim_strategy::util {
+constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+}
+
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
+    using signed_index_type = Sequence::signed_index_type;
+    const std::size_t _size;
+    Sequence &_cursor;
+    WAIT_STRATEGY &_waitStrategy;
+    signed_index_type _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
+    mutable signed_index_type _cachedValue{ kInitialCursorValue };
+
+public:
+    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
+        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
+    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
+    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
+    void operator=(const SingleThreadedStrategy &) = delete;
+
+    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type/*cursorValue*/) const noexcept {
+        if (const signed_index_type wrapPoint = (_nextValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
+            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
+            _cachedValue     = minSequence;
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim = 1) noexcept {
+        assert((n_slots_to_claim > 0 && n_slots_to_claim <= _size) && "n_slots_to_claim must be > 0 and <= bufferSize");
+
+        auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
+        auto wrapPoint    = nextSequence - static_cast<signed_index_type>(_size);
+
+        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
+            SpinWait     spinWait;
+            signed_index_type minSequence;
+            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
+                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                    _waitStrategy.signalAllWhenBlocking();
+                }
+                spinWait.spinOnce();
+            }
+            _cachedValue = minSequence;
+        }
+        _nextValue = nextSequence;
+
+        return nextSequence;
+    }
+
+    signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
+            throw NoCapacityException();
+        }
+
+        const auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
+        _nextValue              = nextSequence;
+
+        return nextSequence;
+    }
+
+    signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
+        const auto produced = _nextValue;
+
+        return static_cast<signed_index_type>(_size) - (produced - consumed);
+    }
+
+    void publish(signed_index_type sequence) {
+        _cursor.setValue(sequence);
+        _nextValue = sequence;
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept { return sequence <= _cursor.value(); }
+    [[nodiscard]] signed_index_type getHighestPublishedSequence(signed_index_type /*nextSequence*/, signed_index_type availableSequence) const noexcept { return availableSequence; }
+};
+
+static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+
+template <std::size_t Size>
+struct MultiThreadedStrategySizeMembers
+{
+    static constexpr std::int32_t _size = Size;
+    static constexpr std::int32_t _indexShift = std::bit_width(Size);
+};
+
+template <>
+struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
+    const std::int32_t _size;
+    const std::int32_t _indexShift;
+
+    #ifdef __clang__
+    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
+    #else
+    #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
+    #pragma GCC diagnostic ignored "-Wuseless-cast"
+    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
+    #pragma GCC diagnostic pop
+    #endif
+};
+
+/**
+ * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
+ * Suitable for use for sequencing across multiple publisher threads.
+ * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
+ * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ *
+ * The size argument (compile-time and run-time) must be a power-of-2 value.
+ */
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
+class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
+: private MultiThreadedStrategySizeMembers<SIZE> {
+    Sequence &_cursor;
+    WAIT_STRATEGY &_waitStrategy;
+    std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
+    std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
+    using MultiThreadedStrategySizeMembers<SIZE>::_size;
+    using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
+    using signed_index_type = Sequence::signed_index_type;
+
+public:
+    MultiThreadedStrategy() = delete;
+
+    explicit
+    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
+    : _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(SIZE, -1) {
+    }
+
+    explicit
+    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
+    requires (SIZE == std::dynamic_extent)
+    : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
+      _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(buffer_size, -1) {
+    }
+
+    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
+    void               operator=(const MultiThreadedStrategy &) = delete;
+
+    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type cursorValue) const noexcept {
+        const auto wrapPoint = (cursorValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size);
+
+        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
+            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
+            _gatingSequenceCache->setValue(minSequence);
+
+            if (wrapPoint > minSequence) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        signed_index_type current;
+        signed_index_type next;
+
+        SpinWait     spinWait;
+        do {
+            current = _cursor.value();
+            next = current + static_cast<signed_index_type>(n_slots_to_claim);
+
+            signed_index_type wrapPoint            = next - static_cast<signed_index_type>(_size);
+            signed_index_type cachedGatingSequence = _gatingSequenceCache->value();
+
+            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
+                signed_index_type gatingSequence = detail::getMinimumSequence(dependents, current);
+
+                if (wrapPoint > gatingSequence) {
+                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+                        _waitStrategy.signalAllWhenBlocking();
+                    }
+                    spinWait.spinOnce();
+                    continue;
+                }
+
+                _gatingSequenceCache->setValue(gatingSequence);
+            } else if (_cursor.compareAndSet(current, next)) {
+                break;
+            }
+        } while (true);
+
+        return next;
+    }
+
+    [[nodiscard]] signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
+        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+
+        signed_index_type current;
+        signed_index_type next;
+
+        do {
+            current = _cursor.value();
+            next    = current + static_cast<signed_index_type>(n_slots_to_claim);
+
+            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
+                throw NoCapacityException();
+            }
+        } while (!_cursor.compareAndSet(current, next));
+
+        return next;
+    }
+
+    [[nodiscard]] signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
+        const auto produced = _cursor.value();
+        const auto consumed = detail::getMinimumSequence(dependents, produced);
+
+        return static_cast<signed_index_type>(_size) - (produced - consumed);
+    }
+
+    void publish(signed_index_type sequence) {
+        setAvailable(sequence);
+        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+            _waitStrategy.signalAllWhenBlocking();
+        }
+    }
+
+    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
+        const auto index = calculateIndex(sequence);
+        const auto flag  = calculateAvailabilityFlag(sequence);
+
+        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
+    }
+
+    [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
+        for (signed_index_type sequence = lowerBound; sequence <= availableSequence; sequence++) {
+            if (!isAvailable(sequence)) {
+                return sequence - 1;
+            }
+        }
+
+        return availableSequence;
+    }
+
+private:
+    void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
+    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(static_cast<signed_index_type>(sequence) >> _indexShift); }
+    [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
+};
+
+static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
+// clang-format on
+
+enum class ProducerType {
+    /**
+     * creates a buffer assuming a single producer-thread and multiple consumer
+     */
+    Single,
+
+    /**
+     * creates a buffer assuming multiple producer-threads and multiple consumer
+     */
+    Multi
+};
+
+namespace detail {
+template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+struct producer_type;
+
+template<std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
+    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
+};
+
+template<std::size_t size, WaitStrategy WAIT_STRATEGY>
+struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
+    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
+};
+
+template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+
+} // namespace detail
+
+} // namespace gr
+
+#endif // GNURADIO_CLAIMSTRATEGY_HPP
+
+// #include "Sequence.hpp"
+
+// #include "WaitStrategy.hpp"
+
+
+namespace gr {
+
+namespace util {
+constexpr std::size_t
+round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
+    if (multiple == 0) {
+        return num_to_round;
+    }
+    const auto remainder = num_to_round % multiple;
+    if (remainder == 0) {
+        return num_to_round;
+    }
+    return num_to_round + multiple - remainder;
+}
+} // namespace util
+
+// clang-format off
+class double_mapped_memory_resource : public std::pmr::memory_resource {
+    [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
+        // the 2nd double mapped memory call mmap may fail and/or return an unsuitable return address which is unavoidable
+        // this workaround retries to get a more favourable allocation up to three times before it throws the regular exception
+        for (int retry_attempt=0; retry_attempt < 3; retry_attempt++) {
+            try {
+                return do_allocate_internal(required_size, alignment);
+            } catch (std::system_error& e) { // explicitly caught for retry
+                fmt::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+            } catch (std::invalid_argument& e) { // explicitly caught for retry
+                fmt::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+            }
+        }
+        return do_allocate_internal(required_size, alignment);
+    }
+#ifdef HAS_POSIX_MAP_INTERFACE
+    [[nodiscard]] static void* do_allocate_internal(const std::size_t required_size, std::size_t alignment) { //NOSONAR
+
+        const std::size_t size = 2 * required_size;
+        if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
+            throw std::invalid_argument(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
+        }
+        const std::size_t size_half = size/2;
+
+        static std::size_t _counter;
+        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) {
+            return syscall(__NR_memfd_create, name, flags);
+        };
+        auto shm_fd = static_cast<int>(memfd_create(0));
+        if (shm_fd < 0) {
+            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
+            std::error_code errorCode(errno, std::system_category());
+            close(shm_fd);
+            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
+        if (first_copy == MAP_FAILED) {
+            std::error_code errorCode(errno, std::system_category());
+            close(shm_fd);
+            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        // unmap the 2nd half
+        if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
+            std::error_code errorCode(errno, std::system_category());
+            close(shm_fd);
+            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
+        }
+
+        // Map the first half into the now available hole.
+        // Note that the second_copy_addr mmap argument is only a hint and mmap might place the
+        // mapping somewhere else: "If addr is not NULL, then the kernel takes it as  a hint about
+        // where to place the mapping". The returned pointer therefore must equal second_copy_addr
+        // for our contiguous mapping to work as intended.
+        void* second_copy_addr = static_cast<char*> (first_copy) + size_half;
+        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); result != second_copy_addr) {
+            std::error_code errorCode(errno, std::system_category());
+            close(shm_fd);
+            if (result == MAP_FAILED) {
+                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+            } else {
+                ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
+                ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
+                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}",
+                                                     buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2*size_half));
+            }
+        }
+
+        close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
+        return first_copy;
+}
+#else
+    [[nodiscard]] static void* do_allocate_internal(const std::size_t, std::size_t) { //NOSONAR
+        throw std::invalid_argument("OS does not provide POSIX interface for mmap(...) and munmao(...)");
+        // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
+    }
+#endif
+
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+    void  do_deallocate(void* p, std::size_t size, size_t alignment) override { //NOSONAR
+
+        if (munmap(p, size) == -1) {
+            throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
+        }
+    }
+#else
+    void  do_deallocate(void*, std::size_t, size_t) override { }
+#endif
+
+    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
+
+public:
+    static inline double_mapped_memory_resource* defaultAllocator() {
+        static auto instance = double_mapped_memory_resource();
+        return &instance;
+    }
+
+    template<typename T>
+    static inline std::pmr::polymorphic_allocator<T> allocator()
+    {
+        return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
+    }
+};
+
+
+
+/**
+ * @brief circular buffer implementation using double-mapped memory allocations
+ * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
+ * free bulk memory access. The buffer keeps a list of indices (using 'Sequence')
+ * to keep track of which parts can be tread-safely read and/or written
+ *
+ *                          wrap-around point
+ *                                 |
+ *                                 v
+ *  | buffer segment #1 (original) | buffer segment #2 (copy of #1) |
+ *  0                            SIZE                            2*SIZE
+ *                      writeIndex
+ *                          v
+ *  wrap-free write access  |<-  N_1 < SIZE   ->|
+ *
+ *  readIndex < writeIndex-N_2
+ *      v
+ *      |<- N_2 < SIZE ->|
+ *
+ * N.B N_AVAILABLE := (SIZE + writeIndex - readIndex ) % SIZE
+ *
+ * citation: <find appropriate first and educational reference>
+ *
+ * This implementation provides single- as well as multi-producer/consumer buffer
+ * combinations for thread-safe CPU-to-CPU data transfer (optionally) using either
+ * a) the POSIX mmaped(..)/munmapped(..) MMU interface, if available, and/or
+ * b) the guaranteed portable standard C/C++ (de-)allocators as a fall-back.
+ *
+ * for more details see
+ */
+template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
+class CircularBuffer
+{
+    using Allocator         = std::pmr::polymorphic_allocator<T>;
+    using BufferType        = CircularBuffer<T, SIZE, producer_type, WAIT_STRATEGY>;
+    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
+    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
+    using signed_index_type = Sequence::signed_index_type;
+
+    struct buffer_impl {
+        Sequence                    _cursor;
+        Allocator                   _allocator{};
+        const bool                  _is_mmap_allocated;
+        const std::size_t             _size; // pre-condition: std::has_single_bit(_size)
+        std::vector<T, Allocator>   _data;
+        WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
+        ClaimType                   _claim_strategy;
+        // list of dependent reader indices
+        DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
+
+        buffer_impl() = delete;
+        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _is_mmap_allocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
+            _size(align_with_page_size(std::bit_ceil(min_size), _is_mmap_allocated)), _data(buffer_size(_size, _is_mmap_allocated), _allocator), _claim_strategy(ClaimType(_cursor, _wait_strategy, _size)) {
+        }
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+        static std::size_t align_with_page_size(const std::size_t min_size, bool _is_mmap_allocated) {
+            if (_is_mmap_allocated) {
+                const std::size_t pageSize = static_cast<std::size_t>(getpagesize());
+                const std::size_t elementSize = sizeof(T);
+                // least common multiple (lcm) of elementSize and pageSize
+                std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
+
+                // adjust lcmValue to be larger than min_size
+                while (lcmValue < min_size) {
+                    lcmValue += lcmValue;
+                }
+                return lcmValue;
+            } else {
+                return min_size;
+            }
+        }
+#else
+        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
+            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
+        }
+#endif
+
+        static std::size_t buffer_size(const std::size_t size, bool _is_mmap_allocated) {
+            // double-mmaped behaviour requires the different size/alloc strategy
+            // i.e. the second buffer half may not default-constructed as it's identical to the first one
+            // and would result in a double dealloc during the default destruction
+            return _is_mmap_allocated ? size : 2 * size;
+        }
+    };
+
+    template <typename U = T>
+    class buffer_writer {
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+
+        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        bool                        _is_mmap_allocated;
+        std::size_t                   _size;
+        ClaimType*                  _claim_strategy;
+
+    class ReservedOutputRange {
+        buffer_writer<U>* _parent = nullptr;
+        std::size_t       _index = 0;
+        std::size_t       _n_slots_to_claim = 0;
+        signed_index_type      _offset = 0;
+        bool              _published_data = false;
+        std::span<T>      _internal_span{};
+    public:
+    using element_type = T;
+    using value_type = typename std::remove_cv_t<T>;
+    using iterator = typename std::span<T>::iterator;
+    using reverse_iterator = typename std::span<T>::reverse_iterator;
+    using pointer = typename std::span<T>::reverse_iterator;
+
+    explicit ReservedOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {};
+    explicit constexpr ReservedOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t n_slots_to_claim) noexcept :
+        _parent(parent), _index(index), _n_slots_to_claim(n_slots_to_claim), _offset(sequence - static_cast<signed_index_type>(n_slots_to_claim)), _internal_span({ &_parent->_buffer->_data.data()[_index], _n_slots_to_claim }) { }
+    ReservedOutputRange(const ReservedOutputRange&) = delete;
+    ReservedOutputRange& operator=(const ReservedOutputRange&) = delete;
+    ReservedOutputRange(ReservedOutputRange&& other) noexcept
+        : _parent(std::exchange(other._parent, nullptr))
+        , _index(std::exchange(other._index, 0))
+        , _n_slots_to_claim(std::exchange(other._n_slots_to_claim, 0))
+        , _offset(std::exchange(other._offset, 0))
+        , _published_data(std::exchange(other._published_data, 0))
+        , _internal_span(std::exchange(other._internal_span, std::span<T>{})) {
+    };
+    ReservedOutputRange& operator=(ReservedOutputRange&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(_parent, tmp._parent);
+        std::swap(_index, tmp._index);
+        std::swap(_n_slots_to_claim, tmp._n_slots_to_claim);
+        std::swap(_offset, tmp._offset);
+        std::swap(_published_data, tmp._published_data);
+        std::swap(_internal_span, tmp._internal_span);
+        return *this;
+    };
+    ~ReservedOutputRange() {
+        if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
+            if (_n_slots_to_claim) {
+                fmt::print(stderr, "circular_buffer::multiple_writer::ReservedOutputRange() - did not publish {} samples\n", _n_slots_to_claim);
+                std::abort();
+            }
+
+        } else {
+            if (_n_slots_to_claim && not _published_data) {
+                fmt::print(stderr, "circular_buffer::single_writer::ReservedOutputRange() - omitted publish call for {} reserved samples\n", _n_slots_to_claim);
+                std::abort();
+            }
+        }
+    }
+
+    constexpr bool
+    is_published() const noexcept {
+        return _published_data;
+    }
+
+    constexpr std::size_t size() const noexcept { return _n_slots_to_claim; };
+    constexpr std::size_t size_bytes() const noexcept { return _n_slots_to_claim * sizeof(T); };
+    constexpr bool empty() const noexcept { return _n_slots_to_claim == 0; }
+    constexpr iterator begin() const noexcept { return _internal_span.begin(); }
+    constexpr iterator end() const noexcept { return _internal_span.end(); }
+    constexpr reverse_iterator rbegin() const noexcept { return _internal_span.rbegin(); }
+    constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
+    constexpr T* data() const noexcept { return _internal_span.data(); }
+
+    T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data.data()[_index + i]; }
+    T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data.data()[_index + i]; }
+    operator std::span<T>&() const noexcept { return _internal_span; }
+    operator std::span<T>&() noexcept { return _internal_span; }
+
+    constexpr void publish(std::size_t n_produced) noexcept {
+        assert(n_produced <= _n_slots_to_claim && "n_produced must be <= than claimed slots");
+        if (!_parent->_is_mmap_allocated) {
+            const std::size_t size = _parent->_size;
+            // mirror samples below/above the buffer's wrap-around point
+            const size_t nFirstHalf = std::min(size - _index, n_produced);
+            const size_t nSecondHalf = n_produced - nFirstHalf;
+
+            auto &data = _parent->_buffer->_data;
+            std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
+            std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+        }
+        _parent->_claim_strategy->publish(_offset + static_cast<signed_index_type>(n_produced));
+        _n_slots_to_claim -= n_produced;
+        _published_data = true;
+    }
+    };
+
+    public:
+        buffer_writer() = delete;
+        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
+            _buffer(std::move(buffer)), _is_mmap_allocated(_buffer->_is_mmap_allocated),
+            _size(_buffer->_size), _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer(buffer_writer&& other) noexcept
+            : _buffer(std::move(other._buffer))
+            , _is_mmap_allocated(_buffer->_is_mmap_allocated)
+            , _size(_buffer->_size)
+            , _claim_strategy(std::addressof(_buffer->_claim_strategy)) { };
+        buffer_writer& operator=(buffer_writer tmp) noexcept {
+            std::swap(_buffer, tmp._buffer);
+            _is_mmap_allocated = _buffer->_is_mmap_allocated;
+            _size = _buffer->_size;
+            _claim_strategy = std::addressof(_buffer->_claim_strategy);
+
+            return *this;
+        }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
+
+        [[nodiscard]] constexpr auto reserve_output_range(std::size_t n_slots_to_claim) noexcept -> ReservedOutputRange {
+            try {
+                const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim); // alt: try_next
+                const std::size_t index = (static_cast<std::size_t>(sequence) + _size - n_slots_to_claim) % _size;
+                return ReservedOutputRange(this, index, sequence, n_slots_to_claim);
+            } catch (const NoCapacityException &) {
+                return ReservedOutputRange(this);
+            }
+        }
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr void publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
+                return;
+            }
+            const auto sequence = _claim_strategy->next(*_buffer->_read_indices, n_slots_to_claim);
+            translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
+        } // blocks until elements are available
+
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr bool try_publish(Translator&& translator, std::size_t n_slots_to_claim = 1, Args&&... args) {
+            if (n_slots_to_claim <= 0 || _buffer->_read_indices->empty()) {
+                return true;
+            }
+            try {
+                const auto sequence = _claim_strategy->tryNext(*_buffer->_read_indices, n_slots_to_claim);
+                translate_and_publish(std::forward<Translator>(translator), n_slots_to_claim, sequence, std::forward<Args>(args)...);
+                return true;
+            } catch (const NoCapacityException &) {
+                return false;
+            }
+        }
+
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
+
+        [[nodiscard]] constexpr std::size_t available() const noexcept {
+            return static_cast<std::size_t>(_claim_strategy->getRemainingCapacity(*_buffer->_read_indices));
+        }
+
+        private:
+        template <typename... Args, WriterCallback<U, Args...> Translator>
+        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
+            try {
+                auto& data = _buffer->_data;
+                const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
+                std::span<U> writable_data(&data[index], n_slots_to_claim);
+                if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), writable_data, publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
+                } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
+                    std::invoke(std::forward<Translator>(translator), writable_data, args...);
+                } else {
+                    static_assert(gr::meta::always_false<Translator>, "Translator does not provide a matching signature");
+                }
+
+                if (!_is_mmap_allocated) {
+                    // mirror samples below/above the buffer's wrap-around point
+                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
+                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
+
+                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
+                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+                }
+                _claim_strategy->publish(publishSequence); // points at first non-writable index
+            } catch (const std::exception&) {
+                throw;
+            } catch (...) {
+                throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
+            }
+        }
+    };
+
+    template<typename U = T>
+    class buffer_reader
+    {
+        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+
+        std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
+        signed_index_type                _read_index_cached;
+        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        std::size_t                   _size; // pre-condition: std::has_single_bit(_size)
+
+        std::size_t
+        buffer_index() const noexcept {
+            const auto bitmask = _size - 1;
+            return static_cast<std::size_t>(_read_index_cached) & bitmask;
+        }
+
+    public:
+        buffer_reader() = delete;
+        buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept :
+            _buffer(buffer), _size(buffer->_size) {
+            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
+            _read_index_cached = _read_index->value();
+        }
+        buffer_reader(buffer_reader&& other) noexcept
+            : _read_index(std::move(other._read_index))
+            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
+            , _buffer(other._buffer)
+            , _size(_buffer->_size) {
+        }
+        buffer_reader& operator=(buffer_reader tmp) noexcept {
+            std::swap(_read_index, tmp._read_index);
+            std::swap(_read_index_cached, tmp._read_index_cached);
+            std::swap(_buffer, tmp._buffer);
+            _size = _buffer->_size;
+            return *this;
+        };
+        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
+
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
+
+        template <bool strict_check = true>
+        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
+            const auto& data = _buffer->_data;
+            if constexpr (strict_check) {
+                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
+                return { &data[buffer_index()], n };
+            }
+            const std::size_t n = n_requested > 0 ? n_requested : available();
+            return { &data[buffer_index()], n };
+        }
+
+        template <bool strict_check = true>
+        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
+            if constexpr (strict_check) {
+                if (n_elements <= 0) {
+                    return true;
+                }
+                if (n_elements > available()) {
+                    return false;
+                }
+            }
+            _read_index_cached = _read_index->addAndGet(static_cast<signed_index_type>(n_elements));
+            return true;
+        }
+
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _read_index_cached; }
+
+        [[nodiscard]] constexpr std::size_t available() const noexcept {
+            return static_cast<std::size_t>(_buffer->_cursor.value() - _read_index_cached);
+        }
+    };
+
+    [[nodiscard]] constexpr static Allocator DefaultAllocator() {
+        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
+            return double_mapped_memory_resource::allocator<T>();
+        } else {
+            return Allocator();
+        }
+    }
+
+    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
+    explicit CircularBuffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+
+public:
+    CircularBuffer() = delete;
+    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
+        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
+    ~CircularBuffer() = default;
+
+    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
+    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
+    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
+
+    // implementation specific interface -- not part of public Buffer / production-code API
+    [[nodiscard]] auto n_readers()              { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] const auto &claim_strategy()  { return _shared_buffer_ptr->_claim_strategy; }
+    [[nodiscard]] const auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
+    [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+
+};
+static_assert(Buffer<CircularBuffer<int32_t>>);
+// clang-format on
+
+} // namespace gr
+
+#endif // GNURADIO_CIRCULARBUFFER_HPP
+
+// #include "DataSet.hpp"
+#ifndef GNURADIO_DATASET_HPP
+#define GNURADIO_DATASET_HPP
+
+// #include "reflection.hpp"
+#ifndef GNURADIO_REFLECTION_HPP
+#define GNURADIO_REFLECTION_HPP
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+// #include <refl.hpp>
+
+
+/**
+ * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp
+ * The are basically needed to do a struct member-field introspections, to support
+ *   a) compile-time serialiser generation between std::map<std::string, pmt::pmtv> <-> user-defined settings structs
+ *   b) allow for block ports being defined a member fields rather than as NTTPs of the node<T, ...> template
+
+ * Their use is limited to the namespace scope where the block is defined (i.e. not across .so boundaries) and will be
+ * supplanted once the compile-time reflection language feature is merged with the C++ standard, e.g.
+ * Matúš Chochlík, Axel Naumann, David Sankel: Static reflection, P0194R3, ISO/IEC JTC1 SC22 WG21
+ *    https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0194r3.html
+ *
+ *  These macros need to be defined in a global scope due to relying on template specialisation that cannot be done in
+ *  any other namespace than the one they were declared -- for illustration see, for example:
+ *  https://github.com/veselink1/refl-cpp/issues/59
+ *  https://compiler-explorer.com/z/MG7fxzK4j
+ *
+ *  For practical purposes, the macro can be defined either at the end of the struct declaring namespace or the specific
+ *  namespace exited/re-enteres such as
+ *  @code
+ *  namespace private::library {
+ *     struct my_struct {
+ *         int field_a;
+ *         std::string field_b;
+ *     };
+ *  }
+ *  ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
+ *  namespace private::library {
+ *   // ...
+ *  @endcode
+ *
+ *  And please, if you want to accelerator the compile-time reflection process, please give your support and shout-out
+ *  to the above authors, and contact your C++ STD Committee representative that this feature should not be delayed.
+ */
+
+/**
+ * This macro can be used for simple non-templated structs and classes, e.g.
+ * @code
+ * struct my_struct {
+ *     int field_a;
+ *      std::string field_b;
+ * };
+ * ENABLE_REFLECTION(private::library:my_struct, field_a, field_b)
+ */
+#define ENABLE_REFLECTION(TypeName, ...) \
+    REFL_TYPE(TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+/**
+ * This macro can be used for arbitrary templated structs and classes, that depend
+ * on mixed typename and NTTP parameters
+ * @code
+ * template<typename T, std::size_t size>
+ * struct custom_struct {
+ *     T field_a;
+ *     T field_b;
+ *
+ *     [[nodiscard]] constexpr std::size_t size() const noexcept { return size; }
+ * };
+ * ENABLE_REFLECTION_FOR_TEMPLATE_FULL(typename T, std::size_t size), (custom_struct<T, size>), field_a, field_a);
+ */
+#define ENABLE_REFLECTION_FOR_TEMPLATE_FULL(TemplateDef, TypeName, ...) \
+    REFL_TEMPLATE(TemplateDef, TypeName __VA_OPT__(, )) \
+    REFL_DETAIL_FOR_EACH(REFL_DETAIL_EX_1_field __VA_OPT__(, ) __VA_ARGS__) \
+    REFL_END
+
+/**
+ * This macro can be used for simple templated structs and classes, that depend
+ * only on pure typename-template lists
+ * @code
+ * template<typename T>
+ * struct my_templated_struct {
+ *     T field_a;
+ *     T field_b;
+ * };
+ * ENABLE_REFLECTION_FOR_TEMPLATE(my_templated_struct, field_a, field_b);
+ */
+#define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
+
+#define GP_CONCAT_IMPL(x, y) x##y
+#define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
+
+#define GP_REGISTER_BLOCK_IMPL(Register, Name, ...) gr::detail::RegisterBlock<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_BLOCK_, __COUNTER__)(Register, #Name);
+#define GP_REGISTER_BLOCK(Register, Name, ...) \
+    namespace { \
+    using gr::detail::BlockParameters; \
+    GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
+    }
+#define GP_REGISTER_BLOCK_RUNTIME(Register, Name, ...) \
+    { \
+        using gr::detail::BlockParameters; \
+        GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
+    }
+
+#pragma GCC diagnostic pop
+#endif // GNURADIO_REFLECTION_HPP
+
+// #include "Tag.hpp"
+#ifndef GNURADIO_TAG_HPP
+#define GNURADIO_TAG_HPP
+
+#include <map>
+
+// #include <pmtv/pmt.hpp>
+
+
 // #include <gnuradio-4.0/meta/utils.hpp>
 
 
@@ -13649,6 +13654,53 @@ ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_val
                   timing_events)
 #endif // GNURADIO_DATASET_HPP
 
+// #include "Message.hpp"
+#ifndef GNURADIO_MESSAGE_HPP
+#define GNURADIO_MESSAGE_HPP
+
+// #include "gnuradio-4.0/Tag.hpp"
+
+#include <string_view>
+
+// #include <pmtv/pmt.hpp>
+
+
+namespace gr {
+
+namespace message::key {
+const std::string Sender    = "SENDER_KEY";
+const std::string Target    = "TARGET_KEY";
+const std::string Kind      = "KIND_KEY";
+const std::string What      = "WHAT_KEY";
+const std::string Data      = "DATA_KEY";
+const std::string Location  = "LOCATION_KEY";
+const std::string ErrorInfo = "ERROR_INFO_KEY"; // optional: if a message has an additional error information
+} // namespace message::key
+
+namespace message::kind {
+const std::string Error           = "ERROR_KIND";
+const std::string Graph_update    = "GRAPH_UPDATE_KIND";
+const std::string UpdateSettings  = "UPDATE_SETTINGS_KIND";
+const std::string SettingsChanged = "SETTINGS_CHANGED_KIND";
+} // namespace message::kind
+
+using Message = property_map;
+
+template<typename T>
+std::optional<T>
+messageField(const Message &message, const std::string &key) {
+    auto it = message.find(key);
+    if (it == message.end()) {
+        return {};
+    }
+
+    return std::get<T>(it->second);
+}
+
+} // namespace gr
+
+#endif // include guard
+
 // #include "Tag.hpp"
 
 
@@ -13668,7 +13720,8 @@ enum class ConnectionResult { SUCCESS, FAILED };
 
 enum class PortType {
     STREAM, /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
-    MESSAGE /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+    MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+    ANY // 'ANY' only for querying and not to be used for port declarations
 };
 
 /**
@@ -13791,9 +13844,12 @@ using is_tag_buffer_attribute = std::bool_constant<IsTagBufferAttribute<T>>;
 template<typename T>
 struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
+struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
+
 struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<Tag>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
+static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
@@ -13844,6 +13900,7 @@ struct Port {
     using with_name_and_descriptor = Port<T, newName, portType, portDirection, ReflDescriptor, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
+    static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
 
     using value_type        = T;
     using AttributeTypeList = typename gr::meta::typelist<Attributes...>;
@@ -13960,18 +14017,7 @@ public:
         , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
-    operator=(Port &&other) noexcept {
-        Port tmp(std::move(other));
-        std::swap(name, tmp._name);
-        std::swap(min_samples, tmp._min_samples);
-        std::swap(max_samples, tmp._max_samples);
-        std::swap(priority, tmp._priority);
-
-        std::swap(_connected, tmp._connected);
-        std::swap(_ioHandler, tmp._ioHandler);
-        std::swap(_tagIoHandler, tmp._tagIoHandler);
-        return *this;
-    }
+    operator=(Port &&other)  = delete;
 
     ~Port() = default;
 
@@ -14074,7 +14120,7 @@ public:
     buffer() {
         struct port_buffers {
             BufferType    streamBuffer;
-            TagBufferType tagBufferType;
+            TagBufferType tagBuffer;
         };
 
         return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
@@ -14088,7 +14134,7 @@ public:
             _connected    = true;
         } else {
             _ioHandler    = streamBuffer.new_writer();
-            _tagIoHandler = tagBuffer.new_reader();
+            _tagIoHandler = tagBuffer.new_writer();
         }
     }
 
@@ -14291,25 +14337,27 @@ template<typename T, typename... Attributes>
 using PortIn = Port<T, "", PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, typename... Attributes>
 using PortOut = Port<T, "", PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
-template<typename... Attributes>
-using MsgPortIn = Port<property_map, "", PortType::MESSAGE, PortDirection::INPUT, Attributes...>;
-template<typename... Attributes>
-using MsgPortOut = Port<property_map, "", PortType::MESSAGE, PortDirection::OUTPUT, Attributes...>;
-
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+
+template<typename... Attributes>
+using MsgPortIn = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
+template<typename... Attributes>
+using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
-using MsgPortInNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
+using MsgPortInNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
-using MsgPortOutNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+using MsgPortOutNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
 
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
-static_assert(PortLike<MsgPortIn<float>>);
-static_assert(PortLike<MsgPortOut<float>>);
+static_assert(PortLike<MsgPortIn<>>);
+static_assert(PortLike<MsgPortOut<>>);
+
+static_assert(std::is_same_v<MsgPortIn<>::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);
@@ -14703,6 +14751,58 @@ using is_port = std::integral_constant<bool, is_port_v<Type>>;
 template<typename Collection>
 concept is_port_collection_v = is_port_v<typename Collection::value_type>;
 
+template<typename T>
+auto
+unwrap_port_helper() {
+    if constexpr (port::is_port_v<T>) {
+        return static_cast<T *>(nullptr);
+    } else if constexpr (port::is_port_collection_v<T>) {
+        return static_cast<typename T::value_type *>(nullptr);
+    } else {
+        meta::print_types<meta::message_type<"Is not a port or a collection of ports">, T>{};
+    }
+}
+
+template<typename T>
+using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
+
+struct kind {
+    template<typename Port>
+    static constexpr auto
+    value_helper() {
+        if constexpr (std::is_same_v<typename Port::value_type, gr::Message>) {
+            return gr::PortType::MESSAGE;
+        } else {
+            return gr::PortType::STREAM;
+        }
+    }
+
+    template<PortType portType>
+    struct tester_for {
+        template<typename Port>
+        static constexpr bool matches_kind = portType == PortType::ANY || kind::value_helper<Port>() == portType;
+
+        template<typename T>
+        constexpr static bool
+        is_port_or_collection_helper() {
+            if constexpr (port::is_port_v<T> || port::is_port_collection_v<T>) {
+                return matches_kind<unwrap_port<T>>;
+            } else {
+                return false;
+            }
+        }
+
+        template<typename T>
+        using is_port_or_collection = std::integral_constant<bool, is_port_or_collection_helper<T>()>;
+
+        template<typename T>
+        using is_input_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_input_v<unwrap_port<T>>>;
+
+        template<typename T>
+        using is_output_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_output_v<unwrap_port<T>>>;
+    };
+};
+
 template<typename PortOrCollection>
 auto
 type_helper() {
@@ -14721,6 +14821,9 @@ struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::Requi
 
 template<typename... Ports>
 struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
+
+template<typename Type>
+constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_for<PortType::ANY>::is_port_or_collection<Type>();
 
 } // namespace gr::traits::port
 
@@ -14743,30 +14846,6 @@ namespace detail {
 
 template<typename FieldDescriptor>
 using member_type = typename FieldDescriptor::value_type;
-
-template<typename T>
-auto
-unwrap_port_helper() {
-    if constexpr (port::is_port_v<T>) {
-        return static_cast<T *>(nullptr);
-    } else if constexpr (port::is_port_collection_v<T>) {
-        return static_cast<typename T::value_type *>(nullptr);
-    } else {
-        static_assert(meta::always_false<T>, "Not a port or a collection of ports");
-    }
-}
-
-template<typename T>
-using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
-
-template<typename T>
-using is_port_or_collection = std::integral_constant<bool, port::is_port_v<T> || port::is_port_collection_v<T>>;
-
-template<typename T>
-using is_input_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_input_v<unwrap_port<T>>>;
-
-template<typename T>
-using is_output_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_output_v<unwrap_port<T>>>;
 
 template<typename Port>
 constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
@@ -14819,7 +14898,7 @@ concept Reflectable = refl::is_reflectable<ValueType>();
 
 template<Reflectable TBlock>
 struct member_ports_detector<TBlock> {
-    using member_ports          = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
+    using member_ports = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
 
     static constexpr bool value = member_ports::size != 0;
 };
@@ -14838,31 +14917,38 @@ struct member_descriptor_has_type {
 template<typename...>
 struct fixedBlock_ports_data_helper;
 
-// This specialization defines node attributes when the node is created
+// This specialization defines block attributes when the block is created
 // with two type lists - one list for input and one for output ports
-template<typename T, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-    requires InputPorts::template
-all_of<port::has_fixed_info> &&OutputPorts::template all_of<port::has_fixed_info> struct fixedBlock_ports_data_helper<T, InputPorts, OutputPorts> {
+template<typename TBlock, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
+    requires(InputPorts::template all_of<port::has_fixed_info> && OutputPorts::template all_of<port::has_fixed_info>)
+struct fixedBlock_ports_data_helper<TBlock, InputPorts, OutputPorts> {
     using member_ports_detector = std::false_type;
 
-    // using member_ports_detector = detail::member_ports_detector<TBlock>;
+    using defined_input_ports  = InputPorts;
+    using defined_output_ports = OutputPorts;
 
-    using input_ports       = InputPorts;
-    using output_ports      = OutputPorts;
+    template<gr::PortType portType>
+    struct for_type {
+        using input_ports  = typename defined_input_ports ::template filter<traits::port::kind::tester_for<portType>::template is_input_port_or_collection>;
+        using output_ports = typename defined_output_ports ::template filter<traits::port::kind::tester_for<portType>::template is_output_port_or_collection>;
+        using all_ports    = meta::concat<input_ports, output_ports>;
 
-    using input_port_types  = typename input_ports ::template transform<port::type>;
-    using output_port_types = typename output_ports ::template transform<port::type>;
+        using input_port_types  = typename input_ports ::template transform<port::type>;
+        using output_port_types = typename output_ports ::template transform<port::type>;
+    };
 
-    using all_ports         = meta::concat<input_ports, output_ports>;
+    using all     = for_type<PortType::ANY>;
+    using stream  = for_type<PortType::STREAM>;
+    using message = for_type<PortType::MESSAGE>;
 };
 
-// This specialization defines node attributes when the node is created
+// This specialization defines block attributes when the block is created
 // with a list of ports as template arguments
 template<typename TBlock, port::HasFixedInfo... Ports>
 struct fixedBlock_ports_data_helper<TBlock, Ports...> {
     using member_ports_detector = detail::member_ports_detector<TBlock>;
 
-    using all_ports             = std::remove_pointer_t<decltype([] {
+    using all_ports = std::remove_pointer_t<decltype([] {
         if constexpr (member_ports_detector::value) {
             return static_cast<typename member_ports_detector::member_ports *>(nullptr);
         } else {
@@ -14870,11 +14956,18 @@ struct fixedBlock_ports_data_helper<TBlock, Ports...> {
         }
     }())>;
 
-    using input_ports           = typename all_ports ::template filter<detail::is_input_port_or_collection>;
-    using output_ports          = typename all_ports ::template filter<detail::is_output_port_or_collection>;
+    template<PortType portType>
+    struct for_type {
+        using input_ports  = typename all_ports ::template filter<traits::port::kind::tester_for<portType>::template is_input_port_or_collection>;
+        using output_ports = typename all_ports ::template filter<traits::port::kind::tester_for<portType>::template is_output_port_or_collection>;
 
-    using input_port_types      = typename input_ports ::template transform<port::type>;
-    using output_port_types     = typename output_ports ::template transform<port::type>;
+        using input_port_types  = typename input_ports ::template transform<port::type>;
+        using output_port_types = typename output_ports ::template transform<port::type>;
+    };
+
+    using all     = for_type<PortType::ANY>;
+    using stream  = for_type<PortType::STREAM>;
+    using message = for_type<PortType::MESSAGE>;
 };
 
 // clang-format off
@@ -14888,31 +14981,46 @@ using fixedBlock_ports_data =
 // clang-format on
 
 template<typename TBlock>
-using all_ports = typename fixedBlock_ports_data<TBlock>::all_ports;
+using ports_data = fixedBlock_ports_data<TBlock>;
 
 template<typename TBlock>
-using input_ports = typename fixedBlock_ports_data<TBlock>::input_ports;
+using all_input_ports = typename fixedBlock_ports_data<TBlock>::all::input_ports;
 
 template<typename TBlock>
-using output_ports = typename fixedBlock_ports_data<TBlock>::output_ports;
+using all_output_ports = typename fixedBlock_ports_data<TBlock>::all::output_ports;
 
 template<typename TBlock>
-using input_port_types = typename fixedBlock_ports_data<TBlock>::input_port_types;
+using all_input_port_types = typename fixedBlock_ports_data<TBlock>::all::input_port_types;
 
 template<typename TBlock>
-using output_port_types = typename fixedBlock_ports_data<TBlock>::output_port_types;
+using all_output_port_types = typename fixedBlock_ports_data<TBlock>::all::output_port_types;
 
 template<typename TBlock>
-using input_port_types_tuple = typename input_port_types<TBlock>::tuple_type;
+using all_input_port_types_tuple = typename all_input_port_types<TBlock>::tuple_type;
 
 template<typename TBlock>
-using return_type = typename output_port_types<TBlock>::tuple_or_type;
+using stream_input_ports = typename fixedBlock_ports_data<TBlock>::stream::input_ports;
 
 template<typename TBlock>
-using input_port_names = typename input_ports<TBlock>::template transform<detail::port_name>;
+using stream_output_ports = typename fixedBlock_ports_data<TBlock>::stream::output_ports;
 
 template<typename TBlock>
-using output_port_names = typename output_ports<TBlock>::template transform<detail::port_name>;
+using stream_input_port_types = typename fixedBlock_ports_data<TBlock>::stream::input_port_types;
+
+template<typename TBlock>
+using stream_output_port_types = typename fixedBlock_ports_data<TBlock>::stream::output_port_types;
+
+template<typename TBlock>
+using stream_input_port_types_tuple = typename stream_input_port_types<TBlock>::tuple_type;
+
+template<typename TBlock>
+using stream_return_type = typename fixedBlock_ports_data<TBlock>::stream::output_port_types::tuple_or_type;
+
+template<typename TBlock>
+using all_input_port_names = typename all_input_ports<TBlock>::template transform<detail::port_name>;
+
+template<typename TBlock>
+using all_output_port_names = typename all_output_ports<TBlock>::template transform<detail::port_name>;
 
 template<typename TBlock>
 constexpr bool block_defines_ports_as_member_variables = fixedBlock_ports_data<TBlock>::member_ports_detector::value;
@@ -14925,26 +15033,27 @@ using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::
 namespace detail {
 template<std::size_t... Is>
 auto
-can_processOne_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.processOne(std::get<Is>(input)...));
+can_processOne_invoke_test(auto &block, const auto &input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
 
 template<typename T>
 struct exact_argument_type {
     template<std::same_as<T> U>
-    constexpr operator U() const noexcept;
+    constexpr
+    operator U() const noexcept;
 };
 
 template<std::size_t... Is>
 auto
-can_processOne_with_offset_invoke_test(auto &node, const auto &input, std::index_sequence<Is...>) -> decltype(node.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
+can_processOne_with_offset_invoke_test(auto &block, const auto &input, std::index_sequence<Is...>) -> decltype(block.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
 
 template<typename TBlock>
-using simd_return_type_of_can_processOne = meta::simdize<return_type<TBlock>, meta::simdize_size_v<meta::simdize<input_port_types_tuple<TBlock>>>>;
+using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlock>, meta::simdize_size_v<meta::simdize<stream_input_port_types_tuple<TBlock>>>>;
 } // namespace detail
 
-/* A node "can process simd" if its `processOne` function takes at least one argument and all
+/* A block "can process simd" if its `processOne` function takes at least one argument and all
  * arguments can be simdized types of the actual port data types.
  *
- * The node can be a sink (no output ports).
+ * The block can be a sink (no output ports).
  * The requirement of at least one function argument disallows sources.
  *
  * There is another (unnamed) concept for source nodes: Source nodes can implement
@@ -14955,10 +15064,10 @@ concept can_processOne_simd =
 #if DISABLE_SIMD
         false;
 #else
-        traits::block::input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::block::input_port_types<TBlock>::size() > 0 and requires(TBlock &node, const meta::simdize<input_port_types_tuple<TBlock>> &input_simds) {
+        traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
+        traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock &block, const meta::simdize<stream_input_port_types_tuple<TBlock>> &input_simds) {
             {
-                detail::can_processOne_invoke_test(node, input_simds, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>())
+                detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>())
             } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
         };
 #endif
@@ -14968,22 +15077,22 @@ concept can_processOne_simd_with_offset =
 #if DISABLE_SIMD
         false;
 #else
-        traits::block::input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::block::input_port_types<TBlock>::size() > 0 && requires(TBlock &node, const meta::simdize<input_port_types_tuple<TBlock>> &input_simds) {
+        traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
+        traits::block::stream_input_port_types<TBlock>::size() > 0 && requires(TBlock &block, const meta::simdize<stream_input_port_types_tuple<TBlock>> &input_simds) {
             {
-                detail::can_processOne_with_offset_invoke_test(node, input_simds, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>())
+                detail::can_processOne_with_offset_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>())
             } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
         };
 #endif
 
 template<typename TBlock>
-concept can_processOne_scalar = requires(TBlock &node, const input_port_types_tuple<TBlock> &inputs) {
-    { detail::can_processOne_invoke_test(node, inputs, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>()) } -> std::same_as<return_type<TBlock>>;
+concept can_processOne_scalar = requires(TBlock &block, const stream_input_port_types_tuple<TBlock> &inputs) {
+    { detail::can_processOne_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
 };
 
 template<typename TBlock>
-concept can_processOne_scalar_with_offset = requires(TBlock &node, const input_port_types_tuple<TBlock> &inputs) {
-    { detail::can_processOne_with_offset_invoke_test(node, inputs, std::make_index_sequence<traits::block::input_ports<TBlock>::size()>()) } -> std::same_as<return_type<TBlock>>;
+concept can_processOne_scalar_with_offset = requires(TBlock &block, const stream_input_port_types_tuple<TBlock> &inputs) {
+    { detail::can_processOne_with_offset_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
 };
 
 template<typename TBlock>
@@ -14991,6 +15100,9 @@ concept can_processOne = can_processOne_scalar<TBlock> or can_processOne_simd<TB
 
 template<typename TBlock>
 concept can_processOne_with_offset = can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
+
+template<typename TBlock, typename TPort>
+concept can_processMessagesForPort = requires(TBlock &block, TPort &inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
 
 namespace detail {
 template<typename T>
@@ -15074,15 +15186,15 @@ using dynamic_span = std::span<T>;
 
 template<std::size_t... InIdx, std::size_t... OutIdx>
 auto
-can_processBulk_invoke_test(auto &node, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
-        -> decltype(node.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
+can_processBulk_invoke_test(auto &block, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
+        -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
 template<typename TBlock>
-concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::input_ports<TBlock>>::tuple_type inputs,
-                                   typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::output_ports<TBlock>>::tuple_type outputs) {
+concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::stream_input_ports<TBlock>>::tuple_type inputs,
+                                   typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::stream_output_ports<TBlock>>::tuple_type outputs) {
     {
-        detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<input_port_types<TBlock>::size>(), std::make_index_sequence<output_port_types<TBlock>::size>())
+        detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<stream_input_port_types<TBlock>::size>(), std::make_index_sequence<stream_output_port_types<TBlock>::size>())
     } -> std::same_as<work::Status>;
 };
 
@@ -15094,24 +15206,24 @@ concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nes
 template<typename TDerived, std::size_t I>
 concept processBulk_requires_ith_output_as_span
         = can_processBulk<TDerived>
-       && requires(TDerived &d, typename meta::transform_types<detail::dummy_input_span, traits::block::input_port_types<TDerived>>::template apply<std::tuple> inputs,
+       && requires(TDerived &d, typename meta::transform_types<detail::dummy_input_span, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
                    typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
-                                                        traits::block::output_port_types<TDerived>>::template apply<std::tuple>
+                                                        traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
                            outputs,
                    typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
-                                                        traits::block::output_port_types<TDerived>>::template apply<std::tuple>
+                                                        traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
                            bad_outputs) {
               {
                   []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                                   std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
                       return {};
-                  }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>())
+                  }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>())
               } -> std::same_as<work::Status>;
               not requires {
                   []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                                   std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
                       return {};
-                  }(std::make_index_sequence<traits::block::input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::output_port_types<TDerived>::size>());
+                  }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>());
               };
           };
 
@@ -17633,7 +17745,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                            if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                                 if (default_tag == get_display_name(member)) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
@@ -17723,7 +17835,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -17781,7 +17893,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
@@ -17872,7 +17984,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (!traits::block::detail::is_port_or_collection<Type>() && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
@@ -17917,7 +18029,7 @@ public:
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (!traits::block::detail::is_port_or_collection<Type>() && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
@@ -17956,7 +18068,7 @@ public:
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr ((!traits::block::detail::is_port_or_collection<Type>()) && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_block));
                 }
             };
@@ -17975,7 +18087,7 @@ private:
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr (!traits::block::detail::is_port_or_collection<Type>() && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
@@ -18120,54 +18232,64 @@ invokeProcessOneWithOrWithoutOffset(T &node, std::size_t offset, const Us &...in
         return node.processOne(inputs...);
 }
 
-template<std::size_t Index, typename Self>
+template<std::size_t Index, PortType portType, typename Self>
 [[nodiscard]] constexpr auto &
 inputPort(Self *self) noexcept {
-    using TRequestedPortType = typename traits::block::input_ports<Self>::template at<Index>;
+    using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::input_ports::template at<Index>;
     if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
         using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
         return member_descriptor()(*self);
     } else {
-        return std::get<TRequestedPortType>(*self);
+        return self->template getArgument<TRequestedPortType>();
     }
 }
 
-template<std::size_t Index, typename Self>
+template<std::size_t Index, PortType portType, typename Self>
 [[nodiscard]] constexpr auto &
 outputPort(Self *self) noexcept {
-    using requested_port_type = typename traits::block::output_ports<Self>::template at<Index>;
+    using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::output_ports::template at<Index>;
     if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
-        using member_descriptor = traits::block::get_port_member_descriptor<Self, requested_port_type>;
+        using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
         return member_descriptor()(*self);
     } else {
-        return std::get<requested_port_type>(*self);
+        return self->template getArgument<TRequestedPortType>();
     }
 }
 
 template<fixed_string Name, typename Self>
 [[nodiscard]] constexpr auto &
 inputPort(Self *self) noexcept {
-    constexpr int Index = meta::indexForName<Name, traits::block::input_ports<Self>>();
-    return inputPort<Index, Self>(self);
+    constexpr int Index = meta::indexForName<Name, traits::block::all_input_ports<Self>>();
+    if constexpr (Index == meta::default_message_port_index) {
+        return self->msgIn;
+    }
+    return inputPort<Index, PortType::ANY, Self>(self);
 }
 
 template<fixed_string Name, typename Self>
 [[nodiscard]] constexpr auto &
 outputPort(Self *self) noexcept {
-    constexpr int Index = meta::indexForName<Name, traits::block::output_ports<Self>>();
-    return outputPort<Index, Self>(self);
+    constexpr int Index = meta::indexForName<Name, traits::block::all_output_ports<Self>>();
+    if constexpr (Index == meta::default_message_port_index) {
+        return self->msgOut;
+    }
+    return outputPort<Index, PortType::ANY, Self>(self);
 }
 
-template<typename Self>
+template<PortType portType, typename Self>
 [[nodiscard]] constexpr auto
 inputPorts(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(inputPort<Idx>(self)...); }(std::make_index_sequence<traits::block::input_ports<Self>::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::tie(inputPort<Idx, portType>(self)...);
+    }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::input_ports::size()>());
 }
 
-template<typename Self>
+template<PortType portType, typename Self>
 [[nodiscard]] constexpr auto
 outputPorts(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx>(self)...); }(std::make_index_sequence<traits::block::output_ports<Self>::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+        return std::tie(outputPort<Idx, portType>(self)...);
+    }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::output_ports::size>());
 }
 
 namespace work {
@@ -18375,11 +18497,12 @@ static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-struct Block : protected std::tuple<Arguments...> {
+class Block : protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
 
+public:
     using base_t                     = Block<Derived, Arguments...>;
     using derived_t                  = Derived;
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
@@ -18389,6 +18512,19 @@ struct Block : protected std::tuple<Arguments...> {
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UZ, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
+    template<typename T>
+    auto &
+    getArgument() {
+        return std::get<T>(*this);
+    }
+
+    template<typename T>
+    const auto &
+    getArgument() const {
+        return std::get<T>(*this);
+    }
+
+    // TODO: These are not involved in move operations, might be a problem later
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
@@ -18397,20 +18533,35 @@ struct Block : protected std::tuple<Arguments...> {
             "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
+
     //
     using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
     A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
     A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
     using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::size_t, std::size_t>;
-    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride         = StrideControl::kStride;
-    std::size_t                                                                                                         stride_counter = 0UZ;
-    const std::size_t                                                                                                   unique_id      = _unique_id_counter++;
-    const std::string                                                                                                   unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                                 name        = gr::meta::type_name<Derived>();
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">>      meta_information;
-    constexpr static std::string_view                                                                                   description = static_cast<std::string_view>(Description::value);
-    std::atomic<lifecycle::State>                                                                                       state       = lifecycle::State::IDLE;
+    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
+
+    //
+    std::size_t                   stride_counter = 0UZ;
+    std::atomic<lifecycle::State> state          = lifecycle::State::IDLE;
+
+    // TODO: These are not involved in move operations, might be a problem later
+    const std::size_t unique_id   = _unique_id_counter++;
+    const std::string unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+
+    //
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name = gr::meta::type_name<Derived>();
+    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
+
+    //
+    constexpr static std::string_view description = static_cast<std::string_view>(Description::value);
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+
+    // TODO: C++26 make sure these are not reflected
+    // We support ports that are template parameters or reflected member variables,
+    // so these are handled in a special way
+    MsgPortInNamed<"__Builtin">  msgIn;
+    MsgPortOutNamed<"__Builtin"> msgOut;
 
     struct PortsStatus {
         std::size_t in_min_samples{ 1UZ };                                             // max of `port.min_samples()` of all input ports
@@ -18488,7 +18639,7 @@ protected:
                 ps.nSamplesToEosTag       = std::min(ps.nSamplesToEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
             }
         };
-        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts(&self()));
+        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts<PortType::STREAM>(&self()));
 
         auto adjust_for_output_port = [&ps = ports_status]<PortLike Port>(Port &port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
@@ -18498,7 +18649,7 @@ protected:
                 ps.out_available         = std::min(ps.out_available, port.streamWriter().available());
             }
         };
-        for_each_port([&adjust_for_output_port](PortLike auto &port) { adjust_for_output_port(port); }, outputPorts(&self()));
+        for_each_port([&adjust_for_output_port](PortLike auto &port) { adjust_for_output_port(port); }, outputPorts<PortType::STREAM>(&self()));
 
         ports_status.in_samples = ports_status.in_available;
         if (ports_status.in_samples < ports_status.in_min_samples) ports_status.in_samples = 0;
@@ -18536,7 +18687,25 @@ public:
         }
     }
 
-    Block(Block &&other) noexcept : std::tuple<Arguments...>(std::move(other)), _settings(std::move(other._settings)) {}
+    Block(Block &&other) noexcept
+        : std::tuple<Arguments...>(std::move(other))
+        , numerator(std::move(other.numerator))
+        , denominator(std::move(other.denominator))
+        , stride(std::move(other.stride))
+        , stride_counter(std::move(other.stride_counter))
+        , state(other.state.load()) // atomic, not moving
+        , msgIn(std::move(other.msgIn))
+        , msgOut(std::move(other.msgOut))
+        , ports_status(std::move(other.ports_status))
+        , _output_tags_changed(std::move(other._output_tags_changed))
+        , _mergedInputTag(std::move(other._mergedInputTag))
+        , _settings(std::move(other._settings)) {}
+
+    // There are a few const or conditionally const member variables,
+    // we can not have a move-assignment that is equivalent to
+    // the move constructor
+    Block &
+    operator=(Block &&other) = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
@@ -18583,8 +18752,8 @@ public:
                 }
             }
         };
-        traits::block::input_ports<Derived>::template apply_func(setPortName);
-        traits::block::output_ports<Derived>::template apply_func(setPortName);
+        traits::block::all_input_ports<Derived>::for_each(setPortName);
+        traits::block::all_output_ports<Derived>::for_each(setPortName);
 
         // Handle settings
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
@@ -18603,9 +18772,9 @@ public:
     [[nodiscard]] constexpr std::size_t
     availableInputSamples(Container &data) const noexcept {
         if constexpr (gr::meta::vector_type<Container>) {
-            data.resize(traits::block::input_port_types<Derived>::size);
+            data.resize(traits::block::stream_input_port_types<Derived>::size);
         } else if constexpr (gr::meta::array_type<Container>) {
-            static_assert(std::tuple_size<Container>::value >= traits::block::input_port_types<Derived>::size);
+            static_assert(std::tuple_size<Container>::value >= traits::block::stream_input_port_types<Derived>::size);
         } else {
             static_assert(gr::meta::always_false<Container>, "type not supported");
         }
@@ -18620,17 +18789,17 @@ public:
                         }
                     }
                 },
-                inputPorts(&self()));
-        return traits::block::input_port_types<Derived>::size;
+                inputPorts<PortType::STREAM>(&self()));
+        return traits::block::stream_input_port_types<Derived>::size;
     }
 
     template<gr::meta::array_or_vector_type Container>
     [[nodiscard]] constexpr std::size_t
     availableOutputSamples(Container &data) const noexcept {
         if constexpr (gr::meta::vector_type<Container>) {
-            data.resize(traits::block::output_port_types<Derived>::size);
+            data.resize(traits::block::stream_output_port_types<Derived>::size);
         } else if constexpr (gr::meta::array_type<Container>) {
-            static_assert(std::tuple_size<Container>::value >= traits::block::output_port_types<Derived>::size);
+            static_assert(std::tuple_size<Container>::value >= traits::block::stream_output_port_types<Derived>::size);
         } else {
             static_assert(gr::meta::always_false<Container>, "type not supported");
         }
@@ -18645,8 +18814,8 @@ public:
                         }
                     }
                 },
-                outputPorts(&self()));
-        return traits::block::output_port_types<Derived>::size;
+                outputPorts<PortType::STREAM>(&self()));
+        return traits::block::stream_output_port_types<Derived>::size;
     }
 
     [[nodiscard]] constexpr bool
@@ -18698,8 +18867,8 @@ public:
 
     constexpr void
     checkParametersAndThrowIfNeeded() {
-        constexpr bool kIsSourceBlock = traits::block::input_port_types<Derived>::size == 0;
-        constexpr bool kIsSinkBlock   = traits::block::output_port_types<Derived>::size == 0;
+        constexpr bool kIsSourceBlock = traits::block::stream_input_port_types<Derived>::size == 0;
+        constexpr bool kIsSinkBlock   = traits::block::stream_output_port_types<Derived>::size == 0;
 
         if constexpr (Resampling::kEnabled) {
             static_assert(!kIsSinkBlock, "Decimation/interpolation is not available for sink blocks. Remove 'ResamplingRatio<>' from the block definition.");
@@ -18722,7 +18891,7 @@ public:
 
     void
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
-        if constexpr (traits::block::output_ports<Derived>::size > 0) {
+        if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
                     [available_values_count]<typename OutputRange>(auto i, OutputRange &output_range) {
                         if constexpr (traits::block::can_processOne<Derived> or traits::block::processBulk_requires_ith_output_as_span<Derived, i>) {
@@ -18761,7 +18930,7 @@ public:
     bool
     consumeReaders(Self &self, std::size_t available_values_count) {
         bool success = true;
-        if constexpr (traits::block::input_ports<Derived>::size > 0) {
+        if constexpr (traits::block::stream_input_ports<Derived>::size > 0) {
             std::apply(
                     [available_values_count, &success](auto &...input_port) {
                         auto consume_port = [&]<typename Port>(Port &port_or_collection) {
@@ -18775,7 +18944,7 @@ public:
                         };
                         (consume_port(input_port), ...);
                     },
-                    inputPorts(&self));
+                    inputPorts<PortType::STREAM>(&self));
         }
         return success;
     }
@@ -18783,10 +18952,10 @@ public:
     template<typename... Ts>
     constexpr auto
     invoke_processOne(std::size_t offset, Ts &&...inputs) {
-        if constexpr (traits::block::output_ports<Derived>::size == 0) {
+        if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
             invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
             return std::tuple{};
-        } else if constexpr (traits::block::output_ports<Derived>::size == 1) {
+        } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
             return std::tuple{ invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...) };
         } else {
             return invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
@@ -18797,10 +18966,10 @@ public:
     constexpr auto
     invoke_processOne_simd(std::size_t offset, auto width, Ts &&...input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
-            if constexpr (traits::block::output_ports<Derived>::size == 0) {
+            if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
                 self().processOne_simd(offset, width);
                 return std::tuple{};
-            } else if constexpr (traits::block::output_ports<Derived>::size == 1) {
+            } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
                 return std::tuple{ self().processOne_simd(offset, width) };
             } else {
                 return self().processOne_simd(offset, width);
@@ -18817,7 +18986,7 @@ public:
             _mergedInputTag.map.clear();
         }
 
-        for_each_port([](PortLike auto &outPort) noexcept { outPort.publishPendingTags(); }, outputPorts(&self()));
+        for_each_port([](PortLike auto &outPort) noexcept { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
         _output_tags_changed = false;
     }
 
@@ -18839,12 +19008,12 @@ public:
                     const Tag mergedPortTags = input_port.getTag(untilOffset);
                     mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
                 },
-                inputPorts(&self()));
+                inputPorts<PortType::STREAM>(&self()));
 
         if (!mergedInputTag().map.empty()) {
             settings().autoUpdate(mergedInputTag().map); // apply tags as new settings if matching
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts(&self()));
+                for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
             }
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
                 requestStop();
@@ -18856,7 +19025,7 @@ public:
     updateOutputTagsWithSettingParametersIfNeeded() {
         if (settings().changed()) {
             if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
-                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts(&self()));
+                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts<PortType::STREAM>(&self()));
             }
             settings()._changed.store(false);
         }
@@ -18942,7 +19111,7 @@ public:
                         return result;
                     }
                 },
-                inputPorts(&self()));
+                inputPorts<PortType::STREAM>(&self()));
     }
 
     constexpr auto
@@ -18967,23 +19136,48 @@ public:
                         return result;
                     }
                 },
-                outputPorts(&self()));
+                outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void
     publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts(&self()));
+        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void
     publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([&tag_data, tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts(&self()));
+        for_each_port([&tag_data, tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     constexpr void
     requestStop() noexcept {
         std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
         this->state.notify_all();
+    }
+
+    constexpr void
+    processScheduledMessages() {
+        auto processPort = [this]<PortLike TPort>(TPort &inPort) {
+            const auto available = inPort.streamReader().available();
+            if constexpr (traits::block::can_processMessagesForPort<Derived, TPort>) {
+                if (available > 0) {
+                    self().processMessages(inPort, inPort.streamReader().get(available));
+                }
+            }
+            if (available > 0) {
+                if (auto consumed = inPort.streamReader().consume(available); !consumed) {
+                    throw fmt::format("Could not consume the messages from the message port");
+                }
+            }
+        };
+        processPort(msgIn);
+        for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
+    }
+
+    void
+    emitMessage(auto &port, Message message) {
+        message[gr::message::key::Sender] = unique_name;
+        port.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
     }
 
 protected:
@@ -18994,8 +19188,8 @@ protected:
     work::Result
     workInternal(std::size_t requested_work) {
         using gr::work::Status;
-        using TInputTypes  = traits::block::input_port_types<Derived>;
-        using TOutputTypes = traits::block::output_port_types<Derived>;
+        using TInputTypes  = traits::block::stream_input_port_types<Derived>;
+        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
 
         constexpr bool kIsSourceBlock = TInputTypes::size == 0;
         constexpr bool kIsSinkBlock   = TOutputTypes::size == 0;
@@ -19187,7 +19381,7 @@ protected:
             // cannot use std::apply because it requires tuple_cat(inputSpans, writersTuple). The latter doesn't work because writersTuple isn't copyable.
             const work::Status ret = [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
                 return self().processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(writersTuple)...);
-            }(std::make_index_sequence<traits::block::input_ports<Derived>::size>(), std::make_index_sequence<traits::block::output_ports<Derived>::size>());
+            }(std::make_index_sequence<traits::block::stream_input_ports<Derived>::size>(), std::make_index_sequence<traits::block::stream_output_ports<Derived>::size>());
 
             forwardTags();
             if constexpr (kIsSourceBlock) {
@@ -19303,6 +19497,8 @@ public:
      */
     work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
+        processScheduledMessages();
+
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
@@ -19348,6 +19544,45 @@ public:
             return workInternal(requested_work);
         }
     }
+
+    void
+    processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> messages) {
+        if (std::addressof(port) != std::addressof(msgIn)) {
+            fmt::print("{} got a message on a wrong port\n", self().unique_name);
+            return;
+        }
+
+        for (const auto &message : messages) {
+            const auto kind   = messageField<std::string>(message, gr::message::key::Kind).value_or(std::string{});
+            const auto target = messageField<std::string>(message, gr::message::key::Target);
+
+            if (target && !target->empty() && *target != self().unique_name) {
+                continue;
+            }
+
+            if (kind == gr::message::kind::UpdateSettings) {
+                const auto data   = messageField<property_map>(message, gr::message::key::Data).value();
+                auto       notSet = settings().set(data);
+
+                std::string keysNotSet;
+                for (const auto &[k, v] : notSet) {
+                    keysNotSet += " " + k;
+                }
+
+                Message settingsUpdated;
+                settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
+                settingsUpdated[gr::message::key::Data] = settings().get();
+
+                if (!notSet.empty()) {
+                    Message errorMessage;
+                    errorMessage[gr::message::key::Kind]         = gr::message::kind::Error;
+                    errorMessage[gr::message::key::Data]         = notSet;
+                    settingsUpdated[gr::message::key::ErrorInfo] = std::move(errorMessage);
+                }
+                emitMessage(msgOut, std::move(settingsUpdated));
+            }
+        }
+    }
 };
 
 template<typename Derived, typename... Arguments>
@@ -19374,7 +19609,7 @@ blockDescription() noexcept {
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
                                                 gr::meta::type_name<DerivedBlock>(), Description::value._data,
                                                 kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
-    gr::meta::typelist<SupportedTypes>::template apply_func([&](std::size_t index, auto &&t) {
+    gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto &&t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
         ret += fmt::format("{}:{} ", index, type_name);
     });
@@ -19413,7 +19648,7 @@ struct BlockParameters {
     template<template<typename...> typename TBlock, typename RegisterInstance>
     void
     registerOn(RegisterInstance *plugin_instance, std::string block_type) const {
-        plugin_instance->template add_block_type<TBlock, Types...>(block_type);
+        plugin_instance->template addBlockType<TBlock, Types...>(block_type);
     }
 };
 
@@ -19421,14 +19656,15 @@ template<template<typename...> typename TBlock, typename... TBlockParameters>
 struct RegisterBlock {
     template<typename RegisterInstance>
     RegisterBlock(RegisterInstance *plugin_instance, std::string block_type) {
-        auto add_block_type = [&]<typename Type> {
+        std::cout << "registerBlock " << block_type << std::endl;
+        auto addBlockType = [&]<typename Type> {
             if constexpr (meta::is_instantiation_of<Type, BlockParameters>) {
                 Type().template registerOn<TBlock>(plugin_instance, block_type);
             } else {
-                plugin_instance->template add_block_type<TBlock, Type>(block_type);
+                plugin_instance->template addBlockType<TBlock, Type>(block_type);
             }
         };
-        ((add_block_type.template operator()<TBlockParameters>()), ...);
+        ((addBlockType.template operator()<TBlockParameters>()), ...);
     }
 };
 } // namespace detail
@@ -19538,6 +19774,9 @@ public:
     initDynamicPorts() const {
         if (!_dynamicPortsLoaded) _dynamicPortsLoader();
     }
+
+    MsgPortInNamed<"__Builtin">  *msgIn;
+    MsgPortOutNamed<"__Builtin"> *msgOut;
 
     [[nodiscard]] gr::DynamicPort &
     dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
@@ -19695,7 +19934,9 @@ public:
      * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
      * See enum description for details.
      */
-    [[nodiscard]] virtual lifecycle::State state() const noexcept = 0;
+    [[nodiscard]] virtual lifecycle::State
+    state() const noexcept
+            = 0;
 
     /**
      * @brief number of available readable samples at the block's input ports
@@ -19760,6 +20001,10 @@ public:
     work(std::size_t requested_work)
             = 0;
 
+    virtual void
+    processScheduledMessages()
+            = 0;
+
     [[nodiscard]] virtual void *
     raw() = 0;
 };
@@ -19795,6 +20040,12 @@ private:
     }
 
     void
+    initMessagePorts() {
+        msgIn  = std::addressof(_block.msgIn);
+        msgOut = std::addressof(_block.msgOut);
+    }
+
+    void
     createDynamicPortsLoader() {
         _dynamicPortsLoader = [this] {
             if (_dynamicPortsLoaded) return;
@@ -19816,9 +20067,9 @@ private:
                     } else {
                         // We can also have ports defined as template parameters
                         if constexpr (decltype(direction)::value == PortDirection::INPUT) {
-                            processPort(where, gr::inputPort<decltype(index)::value>(&blockRef()));
+                            processPort(where, gr::inputPort<decltype(index)::value, PortType::ANY>(&blockRef()));
                         } else {
-                            processPort(where, gr::outputPort<decltype(index)::value>(&blockRef()));
+                            processPort(where, gr::outputPort<decltype(index)::value, PortType::ANY>(&blockRef()));
                         }
                     }
                 } else {
@@ -19836,11 +20087,11 @@ private:
                     }
                 }
             };
-            traits::block::input_ports<Node>::template apply_func(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
-            traits::block::output_ports<Node>::template apply_func(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
+            traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
+            traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
 
-            constexpr std::size_t input_port_count  = gr::traits::block::template input_port_types<Node>::size;
-            constexpr std::size_t output_port_count = gr::traits::block::template output_port_types<Node>::size;
+            constexpr std::size_t input_port_count  = gr::traits::block::all_input_port_types<Node>::size;
+            constexpr std::size_t output_port_count = gr::traits::block::all_output_port_types<Node>::size;
             static_assert(input_port_count + output_port_count > 0);
             _dynamicPortsLoaded = true;
         };
@@ -19858,21 +20109,29 @@ public:
 
     ~BlockWrapper() override = default;
 
-    BlockWrapper() { createDynamicPortsLoader(); }
+    BlockWrapper() {
+        initMessagePorts();
+        createDynamicPortsLoader();
+    }
 
     template<typename Arg>
         requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
     explicit BlockWrapper(Arg &&arg) : _block(std::forward<Arg>(arg)) {
+        initMessagePorts();
         createDynamicPortsLoader();
     }
 
     template<typename... Args>
         requires(!detail::contains_type<BlockWrapper, std::decay_t<Args>...> && sizeof...(Args) > 1)
     explicit BlockWrapper(Args &&...args) : _block{ std::forward<Args>(args)... } {
+        initMessagePorts();
         createDynamicPortsLoader();
     }
 
-    explicit BlockWrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _block{ std::move(init_parameter) } { createDynamicPortsLoader(); }
+    explicit BlockWrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _block{ std::move(init_parameter) } {
+        initMessagePorts();
+        createDynamicPortsLoader();
+    }
 
     void
     init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
@@ -19919,12 +20178,18 @@ public:
         return blockRef().work(requested_work);
     }
 
+    void
+    processScheduledMessages() override {
+        return blockRef().processScheduledMessages();
+    }
+
     [[nodiscard]] constexpr bool
     isBlocking() const noexcept override {
         return blockRef().isBlocking();
     }
 
-    [[nodiscard]] lifecycle::State state() const noexcept override {
+    [[nodiscard]] lifecycle::State
+    state() const noexcept override {
         return blockRef().state.load();
     }
 
@@ -20066,15 +20331,16 @@ public:
     }
 };
 
-struct Graph {
+class Graph : public gr::Block<Graph> {
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
 
 private:
     std::vector<std::function<ConnectionResult(Graph &)>> _connectionDefinitions;
-    std::vector<std::unique_ptr<BlockModel>>              _blocks;
     std::vector<Edge>                                     _edges;
+
+    std::vector<std::unique_ptr<BlockModel>> _blocks;
 
     template<typename TBlock>
     std::unique_ptr<BlockModel> &
@@ -20096,7 +20362,7 @@ private:
              typename Destination, typename DestinationPort>
     [[nodiscard]] ConnectionResult
     connectImpl(Source &sourceNodeRaw, SourcePort &source_port_or_collection, Destination &destinationNodeRaw, DestinationPort &destinationPort_or_collection, std::size_t minBufferSize = 65536,
-                std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+                std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(sourceNodeRaw); })
             || !std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(destinationNodeRaw); })) {
             throw std::runtime_error(
@@ -20119,15 +20385,18 @@ private:
             }
         }();
 
-        static_assert(std::is_same_v<typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>,
-                      "The source port type needs to match the sink port type");
+        if constexpr (!std::is_same_v<typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>) {
+            meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type,
+                              typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
+        }
 
         auto result = sourcePort->connect(*destinationPort);
         if (result == ConnectionResult::SUCCESS) {
             auto *sourceNode      = findBlock(sourceNodeRaw).get();
             auto *destinationNode = findBlock(destinationNodeRaw).get();
+            // TODO: Rethink edge definition, indices, message port -1 etc.
             _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{ sourcePortIndex, sourcePortSubIndex }, destinationNode,
-                                PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, name);
+                                PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, edgeName);
         }
 
         return result;
@@ -20144,7 +20413,7 @@ private:
 
         SourceConnector(Graph &_self, Source &_source, Port &_port) : self(_self), source(_source), port(_port) {}
 
-        static_assert(traits::port::is_port_v<Port> || (sourcePortSubIndex != meta::invalid_index),
+        static_assert(std::is_same_v<Port, gr::Message> || traits::port::is_port_v<Port> || (sourcePortSubIndex != meta::invalid_index),
                       "When we have a collection of ports, we need to have an index to access the desired port in the collection");
 
     private:
@@ -20170,16 +20439,27 @@ private:
         // connect using the port index
 
         template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard, deprecated("For internal use only, the the with the port name should be used")]] auto
-        to(Destination &destination) {
-            auto &destinationPort = inputPort<destinationPortIndex>(&destination);
+        [[nodiscard]] auto
+        to_internal(Destination &destination) {
+            auto &destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
         }
 
-        template<std::size_t destinationPortIndex, typename Destination>
-        [[nodiscard, deprecated("For internal use only, the the with the port name should be used")]] auto
+        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
+        [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
         to(Destination &destination) {
-            return to<destinationPortIndex, meta::invalid_index, Destination>(destination);
+            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
+        }
+
+        template<std::size_t destinationPortIndex, typename Destination>
+        [[nodiscard]] auto
+        to(Destination &destination) {
+            if constexpr (destinationPortIndex == gr::meta::default_message_port_index) {
+                return to<Destination, decltype(destination.msgIn)>(destination, destination.msgIn);
+
+            } else {
+                return to<destinationPortIndex, meta::invalid_index, Destination>(destination);
+            }
         }
 
         // connect using the port name
@@ -20187,14 +20467,14 @@ private:
         template<fixed_string destinationPortName, std::size_t destinationPortSubIndex, typename Destination>
         [[nodiscard]] constexpr auto
         to(Destination &destination) {
-            using destination_input_ports              = typename traits::block::input_ports<Destination>;
+            using destination_input_ports              = typename traits::block::all_input_ports<Destination>;
             constexpr std::size_t destinationPortIndex = meta::indexForName<destinationPortName, destination_input_ports>();
             if constexpr (destinationPortIndex == meta::invalid_index) {
                 meta::print_types<meta::message_type<"There is no input port with the specified name in this destination block">, Destination, meta::message_type<destinationPortName>,
-                                  meta::message_type<"These are the known names:">, traits::block::input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports>
+                                  meta::message_type<"These are the known names:">, traits::block::all_input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports>
                         port_not_found_error{};
             }
-            return to<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
+            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
         }
 
         template<fixed_string destinationPortName, typename Destination>
@@ -20245,6 +20525,7 @@ public:
     addBlock(std::unique_ptr<BlockModel> block) {
         auto &new_block_ref = _blocks.emplace_back(std::move(block));
         new_block_ref->init(progress, ioThreadPool);
+        // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *new_block_ref.get();
     }
 
@@ -20262,12 +20543,12 @@ public:
     auto &
     emplaceBlock(const property_map &initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>());
-        auto  raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
-        const auto failed   = raw_ref->settings().set(initialSettings);
+        auto      &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>());
+        auto       raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
+        const auto failed        = raw_ref->settings().set(initialSettings);
         if (!failed.empty()) {
             std::vector<std::string> keys;
-            for (const auto& pair : failed) {
+            for (const auto &pair : failed) {
                 keys.push_back(pair.first);
             }
             throw std::invalid_argument(fmt::format("initial Block settings could not be applied successfully - mismatched keys or value-type: {}\n", fmt::join(keys, ", ")));
@@ -20279,16 +20560,26 @@ public:
     // connect using the port index
 
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
-    connect(Source &source) {
-        auto &port_or_collection = outputPort<sourcePortIndex>(&source);
+    [[nodiscard]] auto
+    connect_internal(Source &source) {
+        auto &port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
     }
 
-    template<std::size_t sourcePortIndex, typename Source>
-    [[nodiscard, deprecated("For internal use only, the connect with the port name should be used")]] auto
+    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
+    [[nodiscard, deprecated("The connect with the port name should be used")]] auto
     connect(Source &source) {
-        return connect<sourcePortIndex, meta::invalid_index, Source>(source);
+        return connect_internal<sourcePortIndex, sourcePortSubIndex, Source>(source);
+    }
+
+    template<std::size_t sourcePortIndex, typename Source>
+    [[nodiscard]] auto
+    connect(Source &source) {
+        if constexpr (sourcePortIndex == meta::default_message_port_index) {
+            return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut);
+        } else {
+            return connect<sourcePortIndex, meta::invalid_index, Source>(source);
+        }
     }
 
     // connect using the port name
@@ -20296,14 +20587,14 @@ public:
     template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard]] auto
     connect(Source &source) {
-        using source_output_ports             = typename traits::block::output_ports<Source>;
+        using source_output_ports             = typename traits::block::all_output_ports<Source>;
         constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
         if constexpr (sourcePortIndex == meta::invalid_index) {
             meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>,
-                              meta::message_type<"These are the known names:">, traits::block::output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports>
+                              meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports>
                     port_not_found_error{};
         }
-        return connect<sourcePortIndex, sourcePortSubIndex, Source>(source);
+        return connect_internal<sourcePortIndex, sourcePortSubIndex, Source>(source);
     }
 
     template<fixed_string sourcePortName, typename Source>
@@ -20312,18 +20603,20 @@ public:
         return connect<sourcePortName, meta::invalid_index, Source>(source);
     }
 
+    // dynamic/runtime connections
+
     template<typename Source, typename Destination>
         requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult
     connect(Source &sourceBlockRaw, PortIndexDefinition<std::size_t> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::size_t> destinationPortDefinition,
-            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         auto result = findBlock(sourceBlockRaw)
                               ->dynamicOutputPort(sourcePortDefinition.topLevel, sourcePortDefinition.subIndex)
                               .connect(findBlock(destinationBlockRaw)->dynamicInputPort(destinationPortDefinition.topLevel, destinationPortDefinition.subIndex));
         if (result == ConnectionResult::SUCCESS) {
             auto *sourceBlock      = findBlock(sourceBlockRaw).get();
             auto *destinationBlock = findBlock(destinationBlockRaw).get();
-            _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, name);
+            _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, edgeName);
         }
         return result;
     }
@@ -20332,11 +20625,17 @@ public:
         requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult
     connect(Source &sourceBlockRaw, PortIndexDefinition<std::string> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::string> destinationPortDefinition,
-            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view name = "unnamed edge") {
+            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         auto sourcePortIndex      = this->findBlock(sourceBlockRaw)->dynamicOutputPortIndex(sourcePortDefinition.topLevel);
         auto destinationPortIndex = this->findBlock(destinationBlockRaw)->dynamicInputPortIndex(destinationPortDefinition.topLevel);
         return connect(sourceBlockRaw, { sourcePortIndex, sourcePortDefinition.subIndex }, destinationBlockRaw, { destinationPortIndex, destinationPortDefinition.subIndex }, minBufferSize, weight,
-                       name);
+                       edgeName);
+    }
+
+    template<typename Anything>
+    void
+    processMessages(MsgPortInNamed<"__FromChildren"> &port, std::span<const Anything> input) {
+        static_assert(meta::always_false<Anything>, "This is not called, children are processed in processScheduledMessages");
     }
 
     bool
@@ -20352,15 +20651,17 @@ public:
     template<typename F> // TODO: F must be constraint by a descriptive concept
     void
     forEachBlock(F &&f) const {
-        std::for_each(_blocks.cbegin(), _blocks.cend(), [f](const auto &block_ptr) { f(*block_ptr.get()); });
+        std::ranges::for_each(_blocks, [f](const auto &block_ptr) { std::invoke(f, *block_ptr.get()); });
     }
 
     template<typename F> // TODO: F must be constraint by a descriptive concept
     void
     forEachEdge(F &&f) const {
-        std::for_each(_edges.cbegin(), _edges.cend(), [f](const auto &edge) { f(edge); });
+        std::ranges::for_each(_edges, [f](const auto &edge) { std::invoke(f, edge); });
     }
 };
+
+static_assert(BlockLike<Graph>);
 
 /*******************************************************************************************************/
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
@@ -20405,18 +20706,19 @@ public:
  */
 
 template<typename TBlock>
-concept SourceBlockLike = traits::block::can_processOne<TBlock> and traits::block::template output_port_types<TBlock>::size > 0;
+concept SourceBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_output_port_types<TBlock>::size > 0;
 
 static_assert(not SourceBlockLike<int>);
 
 template<typename TBlock>
-concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block::template input_port_types<TBlock>::size > 0;
+concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_input_port_types<TBlock>::size > 0;
 
 static_assert(not SinkBlockLike<int>);
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-class MergedGraph : public Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::input_ports<Left>, meta::remove_at<InId, typename traits::block::input_ports<Right>>>,
-                                 meta::concat<meta::remove_at<OutId, typename traits::block::output_ports<Left>>, typename traits::block::output_ports<Right>>> {
+class MergedGraph
+    : public Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>,
+                   meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>> {
     static std::atomic_size_t _unique_id_counter;
 
 public:
@@ -20425,8 +20727,8 @@ public:
 
 private:
     // copy-paste from above, keep in sync
-    using base = Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::input_ports<Left>, meta::remove_at<InId, typename traits::block::input_ports<Right>>>,
-                       meta::concat<meta::remove_at<OutId, typename traits::block::output_ports<Left>>, typename traits::block::output_ports<Right>>>;
+    using base = Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>,
+                       meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>>;
 
     Left  left;
     Right right;
@@ -20458,8 +20760,8 @@ private:
                 return std::dynamic_extent;
             }
         }();
-        return std::min({ traits::block::input_ports<Right>::template apply<traits::port::max_samples>::value, traits::block::output_ports<Left>::template apply<traits::port::max_samples>::value,
-                          left_size, right_size });
+        return std::min({ traits::block::stream_input_ports<Right>::template apply<traits::port::max_samples>::value,
+                          traits::block::stream_output_ports<Left>::template apply<traits::port::max_samples>::value, left_size, right_size });
     }
 
     template<std::size_t I>
@@ -20474,8 +20776,8 @@ private:
     constexpr auto
     apply_right(std::size_t offset, auto &&input_tuple, auto &&tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
-            constexpr std::size_t first_offset  = traits::block::input_port_types<Left>::size;
-            constexpr std::size_t second_offset = traits::block::input_port_types<Left>::size + sizeof...(Is);
+            constexpr std::size_t first_offset  = traits::block::stream_input_port_types<Left>::size;
+            constexpr std::size_t second_offset = traits::block::stream_input_port_types<Left>::size + sizeof...(Is);
             static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
             return invokeProcessOneWithOrWithoutOffset(right, offset, std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp),
                                                        std::get<second_offset + Js>(input_tuple)...);
@@ -20483,9 +20785,9 @@ private:
     }
 
 public:
-    using TInputPortTypes  = typename traits::block::input_port_types<base>;
-    using TOutputPortTypes = typename traits::block::output_port_types<base>;
-    using TReturnType      = typename traits::block::return_type<base>;
+    using TInputPortTypes  = typename traits::block::stream_input_port_types<base>;
+    using TOutputPortTypes = typename traits::block::stream_output_port_types<base>;
+    using TReturnType      = typename traits::block::stream_return_type<base>;
 
     constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
@@ -20503,9 +20805,9 @@ public:
         requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
     constexpr meta::simdize<TReturnType, meta::simdize_size_v<std::tuple<Ts...>>>
     processOne(std::size_t offset, const Ts &...inputs) {
-        static_assert(traits::block::output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...),
-                                                                                            apply_left<traits::block::input_port_types<Left>::size()>(offset, std::tie(inputs...)));
+        static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
+        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...),
+                                                                                                   apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::tie(inputs...)));
     }
 
     constexpr auto
@@ -20521,7 +20823,7 @@ public:
                              }) {
             return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(N));
         } else {
-            using LeftResult = typename traits::block::return_type<Left>;
+            using LeftResult = typename traits::block::stream_return_type<Left>;
             using V          = meta::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0; i < V::size(); ++i) {
@@ -20539,33 +20841,34 @@ public:
         // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
-        if constexpr (traits::block::output_port_types<Left>::size == 1) {
+        if constexpr (traits::block::stream_output_port_types<Left>::size == 1) {
             // only the result from the right block needs to be returned
-            return apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                                apply_left<traits::block::input_port_types<Left>::size()>(offset, std::forward_as_tuple(
-                                                                                                                                                                          std::forward<Ts>(inputs)...)));
+            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId
+                                             - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                                                  apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
-            auto left_out  = apply_left<traits::block::input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
-            auto right_out = apply_right<InId, traits::block::input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                                          std::move(std::get<OutId>(left_out)));
+            auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
+                                                                                                                 std::move(std::get<OutId>(left_out)));
 
-            if constexpr (traits::block::output_port_types<Left>::size == 2 && traits::block::output_port_types<Right>::size == 1) {
+            if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
 
-            } else if constexpr (traits::block::output_port_types<Left>::size == 2) {
+            } else if constexpr (traits::block::stream_output_port_types<Left>::size == 2) {
                 return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
 
-            } else if constexpr (traits::block::output_port_types<Right>::size == 1) {
+            } else if constexpr (traits::block::stream_output_port_types<Right>::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
                     return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out));
-                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::output_port_types<Left>::size - OutId - 1>());
+                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
 
             } else {
                 return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) {
                     return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...));
-                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
+                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>(),
+                       std::make_index_sequence<Right::output_port_types::size>());
             }
         }
     } // end:: processOne
@@ -20604,13 +20907,13 @@ inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_coun
 template<std::size_t OutId, std::size_t InId, SourceBlockLike A, SinkBlockLike B>
 constexpr auto
 mergeByIndex(A &&a, B &&b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
-    if constexpr (!std::is_same_v<typename traits::block::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
-                                  typename traits::block::input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-        gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::block::output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
-                              typename traits::block::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+    if constexpr (!std::is_same_v<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+                                  typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+        gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
+                              typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                              gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::block::input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
-                              typename traits::block::input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+                              gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
+                              typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
     return { std::forward<A>(a), std::forward<B>(b) };
 }
@@ -20640,14 +20943,14 @@ mergeByIndex(A &&a, B &&b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cv
 template<fixed_string OutName, fixed_string InName, SourceBlockLike A, SinkBlockLike B>
 constexpr auto
 merge(A &&a, B &&b) {
-    constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::output_ports<A>>();
-    constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::input_ports<B>>();
+    constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
+    constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::stream_input_ports<B>>();
     static_assert(OutIdUnchecked != -1);
     static_assert(InIdUnchecked != -1);
     constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
     constexpr auto InId  = static_cast<std::size_t>(InIdUnchecked);
-    static_assert(std::same_as<typename traits::block::output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
-                               typename traits::block::input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
+    static_assert(std::same_as<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+                               typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
                   "Port types do not match");
     return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
@@ -20678,8 +20981,8 @@ namespace gr {
 
 #if !DISABLE_SIMD
 namespace test {
-static_assert(traits::block::input_port_types<copy>::size() == 1);
-static_assert(std::same_as<traits::block::return_type<copy>, float>);
+static_assert(traits::block::stream_input_port_types<copy>::size() == 1);
+static_assert(std::same_as<traits::block::stream_return_type<copy>, float>);
 static_assert(traits::block::can_processOne_scalar<copy>);
 static_assert(traits::block::can_processOne_simd<copy>);
 static_assert(traits::block::can_processOne_scalar_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);

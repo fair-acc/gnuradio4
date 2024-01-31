@@ -10,6 +10,7 @@
 #include "annotated.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
+#include "Message.hpp"
 #include "Tag.hpp"
 
 namespace gr {
@@ -28,7 +29,8 @@ enum class ConnectionResult { SUCCESS, FAILED };
 
 enum class PortType {
     STREAM, /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
-    MESSAGE /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+    MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
+    ANY // 'ANY' only for querying and not to be used for port declarations
 };
 
 /**
@@ -151,9 +153,12 @@ using is_tag_buffer_attribute = std::bool_constant<IsTagBufferAttribute<T>>;
 template<typename T>
 struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
+struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
+
 struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<Tag>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
+static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
@@ -204,6 +209,7 @@ struct Port {
     using with_name_and_descriptor = Port<T, newName, portType, portDirection, ReflDescriptor, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
+    static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
 
     using value_type        = T;
     using AttributeTypeList = typename gr::meta::typelist<Attributes...>;
@@ -320,18 +326,7 @@ public:
         , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
-    operator=(Port &&other) noexcept {
-        Port tmp(std::move(other));
-        std::swap(name, tmp._name);
-        std::swap(min_samples, tmp._min_samples);
-        std::swap(max_samples, tmp._max_samples);
-        std::swap(priority, tmp._priority);
-
-        std::swap(_connected, tmp._connected);
-        std::swap(_ioHandler, tmp._ioHandler);
-        std::swap(_tagIoHandler, tmp._tagIoHandler);
-        return *this;
-    }
+    operator=(Port &&other)  = delete;
 
     ~Port() = default;
 
@@ -434,7 +429,7 @@ public:
     buffer() {
         struct port_buffers {
             BufferType    streamBuffer;
-            TagBufferType tagBufferType;
+            TagBufferType tagBuffer;
         };
 
         return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
@@ -448,7 +443,7 @@ public:
             _connected    = true;
         } else {
             _ioHandler    = streamBuffer.new_writer();
-            _tagIoHandler = tagBuffer.new_reader();
+            _tagIoHandler = tagBuffer.new_writer();
         }
     }
 
@@ -651,25 +646,27 @@ template<typename T, typename... Attributes>
 using PortIn = Port<T, "", PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, typename... Attributes>
 using PortOut = Port<T, "", PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
-template<typename... Attributes>
-using MsgPortIn = Port<property_map, "", PortType::MESSAGE, PortDirection::INPUT, Attributes...>;
-template<typename... Attributes>
-using MsgPortOut = Port<property_map, "", PortType::MESSAGE, PortDirection::OUTPUT, Attributes...>;
-
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+
+template<typename... Attributes>
+using MsgPortIn = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
+template<typename... Attributes>
+using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
-using MsgPortInNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
+using MsgPortInNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
-using MsgPortOutNamed = Port<property_map, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+using MsgPortOutNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
 
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
-static_assert(PortLike<MsgPortIn<float>>);
-static_assert(PortLike<MsgPortOut<float>>);
+static_assert(PortLike<MsgPortIn<>>);
+static_assert(PortLike<MsgPortOut<>>);
+
+static_assert(std::is_same_v<MsgPortIn<>::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);

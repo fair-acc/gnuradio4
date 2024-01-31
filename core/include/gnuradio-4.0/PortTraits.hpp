@@ -50,6 +50,58 @@ using is_port = std::integral_constant<bool, is_port_v<Type>>;
 template<typename Collection>
 concept is_port_collection_v = is_port_v<typename Collection::value_type>;
 
+template<typename T>
+auto
+unwrap_port_helper() {
+    if constexpr (port::is_port_v<T>) {
+        return static_cast<T *>(nullptr);
+    } else if constexpr (port::is_port_collection_v<T>) {
+        return static_cast<typename T::value_type *>(nullptr);
+    } else {
+        meta::print_types<meta::message_type<"Is not a port or a collection of ports">, T>{};
+    }
+}
+
+template<typename T>
+using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
+
+struct kind {
+    template<typename Port>
+    static constexpr auto
+    value_helper() {
+        if constexpr (std::is_same_v<typename Port::value_type, gr::Message>) {
+            return gr::PortType::MESSAGE;
+        } else {
+            return gr::PortType::STREAM;
+        }
+    }
+
+    template<PortType portType>
+    struct tester_for {
+        template<typename Port>
+        static constexpr bool matches_kind = portType == PortType::ANY || kind::value_helper<Port>() == portType;
+
+        template<typename T>
+        constexpr static bool
+        is_port_or_collection_helper() {
+            if constexpr (port::is_port_v<T> || port::is_port_collection_v<T>) {
+                return matches_kind<unwrap_port<T>>;
+            } else {
+                return false;
+            }
+        }
+
+        template<typename T>
+        using is_port_or_collection = std::integral_constant<bool, is_port_or_collection_helper<T>()>;
+
+        template<typename T>
+        using is_input_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_input_v<unwrap_port<T>>>;
+
+        template<typename T>
+        using is_output_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_output_v<unwrap_port<T>>>;
+    };
+};
+
 template<typename PortOrCollection>
 auto
 type_helper() {
@@ -68,6 +120,9 @@ struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::Requi
 
 template<typename... Ports>
 struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
+
+template<typename Type>
+constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_for<PortType::ANY>::is_port_or_collection<Type>();
 
 } // namespace gr::traits::port
 

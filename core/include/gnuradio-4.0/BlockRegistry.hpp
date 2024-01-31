@@ -22,7 +22,7 @@ private:
 
     template<template<typename...> typename TBlock, typename... TBlockParameters>
     static auto
-    create_handler() {
+    createHandler() {
         return [](std::unique_ptr<gr::BlockModel> &result, const property_map &params) {
             using BlockType = TBlock<TBlockParameters...>;
 
@@ -68,9 +68,9 @@ private:
 public:
     template<template<typename...> typename TBlock, typename... TBlockParameters>
     void
-    add_block_type(std::string block_type) {
+    addBlockType(std::string block_type) {
         auto &block_handlers                                         = findBlock_type_handlers_map(block_type);
-        block_handlers[encoded_list_of_types<TBlockParameters...>()] = create_handler<TBlock, TBlockParameters...>();
+        block_handlers[encoded_list_of_types<TBlockParameters...>()] = createHandler<TBlock, TBlockParameters...>();
         fmt::print("Registered {} {}\n", block_type, encoded_list_of_types<TBlockParameters...>());
     }
 

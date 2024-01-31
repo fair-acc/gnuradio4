@@ -29,7 +29,13 @@ protected:
     std::atomic_size_t                  _running_threads;
     std::atomic_bool                    _stop_requested;
 
+    MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
+    MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
+
 public:
+    MsgPortInNamed<"__Builtin">  msgIn;
+    MsgPortOutNamed<"__Builtin"> msgOut;
+
     explicit SchedulerBase(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                            const profiling::Options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.forThisThread() }, _pool(std::move(thread_pool)) {}
@@ -38,27 +44,27 @@ public:
 
     void
     startBlocks() {
-        std::ranges::for_each(this->_graph.blocks(), [](auto &b) { b->start(); });
+        _graph.forEachBlock(&BlockModel::start);
     }
 
     void
     stopBlocks() {
-        std::ranges::for_each(this->_graph.blocks(), [](auto &b) { b->stop(); });
+        _graph.forEachBlock(&BlockModel::stop);
     }
 
     void
     pauseBlocks() {
-        std::ranges::for_each(this->_graph.blocks(), [](auto &b) { b->pause(); });
+        _graph.forEachBlock(&BlockModel::pause);
     }
 
     void
     resumeBlocks() {
-        std::ranges::for_each(this->_graph.blocks(), [](auto &b) { b->resume(); });
+        _graph.forEachBlock(&BlockModel::resume);
     }
 
     void
     resetBlocks() {
-        std::ranges::for_each(this->_graph.blocks(), [](auto &b) { b->reset(); });
+        _graph.forEachBlock(&BlockModel::reset);
     }
 
     bool
@@ -135,17 +141,56 @@ public:
     }
 
     void
+    connectBlockMessagePorts() {
+        _graph.forEachBlock([this](auto &block) {
+            if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
+                throw fmt::format("Failed to connect scheduler output message port to child {}", block.uniqueName());
+            }
+
+            auto buffer = _fromChildMessagePort.buffer();
+            block.msgOut->setBuffer(buffer.streamBuffer, buffer.tagBuffer);
+        });
+    }
+
+    void
+    processScheduledMessages() {
+        // Process messages in scheduler
+        auto passMessages = [](auto &inPort, auto &outPort) {
+            auto &reader = inPort.streamReader();
+            if (const auto available = reader.available(); available > 0) {
+                const auto &input = reader.get(available);
+                outPort.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
+            }
+        };
+
+        passMessages(msgIn, _toChildMessagePort);
+        passMessages(_fromChildMessagePort, msgOut);
+
+        // Process messages in the graph
+        _graph.processScheduledMessages();
+        _graph.forEachBlock(&BlockModel::processScheduledMessages);
+    }
+
+    void
     init() {
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.init");
         if (!canInit()) {
             return;
         }
         const auto result = _graph.performConnections();
+
+        connectBlockMessagePorts();
+
         if (result) {
             _state = lifecycle::State::INITIALISED;
         } else {
             _state = lifecycle::State::ERROR;
         }
+    }
+
+    auto &
+    graph() {
+        return _graph;
     }
 
     void
@@ -255,6 +300,8 @@ public:
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
         std::size_t           performedWorkAllBlocks = 0UZ;
+
+        this->processScheduledMessages();
 
         bool something_happened = false;
         for (auto &currentBlock : blocks) {

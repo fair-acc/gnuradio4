@@ -12,9 +12,9 @@
 
 template<typename T>
 class builtin_multiply : public gr::Block<builtin_multiply<T>> {
-    T _factor = static_cast<T>(1.0f);
-
 public:
+    T factor = static_cast<T>(1.0f);
+
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
@@ -23,17 +23,17 @@ public:
     builtin_multiply(gr::property_map properties) {
         auto it = properties.find("factor");
         if (it != properties.cend()) {
-            _factor = std::get<T>(it->second);
+            factor = std::get<T>(it->second);
         }
     }
 
     [[nodiscard]] constexpr auto
     processOne(T a) const noexcept {
-        return a * _factor;
+        return a * factor;
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out, factor);
 
 template<typename T>
 class builtin_counter : public gr::Block<builtin_counter<T>> {
@@ -70,7 +70,7 @@ public:
 protected:
     using TPortIn = gr::PortIn<T>;
     std::vector<TPortIn> _input_ports;
-    gr::PortOut<T>     _output_port;
+    gr::PortOut<T>       _output_port;
 
 protected:
     using setting_map                            = std::map<std::string, int, std::less<>>;
@@ -196,6 +196,9 @@ public:
         return { requested_work, available_samples, gr::work::Status::OK };
     }
 
+    void
+    processScheduledMessages() override {}
+
     void *
     raw() override {
         return this;
@@ -234,8 +237,8 @@ void
                        registerBuiltinBlocks(Registry *registry) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    GP_REGISTER_NODE_RUNTIME(registry, builtin_multiply, double, float);
-    GP_REGISTER_NODE_RUNTIME(registry, builtin_counter, double, float);
+    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_multiply, double, float);
+    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_counter, double, float);
 #pragma GCC diagnostic pop
 }
 
