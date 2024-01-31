@@ -11148,7 +11148,7 @@ is_const_member_function(T) noexcept {
 #endif // include guard
 
 
-// #include "BlockTraits.hpp"
+// #include <gnuradio-4.0/BlockTraits.hpp>
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
@@ -15231,13 +15231,13 @@ concept processBulk_requires_ith_output_as_span
 
 #endif // include guard
 
-// #include "Port.hpp"
+// #include <gnuradio-4.0/Port.hpp>
 
-// #include "Sequence.hpp"
+// #include <gnuradio-4.0/Sequence.hpp>
 
-// #include "Tag.hpp"
+// #include <gnuradio-4.0/Tag.hpp>
 
-// #include "thread/thread_pool.hpp"
+// #include <gnuradio-4.0/thread/thread_pool.hpp>
 #ifndef THREADPOOL_HPP
 #define THREADPOOL_HPP
 
@@ -17018,11 +17018,11 @@ static_assert(ThreadPool<BasicThreadPool>);
 #endif // THREADPOOL_HPP
 
 
-// #include "annotated.hpp"
+// #include <gnuradio-4.0/annotated.hpp>
  // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
-// #include "reflection.hpp"
+// #include <gnuradio-4.0/reflection.hpp>
 
-// #include "Settings.hpp"
+// #include <gnuradio-4.0/Settings.hpp>
 #ifndef GNURADIO_SETTINGS_HPP
 #define GNURADIO_SETTINGS_HPP
 
@@ -18131,12 +18131,13 @@ struct hash<gr::SettingsCtx> {
 #endif // GNURADIO_SETTINGS_HPP
 
 
-namespace gr {
+// #include <gnuradio-4.0/LifeCycle.hpp>
+#ifndef GNURADIO_LIFECYCLE_HPP
+#define GNURADIO_LIFECYCLE_HPP
 
-namespace stdx = vir::stdx;
-using gr::meta::fixed_string;
+#include <atomic>
 
-namespace lifecycle {
+namespace gr ::lifecycle {
 /**
  * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
  *
@@ -18202,7 +18203,108 @@ isShuttingDown(lifecycle::State state) noexcept {
     return state == REQUESTED_STOP || state == STOPPED;
 }
 
-} // namespace lifecycle
+constexpr bool
+isValidTransition(const State from, const State to) noexcept {
+    if (to == State::ERROR) {
+        // can transit to ERROR from any state
+        return true;
+    }
+    switch (from) {
+    case State::IDLE: return to == State::INITIALISED;
+    case State::INITIALISED: return to == State::RUNNING;
+    case State::RUNNING: return to == State::REQUESTED_PAUSE || to == State::REQUESTED_STOP;
+    case State::REQUESTED_PAUSE: return to == State::PAUSED;
+    case State::PAUSED: return to == State::RUNNING || to == State::REQUESTED_STOP;
+    case State::REQUESTED_STOP: return to == State::STOPPED;
+    case State::STOPPED: return to == State::INITIALISED;
+    case State::ERROR: return to == State::INITIALISED;
+    default: return false;
+    }
+}
+
+enum class StorageType { ATOMIC, NON_ATOMIC };
+
+template<typename TDerived, StorageType storageType = StorageType::ATOMIC>
+class StateMachine {
+protected:
+    using StateStorage  = std::conditional_t<storageType == StorageType::ATOMIC, std::atomic<State>, State>;
+    StateStorage _state = lifecycle::State::IDLE;
+
+public:
+    [[nodiscard]] constexpr bool
+    transitionTo(State newState) {
+        if (!isValidTransition(_state, newState)) {
+            return false;
+        }
+
+        State oldState = _state;
+
+        if constexpr (storageType == StorageType::ATOMIC) {
+            _state.store(newState);
+        } else {
+            _state = newState;
+        }
+
+        if constexpr (storageType == StorageType::ATOMIC) {
+            _state.notify_all();
+        }
+
+        // Call specific methods in TDerived based on the state
+        if constexpr (requires(TDerived &d) { d.start(); }) {
+            if (oldState == State::INITIALISED && newState == State::RUNNING) {
+                static_cast<TDerived *>(this)->start();
+            }
+        }
+        if constexpr (requires(TDerived &d) { d.stop(); }) {
+            if (newState == State::REQUESTED_STOP) {
+                static_cast<TDerived *>(this)->stop();
+            }
+        }
+        if constexpr (requires(TDerived &d) { d.pause(); }) {
+            if (newState == State::REQUESTED_PAUSE) {
+                static_cast<TDerived *>(this)->pause();
+            }
+        }
+        if constexpr (requires(TDerived &d) { d.resume(); }) {
+            if (oldState == State::PAUSED && newState == State::RUNNING) {
+                static_cast<TDerived *>(this)->resume();
+            }
+        }
+        if constexpr (requires(TDerived &d) { d.reset(); }) {
+            if (oldState == State::STOPPED && newState == State::INITIALISED) {
+                static_cast<TDerived *>(this)->reset();
+            }
+        }
+
+        return true;
+    }
+
+    [[nodiscard]] State
+    state() const noexcept {
+        if constexpr (storageType == StorageType::ATOMIC) {
+            return _state.load();
+        } else {
+            return _state;
+        }
+    }
+
+    void
+    waitOnState(State oldState)
+        requires(storageType == StorageType::ATOMIC)
+    {
+        _state.wait(oldState);
+    }
+};
+
+} // namespace gr::lifecycle
+
+#endif // GNURADIO_LIFECYCLE_HPP
+
+
+namespace gr {
+
+namespace stdx = vir::stdx;
+using gr::meta::fixed_string;
 
 template<typename F>
 constexpr void
@@ -18705,7 +18807,8 @@ public:
     // we can not have a move-assignment that is equivalent to
     // the move constructor
     Block &
-    operator=(Block &&other) = delete;
+    operator=(Block &&other)
+            = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
