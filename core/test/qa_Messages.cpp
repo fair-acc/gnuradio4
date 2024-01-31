@@ -44,7 +44,8 @@ messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &total
                     continue;
                 }
 
-                countdown--;
+                fmt::print("Got a message, countdown was {}\n", countdown.load());
+                if (countdown > 0) countdown--;
                 totalCounter++;
 
                 if (!replyMessage.empty()) _this->emitMessage(_this->msgOut, std::move(replyMessage));
@@ -189,8 +190,9 @@ const boost::ut::suite MessagesTests = [] {
         scheduler.runAndWait();
         messenger.join();
 
-        expect(sourceMessagesCountdown == 1);
-        expect(sinkMessagesCountdown == 0);
+        expect(eq(sourceMessagesCountdown.load(), 1UZ));
+        fmt::print("This is the sinkMessagesCountdown {}\n", sinkMessagesCountdown.load());
+        expect(eq(sinkMessagesCountdown.load(), 0UZ));
     };
 
     // Testing if settings messages work
