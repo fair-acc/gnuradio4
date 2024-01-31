@@ -183,41 +183,18 @@ public:
             = 0;
 
     /**
-     * @brief to be invoked by Scheduler->start() at the very beginning
-     */
-    virtual void
-    start() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->stop() at the very beginning
-     */
-    virtual void
-    stop() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->pause() at the very beginning
-     */
-    virtual void
-    pause() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->resume() at the very beginning
-     */
-    virtual void
-    resume() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->reset() at the very beginning
-     */
-    virtual void
-    reset() = 0;
-
-    /**
      * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
      */
     [[nodiscard]] virtual constexpr bool
     isBlocking() const noexcept
             = 0;
+
+    /**
+     * @brief change Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
+     * See enum description for details.
+     */
+    [[nodiscard]] virtual std::expected<void, lifecycle::ErrorType>
+    changeState(lifecycle::State newState) noexcept = 0;
 
     /**
      * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
@@ -427,41 +404,6 @@ public:
         return blockRef().init(progress, ioThreadPool);
     }
 
-    void
-    start() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.start(); }) {
-            blockRef().start();
-        }
-    }
-
-    void
-    stop() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.stop(); }) {
-            blockRef().stop();
-        }
-    }
-
-    void
-    pause() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.pause(); }) {
-            blockRef().pause();
-        }
-    }
-
-    void
-    resume() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.resume(); }) {
-            blockRef().resume();
-        }
-    }
-
-    void
-    reset() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.reset(); }) {
-            blockRef().reset();
-        }
-    };
-
     [[nodiscard]] constexpr work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return blockRef().work(requested_work);
@@ -477,9 +419,14 @@ public:
         return blockRef().isBlocking();
     }
 
+    [[nodiscard]] std::expected<void, lifecycle::ErrorType>
+    changeState(lifecycle::State newState) noexcept override {
+        return blockRef().changeStateTo(newState);
+    }
+
     [[nodiscard]] lifecycle::State
     state() const noexcept override {
-        return blockRef().state.load();
+        return blockRef().state();
     }
 
     [[nodiscard]] constexpr std::size_t
@@ -923,7 +870,7 @@ public:
 
     template<typename Anything>
     void
-    processMessages(MsgPortInNamed<"__FromChildren"> &port, std::span<const Anything> input) {
+    processMessages(MsgPortInNamed<"__FromChildren"> & /*port*/, std::span<const Anything> /*input*/) {
         static_assert(meta::always_false<Anything>, "This is not called, children are processed in processScheduledMessages");
     }
 

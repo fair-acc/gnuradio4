@@ -6,9 +6,11 @@
 #include <utility>
 #include <queue>
 
-#include "Graph.hpp"
-#include "Profiler.hpp"
-#include "thread/thread_pool.hpp"
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Profiler.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
@@ -32,6 +34,14 @@ protected:
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
     MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
 
+    std::string unique_name = gr::meta::type_name<SchedulerBase<TProfiler>>(); // TODO: to be replaced if scheduler derives from Block<T>
+
+    void
+    emitMessage(auto &port, Message message) { // TODO: to be replaced if scheduler derives from Block<T>
+        message[gr::message::key::Sender] = unique_name;
+        port.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
+    }
+
 public:
     MsgPortInNamed<"__Builtin">  msgIn;
     MsgPortOutNamed<"__Builtin"> msgOut;
@@ -41,31 +51,6 @@ public:
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.forThisThread() }, _pool(std::move(thread_pool)) {}
 
     ~SchedulerBase() { stop(); }
-
-    void
-    startBlocks() {
-        _graph.forEachBlock(&BlockModel::start);
-    }
-
-    void
-    stopBlocks() {
-        _graph.forEachBlock(&BlockModel::stop);
-    }
-
-    void
-    pauseBlocks() {
-        _graph.forEachBlock(&BlockModel::pause);
-    }
-
-    void
-    resumeBlocks() {
-        _graph.forEachBlock(&BlockModel::resume);
-    }
-
-    void
-    resetBlocks() {
-        _graph.forEachBlock(&BlockModel::reset);
-    }
 
     bool
     canInit() {
@@ -104,7 +89,18 @@ public:
         }
         requestStop();
         waitDone();
-        this->stopBlocks();
+        _graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::REQUESTED_STOP); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+            if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
+                if (auto e = block.changeState(lifecycle::State::STOPPED); !e) {
+                    using namespace gr::message;
+                    this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
+            }
+        });
         _state = lifecycle::State::STOPPED;
     }
 
@@ -115,7 +111,12 @@ public:
         }
         requestPause();
         waitDone();
-        this->pauseBlocks();
+        this->_graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::REQUESTED_PAUSE); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
         _state = lifecycle::State::PAUSED;
     }
 
@@ -198,7 +199,12 @@ public:
         if (!canReset()) {
             return;
         }
-        this->resetBlocks();
+        this->_graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::INITIALISED); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
 
         // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
         // clear buffers
@@ -340,7 +346,12 @@ public:
         if (!this->canResume()) {
             return;
         }
-        this->resumeBlocks();
+        this->_graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
 
         // TODO: Add resume logic of the scheduler
     }
@@ -351,7 +362,12 @@ public:
             return;
         }
 
-        this->startBlocks();
+        this->_graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
 
         if constexpr (executionPolicy == singleThreaded) {
             this->_state = lifecycle::State::RUNNING;
@@ -485,6 +501,12 @@ public:
             return;
         }
         this->resumeBlocks();
+        this->_graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
 
         // TODO: Add resume logic of the scheduler
     }
@@ -495,7 +517,12 @@ public:
             return;
         }
 
-        this->startBlocks();
+        this->_graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
+                using namespace gr::message;
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
 
         if constexpr (executionPolicy == singleThreaded) {
             this->_state = lifecycle::State::RUNNING;

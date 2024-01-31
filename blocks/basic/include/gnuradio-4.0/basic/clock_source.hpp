@@ -189,14 +189,14 @@ private:
             return false; // use Block<T>::work generated thread
         }
         if (verbose_console) {
-            fmt::println("initial ClockSource state: {}", magic_enum::enum_name(this->state.load()));
+            fmt::println("initial ClockSource state: {}", magic_enum::enum_name(this->state()));
         }
-        if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; this->state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
+        if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; this->_state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
             // mocks re-using a user-provided thread
             if (verbose_console) {
                 fmt::println("mocking a user-provided io-Thread for {}", this->name);
             }
-            this->state.notify_all();
+            this->_state.notify_all();
             auto createManagedThread = [](auto &&threadFunction, auto &&threadDeleter) {
                 return std::shared_ptr<std::thread>(new std::thread(std::forward<decltype(threadFunction)>(threadFunction)), std::forward<decltype(threadDeleter)>(threadDeleter));
             };
@@ -205,29 +205,40 @@ private:
                         if (verbose_console) {
                             fmt::println("started user-provided thread");
                         }
-                        lifecycle::State actualThreadState = this->state.load();
+                        lifecycle::State actualThreadState = this->state();
                         while (lifecycle::isActive(actualThreadState)) {
                             std::this_thread::sleep_until(nextTimePoint);
                             // invoke and execute work function from user-provided thread
                             const work::Status status = this->invokeWork();
                             if (status == work::Status::DONE) {
-                                std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-                                this->state.notify_all();
+                                if (auto ret = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !ret) {
+                                    using namespace gr::message;
+                                    this->emitMessage(this->msgOut, { { key::Sender, this->unique_name },
+                                                                      { key::Kind, kind::Error },
+                                                                      { key::ErrorInfo, ret.error().message },
+                                                                      { key::Location, ret.error().srcLoc() } });
+                                }
                                 break;
                             }
-                            actualThreadState = this->state.load();
+                            actualThreadState = this->state();
                             this->ioLastWorkStatus.exchange(status, std::memory_order_relaxed);
                         }
 
                         if (verbose_console) {
-                            fmt::println("stopped user-provided thread - state: {}", magic_enum::enum_name(this->state.load()));
+                            fmt::println("stopped user-provided thread - state: {}", magic_enum::enum_name(this->state()));
                         }
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        this->state.notify_all();
+                        if (auto ret = this->changeStateTo(lifecycle::State::STOPPED); !ret) {
+                            using namespace gr::message;
+                            this->emitMessage(this->msgOut,
+                                              { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+                        }
                     },
                     [this](std::thread *t) {
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        this->state.notify_all();
+                        if (auto ret = this->changeStateTo(lifecycle::State::STOPPED); !ret) {
+                            using namespace gr::message;
+                            this->emitMessage(this->msgOut,
+                                              { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+                        }
                         if (t->joinable()) {
                             t->join();
                         }
