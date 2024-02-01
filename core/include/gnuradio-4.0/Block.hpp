@@ -595,7 +595,8 @@ public:
     // we can not have a move-assignment that is equivalent to
     // the move constructor
     Block &
-    operator=(Block &&other) = delete;
+    operator=(Block &&other)
+            = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
@@ -1048,14 +1049,19 @@ public:
     constexpr void
     processScheduledMessages() {
         auto processPort = [this]<PortLike TPort>(TPort &inPort) {
-            const auto available = inPort.streamReader().available();
-            if constexpr (traits::block::can_processMessagesForPort<Derived, TPort>) {
-                if (available > 0) {
-                    self().processMessages(inPort, inPort.streamReader().get(available));
+            ConsumableSpan auto inSpan = inPort.streamReader().get();
+            if constexpr (traits::block::can_processMessagesForPortConsumableSpan<Derived, TPort>) {
+                if (inSpan.size() > 0) {
+                    self().processMessages(inPort, inSpan);
+                }
+            } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
+                if (inSpan.size() > 0) {
+                    self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 }
             }
-            if (available > 0) {
-                if (auto consumed = inPort.streamReader().consume(available); !consumed) {
+
+            if (inSpan.size() > 0) {
+                if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
                     throw fmt::format("Could not consume the messages from the message port");
                 }
             }
