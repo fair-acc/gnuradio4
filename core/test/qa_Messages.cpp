@@ -28,6 +28,7 @@ createOnesGenerator(IsDone &isDone) {
     };
 }
 
+template <gr::fixed_string which>
 auto
 messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &totalCounter, std::string inMessageKind, gr::Message replyMessage) {
     return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> messages) {
@@ -75,12 +76,12 @@ const boost::ut::suite MessagesTests = [] {
             auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
 
             source.generator        = createOnesGenerator(isDone);
-            source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+            source.messageProcessor = messageProcessorCounter<"MulticastMessaggingWithTheWorld_source.messageProcessor">(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
 
             auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
 
             auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-            sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
+            sink.messageProcessor = messageProcessorCounter<"MulticastMessaggingWithTheWorld_sink.messageProcessor">(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
                 gr::Message outMessage;
                 outMessage[gr::message::key::Kind] = "custom_reply_kind";
                 return outMessage;
@@ -144,12 +145,12 @@ const boost::ut::suite MessagesTests = [] {
             auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
 
             source.generator        = createOnesGenerator(isDone);
-            source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+            source.messageProcessor = messageProcessorCounter<"TargettedMessageForABlock_source.messageProcessor">(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
 
             auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
 
             auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-            sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+            sink.messageProcessor = messageProcessorCounter<"TargettedMessageForABlock_sink.messageProcessor">(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, {});
 
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
             expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
@@ -281,12 +282,12 @@ const boost::ut::suite MessagesTests = [] {
             auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
 
             source.generator        = createOnesGenerator(isDone);
-            source.messageProcessor = messageProcessorCounter(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
+            source.messageProcessor = messageProcessorCounter<"MessagesWithoutARunningScheduler_source.messageProcessor">(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
 
             auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
 
             auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-            sink.messageProcessor = messageProcessorCounter(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
+            sink.messageProcessor = messageProcessorCounter<"MessagesWithoutARunningScheduler_sink.messageProcessor">(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
                 gr::Message outMessage;
                 outMessage[gr::message::key::Kind] = "custom_reply_kind";
                 return outMessage;
