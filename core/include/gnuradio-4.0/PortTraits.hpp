@@ -66,20 +66,10 @@ template<typename T>
 using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
 
 struct kind {
-    template<typename Port>
-    static constexpr auto
-    value_helper() {
-        if constexpr (std::is_same_v<typename Port::value_type, gr::Message>) {
-            return gr::PortType::MESSAGE;
-        } else {
-            return gr::PortType::STREAM;
-        }
-    }
-
-    template<PortType portType>
+    template<PortType matcherPortType>
     struct tester_for {
         template<typename Port>
-        static constexpr bool matches_kind = portType == PortType::ANY || kind::value_helper<Port>() == portType;
+        static constexpr bool matches_kind = matcherPortType == PortType::ANY || matcherPortType == Port::kPortType;
 
         template<typename T>
         constexpr static bool
