@@ -13901,6 +13901,7 @@ struct Port {
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
     static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
+    static_assert(portType == PortType::STREAM || std::is_same_v<T, gr::Message>, "If a port type is MESSAGE, the value type needs to be gr::Message");
 
     using value_type        = T;
     using AttributeTypeList = typename gr::meta::typelist<Attributes...>;
@@ -13912,6 +13913,7 @@ struct Port {
 
     // constexpr members:
     static constexpr PortDirection kDirection = portDirection;
+    static constexpr PortType      kPortType  = portType;
     static constexpr bool          kIsInput   = portDirection == PortDirection::INPUT;
     static constexpr bool          kIsOutput  = portDirection == PortDirection::OUTPUT;
     static constexpr fixed_string  Name       = portName;
@@ -14342,10 +14344,8 @@ using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, At
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
 
-template<typename... Attributes>
-using MsgPortIn = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
-template<typename... Attributes>
-using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
+using MsgPortIn = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer>;
+using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer>;
 template<fixed_string PortName, typename... Attributes>
 using MsgPortInNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
 template<fixed_string PortName, typename... Attributes>
@@ -14354,10 +14354,10 @@ using MsgPortOutNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
-static_assert(PortLike<MsgPortIn<>>);
-static_assert(PortLike<MsgPortOut<>>);
+static_assert(PortLike<MsgPortIn>);
+static_assert(PortLike<MsgPortOut>);
 
-static_assert(std::is_same_v<MsgPortIn<>::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
+static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);
@@ -14367,6 +14367,10 @@ static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>, GPU>::Domain, GP
 static_assert(MsgPortOutNamed<"out_msg">::static_name() == fixed_string("out_msg"));
 static_assert(!(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message", std::false_type>::static_name() == fixed_string("out_msg")));
 static_assert(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message", std::false_type>::static_name() == fixed_string("out_message"));
+
+static_assert(PortIn<float>::kPortType == PortType::STREAM);
+static_assert(PortIn<Message>::kPortType == PortType::STREAM);
+static_assert(MsgPortIn::kPortType == PortType::MESSAGE);
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
@@ -14767,20 +14771,10 @@ template<typename T>
 using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
 
 struct kind {
-    template<typename Port>
-    static constexpr auto
-    value_helper() {
-        if constexpr (std::is_same_v<typename Port::value_type, gr::Message>) {
-            return gr::PortType::MESSAGE;
-        } else {
-            return gr::PortType::STREAM;
-        }
-    }
-
-    template<PortType portType>
+    template<PortType matcherPortType>
     struct tester_for {
         template<typename Port>
-        static constexpr bool matches_kind = portType == PortType::ANY || kind::value_helper<Port>() == portType;
+        static constexpr bool matches_kind = matcherPortType == PortType::ANY || matcherPortType == Port::kPortType;
 
         template<typename T>
         constexpr static bool
