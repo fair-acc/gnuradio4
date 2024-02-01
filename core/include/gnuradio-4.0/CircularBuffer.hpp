@@ -528,8 +528,8 @@ class CircularBuffer
         }
         ~ConsumableInputRange() = default;
 
-        [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); };
-        [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
+        [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
+        [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
         [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
         [[nodiscard]] constexpr iterator begin() const noexcept { return _internalSpan.begin(); }
         [[nodiscard]] constexpr iterator end() const noexcept { return _internalSpan.end(); }
