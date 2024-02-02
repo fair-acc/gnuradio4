@@ -138,7 +138,9 @@ struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
     explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
     #else
     #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
+    #ifndef __clang__
     #pragma GCC diagnostic ignored "-Wuseless-cast"
+    #endif
     explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
     #pragma GCC diagnostic pop
     #endif

@@ -99,4 +99,33 @@ struct fmt::formatter<gr::property_map> {
     }
 };
 
+template<>
+struct fmt::formatter<std::vector<bool>> {
+    char presentation = 'c';
+
+    constexpr auto
+    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+        auto it = ctx.begin(), end = ctx.end();
+        if (it != end && (*it == 's' || *it == 'c')) presentation = *it++;
+        if (it != end && *it != '}') throw fmt::format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const std::vector<bool> &v, FormatContext &ctx) const -> decltype(ctx.out()) {
+        auto   sep = (presentation == 'c' ? ", " : " ");
+        size_t len = v.size();
+        fmt::format_to(ctx.out(), "[");
+        for (size_t i = 0; i < len; ++i) {
+            if (i > 0) {
+                fmt::format_to(ctx.out(), "{}", sep);
+            }
+            fmt::format_to(ctx.out(), "{}", v[i] ? "true" : "false");
+        }
+        fmt::format_to(ctx.out(), "]");
+        return ctx.out();
+    }
+};
+
 #endif // GNURADIO_FORMATTER_HPP

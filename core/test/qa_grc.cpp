@@ -120,10 +120,10 @@ const boost::ut::suite GrcTests = [] {
         auto     &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
         auto     &arraySource1 = graph_1.emplaceBlock<ArraySource<double>>();
 
-        graph_1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink);
-        graph_1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink);
-        graph_1.connect<"outB", 0>(arraySource0).to<"inA", 0>(arraySink);
-        graph_1.connect<"outB", 1>(arraySource1).to<"inA", 1>(arraySink);
+        expect(eq(ConnectionResult::SUCCESS, graph_1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink)));
+        expect(eq(ConnectionResult::SUCCESS, graph_1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink)));
+        expect(eq(ConnectionResult::SUCCESS, graph_1.connect<"outB", 0>(arraySource0).to<"inA", 0>(arraySink)));
+        expect(eq(ConnectionResult::SUCCESS, graph_1.connect<"outB", 1>(arraySource1).to<"inA", 1>(arraySink)));
 
         expect(graph_1.performConnections());
 
@@ -139,12 +139,12 @@ const boost::ut::suite GrcTests = [] {
 
         gr::Graph  graph_1;
         const auto expectedString       = std::string("abc");
-        const auto expectedBool         = true;
+        const bool expectedBool         = true;
         const auto expectedStringVector = std::vector<std::string>{ "a", "b", "c" };
         const auto expectedBoolVector   = std::vector<bool>{ true, false, true };
         const auto expectedDoubleVector = std::vector<double>{ 1., 2., 3. };
         const auto expectedInt16Vector  = std::vector<int16_t>{ 1, 2, 3 };
-        auto      &arraySink            = graph_1.emplaceBlock<ArraySink<double>>({ { "bool_setting", expectedBool },
+        std::ignore                     = graph_1.emplaceBlock<ArraySink<double>>({ { "bool_setting", bool(expectedBool) },
                                                                                     { "string_setting", expectedString },
                                                                                     { "bool_vector", expectedBoolVector },
                                                                                     { "string_vector", expectedStringVector },

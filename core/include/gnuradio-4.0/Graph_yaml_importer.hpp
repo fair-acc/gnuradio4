@@ -117,8 +117,8 @@ load_grc(PluginLoader &loader, const std::string &yaml_source) {
                 const auto &key = kv.first.as<std::string>();
 
                 if (auto it = currentBlock_settings.find(key); it != currentBlock_settings.end()) {
-                    using variant_type_list = meta::to_typelist<pmtv::pmt>;
-                    const auto &grc_value   = kv.second;
+                    using variant_type_list     = meta::to_typelist<pmtv::pmt>;
+                    const YAML::Node &grc_value = kv.second;
 
                     // This is a known property of this node
                     auto try_type = [&]<typename T>() {
@@ -129,6 +129,19 @@ load_grc(PluginLoader &loader, const std::string &yaml_source) {
                         }
 
                         if (it->second.index() == variant_type_list::index_of<std::vector<T>>()) {
+#ifdef __clang__
+                            if constexpr (std::is_same_v<T, bool>) {
+                                // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>
+                                // see https://en.cppreference.com/w/cpp/container/vector_bool for details
+                                const auto       &value = grc_value.template as<std::vector<int>>(); // need intermediary vector
+                                std::vector<bool> boolVector;
+                                for (int intValue : value) {
+                                    boolVector.push_back(intValue != 0);
+                                }
+                                new_properties[key] = boolVector;
+                                return true;
+                            }
+#endif
                             const auto &value   = grc_value.template as<std::vector<T>>();
                             new_properties[key] = value;
                             return true;

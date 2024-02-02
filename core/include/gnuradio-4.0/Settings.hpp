@@ -9,11 +9,14 @@
 #include <set>
 #include <variant>
 
-#include "annotated.hpp"
-#include "BlockTraits.hpp"
-#include "reflection.hpp"
-#include "Tag.hpp"
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
+#include <gnuradio-4.0/annotated.hpp>
+#include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 
 namespace gr {
 
@@ -370,7 +373,14 @@ public:
                             is_set = true;
                         }
                         if (std::string(get_display_name(member)) == key && !std::holds_alternative<Type>(value)) {
-                            throw std::invalid_argument(fmt::format("The {} has a wrong type", key));
+                            const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>();
+                            std::visit(
+                                    [&key, &value, &required_index](auto &&arg) {
+                                        using ActualType = std::decay_t<decltype(arg)>;
+                                        throw std::invalid_argument(fmt::format("value for key {} has a wrong type ({}: {}) vs. expected ({}: {})", //
+                                                                                       key, value.index(), gr::meta::type_name<ActualType>(), required_index, gr::meta::type_name<Type>()));
+                                    },
+                                    value);
                         }
                     }
                 };
@@ -442,11 +452,10 @@ public:
     [[nodiscard]] property_map
     get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept override {
         std::lock_guard lg(_lock);
-        property_map    ret;
         if (parameter_keys.empty()) {
-            ret = _active;
-            return ret;
+            return _active;
         }
+        property_map ret;
         for (const auto &key : parameter_keys) {
             if (_active.contains(key)) {
                 ret.insert_or_assign(key, _active.at(key));
@@ -528,7 +537,7 @@ public:
                                                RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
 #else
                                     fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                               "_block->unique_name", "_block->name", member(*_block), std::get<Type>(staged_value),                              //
+                                               "_block->unique_name", "_block->name", "member(*_block)", std::get<Type>(staged_value),                            //
                                                std::string(get_display_name(member)), RawType::LimitType::MinRange,
                                                RawType::LimitType::MaxRange, //
                                                RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
@@ -555,7 +564,7 @@ public:
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
                 if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
-                    _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
+                    _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
             processMembers<TBlock>(update_active);
@@ -592,9 +601,8 @@ public:
             std::lock_guard lg(_lock);
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-
                 if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
-                    _active.insert_or_assign(get_display_name_const(member).str(), member(*_block));
+                    _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
             if constexpr (detail::HasBaseType<TBlock>) {
