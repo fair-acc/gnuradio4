@@ -276,7 +276,10 @@ template<typename TBlock>
 concept can_processOne_with_offset = can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
 
 template<typename TBlock, typename TPort>
-concept can_processMessagesForPort = requires(TBlock &block, TPort &inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
+concept can_processMessagesForPortConsumableSpan = requires(TBlock &block, TPort &inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
+
+template<typename TBlock, typename TPort>
+concept can_processMessagesForPortStdSpan = requires(TBlock &block, TPort &inPort, std::span<const Message> msgSpan) { block.processMessages(inPort, msgSpan); };
 
 namespace detail {
 template<typename T>

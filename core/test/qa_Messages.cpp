@@ -28,7 +28,7 @@ createOnesGenerator(IsDone &isDone) {
     };
 }
 
-template <gr::fixed_string which>
+template<gr::fixed_string which>
 auto
 messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &totalCounter, std::string inMessageKind, gr::Message replyMessage) {
     return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> messages) {
@@ -54,6 +54,34 @@ messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &total
         }
     };
 }
+
+template<typename T>
+struct ProcessMessageStdSpanBlock : gr::Block<ProcessMessageStdSpanBlock<T>> {
+    gr::PortIn<T> in;
+
+    T
+    processOne(T value);
+
+    void
+    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> message);
+};
+
+template<typename T>
+struct ProcessMessageConsumableSpanBlock : gr::Block<ProcessMessageConsumableSpanBlock<T>> {
+    gr::PortIn<T> in;
+
+    T
+    processOne(T value);
+
+    void
+    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, gr::ConsumableSpan auto message);
+};
+
+static_assert(gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+
+static_assert(!gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 
 const boost::ut::suite MessagesTests = [] {
     using namespace boost::ut;

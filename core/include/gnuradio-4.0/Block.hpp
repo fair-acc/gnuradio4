@@ -284,17 +284,6 @@ concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
-template<typename T>
-concept ConsumableSpan = std::ranges::contiguous_range<T> and std::convertible_to<T, std::span<const std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.consume(0); };
-
-static_assert(ConsumableSpan<traits::block::detail::dummy_input_span<float>>);
-
-template<typename T>
-concept PublishableSpan = std::ranges::contiguous_range<T> and std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>>
-                      and std::convertible_to<T, std::span<std::remove_cvref_t<typename T::value_type>>> and requires(T &s) { s.publish(0UZ); };
-
-static_assert(PublishableSpan<traits::block::detail::dummy_output_span<float>>);
-
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -606,7 +595,8 @@ public:
     // we can not have a move-assignment that is equivalent to
     // the move constructor
     Block &
-    operator=(Block &&other) = delete;
+    operator=(Block &&other)
+            = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
@@ -1059,14 +1049,19 @@ public:
     constexpr void
     processScheduledMessages() {
         auto processPort = [this]<PortLike TPort>(TPort &inPort) {
-            const auto available = inPort.streamReader().available();
-            if constexpr (traits::block::can_processMessagesForPort<Derived, TPort>) {
-                if (available > 0) {
-                    self().processMessages(inPort, inPort.streamReader().get(available));
+            ConsumableSpan auto inSpan = inPort.streamReader().get();
+            if constexpr (traits::block::can_processMessagesForPortConsumableSpan<Derived, TPort>) {
+                if (inSpan.size() > 0) {
+                    self().processMessages(inPort, inSpan);
+                }
+            } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
+                if (inSpan.size() > 0) {
+                    self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 }
             }
-            if (available > 0) {
-                if (auto consumed = inPort.streamReader().consume(available); !consumed) {
+
+            if (inSpan.size() > 0) {
+                if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
                     throw fmt::format("Could not consume the messages from the message port");
                 }
             }
@@ -1101,9 +1096,7 @@ protected:
 
         // TODO: these checks can be moved to setting changed
         checkParametersAndThrowIfNeeded();
-
         updatePortsStatus();
-
         if constexpr (kIsSourceBlock) {
             // TODO: available_samples() methods are no longer needed for Source blocks, the are presently still/only needed for merge graph/block.
             // TODO: Review if they can be removed.

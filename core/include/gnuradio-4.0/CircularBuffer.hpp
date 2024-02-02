@@ -13,6 +13,7 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <memory_resource>
 #endif
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert> // to assert if compiled for debugging
 #include <functional>
@@ -156,7 +157,6 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     }
 #endif
 
-
 #ifdef HAS_POSIX_MAP_INTERFACE
     void  do_deallocate(void* p, std::size_t size, size_t alignment) override { //NOSONAR
 
@@ -269,7 +269,7 @@ class CircularBuffer
             // and would result in a double dealloc during the default destruction
             return _is_mmap_allocated ? size : 2 * size;
         }
-    };
+    }; // struct buffer_impl
 
     template <typename U = T>
     class buffer_writer {
@@ -332,19 +332,19 @@ class CircularBuffer
         }
     }
 
-    constexpr bool
+    [[nodiscard]] constexpr bool
     is_published() const noexcept {
         return _published_data;
     }
 
-    constexpr std::size_t size() const noexcept { return _n_slots_to_claim; };
-    constexpr std::size_t size_bytes() const noexcept { return _n_slots_to_claim * sizeof(T); };
-    constexpr bool empty() const noexcept { return _n_slots_to_claim == 0; }
-    constexpr iterator begin() const noexcept { return _internal_span.begin(); }
-    constexpr iterator end() const noexcept { return _internal_span.end(); }
-    constexpr reverse_iterator rbegin() const noexcept { return _internal_span.rbegin(); }
-    constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
-    constexpr T* data() const noexcept { return _internal_span.data(); }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return _n_slots_to_claim; };
+    [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return _n_slots_to_claim * sizeof(T); };
+    [[nodiscard]] constexpr bool empty() const noexcept { return _n_slots_to_claim == 0; }
+    [[nodiscard]] constexpr iterator begin() const noexcept { return _internal_span.begin(); }
+    [[nodiscard]] constexpr iterator end() const noexcept { return _internal_span.end(); }
+    [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _internal_span.rbegin(); }
+    [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _internal_span.rend(); }
+    [[nodiscard]] constexpr T* data() const noexcept { return _internal_span.data(); }
 
     T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data.data()[_index + i]; }
     T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data.data()[_index + i]; }
@@ -367,7 +367,9 @@ class CircularBuffer
         _n_slots_to_claim -= n_produced;
         _published_data = true;
     }
-    };
+    }; // class ReservedOutputRange
+
+    static_assert(PublishableSpan<ReservedOutputRange>);
 
     public:
         buffer_writer() = delete;
@@ -459,79 +461,187 @@ class CircularBuffer
                 throw std::runtime_error("circular_buffer::translate_and_publish() - unknown user exception thrown");
             }
         }
-    };
+    }; // class buffer_writer
+    //static_assert(BufferWriter<buffer_writer<T>>);
 
     template<typename U = T>
     class buffer_reader
     {
+        class ConsumableInputRange;
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
-        std::shared_ptr<Sequence>   _read_index = std::make_shared<Sequence>();
-        signed_index_type                _read_index_cached;
-        BufferTypeLocal             _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        std::size_t                   _size; // pre-condition: std::has_single_bit(_size)
+        std::shared_ptr<Sequence>    _readIndex = std::make_shared<Sequence>();
+        mutable signed_index_type    _readIndexCached;
+        BufferTypeLocal              _buffer; // controls buffer life-cycle, the rest are cache optimisations
+        std::size_t                  _size; // pre-condition: std::has_single_bit(_size)
+        // TODO: doesn't have to be atomic because this reader is (/must be) accessed (by design) always by the same thread.
+        mutable std::atomic_bool     _isRangeConsumed {true}; // controls if consume() was invoked
 
         std::size_t
         buffer_index() const noexcept {
             const auto bitmask = _size - 1;
-            return static_cast<std::size_t>(_read_index_cached) & bitmask;
+            return static_cast<std::size_t>(_readIndexCached) & bitmask;
         }
+
+        class ConsumableInputRange {
+            const buffer_reader<U>* _parent = nullptr;
+            std::size_t             _index = 0;
+            std::span<const T>      _internalSpan{};
+
+        public:
+        using element_type = T;
+        using value_type = typename std::remove_cv_t<T>;
+        using iterator = typename std::span<const T>::iterator;
+        using reverse_iterator = typename std::span<const T>::reverse_iterator;
+        using pointer = typename std::span<const T>::reverse_iterator;
+
+        explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) {};
+        explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept :
+            _parent(parent), _index(index), _internalSpan({ &_parent->_buffer->_data.data()[_index], nRequested }) { }
+
+        ConsumableInputRange(const ConsumableInputRange& other)
+            : _parent(other._parent),
+              _index(other._index),
+              _internalSpan(other._internalSpan) {
+        }
+
+        ConsumableInputRange& operator=(const ConsumableInputRange& other) {
+            if (this != &other) {
+                _parent = other._parent;
+                _index = other._index;
+                _internalSpan = other._internalSpan;
+            }
+            return *this;
+        }
+
+        ConsumableInputRange(ConsumableInputRange&& other) noexcept
+            : _parent(std::exchange(other._parent, nullptr))
+            , _index(std::exchange(other._index, 0))
+            , _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {
+        }
+        ConsumableInputRange& operator=(ConsumableInputRange&& other) noexcept {
+            auto tmp = std::move(other);
+            std::swap(_parent, tmp._parent);
+            std::swap(_index, tmp._index);
+            std::swap(_internalSpan, tmp._internalSpan);
+            return *this;
+        }
+        ~ConsumableInputRange() = default;
+
+        [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); };
+        [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
+        [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
+        [[nodiscard]] constexpr iterator begin() const noexcept { return _internalSpan.begin(); }
+        [[nodiscard]] constexpr iterator end() const noexcept { return _internalSpan.end(); }
+        [[nodiscard]] constexpr const T& front() const noexcept { return _internalSpan.front(); }
+        [[nodiscard]] constexpr const T& back() const noexcept { return _internalSpan.back(); }
+        [[nodiscard]] constexpr auto first(std::size_t count) const noexcept { return _internalSpan.first(count); }
+        [[nodiscard]] constexpr auto last(std::size_t count) const noexcept { return _internalSpan.last(count); }
+        [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _internalSpan.rbegin(); }
+        [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _internalSpan.rend(); }
+        [[nodiscard]] constexpr const T* data() const noexcept { return _internalSpan.data(); }
+        const T& operator [](std::size_t i) const noexcept  {return _parent->_buffer->_data.data()[_index + i]; }
+        const T& operator [](std::size_t i) noexcept { return _parent->_buffer->_data.data()[_index + i]; }
+        operator const std::span<const T>&() const noexcept { return _internalSpan; }
+        operator std::span<const T>&() noexcept { return _internalSpan; }
+        operator std::span<const T>&&() = delete;
+
+        template <bool strict_check = true>
+        [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
+            if (std::atomic_load_explicit(&_parent->_isRangeConsumed, std::memory_order_acquire)) {
+                fmt::println("An error occurred: The method CircularBuffer::buffer_reader::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
+                std::abort();
+            }
+            return tryConsume<strict_check>(nSamples);
+        }
+
+        template <bool strict_check = true>
+        [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
+            if (std::atomic_load_explicit(&_parent->_isRangeConsumed, std::memory_order_acquire)) {
+                return false;
+            }
+            std::atomic_store_explicit(&_parent->_isRangeConsumed, true, std::memory_order_release);
+            _parent->_isRangeConsumed.notify_all();
+            if constexpr (strict_check) {
+                if (nSamples <= 0) {
+                    return true;
+                }
+
+                if (nSamples > std::min(_internalSpan.size(), _parent->available())) {
+                    return false;
+                }
+            }
+            _parent->_readIndexCached = _parent->_readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
+            return true;
+        }
+
+        }; // class ConsumableInputRange
+        static_assert(ConsumableSpan<ConsumableInputRange>);
+
 
     public:
         buffer_reader() = delete;
-        buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept :
+        explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept :
             _buffer(buffer), _size(buffer->_size) {
-            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_read_index});
-            _read_index_cached = _read_index->value();
+            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_readIndex});
+            _readIndexCached = _readIndex->value();
         }
         buffer_reader(buffer_reader&& other) noexcept
-            : _read_index(std::move(other._read_index))
-            , _read_index_cached(std::exchange(other._read_index_cached, _read_index->value()))
+            : _readIndex(std::move(other._readIndex))
+            , _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value()))
             , _buffer(other._buffer)
             , _size(_buffer->_size) {
         }
         buffer_reader& operator=(buffer_reader tmp) noexcept {
-            std::swap(_read_index, tmp._read_index);
-            std::swap(_read_index_cached, tmp._read_index_cached);
+            std::swap(_readIndex, tmp._readIndex);
+            std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);
             _size = _buffer->_size;
             return *this;
         };
-        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _read_index); }
+        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _readIndex); }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         template <bool strict_check = true>
-        [[nodiscard]] constexpr std::span<const U> get(const std::size_t n_requested = 0) const noexcept {
-            const auto& data = _buffer->_data;
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested = 0UZ) const noexcept -> ConsumableInputRange {
+            std::size_t n = nRequested > 0 ? nRequested : available();
             if constexpr (strict_check) {
-                const std::size_t n = n_requested > 0 ? std::min(n_requested, available()) : available();
-                return { &data[buffer_index()], n };
+                n = nRequested > 0 ? std::min(nRequested, available()) : available();
             }
-            const std::size_t n = n_requested > 0 ? n_requested : available();
-            return { &data[buffer_index()], n };
+            std::atomic_store_explicit(&_isRangeConsumed, false, std::memory_order_release);
+            _isRangeConsumed.notify_all();
+            return ConsumableInputRange(this, buffer_index(), n);
         }
 
         template <bool strict_check = true>
-        [[nodiscard]] constexpr bool consume(const std::size_t n_elements = 1) noexcept {
+        [[nodiscard]] constexpr bool consume(const std::size_t nSamples = 1) noexcept {
             if constexpr (strict_check) {
-                if (n_elements <= 0) {
+                if (nSamples <= 0) {
+                    std::atomic_store_explicit(&_isRangeConsumed, true, std::memory_order_release); // TODO: remove consume method
+                    _isRangeConsumed.notify_all();
                     return true;
                 }
-                if (n_elements > available()) {
+                if (nSamples > available()) {
+                    std::atomic_store_explicit(&_isRangeConsumed, true, std::memory_order_release); // TODO: remove consume method
+                   _isRangeConsumed.notify_all();
                     return false;
                 }
             }
-            _read_index_cached = _read_index->addAndGet(static_cast<signed_index_type>(n_elements));
+            _readIndexCached = _readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
+            std::atomic_store_explicit(&_isRangeConsumed, true, std::memory_order_release); // TODO: remove consume method
+            _isRangeConsumed.notify_all();
             return true;
         }
 
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _read_index_cached; }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return static_cast<std::size_t>(_buffer->_cursor.value() - _read_index_cached);
+            return static_cast<std::size_t>(_buffer->_cursor.value() - _readIndexCached);
         }
-    };
+    }; // class buffer_reader
+
+    //static_assert(BufferReader<buffer_reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
         if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
@@ -565,5 +675,4 @@ static_assert(Buffer<CircularBuffer<int32_t>>);
 // clang-format on
 
 } // namespace gr
-
 #endif // GNURADIO_CIRCULARBUFFER_HPP

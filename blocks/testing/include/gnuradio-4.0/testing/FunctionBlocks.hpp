@@ -206,7 +206,6 @@ struct FunctionSink : gr::Block<FunctionSink<T>> {
     }
 };
 
-
 /**
  * MessageSender is a convenience struct template to allow easy creation
  * of a block that generates and sends messages on the builtin messaging

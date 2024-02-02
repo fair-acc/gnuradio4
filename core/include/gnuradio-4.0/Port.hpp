@@ -980,7 +980,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag
 
 inline constexpr std::optional<std::size_t>
 nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
-    const std::span<const Tag> tagData = port.tagReader().template get<false>();
+    const gr::ConsumableSpan auto tagData = port.tagReader().template get<false>();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
