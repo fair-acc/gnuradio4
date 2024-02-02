@@ -154,7 +154,7 @@ const boost::ut::suite SequenceTests = [] {
     };
 };
 
-#if !defined(__EMSCRIPTEN__) && !defined(_GLIBCXX_DEBUG)
+#if defined(HAS_POSIX_MAP_INTERFACE) && !defined(_GLIBCXX_DEBUG)
 const boost::ut::suite DoubleMappedAllocatorTests = [] {
     using namespace boost::ut;
 
@@ -371,7 +371,7 @@ const boost::ut::suite CircularBufferTests = [] {
                 }
             }
             | std::vector{
-#ifndef __EMSCRIPTEN__
+#ifdef HAS_POSIX_MAP_INTERFACE
                   gr::double_mapped_memory_resource::allocator<int32_t>(),
 #endif
                   Allocator()

@@ -18,13 +18,13 @@ inline static std::size_t n_samples_produced = 0UZ;
 template<typename T, std::size_t min = 0UZ, std::size_t count = N_MAX, bool use_bulk_operation = true>
 class source : public gr::Block<source<T, min, count>> {
 public:
-    uint64_t       _n_samples_max;
-    std::size_t    _n_tag_offset;
-    gr::PortOut<T> out;
+    uint64_t                   _n_samples_max;
+    gr::Tag::signed_index_type _n_tag_offset;
+    gr::PortOut<T>             out;
 
     source() = delete;
 
-    source(std::size_t n_samples, std::size_t n_tag_offset = 100) : _n_samples_max(n_samples), _n_tag_offset(n_tag_offset) {}
+    source(std::size_t n_samples, gr::Tag::signed_index_type n_tag_offset = 100) : _n_samples_max(n_samples), _n_tag_offset(n_tag_offset) {}
 
     friend constexpr std::size_t
     available_samples(const source &self) noexcept {

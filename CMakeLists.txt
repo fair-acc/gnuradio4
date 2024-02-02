@@ -44,6 +44,14 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
     if (CMAKE_BUILD_TYPE STREQUAL "" AND NOT CMAKE_CXX_FLAGS MATCHES "-O[123gs]")
         message(WARNING "It seems you are compiling without optimization. Please set CMAKE_BUILD_TYPE or CMAKE_CXX_FLAGS.")
     endif ()
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
+        add_compile_options(-stdlib=libc++ -fcolor-diagnostics)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fdiagnostics-color=always)
+    endif()
+
 endif ()
 
 # Initialize a variable to hold all the compiler flags -> exported into global config.h(.in)

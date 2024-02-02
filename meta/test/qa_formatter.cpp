@@ -74,6 +74,17 @@ const boost::ut::suite propertyMapFormatter = [] {
     };
 };
 
+const boost::ut::suite vectorBoolFormatter = [] {
+    using namespace boost::ut;
+
+    "fmt::formatter<vector<bool>>"_test = [] {
+        std::vector<bool> boolVector{ true, false, true };
+        expect("[true, false, true]" == fmt::format("{}", boolVector));
+        expect("[true, false, true]" == fmt::format("{:c}", boolVector));
+        expect("[true false true]" == fmt::format("{:s}", boolVector));
+    };
+};
+
 } // namespace gr::meta::test
 
 int
