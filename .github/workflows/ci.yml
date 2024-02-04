@@ -84,11 +84,19 @@ jobs:
         if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
         uses: SonarSource/sonarcloud-github-c-cpp@v2
 
-      - name: Configure CMake
-        if: matrix.configurations.compiler != 'emscripten'
+      - name: Configure CMake Clang
+        if: matrix.configurations.compiler == 'clang17'
         shell: bash
         run: |
-          cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.configurations.compiler == 'gcc13' &&  matrix.cmake-build-type == 'Debug'}}
+          export CC=clang-17
+          export CXX=clang++-17
+          cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DCMAKE_LINKER=/usr/bin/clang-17          
+
+      - name: Configure CMake GCC
+        if: matrix.configurations.compiler == 'gcc13'
+        shell: bash
+        run: |          
+          cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.cmake-build-type == 'Debug'}}
 
       - name: Configure CMake Emscripten
         if: matrix.configurations.compiler == 'emscripten'
