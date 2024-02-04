@@ -10,7 +10,7 @@ function(setup_test_no_asan TARGET_NAME)
 endfunction()
 
 function(setup_test TARGET_NAME)
-    if (NOT EMSCRIPTEN)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") # limited to gcc due to a Ubuntu packaging bug of libc++, see https://github.com/llvm/llvm-project/issues/59432
         target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
         target_link_options(${TARGET_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
     endif ()
