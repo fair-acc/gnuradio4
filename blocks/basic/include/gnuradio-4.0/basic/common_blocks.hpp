@@ -10,22 +10,6 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 
-// A convenience class to make writing unit tests easier.
-// This sink allows to inspect the input port values as a class member.
-template<typename T>
-class InspectSink : public gr::Block<InspectSink<T>> {
-public:
-    T             value{};
-    gr::PortIn<T> in;
-
-    constexpr void
-    processOne(T val) {
-        value = val;
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (InspectSink<T>), value, in);
-
 template<typename T>
 class builtin_multiply : public gr::Block<builtin_multiply<T>> {
 public:

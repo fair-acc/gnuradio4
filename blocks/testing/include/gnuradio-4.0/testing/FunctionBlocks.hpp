@@ -264,11 +264,28 @@ struct MessageSender : public gr::Block<MessageSender<T>> {
     }
 };
 
+/**
+ * A convenience class to make writing unit tests easier.
+ * This sink allows to inspect the input port values as a class member.
+ */
+template<typename T>
+class InspectSink : public gr::Block<InspectSink<T>> {
+public:
+    gr::PortIn<T> in;
+    T             value{};
+
+    constexpr void
+    processOne(T val) {
+        value = val;
+    }
+};
+
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionSource, out);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionProcess, in, out);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionSink, in);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::MessageSender, unused)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::InspectSink, in, value);
 
 #endif // GNURADIO_TESTING_FUNCTION_BLOCKS_HPP

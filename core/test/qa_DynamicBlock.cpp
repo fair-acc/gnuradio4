@@ -3,6 +3,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/basic/common_blocks.hpp>
+#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 
 template<typename T>
@@ -29,23 +30,9 @@ static_assert(gr::BlockLike<fixed_source<int>>);
 static_assert(gr::traits::block::stream_input_ports<fixed_source<int>>::size() == 0);
 static_assert(gr::traits::block::stream_output_ports<fixed_source<int>>::size() == 1);
 
-template<typename T>
-struct DebugSink : public gr::Block<DebugSink<T>> {
-    T             lastValue = {};
-    gr::PortIn<T> in;
-
-    void
-    processOne(T value) {
-        lastValue = value;
-    }
-};
-
-static_assert(gr::BlockLike<DebugSink<int>>);
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (DebugSink<T>), lastValue, in);
-
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
+    using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
         constexpr const int         sources_count = 10;
         constexpr const std::size_t events_count  = 5;
