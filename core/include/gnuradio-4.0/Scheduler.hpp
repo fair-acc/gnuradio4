@@ -161,6 +161,7 @@ public:
             if (const auto available = reader.available(); available > 0) {
                 const auto &input = reader.get(available);
                 outPort.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
+                reader.consume(available);
             }
         };
 
