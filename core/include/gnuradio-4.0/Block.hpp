@@ -10,7 +10,9 @@
 #include <fmt/format.h>
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 #include <magic_enum.hpp>
@@ -22,88 +24,22 @@
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "BlockTraits.hpp"
-#include "Port.hpp"
-#include "Sequence.hpp"
-#include "Tag.hpp"
-#include "thread/thread_pool.hpp"
+#include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Sequence.hpp>
+#include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
-#include "annotated.hpp" // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
-#include "reflection.hpp"
-#include "Settings.hpp"
+#include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
+#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/Settings.hpp>
+
+#include <gnuradio-4.0/LifeCycle.hpp>
 
 namespace gr {
 
 namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
-
-namespace lifecycle {
-/**
- * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
- *
- * Transition between the following states is triggered by specific actions or events:
- * - `IDLE`: The initial state before the scheduler has been initialized.
- * - `INITIALISED`: The scheduler has been initialized and is ready to start running.
- * - `RUNNING`: The scheduler is actively running.
- * - `REQUESTED_PAUSE`: A pause has been requested, and the scheduler is in the process of pausing.
- * - `PAUSED`: The scheduler is paused and can be resumed or stopped.
- * - `REQUESTED_STOP`: A stop has been requested, and the scheduler is in the process of stopping.
- * - `STOPPED`: The scheduler has been stopped and can be reset or re-initialized.
- * - `ERROR`: An error state that can be reached from any state at any time, requiring a reset.
- *
- * @note All `Block<T>`-derived classes can optionally implement any subset of the lifecycle methods
- * (`start()`, `stop()`, `reset()`, `pause()`, `resume()`) to handle state changes of the `Scheduler`.
- *
- * State diagram:
- *
- *               Block<T>()              can be reached from
- *                  │                   anywhere and anytime.
- *            ┌─────┴────┐                   ┌────┴────┐
- *            │   IDLE   │                   │  ERROR  │
- *            └────┬─────┘                   └────┬────┘
- *                 │ init()                       │ reset()
- *                 v                              │
- *         ┌───────┴───────┐                      │
- *         │  INITIALISED  ├<─────────────────────┤
- *         └───────┬───────┘                      │
- *                 │ start()                      │
- *                 v                              │
- *   stop() ┌──────┴──────┐                       │  ╓
- *   ┌──────┤   RUNNING   ├<──────────┐           │  ║
- *   │      └─────┬───────┘           │           │  ║
- *   │            │ pause()           │           │  ║  isActive(lifecycle::State) ─> true
- *   │            v                   │ resume()  │  ║
- *   │  ┌─────────┴─────────┐   ┌─────┴─────┐     │  ║
- *   │  │  REQUESTED_PAUSE  ├──>┤  PAUSED   │     │  ║
- *   │  └──────────┬────────┘   └─────┬─────┘     │  ╙
- *   │             │ stop()           │ stop()    │
- *   │             v                  │           │
- *   │   ┌─────────┴────────┐         │           │  ╓
- *   └──>┤  REQUESTED_STOP  ├<────────┘           │  ║
- *       └────────┬─────────┘                     │  ║
- *                │                               │  ║  isShuttingDown(lifecycle::State) ─> true
- *                v                               │  ║
- *          ┌─────┴─────┐ reset()                 │  ║
- *          │  STOPPED  ├─────────────────────────┘  ║
- *          └─────┬─────┘                            ╙
- *                │
- *                v
- *            ~Block<T>()
- */
-enum class State : char { IDLE, INITIALISED, RUNNING, REQUESTED_PAUSE, PAUSED, REQUESTED_STOP, STOPPED, ERROR };
-using enum State;
-
-inline constexpr bool
-isActive(lifecycle::State state) noexcept {
-    return state == RUNNING || state == REQUESTED_PAUSE || state == PAUSED;
-}
-
-inline constexpr bool
-isShuttingDown(lifecycle::State state) noexcept {
-    return state == REQUESTED_STOP || state == STOPPED;
-}
-
-} // namespace lifecycle
 
 template<typename F>
 constexpr void
@@ -387,7 +323,7 @@ concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProc
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : protected std::tuple<Arguments...> {
+class Block : public lifecycle::StateMachine<Derived>, protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -421,6 +357,7 @@ public:
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{ false };
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
@@ -432,8 +369,7 @@ public:
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
     //
-    std::size_t                   stride_counter = 0UZ;
-    std::atomic<lifecycle::State> state          = lifecycle::State::IDLE;
+    std::size_t stride_counter = 0UZ;
 
     // TODO: These are not involved in move operations, might be a problem later
     const std::size_t unique_id   = _unique_id_counter++;
@@ -578,12 +514,12 @@ public:
     }
 
     Block(Block &&other) noexcept
-        : std::tuple<Arguments...>(std::move(other))
+        : lifecycle::StateMachine<Derived>(std::move(other))
+        , std::tuple<Arguments...>(std::move(other))
         , numerator(std::move(other.numerator))
         , denominator(std::move(other.denominator))
         , stride(std::move(other.stride))
         , stride_counter(std::move(other.stride_counter))
-        , state(other.state.load()) // atomic, not moving
         , msgIn(std::move(other.msgIn))
         , msgOut(std::move(other.msgOut))
         , ports_status(std::move(other.ports_status))
@@ -599,21 +535,25 @@ public:
             = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
-        if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
-            std::atomic_store_explicit(&state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-            state.notify_all();
+        if (lifecycle::isActive(this->state())) {
+            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                using namespace gr::message;
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
         }
         if (isBlocking()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
         // wait for done
-        for (auto actualState = std::atomic_load_explicit(&state, std::memory_order_acquire); lifecycle::isActive(actualState);
-             actualState      = std::atomic_load_explicit(&state, std::memory_order_acquire)) {
-            state.wait(actualState);
+        for (auto actualState = this->state(); lifecycle::isActive(actualState); actualState = this->state()) {
+            this->waitOnState(actualState);
         }
-        std::atomic_store_explicit(&state, lifecycle::State::STOPPED, std::memory_order_release);
-        state.notify_all();
+
+        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+            using namespace gr::message;
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+        }
     }
 
     void
@@ -656,7 +596,10 @@ public:
 
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
-        state = lifecycle::State::INITIALISED;
+        if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
+            using namespace gr::message;
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+        }
     }
 
     template<gr::meta::array_or_vector_type Container>
@@ -1042,8 +985,10 @@ public:
 
     constexpr void
     requestStop() noexcept {
-        std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-        this->state.notify_all();
+        if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+            using namespace gr::message;
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+        }
     }
 
     constexpr void
@@ -1090,7 +1035,16 @@ protected:
         constexpr bool kIsSourceBlock = TInputTypes::size == 0;
         constexpr bool kIsSinkBlock   = TOutputTypes::size == 0;
 
-        if (std::atomic_load_explicit(&state, std::memory_order_acquire) == lifecycle::State::STOPPED) {
+        if constexpr (!blockingIO) { // N.B. no other thread/constraint to consider before shutting down
+            if (this->state() == lifecycle::State::REQUESTED_STOP) {
+                if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                    using namespace gr::message;
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
+            }
+        }
+
+        if (this->state() == lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, work::Status::DONE };
         }
 
@@ -1167,9 +1121,11 @@ protected:
             }
 #endif
 
-            if (isEOSTagPresent || lifecycle::isShuttingDown(state)) {
-                state = lifecycle::State::STOPPED;
-                state.notify_all();
+            if (isEOSTagPresent || lifecycle::isShuttingDown(this->state())) {
+                if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                    using namespace gr::message;
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
 #ifdef _DEBUG
                 fmt::println("##block {} received EOS tag at {} in_samples {} -> lifecycle::State::STOPPED", name, ports_status.nSamplesToEosTag, ports_status.in_samples);
 #endif
@@ -1182,8 +1138,14 @@ protected:
                 const auto resamplingStatus = doResampling();
                 if (resamplingStatus != work::Status::OK) {
                     if (resamplingStatus == work::Status::INSUFFICIENT_INPUT_ITEMS || isEOSTagPresent) {
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        state.notify_all();
+                        if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                            using namespace gr::message;
+                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        }
+                        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                            using namespace gr::message;
+                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        }
                         updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
                         updateOutputTagsWithSettingParametersIfNeeded();
                         forwardTags();
@@ -1280,8 +1242,10 @@ protected:
             forwardTags();
             if constexpr (kIsSourceBlock) {
                 if (ret == work::Status::DONE) {
-                    std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                    state.notify_all();
+                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                        using namespace gr::message;
+                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    }
                     publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                     return { requested_work, ports_status.in_samples, work::Status::DONE };
                 }
@@ -1333,7 +1297,7 @@ protected:
                         const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
                         meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writersTuple, results);
                         nOutSamplesBeforeRequestedStop++;
-                        if (_output_tags_changed || lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire))) [[unlikely]] {
+                        if (_output_tags_changed || lifecycle::isShuttingDown(this->state())) [[unlikely]] {
                             // emitted tag and/or requested to stop
                             break;
                         }
@@ -1351,9 +1315,11 @@ protected:
             forwardTags();
             write_to_outputs(ports_status.out_samples, writersTuple);
             const bool success = consumeReaders(self(), nSamplesToConsume);
-            if (lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire))) [[unlikely]] {
-                std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                this->state.notify_all();
+            if (lifecycle::isShuttingDown(this->state())) [[unlikely]] {
+                if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                    using namespace gr::message;
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
                 publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                 return { requested_work, ports_status.in_samples, success ? work::Status::DONE : work::Status::ERROR };
             }
@@ -1396,32 +1362,40 @@ public:
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
-            if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
+
+            bool expectedThreadState = false;
+            if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
                     ioThreadPool->execute([this]() {
-                        assert(lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire)));
-                        lifecycle::State actualThreadState = std::atomic_load_explicit(&state, std::memory_order_acquire);
+                        assert(lifecycle::isActive(this->state()));
+
+                        lifecycle::State actualThreadState = this->state();
                         while (lifecycle::isActive(actualThreadState)) {
                             // execute ten times before testing actual state -- minimises overhead atomic load to work execution if the latter is a noop or very fast to execute
                             for (std::size_t testState = 0UZ; testState < 10UZ; ++testState) {
                                 if (invokeWork() == work::Status::DONE) {
                                     actualThreadState = lifecycle::State::REQUESTED_STOP;
-                                    std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-                                    state.notify_all();
+                                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                                        using namespace gr::message;
+                                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                                    }
                                     break;
                                 }
                             }
-                            actualThreadState = std::atomic_load_explicit(&state, std::memory_order_acquire);
+                            actualThreadState = this->state();
                         }
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        state.notify_all();
+                        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                            using namespace gr::message;
+                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        }
+                        ioThreadRunning.store(false);
                     });
                 } else { // use user-provided ioThreadPool
                     // let user call 'work' explicitly and set both 'ioWorkDone' and 'ioLastWorkStatus'
                 }
             }
             if constexpr (!useIoThread) {
-                const bool blockIsActive = lifecycle::isActive(state.load());
+                const bool blockIsActive = lifecycle::isActive(this->state());
                 if (!blockIsActive) {
                     publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                     ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);

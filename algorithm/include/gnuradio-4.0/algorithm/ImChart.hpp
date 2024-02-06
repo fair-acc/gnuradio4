@@ -14,7 +14,9 @@
 #include <fmt/format.h> // TODO: remove for fmt::print until std::format and std::print is available in gcc & emscripten
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 #include <magic_enum.hpp>
@@ -443,7 +445,9 @@ public:
 
     [[nodiscard]] constexpr std::size_t
     getVerticalAxisPositionX() const noexcept {
-        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
+        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform>
+                              ? 0UZ
+                              : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
         // adjust for axis labels
         std::size_t y_label_width = std::max(fmt::format("{:G}", axis_min_y).size(), fmt::format("{:G}", axis_max_y).size());
         return std::clamp(y_axis_x, y_label_width + 3, _screen_width); // Ensure axis positions are within screen bounds

@@ -6584,7 +6584,9 @@ namespace pmtv {
 #include <fmt/format.h>
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 // #include <magic_enum.hpp>
@@ -11148,7 +11150,7 @@ is_const_member_function(T) noexcept {
 #endif // include guard
 
 
-// #include "BlockTraits.hpp"
+// #include <gnuradio-4.0/BlockTraits.hpp>
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
@@ -12464,7 +12466,9 @@ struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
     explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
     #else
     #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
+    #ifndef __clang__
     #pragma GCC diagnostic ignored "-Wuseless-cast"
+    #endif
     explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
     #pragma GCC diagnostic pop
     #endif
@@ -14193,12 +14197,7 @@ public:
         return portName;
     }
 
-    // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
-#if defined(__EMSCRIPTEN__)
     [[nodiscard]] supported_type
-#else
-    [[nodiscard]] constexpr supported_type
-#endif
     defaultValue() const noexcept {
         return default_value;
     }
@@ -14631,12 +14630,7 @@ private:
 
         ~wrapper() override = default;
 
-        // TODO revisit: constexpr was removed because emscripten does not support constexpr function for non literal type, like DataSet<T>
-#if defined(__EMSCRIPTEN__)
         [[nodiscard]] supported_type
-#else
-        [[nodiscard]] constexpr supported_type
-#endif
         defaultValue() const noexcept override {
             return _value.defaultValue();
         }
@@ -15361,13 +15355,13 @@ concept processBulk_requires_ith_output_as_span
 
 #endif // include guard
 
-// #include "Port.hpp"
+// #include <gnuradio-4.0/Port.hpp>
 
-// #include "Sequence.hpp"
+// #include <gnuradio-4.0/Sequence.hpp>
 
-// #include "Tag.hpp"
+// #include <gnuradio-4.0/Tag.hpp>
 
-// #include "thread/thread_pool.hpp"
+// #include <gnuradio-4.0/thread/thread_pool.hpp>
 #ifndef THREADPOOL_HPP
 #define THREADPOOL_HPP
 
@@ -17148,11 +17142,11 @@ static_assert(ThreadPool<BasicThreadPool>);
 #endif // THREADPOOL_HPP
 
 
-// #include "annotated.hpp"
+// #include <gnuradio-4.0/annotated.hpp>
  // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
-// #include "reflection.hpp"
+// #include <gnuradio-4.0/reflection.hpp>
 
-// #include "Settings.hpp"
+// #include <gnuradio-4.0/Settings.hpp>
 #ifndef GNURADIO_SETTINGS_HPP
 #define GNURADIO_SETTINGS_HPP
 
@@ -17164,19 +17158,20 @@ static_assert(ThreadPool<BasicThreadPool>);
 #include <set>
 #include <variant>
 
-// #include "annotated.hpp"
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
-// #include "BlockTraits.hpp"
+// #include <gnuradio-4.0/annotated.hpp>
 
-// #include "reflection.hpp"
-
-// #include "Tag.hpp"
+// #include <gnuradio-4.0/BlockTraits.hpp>
 
 // #include <gnuradio-4.0/meta/formatter.hpp>
 #ifndef GNURADIO_FORMATTER_HPP
 #define GNURADIO_FORMATTER_HPP
 
-// #include "UncertainValue.hpp"
+#include <complex>
+#include <fmt/format.h>
+// #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #ifndef GNURADIO_UNCERTAINVALUE_HPP
 #define GNURADIO_UNCERTAINVALUE_HPP
 
@@ -17519,10 +17514,9 @@ exp(const T &x) noexcept {
 } // namespace gr::math
 
 #endif // GNURADIO_UNCERTAINVALUE_HPP
-#include <complex>
-#include <fmt/format.h>
 // #include <gnuradio-4.0/Tag.hpp>
 
+#include <source_location>
 
 template<typename T>
 struct fmt::formatter<std::complex<T>> {
@@ -17617,7 +17611,56 @@ struct fmt::formatter<gr::property_map> {
     }
 };
 
+template<>
+struct fmt::formatter<std::vector<bool>> {
+    char presentation = 'c';
+
+    constexpr auto
+    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+        auto it = ctx.begin(), end = ctx.end();
+        if (it != end && (*it == 's' || *it == 'c')) presentation = *it++;
+        if (it != end && *it != '}') throw fmt::format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const std::vector<bool> &v, FormatContext &ctx) const -> decltype(ctx.out()) {
+        auto   sep = (presentation == 'c' ? ", " : " ");
+        size_t len = v.size();
+        fmt::format_to(ctx.out(), "[");
+        for (size_t i = 0; i < len; ++i) {
+            if (i > 0) {
+                fmt::format_to(ctx.out(), "{}", sep);
+            }
+            fmt::format_to(ctx.out(), "{}", v[i] ? "true" : "false");
+        }
+        fmt::format_to(ctx.out(), "]");
+        return ctx.out();
+    }
+};
+
+template<>
+struct fmt::formatter<std::source_location> {
+    constexpr auto
+    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+        return ctx.begin();
+    }
+
+    // Formats the source_location, using 'f' for file and 'l' for line
+    template<typename FormatContext>
+    auto
+    format(const std::source_location &loc, FormatContext &ctx) const -> decltype(ctx.out()) {
+        // Example format: "file:line"
+        return fmt::format_to(ctx.out(), "{}:{}", loc.file_name(), loc.line());
+    }
+};
+
 #endif // GNURADIO_FORMATTER_HPP
+
+// #include <gnuradio-4.0/reflection.hpp>
+
+// #include <gnuradio-4.0/Tag.hpp>
 
 
 namespace gr {
@@ -17975,7 +18018,14 @@ public:
                             is_set = true;
                         }
                         if (std::string(get_display_name(member)) == key && !std::holds_alternative<Type>(value)) {
-                            throw std::invalid_argument(fmt::format("The {} has a wrong type", key));
+                            const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>();
+                            std::visit(
+                                    [&key, &value, &required_index](auto &&arg) {
+                                        using ActualType = std::decay_t<decltype(arg)>;
+                                        throw std::invalid_argument(fmt::format("value for key {} has a wrong type ({}: {}) vs. expected ({}: {})", //
+                                                                                       key, value.index(), gr::meta::type_name<ActualType>(), required_index, gr::meta::type_name<Type>()));
+                                    },
+                                    value);
                         }
                     }
                 };
@@ -18047,11 +18097,10 @@ public:
     [[nodiscard]] property_map
     get(std::span<const std::string> parameter_keys = {}, SettingsCtx = {}) const noexcept override {
         std::lock_guard lg(_lock);
-        property_map    ret;
         if (parameter_keys.empty()) {
-            ret = _active;
-            return ret;
+            return _active;
         }
+        property_map ret;
         for (const auto &key : parameter_keys) {
             if (_active.contains(key)) {
                 ret.insert_or_assign(key, _active.at(key));
@@ -18133,7 +18182,7 @@ public:
                                                RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
 #else
                                     fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                               "_block->unique_name", "_block->name", member(*_block), std::get<Type>(staged_value),                              //
+                                               "_block->unique_name", "_block->name", "member(*_block)", std::get<Type>(staged_value),                            //
                                                std::string(get_display_name(member)), RawType::LimitType::MinRange,
                                                RawType::LimitType::MaxRange, //
                                                RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
@@ -18160,7 +18209,7 @@ public:
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
                 if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
-                    _active.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
+                    _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
             processMembers<TBlock>(update_active);
@@ -18197,9 +18246,8 @@ public:
             std::lock_guard lg(_lock);
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-
                 if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
-                    _active.insert_or_assign(get_display_name_const(member).str(), member(*_block));
+                    _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
             if constexpr (detail::HasBaseType<TBlock>) {
@@ -18261,12 +18309,21 @@ struct hash<gr::SettingsCtx> {
 #endif // GNURADIO_SETTINGS_HPP
 
 
-namespace gr {
+// #include <gnuradio-4.0/LifeCycle.hpp>
+#ifndef GNURADIO_LIFECYCLE_HPP
+#define GNURADIO_LIFECYCLE_HPP
 
-namespace stdx = vir::stdx;
-using gr::meta::fixed_string;
+// #include <gnuradio-4.0/meta/formatter.hpp>
 
-namespace lifecycle {
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+#include <atomic>
+#include <expected>
+#include <source_location>
+#include <string>
+
+namespace gr ::lifecycle {
 /**
  * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
  *
@@ -18285,39 +18342,39 @@ namespace lifecycle {
  *
  * State diagram:
  *
- *               Block<T>()              can be reached from
- *                  │                   anywhere and anytime.
- *            ┌─────┴────┐                   ┌────┴────┐
- *            │   IDLE   │                   │  ERROR  │
- *            └────┬─────┘                   └────┬────┘
- *                 │ init()                       │ reset()
- *                 v                              │
- *         ┌───────┴───────┐                      │
- *         │  INITIALISED  ├<─────────────────────┤
- *         └───────┬───────┘                      │
- *                 │ start()                      │
- *                 v                              │
- *   stop() ┌──────┴──────┐                       │  ╓
- *   ┌──────┤   RUNNING   ├<──────────┐           │  ║
- *   │      └─────┬───────┘           │           │  ║
- *   │            │ pause()           │           │  ║  isActive(lifecycle::State) ─> true
- *   │            v                   │ resume()  │  ║
- *   │  ┌─────────┴─────────┐   ┌─────┴─────┐     │  ║
- *   │  │  REQUESTED_PAUSE  ├──>┤  PAUSED   │     │  ║
- *   │  └──────────┬────────┘   └─────┬─────┘     │  ╙
- *   │             │ stop()           │ stop()    │
- *   │             v                  │           │
- *   │   ┌─────────┴────────┐         │           │  ╓
- *   └──>┤  REQUESTED_STOP  ├<────────┘           │  ║
- *       └────────┬─────────┘                     │  ║
- *                │                               │  ║  isShuttingDown(lifecycle::State) ─> true
- *                v                               │  ║
- *          ┌─────┴─────┐ reset()                 │  ║
- *          │  STOPPED  ├─────────────────────────┘  ║
- *          └─────┬─────┘                            ╙
- *                │
- *                v
- *            ~Block<T>()
+ *                 Block<T>()              can be reached from
+ *                    │                   anywhere and anytime.
+ *              ┌─────┴────┐                   ┌────┴────┐
+ * ┌────────────┤   IDLE   │                   │  ERROR  │
+ * │            └────┬─────┘                   └────┬────┘
+ * │                 │ init()                       │ reset()
+ * │                 v                              │
+ * │         ┌───────┴───────┐                      │
+ * ├<────────┤  INITIALISED  ├<─────────────────────┤
+ * │         └───────┬───────┘                      │
+ * │                 │ start()                      │
+ * │                 v                              │
+ * │   stop() ┌──────┴──────┐                       │  ╓
+ * │ ┌────────┤   RUNNING   ├<──────────┐           │  ║
+ * │ │        └─────┬───────┘           │           │  ║
+ * │ │              │ pause()           │           │  ║  isActive(lifecycle::State) ─> true
+ * │ │              v                   │ resume()  │  ║
+ * │ │    ┌─────────┴─────────┐   ┌─────┴─────┐     │  ║
+ * │ │    │  REQUESTED_PAUSE  ├──>┤  PAUSED   │     │  ║
+ * │ │    └──────────┬────────┘   └─────┬─────┘     │  ╙
+ * │ │               │ stop()           │ stop()    │
+ * │ │               v                  │           │
+ * │ │     ┌─────────┴────────┐         │           │  ╓
+ * │ └────>┤  REQUESTED_STOP  ├<────────┘           │  ║
+ * │       └────────┬─────────┘                     │  ║
+ * │                │                               │  ║  isShuttingDown(lifecycle::State) ─> true
+ * │                v                               │  ║
+ * │          ┌─────┴─────┐ reset()                 │  ║
+ * └─────────>│  STOPPED  ├─────────────────────────┘  ║
+ *            └─────┬─────┘                            ╙
+ *                  │
+ *                  v
+ *              ~Block<T>()
  */
 enum class State : char { IDLE, INITIALISED, RUNNING, REQUESTED_PAUSE, PAUSED, REQUESTED_STOP, STOPPED, ERROR };
 using enum State;
@@ -18332,7 +18389,188 @@ isShuttingDown(lifecycle::State state) noexcept {
     return state == REQUESTED_STOP || state == STOPPED;
 }
 
-} // namespace lifecycle
+constexpr bool
+isValidTransition(const State from, const State to) noexcept {
+    if (to == State::ERROR || from == to) {
+        // can transit to ERROR from any state
+        return true;
+    }
+    switch (from) {
+    case State::IDLE: return to == State::INITIALISED || to == State::REQUESTED_STOP || to == State::STOPPED;
+    case State::INITIALISED: return to == State::RUNNING || to == State::REQUESTED_STOP || to == State::STOPPED;
+    case State::RUNNING: return to == State::REQUESTED_PAUSE || to == State::REQUESTED_STOP;
+    case State::REQUESTED_PAUSE: return to == State::PAUSED;
+    case State::PAUSED: return to == State::RUNNING || to == State::REQUESTED_STOP;
+    case State::REQUESTED_STOP: return to == State::STOPPED;
+    case State::STOPPED: return to == State::INITIALISED;
+    case State::ERROR: return to == State::INITIALISED;
+    default: return false;
+    }
+}
+
+enum class StorageType { ATOMIC, NON_ATOMIC };
+
+struct ErrorType {
+    std::string          message;
+    std::source_location sourceLocation;
+
+    constexpr ErrorType() = default;
+
+    ErrorType(std::string_view msg, const std::source_location &location) : message(msg), sourceLocation(location) {}
+
+    std::string
+    srcLoc() const noexcept {
+        return fmt::format("{}", sourceLocation);
+    }
+};
+
+/**
+ * @brief StateMachine class template that manages the lifecycle states of a Scheduler or Block.
+ * It is designed to be inherited by blocks (TDerived) to safely and effectively manage their lifecycle state transitions.
+ *
+ * If implemented in TDerived, the following specific lifecycle methods are called:
+ * - `start()`  when transitioning from INITIALISED to RUNNING
+ * - `stop()`   when transitioning from any `isActive(State)` to REQUESTED_STOP
+ * - `pause()`  when transitioning from RUNNING to REQUESTED_PAUSE
+ * - `resume()` when transitioning from PAUSED to RUNNING
+ * - `reset()`  when transitioning from any state (typically ERROR or STOPPED) to INITIALISED.
+ * If any of these methods throw an exception, the StateMachine transitions to the ERROR state, captures,
+ * and forward the exception details.
+ *
+ * @tparam TDerived The derived class type implementing specific lifecycle methods.
+ * @tparam storageType Specifies the storage type for the state, allowing for atomic operations
+ *         for thread-safe state changes. Defaults to ATOMIC.
+ */
+template<typename TDerived, StorageType storageType = StorageType::ATOMIC>
+class StateMachine {
+protected:
+    using StateStorage  = std::conditional_t<storageType == StorageType::ATOMIC, std::atomic<State>, State>;
+    StateStorage _state = lifecycle::State::IDLE;
+
+    void
+    setAndNotifyState(State newState) {
+        if constexpr (storageType == StorageType::ATOMIC) {
+            _state.store(newState, std::memory_order_release);
+            _state.notify_all();
+        } else {
+            _state = newState;
+        }
+    }
+
+    std::string
+    getBlockName() {
+        if constexpr (requires(TDerived d) { d.uniqueName(); }) {
+            return std::string{ static_cast<TDerived *>(this)->uniqueName() };
+        } else if constexpr (requires(TDerived d) { d.unique_name; }) {
+            return std::string{ static_cast<TDerived *>(this)->unique_name };
+        } else {
+            return "unknown block/item";
+        }
+    }
+
+    template<typename TMethod>
+    std::expected<void, ErrorType>
+    invokeLifecycleMethod(TMethod method, const std::source_location &location) {
+        try {
+            (static_cast<TDerived *>(this)->*method)();
+            return {};
+        } catch (const std::exception &e) {
+            setAndNotifyState(State::ERROR);
+            return std::unexpected(ErrorType{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location });
+        } catch (...) {
+            setAndNotifyState(State::ERROR);
+            return std::unexpected(ErrorType{ fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location });
+        }
+    }
+
+public:
+    StateMachine() noexcept = default;
+
+    StateMachine(StateMachine &&other) noexcept
+        requires(storageType == StorageType::ATOMIC)
+        : _state(other._state.load()) {} // atomic, not moving
+
+    StateMachine(StateMachine &&other) noexcept
+        requires(storageType != StorageType::ATOMIC)
+        : _state(other._state) {} // plain enum
+
+    [[nodiscard]] constexpr std::expected<void, ErrorType>
+    changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
+        State oldState = _state;
+        if (oldState == newState || (oldState == STOPPED && newState == REQUESTED_STOP) || (oldState == PAUSED && newState == REQUESTED_PAUSE)) {
+            return {};
+        }
+
+        if (!isValidTransition(oldState, newState)) {
+            return std::unexpected(ErrorType{ fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", getBlockName(), gr::meta::type_name<TDerived>(), magic_enum::enum_name(state()),
+                                                          magic_enum::enum_name(newState)),
+                                              location });
+            ;
+        }
+
+        setAndNotifyState(newState);
+
+        if constexpr (std::is_same_v<TDerived, void>) {
+            return {};
+        } else {
+            // Call specific methods in TDerived based on the state
+            if constexpr (requires(TDerived &d) { d.start(); }) {
+                if (oldState == State::INITIALISED && newState == State::RUNNING) {
+                    return invokeLifecycleMethod(&TDerived::start, location);
+                }
+            }
+
+            if constexpr (requires(TDerived &d) { d.stop(); }) {
+                if (newState == State::REQUESTED_STOP) {
+                    return invokeLifecycleMethod(&TDerived::stop, location);
+                }
+            }
+            if constexpr (requires(TDerived &d) { d.pause(); }) {
+                if (newState == State::REQUESTED_PAUSE) {
+                    return invokeLifecycleMethod(&TDerived::pause, location);
+                }
+            }
+            if constexpr (requires(TDerived &d) { d.resume(); }) {
+                if ((oldState == State::REQUESTED_PAUSE || oldState == State::PAUSED) && newState == State::RUNNING) {
+                    return invokeLifecycleMethod(&TDerived::resume, location);
+                }
+            }
+            if constexpr (requires(TDerived &d) { d.reset(); }) {
+                if (oldState != State::IDLE && newState == State::INITIALISED) {
+                    return invokeLifecycleMethod(&TDerived::reset, location);
+                }
+            }
+
+            return {};
+        }
+    }
+
+    [[nodiscard]] State
+    state() const noexcept {
+        if constexpr (storageType == StorageType::ATOMIC) {
+            return _state.load();
+        } else {
+            return _state;
+        }
+    }
+
+    void
+    waitOnState(State oldState)
+        requires(storageType == StorageType::ATOMIC)
+    {
+        _state.wait(oldState);
+    }
+};
+
+} // namespace gr::lifecycle
+
+#endif // GNURADIO_LIFECYCLE_HPP
+
+
+namespace gr {
+
+namespace stdx = vir::stdx;
+using gr::meta::fixed_string;
 
 template<typename F>
 constexpr void
@@ -18616,7 +18854,7 @@ concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProc
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : protected std::tuple<Arguments...> {
+class Block : public lifecycle::StateMachine<Derived>, protected std::tuple<Arguments...> {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -18650,6 +18888,7 @@ public:
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
             "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{ false };
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
@@ -18661,8 +18900,7 @@ public:
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
     //
-    std::size_t                   stride_counter = 0UZ;
-    std::atomic<lifecycle::State> state          = lifecycle::State::IDLE;
+    std::size_t stride_counter = 0UZ;
 
     // TODO: These are not involved in move operations, might be a problem later
     const std::size_t unique_id   = _unique_id_counter++;
@@ -18807,12 +19045,12 @@ public:
     }
 
     Block(Block &&other) noexcept
-        : std::tuple<Arguments...>(std::move(other))
+        : lifecycle::StateMachine<Derived>(std::move(other))
+        , std::tuple<Arguments...>(std::move(other))
         , numerator(std::move(other.numerator))
         , denominator(std::move(other.denominator))
         , stride(std::move(other.stride))
         , stride_counter(std::move(other.stride_counter))
-        , state(other.state.load()) // atomic, not moving
         , msgIn(std::move(other.msgIn))
         , msgOut(std::move(other.msgOut))
         , ports_status(std::move(other.ports_status))
@@ -18828,21 +19066,25 @@ public:
             = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
-        if (lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire))) {
-            std::atomic_store_explicit(&state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-            state.notify_all();
+        if (lifecycle::isActive(this->state())) {
+            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                using namespace gr::message;
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
         }
         if (isBlocking()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
         // wait for done
-        for (auto actualState = std::atomic_load_explicit(&state, std::memory_order_acquire); lifecycle::isActive(actualState);
-             actualState      = std::atomic_load_explicit(&state, std::memory_order_acquire)) {
-            state.wait(actualState);
+        for (auto actualState = this->state(); lifecycle::isActive(actualState); actualState = this->state()) {
+            this->waitOnState(actualState);
         }
-        std::atomic_store_explicit(&state, lifecycle::State::STOPPED, std::memory_order_release);
-        state.notify_all();
+
+        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+            using namespace gr::message;
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+        }
     }
 
     void
@@ -18885,7 +19127,10 @@ public:
 
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
-        state = lifecycle::State::INITIALISED;
+        if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
+            using namespace gr::message;
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+        }
     }
 
     template<gr::meta::array_or_vector_type Container>
@@ -19271,8 +19516,10 @@ public:
 
     constexpr void
     requestStop() noexcept {
-        std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-        this->state.notify_all();
+        if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+            using namespace gr::message;
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+        }
     }
 
     constexpr void
@@ -19319,7 +19566,16 @@ protected:
         constexpr bool kIsSourceBlock = TInputTypes::size == 0;
         constexpr bool kIsSinkBlock   = TOutputTypes::size == 0;
 
-        if (std::atomic_load_explicit(&state, std::memory_order_acquire) == lifecycle::State::STOPPED) {
+        if constexpr (!blockingIO) { // N.B. no other thread/constraint to consider before shutting down
+            if (this->state() == lifecycle::State::REQUESTED_STOP) {
+                if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                    using namespace gr::message;
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
+            }
+        }
+
+        if (this->state() == lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, work::Status::DONE };
         }
 
@@ -19396,9 +19652,11 @@ protected:
             }
 #endif
 
-            if (isEOSTagPresent || lifecycle::isShuttingDown(state)) {
-                state = lifecycle::State::STOPPED;
-                state.notify_all();
+            if (isEOSTagPresent || lifecycle::isShuttingDown(this->state())) {
+                if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                    using namespace gr::message;
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
 #ifdef _DEBUG
                 fmt::println("##block {} received EOS tag at {} in_samples {} -> lifecycle::State::STOPPED", name, ports_status.nSamplesToEosTag, ports_status.in_samples);
 #endif
@@ -19411,8 +19669,14 @@ protected:
                 const auto resamplingStatus = doResampling();
                 if (resamplingStatus != work::Status::OK) {
                     if (resamplingStatus == work::Status::INSUFFICIENT_INPUT_ITEMS || isEOSTagPresent) {
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        state.notify_all();
+                        if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                            using namespace gr::message;
+                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        }
+                        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                            using namespace gr::message;
+                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        }
                         updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
                         updateOutputTagsWithSettingParametersIfNeeded();
                         forwardTags();
@@ -19509,8 +19773,10 @@ protected:
             forwardTags();
             if constexpr (kIsSourceBlock) {
                 if (ret == work::Status::DONE) {
-                    std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                    state.notify_all();
+                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                        using namespace gr::message;
+                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    }
                     publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                     return { requested_work, ports_status.in_samples, work::Status::DONE };
                 }
@@ -19562,7 +19828,7 @@ protected:
                         const auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
                         meta::tuple_for_each([i](auto &output_range, auto &result) { output_range[i] = std::move(result); }, writersTuple, results);
                         nOutSamplesBeforeRequestedStop++;
-                        if (_output_tags_changed || lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire))) [[unlikely]] {
+                        if (_output_tags_changed || lifecycle::isShuttingDown(this->state())) [[unlikely]] {
                             // emitted tag and/or requested to stop
                             break;
                         }
@@ -19580,9 +19846,11 @@ protected:
             forwardTags();
             write_to_outputs(ports_status.out_samples, writersTuple);
             const bool success = consumeReaders(self(), nSamplesToConsume);
-            if (lifecycle::isShuttingDown(std::atomic_load_explicit(&state, std::memory_order_acquire))) [[unlikely]] {
-                std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                this->state.notify_all();
+            if (lifecycle::isShuttingDown(this->state())) [[unlikely]] {
+                if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                    using namespace gr::message;
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                }
                 publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                 return { requested_work, ports_status.in_samples, success ? work::Status::DONE : work::Status::ERROR };
             }
@@ -19625,32 +19893,40 @@ public:
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
-            if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
+
+            bool expectedThreadState = false;
+            if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
                     ioThreadPool->execute([this]() {
-                        assert(lifecycle::isActive(std::atomic_load_explicit(&state, std::memory_order_acquire)));
-                        lifecycle::State actualThreadState = std::atomic_load_explicit(&state, std::memory_order_acquire);
+                        assert(lifecycle::isActive(this->state()));
+
+                        lifecycle::State actualThreadState = this->state();
                         while (lifecycle::isActive(actualThreadState)) {
                             // execute ten times before testing actual state -- minimises overhead atomic load to work execution if the latter is a noop or very fast to execute
                             for (std::size_t testState = 0UZ; testState < 10UZ; ++testState) {
                                 if (invokeWork() == work::Status::DONE) {
                                     actualThreadState = lifecycle::State::REQUESTED_STOP;
-                                    std::atomic_store_explicit(&this->state, lifecycle::State::REQUESTED_STOP, std::memory_order_release);
-                                    state.notify_all();
+                                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                                        using namespace gr::message;
+                                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                                    }
                                     break;
                                 }
                             }
-                            actualThreadState = std::atomic_load_explicit(&state, std::memory_order_acquire);
+                            actualThreadState = this->state();
                         }
-                        std::atomic_store_explicit(&this->state, lifecycle::State::STOPPED, std::memory_order_release);
-                        state.notify_all();
+                        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                            using namespace gr::message;
+                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        }
+                        ioThreadRunning.store(false);
                     });
                 } else { // use user-provided ioThreadPool
                     // let user call 'work' explicitly and set both 'ioWorkDone' and 'ioLastWorkStatus'
                 }
             }
             if constexpr (!useIoThread) {
-                const bool blockIsActive = lifecycle::isActive(state.load());
+                const bool blockIsActive = lifecycle::isActive(this->state());
                 if (!blockIsActive) {
                     publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                     ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
@@ -20017,41 +20293,18 @@ public:
             = 0;
 
     /**
-     * @brief to be invoked by Scheduler->start() at the very beginning
-     */
-    virtual void
-    start() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->stop() at the very beginning
-     */
-    virtual void
-    stop() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->pause() at the very beginning
-     */
-    virtual void
-    pause() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->resume() at the very beginning
-     */
-    virtual void
-    resume() = 0;
-
-    /**
-     * @brief to be invoked by Scheduler->reset() at the very beginning
-     */
-    virtual void
-    reset() = 0;
-
-    /**
      * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
      */
     [[nodiscard]] virtual constexpr bool
     isBlocking() const noexcept
             = 0;
+
+    /**
+     * @brief change Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
+     * See enum description for details.
+     */
+    [[nodiscard]] virtual std::expected<void, lifecycle::ErrorType>
+    changeState(lifecycle::State newState) noexcept = 0;
 
     /**
      * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
@@ -20261,41 +20514,6 @@ public:
         return blockRef().init(progress, ioThreadPool);
     }
 
-    void
-    start() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.start(); }) {
-            blockRef().start();
-        }
-    }
-
-    void
-    stop() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.stop(); }) {
-            blockRef().stop();
-        }
-    }
-
-    void
-    pause() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.pause(); }) {
-            blockRef().pause();
-        }
-    }
-
-    void
-    resume() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.resume(); }) {
-            blockRef().resume();
-        }
-    }
-
-    void
-    reset() override {
-        if constexpr (requires(std::decay_t<decltype(blockRef())> t) { t.reset(); }) {
-            blockRef().reset();
-        }
-    };
-
     [[nodiscard]] constexpr work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return blockRef().work(requested_work);
@@ -20311,9 +20529,14 @@ public:
         return blockRef().isBlocking();
     }
 
+    [[nodiscard]] std::expected<void, lifecycle::ErrorType>
+    changeState(lifecycle::State newState) noexcept override {
+        return blockRef().changeStateTo(newState);
+    }
+
     [[nodiscard]] lifecycle::State
     state() const noexcept override {
-        return blockRef().state.load();
+        return blockRef().state();
     }
 
     [[nodiscard]] constexpr std::size_t
@@ -20757,7 +20980,7 @@ public:
 
     template<typename Anything>
     void
-    processMessages(MsgPortInNamed<"__FromChildren"> &port, std::span<const Anything> input) {
+    processMessages(MsgPortInNamed<"__FromChildren"> & /*port*/, std::span<const Anything> /*input*/) {
         static_assert(meta::always_false<Anything>, "This is not called, children are processed in processScheduledMessages");
     }
 

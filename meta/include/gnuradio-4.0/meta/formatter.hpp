@@ -1,10 +1,11 @@
 #ifndef GNURADIO_FORMATTER_HPP
 #define GNURADIO_FORMATTER_HPP
 
-#include "UncertainValue.hpp"
 #include <complex>
 #include <fmt/format.h>
+#include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <source_location>
 
 template<typename T>
 struct fmt::formatter<std::complex<T>> {
@@ -96,6 +97,51 @@ struct fmt::formatter<gr::property_map> {
     constexpr auto
     format(const gr::property_map &value, FormatContext &ctx) const {
         return fmt::format_to(ctx.out(), "{{ {} }}", fmt::join(value, ", "));
+    }
+};
+
+template<>
+struct fmt::formatter<std::vector<bool>> {
+    char presentation = 'c';
+
+    constexpr auto
+    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+        auto it = ctx.begin(), end = ctx.end();
+        if (it != end && (*it == 's' || *it == 'c')) presentation = *it++;
+        if (it != end && *it != '}') throw fmt::format_error("invalid format");
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto
+    format(const std::vector<bool> &v, FormatContext &ctx) const -> decltype(ctx.out()) {
+        auto   sep = (presentation == 'c' ? ", " : " ");
+        size_t len = v.size();
+        fmt::format_to(ctx.out(), "[");
+        for (size_t i = 0; i < len; ++i) {
+            if (i > 0) {
+                fmt::format_to(ctx.out(), "{}", sep);
+            }
+            fmt::format_to(ctx.out(), "{}", v[i] ? "true" : "false");
+        }
+        fmt::format_to(ctx.out(), "]");
+        return ctx.out();
+    }
+};
+
+template<>
+struct fmt::formatter<std::source_location> {
+    constexpr auto
+    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+        return ctx.begin();
+    }
+
+    // Formats the source_location, using 'f' for file and 'l' for line
+    template<typename FormatContext>
+    auto
+    format(const std::source_location &loc, FormatContext &ctx) const -> decltype(ctx.out()) {
+        // Example format: "file:line"
+        return fmt::format_to(ctx.out(), "{}:{}", loc.file_name(), loc.line());
     }
 };
 

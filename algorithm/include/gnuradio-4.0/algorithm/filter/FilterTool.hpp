@@ -17,7 +17,9 @@
 #include <fmt/std.h>
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 #include <magic_enum.hpp>
@@ -32,7 +34,7 @@
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 // this mocks the execution policy until Emscripten's libc++ does support this (Clang already does)
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__clang__)
 
 namespace std {
 

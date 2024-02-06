@@ -74,6 +74,27 @@ const boost::ut::suite propertyMapFormatter = [] {
     };
 };
 
+const boost::ut::suite vectorBoolFormatter = [] {
+    using namespace boost::ut;
+
+    "fmt::formatter<vector<bool>>"_test = [] {
+        std::vector<bool> boolVector{ true, false, true };
+        expect("[true, false, true]" == fmt::format("{}", boolVector));
+        expect("[true, false, true]" == fmt::format("{:c}", boolVector));
+        expect("[true false true]" == fmt::format("{:s}", boolVector));
+    };
+};
+
+const boost::ut::suite sourceLocationFormatter = [] {
+    using namespace boost::ut;
+
+    "fmt::formatter<std::source_location>"_test = [] {
+        auto loc = fmt::format("{}", std::source_location::current());
+        fmt::println("location formatter test: {}", loc);
+        expect(ge(loc.size(), 0));
+    };
+};
+
 } // namespace gr::meta::test
 
 int
