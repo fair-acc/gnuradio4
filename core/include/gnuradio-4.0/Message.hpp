@@ -12,6 +12,7 @@ namespace message::key {
 const std::string Sender    = "SENDER_KEY";
 const std::string Target    = "TARGET_KEY";
 const std::string Kind      = "KIND_KEY";
+const std::string Type      = "TYPE_KEY";
 const std::string What      = "WHAT_KEY";
 const std::string Data      = "DATA_KEY";
 const std::string Location  = "LOCATION_KEY";
@@ -46,14 +47,20 @@ const std::string DestinationPort  = "DESTINATION_PORT";
 } // namespace data
 } // namespace message::graph_update
 
-namespace message::scheduler_update {
+namespace message::scheduler::command {
+const std::string StartScheduler  = "START_SCHEDULER";
+const std::string StopScheduler   = "STOP_SCHEDULER";
+const std::string PauseScheduler  = "PAUSE_SCHEDULER";
+const std::string ResumeScheduler = "RESUME_SCHEDULER";
+} // namespace message::scheduler::command
+
+namespace message::scheduler::update {
 const std::string SchedulerStarted  = "STARTED_SCHEDULER_UPDATE";
-const std::string SchedulerStarting = "STARTING_SCHEDULER_UPDATE";
 const std::string SchedulerPaused   = "PAUSED_SCHEDULER_UPDATE";
 const std::string SchedulerPausing  = "PAUSING_SCHEDULER_UPDATE";
 const std::string SchedulerStopped  = "STOPPED_SCHEDULER_UPDATE";
 const std::string SchedulerStopping = "STOPPING_SCHEDULER_UPDATE";
-} // namespace message::scheduler_update
+} // namespace message::scheduler::update
 
 using Message = property_map;
 

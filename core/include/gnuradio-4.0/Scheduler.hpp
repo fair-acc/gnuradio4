@@ -17,7 +17,7 @@ using gr::thread_pool::BasicThreadPool;
 
 enum ExecutionPolicy { singleThreaded, multiThreaded };
 
-template<profiling::ProfilerLike TProfiler = profiling::null::Profiler>
+template<typename Derived, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase {
 public:
     lifecycle::State _state = lifecycle::State::IDLE;
@@ -30,6 +30,7 @@ protected:
     std::atomic_uint64_t                _progress;
     std::atomic_size_t                  _running_threads;
     std::atomic_bool                    _stop_requested;
+    std::atomic_bool                    _pause_requested;
 
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
     MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
@@ -101,7 +102,7 @@ public:
                 }
             }
         });
-        _state = lifecycle::State::STOPPED;
+        setState(lifecycle::State::STOPPED);
     }
 
     void
@@ -117,7 +118,17 @@ public:
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
-        _state = lifecycle::State::PAUSED;
+        setState(lifecycle::State::PAUSED);
+    }
+
+    // todo: iterate api for continuous flowgraphs vs ones that become "DONE" at some point
+    void
+    runAndWait() {
+        [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_simple.runAndWait");
+        self().init();
+        self().start();
+        self().waitDone();
+        self().stop();
     }
 
     void
@@ -132,13 +143,13 @@ public:
     void
     requestStop() {
         _stop_requested = true;
-        _state          = lifecycle::State::REQUESTED_STOP;
+        setState(lifecycle::State::REQUESTED_STOP);
     }
 
     void
     requestPause() {
-        _stop_requested = true;
-        _state          = lifecycle::State::REQUESTED_PAUSE;
+        _pause_requested = true;
+        setState(lifecycle::State::REQUESTED_PAUSE);
     }
 
     void
@@ -155,19 +166,39 @@ public:
 
     void
     processScheduledMessages() {
-        // Process messages in scheduler
-        auto passMessages = [](auto &inPort, auto &outPort) {
-            auto &reader = inPort.streamReader();
-            if (const auto available = reader.available(); available > 0) {
-                const auto &input = reader.get(available);
-                outPort.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
-                reader.consume(available);
+        auto &msgInReader = msgIn.streamReader();
+        if (const auto available = msgInReader.available(); available > 0) {
+            const auto &input = msgInReader.get(available);
+            for (const auto &msg : input) {
+                auto &toChildWriter = _toChildMessagePort.streamWriter();
+                const auto kindIt        = msg.find(gr::message::key::Kind);
+                // TODO factor out, protect against throw in std::get
+                const auto kind = kindIt != msg.end() ? std::get<std::string>(kindIt->second) : std::string{};
+                fmt::println("Received message. kind: {}", kind);
+                using namespace gr::message::scheduler::command;
+                if (kind == StartScheduler) {
+                    self().start();
+                } else if (kind == StopScheduler) {
+                    self().stop();
+                } else if (kind == PauseScheduler) {
+                    self().pause();
+                } else if (kind == ResumeScheduler) {
+                    self().resume();
+                } else {
+                    auto out = toChildWriter.reserve_output_range(1);
+                    out[0]   = msg;
+                    out.publish(1);
+                }
             }
-        };
+            std::ignore = msgInReader.consume(available);
+        }
 
-        passMessages(msgIn, _toChildMessagePort);
-        passMessages(_fromChildMessagePort, msgOut);
-
+        auto &fromChildReader = _fromChildMessagePort.streamReader();
+        if (const auto available = fromChildReader.available(); available > 0) {
+            const auto &input = fromChildReader.get(available);
+            msgOut.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
+            std::ignore = fromChildReader.consume(available);
+        }
         // Process messages in the graph
         _graph.processScheduledMessages();
         _graph.forEachBlock(&BlockModel::processScheduledMessages);
@@ -184,9 +215,9 @@ public:
         connectBlockMessagePorts();
 
         if (result) {
-            _state = lifecycle::State::INITIALISED;
+            setState(lifecycle::State::INITIALISED);
         } else {
-            _state = lifecycle::State::ERROR;
+            setState(lifecycle::State::ERROR);
         }
     }
 
@@ -212,7 +243,7 @@ public:
         // std::for_each(_graph.edges().begin(), _graph.edges().end(), [](auto &edge) {
         //
         // });
-        _state = lifecycle::State::INITIALISED;
+        setState(lifecycle::State::INITIALISED);
     }
 
     void
@@ -230,7 +261,7 @@ public:
         auto    &profiler_handler = _profiler.forThisThread();
         uint32_t done             = 0;
         uint32_t progress_count   = 0;
-        while (done < n_batches && !_stop_requested) {
+        while (done < n_batches && !_stop_requested && !_pause_requested) {
             auto                   pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
             const gr::work::Result workResult         = work();
             bool                   something_happened = workResult.status == work::Status::OK;
@@ -266,19 +297,63 @@ public:
         _running_threads.fetch_sub(1);
         _running_threads.notify_all();
     }
+
+protected:
+    [[nodiscard]] constexpr auto &
+    self() noexcept {
+        return *static_cast<Derived *>(this);
+    }
+
+    [[nodiscard]] constexpr const auto &
+    self() const noexcept {
+        return *static_cast<const Derived *>(this);
+    }
+
+    void
+    setState(lifecycle::State state) {
+        if (state == _state) {
+            return;
+        }
+        _state = state;
+
+        const auto stateStr = [](lifecycle::State s) {
+            using enum lifecycle::State;
+            using namespace message::scheduler::update;
+            switch (s) {
+            case RUNNING: return SchedulerStarted;
+            case REQUESTED_PAUSE: return SchedulerPausing;
+            case PAUSED: return SchedulerPaused;
+            case REQUESTED_STOP: return SchedulerStopping;
+            case STOPPED: return SchedulerStopped;
+            default: return std::string{};
+            }
+        }(_state);
+
+        if (!stateStr.empty()) {
+            sendMessage(msgOut, { { gr::message::kind::SchedulerUpdate, stateStr } });
+        }
+    }
+
+    void
+    sendMessage(auto &mout, gr::Message msg) {
+        auto out = mout.streamWriter().reserve_output_range(1);
+        out[0]   = std::move(msg);
+        out.publish(1);
+    }
 };
 
 /**
  * Trivial loop based scheduler, which iterates over all blocks in definition order in the graph until no node did any processing
  */
 template<ExecutionPolicy executionPolicy = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class Simple : public SchedulerBase<TProfiler> {
+class Simple : public SchedulerBase<Simple<executionPolicy, TProfiler>, TProfiler> {
+    using base_t = SchedulerBase<Simple<executionPolicy, TProfiler>, TProfiler>;
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
     explicit Simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                     const profiling::Options &profiling_options = {})
-        : SchedulerBase<TProfiler>(std::move(graph), thread_pool, profiling_options) {}
+        : base_t(std::move(graph), thread_pool, profiling_options) {}
 
     bool
     isProcessing() const
@@ -292,7 +367,7 @@ public:
         if (!this->canInit()) {
             return;
         }
-        SchedulerBase<TProfiler>::init();
+        base_t::init();
         [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_simple.init");
         // generate job list
         if constexpr (executionPolicy == ExecutionPolicy::multiThreaded) {
@@ -331,17 +406,6 @@ public:
         return { requestedWorkAllBlocks, performedWorkAllBlocks, something_happened ? work::Status::OK : work::Status::DONE };
     }
 
-    // todo: could be moved to base class, but would make `start()` virtual or require CRTP
-    // todo: iterate api for continuous flowgraphs vs ones that become "DONE" at some point
-    void
-    runAndWait() {
-        [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_simple.runAndWait");
-        init();
-        start();
-        this->waitDone();
-        this->stop();
-    }
-
     void
     resume() {
         if (!this->canResume()) {
@@ -371,17 +435,17 @@ public:
         });
 
         if constexpr (executionPolicy == singleThreaded) {
-            this->_state = lifecycle::State::RUNNING;
+            this->setState(lifecycle::State::RUNNING);
             work::Result                           result;
             std::span<std::unique_ptr<BlockModel>> blocklist = std::span{ this->_graph.blocks() };
             do {
                 result = workOnce(blocklist);
-            } while (result.status == work::Status::OK);
+            } while (result.status == work::Status::OK && !this->_stop_requested);
             if (result.status == work::Status::ERROR) {
-                this->_state = lifecycle::State::ERROR;
+                this->setState(lifecycle::State::ERROR);
             }
         } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
-            this->_state = lifecycle::State::RUNNING;
+            this->setState(lifecycle::State::RUNNING);
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");
@@ -394,14 +458,16 @@ public:
  * detecting cycles and blocks which can be reached from several source blocks.
  */
 template<ExecutionPolicy executionPolicy = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class BreadthFirst : public SchedulerBase<TProfiler> {
+class BreadthFirst : public SchedulerBase<BreadthFirst<executionPolicy, TProfiler>, TProfiler> {
+    using base_t = SchedulerBase<BreadthFirst<executionPolicy, TProfiler>, TProfiler>;
+
     std::vector<BlockModel *>              _blocklist;
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
     explicit BreadthFirst(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
                           const profiling::Options &profiling_options = {})
-        : SchedulerBase<TProfiler>(std::move(graph), thread_pool, profiling_options) {}
+        : base_t(std::move(graph), thread_pool, profiling_options) {}
 
     bool
     isProcessing() const
@@ -417,7 +483,7 @@ public:
         }
         [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("breadth_first.init");
         using block_t                  = BlockModel *;
-        SchedulerBase<TProfiler>::init();
+        base_t::init();
         // calculate adjacency list
         std::map<block_t, std::vector<block_t>> _adjacency_list{};
         std::vector<block_t>                    _source_blocks{};
@@ -489,14 +555,6 @@ public:
     }
 
     void
-    runAndWait() {
-        init();
-        start();
-        this->waitDone();
-        this->stop();
-    }
-
-    void
     resume() {
         if (!this->canResume()) {
             return;
@@ -526,17 +584,17 @@ public:
         });
 
         if constexpr (executionPolicy == singleThreaded) {
-            this->_state = lifecycle::State::RUNNING;
+            this->setState(lifecycle::State::RUNNING);
             work::Result result;
             auto         blocklist = std::span{ this->_blocklist };
-            while ((result = workOnce(blocklist)).status == work::Status::OK) {
+            while ((result = workOnce(blocklist)).status == work::Status::OK && !this->_stop_requested) {
                 if (result.status == work::Status::ERROR) {
-                    this->_state = lifecycle::State::ERROR;
+                    this->setState(lifecycle::State::ERROR);
                     return;
                 }
             }
         } else if (executionPolicy == multiThreaded) {
-            this->_state = lifecycle::State::RUNNING;
+            this->setState(lifecycle::State::RUNNING);
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
         } else {
             throw std::invalid_argument("Unknown execution Policy");

@@ -5,6 +5,7 @@
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
 
+#include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
@@ -27,6 +28,31 @@ createOnesGenerator(IsDone &isDone) {
         }
     };
 }
+
+template<typename T>
+struct Generator : public gr::Block<Generator<T>> {
+    gr::PortOut<T> out;
+    T              value;
+
+    T
+    processOne() {
+        return value;
+    }
+};
+
+template<typename T>
+struct Inverter : public gr::Block<Inverter<T>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    T
+    processOne(const T &input) {
+        return -input;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(Generator, out, value)
+ENABLE_REFLECTION_FOR_TEMPLATE(Inverter, in, out)
 
 template<gr::fixed_string which>
 auto
@@ -83,13 +109,49 @@ static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessa
 static_assert(!gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 
+namespace {
+
+std::vector<pmtv::map_t>
+waitForMessages(auto &messageReader, std::vector<pmtv::map_t> expectedMessages, std::chrono::milliseconds timeout = 500ms) {
+    using namespace boost::ut;
+
+    std::vector<pmtv::map_t> received;
+    auto                     start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < timeout && !expectedMessages.empty()) {
+        const auto available = messageReader.available();
+        if (available == 0) {
+            std::this_thread::sleep_for(20ms);
+            continue;
+        }
+        const auto messages = messageReader.get(available);
+        received.insert(received.end(), messages.begin(), messages.end());
+        std::erase_if(expectedMessages, [&messages](const auto &expected) {
+            return std::ranges::any_of(messages, [&expected](const auto &rec) {
+                return std::ranges::all_of(expected, [&rec](const auto &pair) { return rec.contains(pair.first) && rec.at(pair.first) == pair.second; });
+            });
+        });
+        std::ignore = messageReader.consume(available);
+    }
+
+    expect(expectedMessages.empty()) << fmt::format("Expected messages not received: {} received: {}", expectedMessages.size(), received.size());
+    return received;
+}
+
+void
+sendMessage(auto &outPort, pmtv::map_t message) {
+    auto out = outPort.streamWriter().reserve_output_range(1);
+    out[0]   = std::move(message);
+    out.publish(1);
+}
+} // namespace
+
 const boost::ut::suite MessagesTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
     // Testing if multicast messages sent from outside of the graph reach
     // the nodes inside, and if messages sent from the node reach the outside
-    "MulticastMessaggingWithTheWorld"_test = [] {
+    "MulticastMessagingWithTheWorld"_test = [] {
         using Scheduler = gr::scheduler::Simple<>;
 
         std::atomic_size_t    collectedEventCount     = 0;
@@ -157,9 +219,9 @@ const boost::ut::suite MessagesTests = [] {
         messenger.join();
     };
 
-    // Testing if targetted messages sent from outside of the graph reach
+    // Testing if targeted messages sent from outside of the graph reach
     // the node
-    "TargettedMessageForABlock"_test = [] {
+    "TargetedMessageForABlock"_test = [] {
         using Scheduler = gr::scheduler::Simple<>;
 
         std::atomic_size_t    collectedEventCount     = 0;
@@ -292,6 +354,37 @@ const boost::ut::suite MessagesTests = [] {
 
         scheduler.runAndWait();
         messenger.join();
+    };
+
+    // Test scheduler state changes via messages
+    "SchedulerControl"_test = [] {
+        using Scheduler = gr::scheduler::Simple<>;
+
+        auto scheduler = [&] {
+            gr::Graph flow;
+            auto     &source = flow.emplaceBlock<Generator<float>>();
+            auto     &sink   = flow.emplaceBlock<gr::basic::DataSink<float>>();
+
+            expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
+
+            return Scheduler(std::move(flow));
+        }();
+
+        gr::MsgPortIn  fromScheduler;
+        gr::MsgPortOut toScheduler;
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+
+        auto client = std::jthread([&fromScheduler, &toScheduler] {
+            auto &reader = fromScheduler.streamReader();
+
+            waitForMessages(reader, { { { message::kind::SchedulerUpdate, message::scheduler::update::SchedulerStarted } } });
+
+            sendMessage(toScheduler, { { message::key::Kind, message::scheduler::command::StopScheduler } });
+            waitForMessages(reader, { { { message::kind::SchedulerUpdate, message::scheduler::update::SchedulerStopping } },
+                                      { { message::kind::SchedulerUpdate, message::scheduler::update::SchedulerStopped } } });
+        });
+        scheduler.runAndWait();
     };
 
     // Testing message passing without a running scheduler
