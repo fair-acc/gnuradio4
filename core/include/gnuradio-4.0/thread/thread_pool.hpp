@@ -405,7 +405,8 @@ public:
                     uint32_t max = std::thread::hardware_concurrency())
         : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
         assert(min > 0 && "minimum number of threads must be > 0");
-        for (uint32_t i = 0; i < _minThreads; ++i) {
+        uint32_t num = _taskType == TaskType::IO_BOUND ? _minThreads : _maxThreads;
+        for (uint32_t i = 0; i < num; ++i) {
             createWorkerThread();
         }
     }
