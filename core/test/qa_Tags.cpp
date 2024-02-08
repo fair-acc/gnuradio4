@@ -85,7 +85,7 @@ const boost::ut::suite TagPropagation = [] {
     using namespace gr::testing;
 
     auto runTest = []<auto srcType>(bool verbose = true) {
-        std::uint64_t      n_samples = 1024;
+        gr::Size_t         n_samples = 1024;
         Graph              testGraph;
         const property_map srcParameter = { { "n_samples_max", n_samples }, { "name", "TagSource" }, { "signal_name", "tagStream" }, { "verbose_console", true && verbose } };
         auto              &src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);

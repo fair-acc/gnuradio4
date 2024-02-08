@@ -48,12 +48,12 @@ struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceTyp
     std::uint64_t              repeat_period{ 0 };          // if repeat_period > last tag_time -> restart tags, in nanoseconds
     bool                       do_zero_order_hold{ false }; // if more tag_times than values: true=publish last tag, false=publish empty
 
-    A<std::uint32_t, "n_samples_max", Visible, Doc<"0: unlimited">>              n_samples_max = 1024;
-    std::uint32_t                                                                n_samples_produced{ 0 };
-    A<float, "avg. sample rate", Visible>                                        sample_rate = 1000.f;
-    A<std::uint32_t, "chunk_size", Visible, Doc<"number of samples per update">> chunk_size  = 100;
-    std::shared_ptr<std::thread>                                                 userProvidedThread;
-    bool                                                                         verbose_console = false;
+    A<gr::Size_t, "n_samples_max", Visible, Doc<"0: unlimited">>              n_samples_max = 1024;
+    gr::Size_t                                                                n_samples_produced{ 0 };
+    A<float, "avg. sample rate", Visible>                                     sample_rate = 1000.f;
+    A<gr::Size_t, "chunk_size", Visible, Doc<"number of samples per update">> chunk_size  = 100;
+    std::shared_ptr<std::thread>                                              userProvidedThread;
+    bool                                                                      verbose_console = false;
 
 private:
     std::chrono::time_point<ClockSourceType> _beginSequenceTimePoint = ClockSourceType::now();
@@ -109,10 +109,10 @@ public:
             std::this_thread::sleep_until(nextTimePoint);
         }
 
-        const std::uint32_t remainingSamples = n_samples_max - n_samples_produced;
-        std::uint32_t       samplesToProduce = std::min(remainingSamples, chunk_size.value);
+        const gr::Size_t remainingSamples = n_samples_max - n_samples_produced;
+        gr::Size_t       samplesToProduce = std::min(remainingSamples, chunk_size.value);
 
-        std::uint32_t samplesToNextTimeTag = std::numeric_limits<uint32_t>::max();
+        gr::Size_t samplesToNextTimeTag = std::numeric_limits<uint32_t>::max();
         if (!tag_times.empty()) {
             if (next_time_tag == 0 && !_beginSequenceTimePointInitialized) {
                 _beginSequenceTimePoint            = nextTimePoint;
@@ -126,11 +126,11 @@ public:
             if (next_time_tag < tag_times.size()) {
                 const auto currentTagTime = std::chrono::microseconds(tag_times[next_time_tag] / 1000); // ns -> μs
                 const auto timeToNextTag  = std::chrono::duration_cast<std::chrono::microseconds>((_beginSequenceTimePoint + currentTagTime - nextTimePoint));
-                samplesToNextTimeTag      = static_cast<std::uint32_t>((static_cast<double>(timeToNextTag.count()) / 1.e6) * static_cast<double>(sample_rate));
+                samplesToNextTimeTag      = static_cast<gr::Size_t>((static_cast<double>(timeToNextTag.count()) / 1.e6) * static_cast<double>(sample_rate));
             }
         }
 
-        auto samplesToNextTag = tags.empty() || next_tag >= tags.size() ? std::numeric_limits<uint32_t>::max() : static_cast<std::uint32_t>(tags[next_tag].index) - n_samples_produced;
+        auto samplesToNextTag = tags.empty() || next_tag >= tags.size() ? std::numeric_limits<uint32_t>::max() : static_cast<gr::Size_t>(tags[next_tag].index) - n_samples_produced;
 
         if (samplesToNextTag < samplesToNextTimeTag) {
             if (next_tag < tags.size() && samplesToNextTag <= samplesToProduce) {

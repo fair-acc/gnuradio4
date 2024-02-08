@@ -2,6 +2,7 @@
 
 #include <barrier>
 #include <chrono>
+#include <cstddef>
 #include <iostream>
 #include <thread>
 
@@ -24,11 +25,11 @@ using namespace gr;
 void
 setCpuAffinity(const int cpuID) // N.B. pthread is not portable
 {
-    const auto nCPU = std::thread::hardware_concurrency();
+    const std::size_t nCPU = std::thread::hardware_concurrency();
     // fmt::print("set CPU affinity to core {}\n", cpuID % nCPU);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(static_cast<size_t>(cpuID) % nCPU, &cpuset);
+    CPU_SET(static_cast<std::size_t>(cpuID) % nCPU, &cpuset);
     int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
         constexpr auto fmt = "pthread_setaffinity_np({} of {}): {} - {}\n";

@@ -100,7 +100,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
     // settings
     const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
-    Annotated<std::uint32_t, "FFT size", Doc<"FFT size">>                            fftSize{ 1024U };
+    Annotated<gr::Size_t, "FFT size", Doc<"FFT size">>                               fftSize{ 1024U };
     Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(magic_enum::enum_name(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
     Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              outputInDeg{ false };
@@ -108,8 +108,8 @@ On the choice of window (mathematically aka. apodisation) functions
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
-    Annotated<T, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>         signal_min  = std::numeric_limits<T>::lowest();
-    Annotated<T, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>         signal_max  = std::numeric_limits<T>::max();
+    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -std::numeric_limits<float>::max();
+    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +std::numeric_limits<float>::max();
 
     // semi-private caching vectors (need to be public for unit-test) -> TODO: move to FFT implementations, casting from T -> U::value_type should be done there
     std::vector<InDataType>  _inData             = std::vector<InDataType>(fftSize, 0);

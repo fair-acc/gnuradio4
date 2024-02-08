@@ -81,13 +81,13 @@ struct BlockingIO {
  * @tparam denominator Bottom number in the input-to-output sample ratio.
  * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
  */
-template<std::size_t numerator = 1LU, std::size_t denominator = 1LU, bool isConst = false>
+template<gr::Size_t numerator = 1U, gr::Size_t denominator = 1U, bool isConst = false>
 struct ResamplingRatio {
     static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
-    static constexpr std::size_t kNumerator   = numerator;
-    static constexpr std::size_t kDenominator = denominator;
-    static constexpr bool        kIsConst     = isConst;
-    static constexpr bool        kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
+    static constexpr gr::Size_t kNumerator   = numerator;
+    static constexpr gr::Size_t kDenominator = denominator;
+    static constexpr bool       kIsConst     = isConst;
+    static constexpr bool       kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
 };
 
 template<typename T>
@@ -115,13 +115,13 @@ static_assert(!is_resampling_ratio<int>::value);
  * @tparam stride The number of samples between data processing events.
  * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
  */
-template<std::size_t stride = 0LU, bool isConst = false>
+template<std::uint64_t stride = 0U, bool isConst = false>
 struct Stride {
-    static_assert(stride >= 0, "Stride must be >= 0");
+    static_assert(stride >= 0U, "Stride must be >= 0");
 
-    static constexpr std::size_t kStride  = stride;
-    static constexpr bool        kIsConst = isConst;
-    static constexpr bool        kEnabled = !isConst || (stride > 0);
+    static constexpr std::uint64_t kStride  = stride;
+    static constexpr bool          kIsConst = isConst;
+    static constexpr bool          kEnabled = !isConst || (stride > 0U);
 };
 
 template<typename T>
@@ -215,7 +215,7 @@ template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
 struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
 
 template<typename T>
-concept Limit    = is_limits<T>::value;
+concept Limit = is_limits<T>::value;
 
 using EmptyLimit = Limits<0, 0>; // nomen-est-omen
 
@@ -236,8 +236,7 @@ struct Annotated {
 
     template<typename U>
         requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false)
-    Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
+    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
 
     template<typename U>
         requires std::assignable_from<T &, U>

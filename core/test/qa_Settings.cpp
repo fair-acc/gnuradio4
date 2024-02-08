@@ -77,28 +77,16 @@ printChanges(const property_map &oldMap, const property_map &newMap) noexcept {
 
 template<typename T>
 struct Source : public Block<Source<T>> {
-    PortOut<T>   out;
-    std::int32_t n_samples_produced = 0;
-    std::int32_t n_samples_max      = 1024;
-    std::int32_t n_tag_offset       = 0;
-    float        sample_rate        = 1000.0f;
+    PortOut<T> out;
+    gr::Size_t n_samples_produced = 0;
+    gr::Size_t n_samples_max      = 1024;
+    float      sample_rate        = 1000.0f;
 
     void
     settingsChanged(const property_map & /*oldSettings*/, property_map &newSettings, property_map &fwdSettings) {
         // optional init function that is called after construction and whenever settings change
         newSettings.insert_or_assign("n_samples_max", n_samples_max);
         fwdSettings.insert_or_assign("n_samples_max", n_samples_max);
-        //
-        //        // gr::publish_tag(out, { { "n_samples_max", n_samples_max } }, static_cast<Tag::signed_index_type>(n_tag_offset));
-        //        if constexpr (true) {
-        //            this->forwardTags(); // explicitly forward pending tags before the end of this processBulk(...) invocation ends
-        //            gr::publishTag(out, { { "n_samples_max", n_samples_max } });
-        //        } else {
-        //            Tag &out_tag       = this->output_tags()[0];
-        //            out_tag.map.insert_or_assign("n_samples_max", n_samples_max);
-        //            out_tag.index      = 0;
-        //            this->forwardTags(); // explicitly forward tags before the end of this processBulk(...) invocation ends
-        //        }
     }
 
     [[nodiscard]] constexpr T
@@ -126,7 +114,7 @@ struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, TestBlockDoc, Su
     // parameters
     A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">>                    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
     A<std::string, "context information", Visible>                                   context{};
-    std::int32_t                                                                     n_samples_max = -1;
+    gr::Size_t                                                                       n_samples_max = 0;
     A<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
     std::vector<T>                                                                   vector_setting{ T(3), T(2), T(1) };
     A<std::vector<std::string>, "string vector">                                     string_vector_setting = {};
@@ -191,8 +179,8 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
 
     constexpr work::Status
     processBulk(std::span<const T> input, std::span<T> output) noexcept {
-        assert(this->numerator == std::size_t(1) && "block implements only basic decimation");
-        assert(this->denominator != std::size_t(0) && "denominator must be non-zero");
+        assert(this->numerator == gr::Size_t(1) && "block implements only basic decimation");
+        assert(this->denominator != gr::Size_t(0) && "denominator must be non-zero");
 
         auto outputIt = output.begin();
         if constexpr (Average) {
@@ -217,11 +205,11 @@ static_assert(BlockLike<Decimate<double>>);
 
 template<typename T>
 struct Sink : public Block<Sink<T>> {
-    PortIn<T>    in;
-    std::int32_t n_samples_consumed = 0;
-    std::int32_t n_samples_max      = -1;
-    int64_t      last_tag_position  = -1;
-    float        sample_rate        = 1.0f;
+    PortIn<T>  in;
+    gr::Size_t n_samples_consumed = 0;
+    gr::Size_t n_samples_max      = 0;
+    int64_t    last_tag_position  = -1;
+    float      sample_rate        = 1.0f;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -235,7 +223,7 @@ struct Sink : public Block<Sink<T>> {
 };
 } // namespace gr::setting_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Source<T>), out, n_samples_produced, n_samples_max, n_tag_offset, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Source<T>), out, n_samples_produced, n_samples_max, sample_rate);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
@@ -247,12 +235,12 @@ const boost::ut::suite SettingsTests = [] {
     using namespace std::string_view_literals;
 
     "basic node settings tag"_test = [] {
-        Graph                  testGraph;
-        constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
+        Graph                testGraph;
+        constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->TestBlock->Sink flow graph
         auto &src = testGraph.emplaceBlock<Source<float>>({ { "sample_rate", 42.f }, { "n_samples_max", n_samples } });
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
-        expect(eq(src.settings().autoUpdateParameters().size(), 4UL));
+        expect(eq(src.settings().autoUpdateParameters().size(), 3UL));
         expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // sample_rate
         auto &block1 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#1" } });
         auto &block2 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#2" } });
@@ -446,12 +434,12 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "basic decimation test"_test = []() {
-        Graph                  testGraph;
-        constexpr std::int32_t n_samples = gr::util::round_up(1'000'000, 1024);
-        auto                  &src       = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
-        auto                  &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::size_t(2) } });
-        auto                  &block2    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", std::size_t(5) } });
-        auto                  &sink      = testGraph.emplaceBlock<Sink<float>>();
+        Graph                testGraph;
+        constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
+        auto                &src       = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
+        auto                &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::uint32_t(2) } });
+        auto                &block2    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", std::uint32_t(5) } });
+        auto                &sink      = testGraph.emplaceBlock<Sink<float>>();
 
         // check denominator
         expect(eq(block1.denominator, std::size_t(2)));

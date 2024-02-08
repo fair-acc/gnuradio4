@@ -13,6 +13,12 @@ template<typename T>
 struct ArraySource : public gr::Block<ArraySource<T>> {
     std::array<gr::PortOut<T>, 2> outA;
     std::array<gr::PortOut<T>, 2> outB;
+
+    template<typename PublishableSpan1, typename PublishableSpan2>
+    gr::work::Status
+    processBulk(PublishableSpan1&, PublishableSpan2& ) { //TODO: needs proper explicit signature
+        return gr::work::Status::OK;
+    }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySource, outA, outB);
@@ -27,6 +33,12 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
     gr::Annotated<std::vector<std::string>, "String vector setting"> string_vector;
     gr::Annotated<std::vector<double>, "Double vector setting">      double_vector;
     gr::Annotated<std::vector<int16_t>, "int16_t vector setting">    int16_vector;
+
+    template<typename ConsumableSpan1, typename ConsumableSpan2>
+    gr::work::Status
+    processBulk(ConsumableSpan1&, ConsumableSpan2&) { //TODO: needs proper explicit signature
+        return gr::work::Status::OK;
+    }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB, bool_setting, string_setting, bool_vector, string_vector, double_vector, int16_vector);

@@ -240,8 +240,8 @@ public:
             if (something_happened) { // something happened in this thread => increase progress and reset done count
                 do {
                     progress_local = _progress.load();
-                    progress_count = static_cast<std::uint32_t>((progress_local >> 32) & ((1ULL << 32) - 1));
-                    done           = static_cast<std::uint32_t>(progress_local & ((1ULL << 32) - 1));
+                    progress_count = static_cast<gr::Size_t>((progress_local >> 32) & ((1ULL << 32) - 1));
+                    done           = static_cast<gr::Size_t>(progress_local & ((1ULL << 32) - 1));
                     progress_new   = (progress_count + 1ULL) << 32;
                 } while (!_progress.compare_exchange_strong(progress_local, progress_new));
                 _progress.notify_all();
@@ -249,8 +249,8 @@ public:
                 uint32_t progress_count_old = progress_count;
                 do {
                     progress_local = _progress.load();
-                    progress_count = static_cast<std::uint32_t>((progress_local >> 32) & ((1ULL << 32) - 1));
-                    done           = static_cast<std::uint32_t>(progress_local & ((1ULL << 32) - 1));
+                    progress_count = static_cast<gr::Size_t>((progress_local >> 32) & ((1ULL << 32) - 1));
+                    done           = static_cast<gr::Size_t>(progress_local & ((1ULL << 32) - 1));
                     if (progress_count == progress_count_old) { // nothing happened => increase done count
                         progress_new = ((progress_count + 0ULL) << 32) + done + 1;
                     } else { // something happened in another thread => keep progress and done count and rerun this task without waiting

@@ -20,6 +20,14 @@
 
 namespace gr {
 
+namespace settings {
+template<typename T>
+inline constexpr static bool
+isSupportedType() {
+    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || gr::meta::vector_type<T> || std::is_same_v<T, property_map>;
+}
+} // namespace settings
+
 namespace detail {
 template<class T>
 inline constexpr void
@@ -273,7 +281,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                            if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                                 if (default_tag == get_display_name(member)) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
@@ -363,7 +371,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -428,7 +436,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
@@ -518,7 +526,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
@@ -563,7 +571,7 @@ public:
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && settings::isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
@@ -601,7 +609,7 @@ public:
             std::lock_guard lg(_lock);
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && settings::isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
@@ -620,7 +628,7 @@ private:
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && settings::isSupportedType<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
@@ -629,12 +637,6 @@ private:
             }
             refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
         }
-    }
-
-    template<typename T>
-    inline constexpr static bool
-    isSupportedType() {
-        return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || gr::meta::vector_type<T> || std::is_same_v<T, property_map>;
     }
 
     template<typename T, typename Func>

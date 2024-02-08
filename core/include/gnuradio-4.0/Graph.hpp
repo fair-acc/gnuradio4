@@ -1,14 +1,14 @@
 #ifndef GNURADIO_GRAPH_HPP
 #define GNURADIO_GRAPH_HPP
 
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/Buffer.hpp>
+#include <gnuradio-4.0/CircularBuffer.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
-
-#include "Block.hpp"
-#include "Buffer.hpp"
-#include "CircularBuffer.hpp"
-#include "Port.hpp"
-#include "Sequence.hpp"
-#include "thread/thread_pool.hpp"
+#include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/Sequence.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <algorithm>
 #include <complex>
@@ -1269,5 +1269,7 @@ this_source_location() {
 #endif // HAVE_SOURCE_LOCATION
 
 } // namespace gr
+
+REFL_TYPE(gr::Graph) REFL_END // minimal reflection declaration
 
 #endif // include guard
