@@ -376,7 +376,7 @@ class BasicThreadPool {
     }
 
     std::atomic_bool        _initialised = ATOMIC_FLAG_INIT;
-    bool                    _shutdown    = false;
+    std::atomic_bool        _shutdown    = false;
 
     std::condition_variable _condition;
     std::atomic_size_t      _numTaskedQueued = 0U; // cache for _taskQueue.size()
