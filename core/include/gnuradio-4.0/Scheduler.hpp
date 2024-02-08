@@ -471,6 +471,8 @@ public:
     template<typename block_type>
     work::Result
     workOnce(const std::span<block_type> &blocks) {
+        this->processScheduledMessages();
+
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
         std::size_t           performed_work     = 0UZ;
