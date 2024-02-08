@@ -2,6 +2,7 @@
 #define GNURADIO_GRAPH_UTILS_HPP
 
 #include <complex>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -27,7 +28,11 @@
 #define DISABLE_SIMD 0
 #endif
 
-namespace gr::meta {
+namespace gr {
+
+using Size_t = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+
+namespace meta {
 
 struct null_type {};
 
@@ -536,6 +541,7 @@ is_const_member_function(T) noexcept {
     return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
 }
 
-} // namespace gr::meta
+} // namespace meta
+} // namespace gr
 
 #endif // include guard

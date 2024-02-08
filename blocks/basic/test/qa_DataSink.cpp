@@ -182,8 +182,8 @@ const boost::ut::suite DataSinkTests = [] {
     using namespace std::string_literals;
 
     "callback continuous mode"_test = [] {
-        constexpr std::uint64_t kSamples   = 200005;
-        constexpr std::size_t   kChunkSize = 1000;
+        constexpr gr::Size_t  kSamples   = 200005;
+        constexpr std::size_t kChunkSize = 1000;
 
         const auto srcTags = makeTestTags(0, 1000);
 
@@ -262,7 +262,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling continuous mode"_test = [] {
-        constexpr std::uint64_t kSamples = 200000;
+        constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph  testGraph;
         const auto tags = makeTestTags(0, 1000);
@@ -339,7 +339,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
-        constexpr std::uint64_t kSamples = 200000;
+        constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph  testGraph;
         auto      &src  = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
@@ -401,7 +401,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking snapshot mode"_test = [] {
-        constexpr std::uint64_t kSamples = 200000;
+        constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph testGraph;
         auto     &src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
@@ -472,11 +472,11 @@ const boost::ut::suite DataSinkTests = [] {
     "blocking multiplexed mode"_test = [] {
         const auto tags = makeTestTags(0, 10000);
 
-        const std::uint64_t n_samples = static_cast<std::uint64_t>(tags.size() * 10000 + 100000);
-        gr::Graph           testGraph;
-        auto               &src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", n_samples }, { "mark_tag", false } });
-        src.tags                = tags;
-        auto &sink              = testGraph.emplaceBlock<DataSink<int32_t>>({ { "name", "test_sink" } });
+        const gr::Size_t n_samples = static_cast<gr::Size_t>(tags.size() * 10000 + 100000);
+        gr::Graph        testGraph;
+        auto            &src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({ { "n_samples_max", n_samples }, { "mark_tag", false } });
+        src.tags             = tags;
+        auto &sink           = testGraph.emplaceBlock<DataSink<int32_t>>({ { "name", "test_sink" } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
@@ -552,7 +552,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode overlapping"_test = [] {
-        constexpr std::uint64_t kSamples  = 150000;
+        constexpr std::uint32_t kSamples  = 150000;
         constexpr std::size_t   kTriggers = 300;
 
         gr::Graph testGraph;
@@ -607,7 +607,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "callback trigger mode overlapping"_test = [] {
-        constexpr std::uint64_t kSamples  = 150000;
+        constexpr std::uint32_t kSamples  = 150000;
         constexpr std::size_t   kTriggers = 300;
 
         gr::Graph testGraph;
@@ -647,7 +647,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "non-blocking polling continuous mode"_test = [] {
-        constexpr std::uint64_t kSamples = 200000;
+        constexpr std::uint32_t kSamples = 200000;
 
         gr::Graph testGraph;
         auto     &src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({ { "n_samples_max", kSamples }, { "mark_tag", false } });
