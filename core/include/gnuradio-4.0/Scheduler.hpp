@@ -3,6 +3,7 @@
 
 #include <barrier>
 #include <set>
+#include <thread>
 #include <utility>
 #include <queue>
 
@@ -125,8 +126,10 @@ public:
         using enum lifecycle::State;
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.waitDone");
         for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
-            _running_threads.wait(running);
+            this->processScheduledMessages();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        this->processScheduledMessages();
     }
 
     void
@@ -161,7 +164,9 @@ public:
             if (const auto available = reader.available(); available > 0) {
                 const auto &input = reader.get(available);
                 outPort.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
-                reader.consume(available);
+                if (!reader.consume(available)) {
+                    throw std::runtime_error("Failed to consume messages from message port");
+                }
             }
         };
 
@@ -170,7 +175,9 @@ public:
 
         // Process messages in the graph
         _graph.processScheduledMessages();
-        _graph.forEachBlock(&BlockModel::processScheduledMessages);
+        if (_running_threads.load() == 0) {
+            _graph.forEachBlock(&BlockModel::processScheduledMessages);
+        }
     }
 
     void
@@ -314,11 +321,9 @@ public:
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
         std::size_t           performedWorkAllBlocks = 0UZ;
-
-        this->processScheduledMessages();
-
         bool something_happened = false;
         for (auto &currentBlock : blocks) {
+            currentBlock->processScheduledMessages();
             const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
             performedWorkAllBlocks += performed_work;
             if (status == work::Status::ERROR) {
@@ -375,6 +380,7 @@ public:
             work::Result                           result;
             std::span<std::unique_ptr<BlockModel>> blocklist = std::span{ this->_graph.blocks() };
             do {
+                this->processScheduledMessages();
                 result = workOnce(blocklist);
             } while (result.status == work::Status::OK);
             if (result.status == work::Status::ERROR) {
@@ -471,13 +477,12 @@ public:
     template<typename block_type>
     work::Result
     workOnce(const std::span<block_type> &blocks) {
-        this->processScheduledMessages();
-
         constexpr std::size_t requested_work     = std::numeric_limits<std::size_t>::max();
         bool                  something_happened = false;
         std::size_t           performed_work     = 0UZ;
 
         for (auto &currentBlock : blocks) {
+            currentBlock->processScheduledMessages();
             gr::work::Result result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
             if (result.status == work::Status::ERROR) {
@@ -532,6 +537,7 @@ public:
             work::Result result;
             auto         blocklist = std::span{ this->_blocklist };
             while ((result = workOnce(blocklist)).status == work::Status::OK) {
+                this->processScheduledMessages();
                 if (result.status == work::Status::ERROR) {
                     this->_state = lifecycle::State::ERROR;
                     return;
