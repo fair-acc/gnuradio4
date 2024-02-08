@@ -1439,7 +1439,11 @@ public:
 
                 Message settingsUpdated;
                 settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
-                settingsUpdated[gr::message::key::Data] = settings().get();
+                auto set = settings().get();
+                for (auto &&staged: settings().stagedParameters()) {
+                    set[staged.first] = staged.second;
+                }
+                settingsUpdated[gr::message::key::Data] = set;
 
                 if (!notSet.empty()) {
                     Message errorMessage;
