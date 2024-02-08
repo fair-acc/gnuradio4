@@ -362,10 +362,10 @@ public:
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
     //
-    using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
-    using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::size_t, std::size_t>;
+    using RatioValue = std::conditional_t<Resampling::kIsConst, const std::uint64_t, std::uint64_t>;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::uint64_t(-1)>>      numerator   = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::uint64_t(-1)>> denominator = Resampling::kDenominator;
+    using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::uint64_t, std::uint64_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
     //

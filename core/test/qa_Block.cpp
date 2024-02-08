@@ -26,9 +26,9 @@ struct ProcessStatus {
 };
 
 struct IntDecTestData {
-    std::size_t n_samples{};
-    std::size_t numerator{};
-    std::size_t denominator{};
+    std::uint64_t n_samples{};
+    std::uint64_t numerator{};
+    std::uint64_t denominator{};
     int         out_port_min{ -1 }; // -1 for not used
     int         out_port_max{ -1 }; // -1 for not used
     std::size_t exp_in{};
@@ -60,22 +60,6 @@ struct StrideTestData {
     to_string() const {
         return fmt::format("n_samples: {}, numerator: {}, denominator: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}",
                            n_samples, numerator, denominator, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out);
-    }
-};
-
-template<typename T>
-struct CountSource : public gr::Block<CountSource<T>> {
-    gr::PortOut<T> out{};
-    int            count{ 0 };
-    int            n_samples{ 1024 };
-
-    constexpr T
-    processOne() {
-        count++;
-        if (count >= n_samples) {
-            this->requestStop();
-        }
-        return static_cast<T>(count - 1); // -1 to start from 0
     }
 };
 
@@ -120,7 +104,6 @@ struct AsyncBlock : gr::Block<AsyncBlock<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, n_samples);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (IntDecBlock<T>), in, out);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (AsyncBlock<T>), in, out);
 
@@ -130,8 +113,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
-    auto     &source = flow.emplaceBlock<CountSource<int>>();
-    source.n_samples = static_cast<int>(data.n_samples);
+    auto     &source = flow.emplaceBlock<gr::testing::TagSource<int>>({{"n_samples_max", data.n_samples }, {"mark_tag", false} });
 
     auto &int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator } });
     if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
@@ -154,14 +136,10 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
     gr::Graph flow;
-    auto     &source = flow.emplaceBlock<CountSource<int>>();
-    source.n_samples = static_cast<int>(data.n_samples);
+    auto     &source = flow.emplaceBlock<gr::testing::TagSource<int>>({{"n_samples_max", data.n_samples }, {"mark_tag", false} });
 
-    auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>();
+    auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>({{"numerator", data.numerator}, {"denominator", data.denominator}, {"stride", data.stride }});
     int_dec_block.write_to_vector = write_to_vector;
-    int_dec_block.numerator       = data.numerator;
-    int_dec_block.denominator     = data.denominator;
-    int_dec_block.stride          = data.stride;
     if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
     if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
 
