@@ -195,6 +195,7 @@ if (ENABLE_TESTING AND UNIX AND NOT APPLE)
         target_compile_options(gnuradio-options INTERFACE --coverage -O0 -g -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0) # fortify_source is not possible without optimization
         target_link_libraries(gnuradio-options INTERFACE --coverage)
         append_coverage_compiler_flags()
+        set(GCOVR_ADDITIONAL_ARGS "--merge-mode-functions=merge-use-line-min")
         setup_target_for_coverage_gcovr_xml(
                 NAME coverage
                 EXECUTABLE ctest
