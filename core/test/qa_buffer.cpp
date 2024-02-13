@@ -178,7 +178,7 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
 
 template<typename Writer, std::size_t N>
 void
-varyingSizedChunksWriter(Writer &writer) {
+writeVaryingChunkSizes(Writer &writer) {
     std::size_t pos    = 0;
     std::size_t iWrite = 0;
     while (pos < N) {
@@ -408,7 +408,7 @@ const boost::ut::suite CircularBufferTests = [] {
         gr::BufferReader auto reader2 = buffer.new_reader();
 
         constexpr auto kWrites      = 200000UZ;
-        auto           writerThread = std::thread(&varyingSizedChunksWriter<decltype(writer), kWrites>, std::ref(writer));
+        auto           writerThread = std::thread(&writeVaryingChunkSizes<decltype(writer), kWrites>, std::ref(writer));
 
         auto readerFnc = [](auto reader) {
             std::size_t i = 0;
@@ -452,7 +452,7 @@ const boost::ut::suite CircularBufferTests = [] {
 
         std::array<std::thread, kNWriters> writerThreads;
         for (std::size_t i = 0; i < kNWriters; i++) {
-            writerThreads[i] = std::thread(&varyingSizedChunksWriter<decltype(writers[i]), kWrites>, std::ref(writers[i]));
+            writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]));
         }
 
         auto readerFnc = [](auto reader) {
