@@ -43,10 +43,10 @@ const boost::ut::suite TagTests = [] {
         if (verbose) {
             fmt::println("started ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
         }
-        constexpr std::uint32_t n_samples   = 1900;
-        constexpr float         sample_rate = 2000.f;
-        Graph                   testGraph;
-        auto                   &src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>(
+        constexpr gr::Size_t n_samples   = 1900;
+        constexpr float      sample_rate = 2000.f;
+        Graph                testGraph;
+        auto                &src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>(
                 { { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" }, { "verbose_console", verbose } });
         src.tags = {
             { 0, { { "key", "value@0" } } },       //
@@ -71,8 +71,8 @@ const boost::ut::suite TagTests = [] {
 
         expect(eq(src.n_samples_max, n_samples)) << "src did not accept require max input samples";
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(static_cast<std::uint32_t>(sink1.n_samples_produced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1.n_samples_produced, n_samples);
-        expect(eq(static_cast<std::uint32_t>(sink2.n_samples_produced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2.n_samples_produced, n_samples);
+        expect(eq(static_cast<gr::Size_t>(sink1.n_samples_produced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1.n_samples_produced, n_samples);
+        expect(eq(static_cast<gr::Size_t>(sink2.n_samples_produced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2.n_samples_produced, n_samples);
 
         if (std::getenv("DISABLE_SENSITIVE_TESTS") == nullptr) {
             expect(approx(sink1.effective_sample_rate(), sample_rate, 500.f))
@@ -157,12 +157,12 @@ const boost::ut::suite TagTests = [] {
     };
 
     "SignalGenerator + ClockSource test"_test = [] {
-        constexpr std::uint32_t n_samples   = 200;
-        constexpr float         sample_rate = 1000.f;
-        Graph                   testGraph;
-        auto                   &clockSrc  = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
-        auto                   &signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({ { "sample_rate", sample_rate }, { "name", "SignalGenerator" } });
-        auto                   &sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
+        constexpr gr::Size_t n_samples   = 200;
+        constexpr float      sample_rate = 1000.f;
+        Graph                testGraph;
+        auto                &clockSrc  = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "ClockSource" } });
+        auto                &signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({ { "sample_rate", sample_rate }, { "name", "SignalGenerator" } });
+        auto                &sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(signalGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(signalGen).to<"in">(sink)));

@@ -1,467 +1,7 @@
 #ifndef GNURADIO_GRAPH_HPP
 #define GNURADIO_GRAPH_HPP
 
-// #include <gnuradio-4.0/meta/typelist.hpp>
-#ifndef GNURADIO_TYPELIST_HPP
-#define GNURADIO_TYPELIST_HPP
-
-#include <bit>
-#include <concepts>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <type_traits>
-
-namespace gr::meta {
-
-template<typename... Ts>
-struct typelist;
-
-// concat ///////////////
-namespace detail {
-template<typename...>
-struct concat_impl;
-
-template<>
-struct concat_impl<> {
-    using type = typelist<>;
-};
-
-template<typename A>
-struct concat_impl<A> {
-    using type = typelist<A>;
-};
-
-template<typename... As>
-struct concat_impl<typelist<As...>> {
-    using type = typelist<As...>;
-};
-
-template<typename A, typename B>
-struct concat_impl<A, B> {
-    using type = typelist<A, B>;
-};
-
-template<typename... As, typename B>
-struct concat_impl<typelist<As...>, B> {
-    using type = typelist<As..., B>;
-};
-
-template<typename A, typename... Bs>
-struct concat_impl<A, typelist<Bs...>> {
-    using type = typelist<A, Bs...>;
-};
-
-template<typename... As, typename... Bs>
-struct concat_impl<typelist<As...>, typelist<Bs...>> {
-    using type = typelist<As..., Bs...>;
-};
-
-template<typename A, typename B, typename C>
-struct concat_impl<A, B, C> {
-    using type = typename concat_impl<typename concat_impl<A, B>::type, C>::type;
-};
-
-template<typename A, typename B, typename C, typename D, typename... More>
-struct concat_impl<A, B, C, D, More...> {
-    using type = typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type, typename concat_impl<More...>::type>::type;
-};
-} // namespace detail
-
-template<typename... Ts>
-using concat = typename detail::concat_impl<Ts...>::type;
-
-// split_at, left_of, right_of ////////////////
-namespace detail {
-template<unsigned N>
-struct splitter;
-
-template<>
-struct splitter<0> {
-    template<typename...>
-    using first = typelist<>;
-    template<typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<1> {
-    template<typename T0, typename...>
-    using first = typelist<T0>;
-    template<typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<2> {
-    template<typename T0, typename T1, typename...>
-    using first = typelist<T0, T1>;
-    template<typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<4> {
-    template<typename T0, typename T1, typename T2, typename T3, typename...>
-    using first = typelist<T0, T1, T2, T3>;
-    template<typename, typename, typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<8> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...>
-    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7>;
-
-    template<typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<>
-struct splitter<16> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12, typename T13,
-             typename T14, typename T15, typename...>
-    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
-
-    template<typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
-    using second = typelist<Ts...>;
-};
-
-template<unsigned N>
-struct splitter {
-    static constexpr unsigned FirstSplit = std::has_single_bit(N) ? N / 2 : std::bit_floor(N);
-    using A                              = splitter<FirstSplit>;
-    using B                              = splitter<N - FirstSplit>;
-
-    template<typename... Ts>
-    using first = concat<typename A::template first<Ts...>, typename B::template first<typename A::template second<Ts...>>>;
-
-    template<typename... Ts>
-    using second = typename B::template second<typename A::template second<Ts...>>;
-};
-
-} // namespace detail
-
-template<unsigned N, typename List>
-struct split_at;
-
-template<unsigned N, typename... Ts>
-struct split_at<N, typelist<Ts...>> {
-    using first  = typename detail::splitter<N>::template first<Ts...>;
-    using second = typename detail::splitter<N>::template second<Ts...>;
-};
-
-template<std::size_t N, typename List>
-using left_of = typename split_at<N, List>::first;
-
-template<std::size_t N, typename List>
-using right_of = typename split_at<N + 1, List>::second;
-
-// remove_at /////////////
-template<std::size_t Idx, typename List>
-using remove_at = concat<left_of<Idx, List>, right_of<Idx, List>>;
-
-// first_type ////////////
-namespace detail {
-template<typename List>
-struct first_type_impl {};
-
-template<typename T0, typename... Ts>
-struct first_type_impl<typelist<T0, Ts...>> {
-    using type = T0;
-};
-} // namespace detail
-
-template<typename List>
-using first_type = typename detail::first_type_impl<List>::type;
-
-// transform_types ////////////
-namespace detail {
-template<template<typename> class Template, typename List>
-struct transform_types_impl;
-
-template<template<typename> class Template, typename... Ts>
-struct transform_types_impl<Template, typelist<Ts...>> {
-    using type = typelist<Template<Ts>...>;
-};
-
-template<template<typename> class Template, typename List>
-struct transform_types_nested_impl;
-
-template<template<typename> class Template, typename... Ts>
-struct transform_types_nested_impl<Template, typelist<Ts...>> {
-    using type = typelist<typename Template<Ts>::type...>;
-};
-} // namespace detail
-
-template<template<typename> class Template, typename List>
-using transform_types = typename detail::transform_types_impl<Template, List>::type;
-
-template<template<typename> class Template, typename List>
-using transform_types_nested = typename detail::transform_types_nested_impl<Template, List>::type;
-
-// transform_value_type
-template<typename T>
-using transform_value_type = typename T::value_type;
-
-namespace detail {
-template<bool Cond, template<typename> class Tpl1, template<typename> class Tpl2, typename T>
-struct conditional_specialization;
-
-template<template<typename> class Tpl1, template<typename> class Tpl2, typename T>
-struct conditional_specialization<true, Tpl1, Tpl2, T> {
-    using type = Tpl1<T>;
-};
-
-template<template<typename> class Tpl1, template<typename> class Tpl2, typename T>
-struct conditional_specialization<false, Tpl1, Tpl2, T> {
-    using type = Tpl2<T>;
-};
-
-template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename List>
-struct transform_conditional_impl;
-
-template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename... Ts>
-struct transform_conditional_impl<CondFun, Tpl1, Tpl2, typelist<Ts...>> {
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> typelist<typename conditional_specialization<CondFun()(Is), Tpl1, Tpl2, Ts>::type...> {
-        return {};
-    }(std::make_index_sequence<sizeof...(Ts)>()));
-};
-} // namespace detail
-
-// Transform all types in List:
-// For all types T with index I in List:
-// If CondFun()(I) is true use Tpl1<T>, otherwise use Tpl2<T>
-template<class CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename List>
-using transform_conditional = typename detail::transform_conditional_impl<CondFun, Tpl1, Tpl2, List>::type;
-
-// reduce ////////////////
-namespace detail {
-template<template<typename, typename> class Method, typename List>
-struct reduce_impl;
-
-template<template<typename, typename> class Method, typename T0>
-struct reduce_impl<Method, typelist<T0>> {
-    using type = T0;
-};
-
-template<template<typename, typename> class Method, typename T0, typename T1, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
-
-template<template<typename, typename> class Method, typename T0, typename T1, typename T2, typename T3, typename... Ts>
-struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {};
-} // namespace detail
-
-template<template<typename, typename> class Method, typename List>
-using reduce = typename detail::reduce_impl<Method, List>::type;
-
-namespace detail {
-
-template<template<typename> typename Pred, typename... Items>
-struct find_type;
-
-template<template<typename> typename Pred>
-struct find_type<Pred> {
-    using type = typelist<>;
-};
-
-template<template<typename> typename Pred, typename First, typename... Rest>
-struct find_type<Pred, First, Rest...> {
-    using type = typename std::conditional_t<Pred<First>::value, typelist<First, typename find_type<Pred, Rest...>::type>, typename find_type<Pred, Rest...>::type>;
-};
-
-template<template<typename> typename Predicate, typename DefaultType, typename... Ts>
-struct find_type_or_default_impl {
-    using type = DefaultType;
-};
-
-template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
-struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
-    : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
-
-template<std::size_t Index, typename... Ts>
-struct at_impl;
-
-template<typename T0, typename... Ts>
-struct at_impl<0, T0, Ts...> {
-    using type = T0;
-};
-
-template<typename T0, typename T1, typename... Ts>
-struct at_impl<1, T0, T1, Ts...> {
-    using type = T1;
-};
-
-template<typename T0, typename T1, typename T2, typename... Ts>
-struct at_impl<2, T0, T1, T2, Ts...> {
-    using type = T2;
-};
-
-template<typename T0, typename T1, typename T2, typename T3, typename... Ts>
-struct at_impl<3, T0, T1, T2, T3, Ts...> {
-    using type = T3;
-};
-
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename... Ts>
-struct at_impl<4, T0, T1, T2, T3, T4, Ts...> {
-    using type = T4;
-};
-
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename... Ts>
-struct at_impl<5, T0, T1, T2, T3, T4, T5, Ts...> {
-    using type = T5;
-};
-
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename... Ts>
-struct at_impl<6, T0, T1, T2, T3, T4, T5, T6, Ts...> {
-    using type = T6;
-};
-
-template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
-struct at_impl<7, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> {
-    using type = T7;
-};
-
-template<std::size_t Index, typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
-    requires(Index >= 8)
-struct at_impl<Index, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> : at_impl<Index - 8, Ts...> {};
-
-} // namespace detail
-
-// typelist /////////////////
-template<typename T>
-concept is_typelist_v = requires { typename T::typelist_tag; };
-
-template<typename... Ts>
-struct typelist {
-    using this_t       = typelist<Ts...>;
-    using typelist_tag = std::true_type;
-
-    static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
-
-    template<template<typename...> class Other>
-    using apply = Other<Ts...>;
-
-    template<class F, std::size_t... Is, typename... LeadingArguments>
-    static constexpr void
-    for_each_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
-        (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
-    }
-
-    template<class F, typename... LeadingArguments>
-    static constexpr void
-    for_each(F &&f, LeadingArguments &&...args) {
-        for_each_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
-    }
-
-    template<std::size_t I>
-    using at = detail::at_impl<I, Ts...>::type;
-
-    template<typename... Heads>
-    using prepend = typelist<Heads..., Ts...>;
-
-    template<typename... Other>
-    static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
-
-    template<typename... Other>
-    static constexpr inline bool are_convertible_to = (std::convertible_to<Ts, Other> && ...);
-
-    template<typename... Other>
-    static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
-
-    template<typename F, typename Tup>
-        requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
-    static constexpr auto
-    construct(Tup &&args_tuple) {
-        return std::apply([]<typename... Args>(Args &&...args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
-    }
-
-    template<template<typename> typename Trafo>
-    using transform = meta::transform_types<Trafo, this_t>;
-
-    template<template<typename...> typename Pred>
-    constexpr static bool all_of = (Pred<Ts>::value && ...);
-
-    template<template<typename...> typename Pred>
-    constexpr static bool any_of = (Pred<Ts>::value || ...);
-
-    template<template<typename...> typename Pred>
-    constexpr static bool none_of = (!Pred<Ts>::value && ...);
-
-    template<typename DefaultType>
-    using safe_head_default = std::remove_pointer_t<decltype([] {
-        if constexpr (sizeof...(Ts) > 0) {
-            return static_cast<this_t::at<0> *>(nullptr);
-        } else {
-            return static_cast<DefaultType *>(nullptr);
-        }
-    }())>;
-
-    using safe_head = std::remove_pointer_t<decltype([] {
-        if constexpr (sizeof...(Ts) > 0) {
-            return static_cast<this_t::at<0> *>(nullptr);
-        } else {
-            return static_cast<void *>(nullptr);
-        }
-    }())>;
-
-    template<typename Matcher = typename this_t::safe_head>
-    constexpr static bool all_same = ((std::is_same_v<Matcher, Ts> && ...));
-
-    template<template<typename...> typename Predicate>
-    using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
-
-    template<template<typename> typename Pred>
-    using find = typename detail::find_type<Pred, Ts...>::type;
-
-    template<template<typename> typename Pred, typename DefaultType>
-    using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
-
-    template<typename Needle>
-    static constexpr std::size_t
-    index_of() {
-        std::size_t result = static_cast<std::size_t>(-1);
-        gr::meta::typelist<Ts...>::for_each([&](auto index, auto &&t) {
-            if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
-                result = index;
-            }
-        });
-        return result;
-    }
-
-    template<typename T>
-    inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
-
-    using tuple_type    = std::tuple<Ts...>;
-    using tuple_or_type = std::remove_pointer_t<decltype([] {
-        if constexpr (sizeof...(Ts) == 0) {
-            return static_cast<void *>(nullptr);
-        } else if constexpr (sizeof...(Ts) == 1) {
-            return static_cast<at<0> *>(nullptr);
-        } else {
-            return static_cast<tuple_type *>(nullptr);
-        }
-    }())>;
-};
-
-template<typename T, typename... Ts>
-constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Ts>...>;
-
-namespace detail {
-template<template<typename...> typename OtherTypelist, typename... Args>
-meta::typelist<Args...>
-to_typelist_helper(OtherTypelist<Args...> *);
-} // namespace detail
-
-template<typename OtherTypelist>
-using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist *>(nullptr)));
-
-} // namespace gr::meta
-
-#endif // GNURADIO_TYPELIST_HPP
-
-
-// #include "Block.hpp"
+// #include <gnuradio-4.0/Block.hpp>
 #ifndef GNURADIO_BLOCK_HPP
 #define GNURADIO_BLOCK_HPP
 
@@ -8174,12 +7714,470 @@ template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
 #endif
 
 // #include <gnuradio-4.0/meta/typelist.hpp>
+#ifndef GNURADIO_TYPELIST_HPP
+#define GNURADIO_TYPELIST_HPP
+
+#include <bit>
+#include <concepts>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+
+namespace gr::meta {
+
+template<typename... Ts>
+struct typelist;
+
+// concat ///////////////
+namespace detail {
+template<typename...>
+struct concat_impl;
+
+template<>
+struct concat_impl<> {
+    using type = typelist<>;
+};
+
+template<typename A>
+struct concat_impl<A> {
+    using type = typelist<A>;
+};
+
+template<typename... As>
+struct concat_impl<typelist<As...>> {
+    using type = typelist<As...>;
+};
+
+template<typename A, typename B>
+struct concat_impl<A, B> {
+    using type = typelist<A, B>;
+};
+
+template<typename... As, typename B>
+struct concat_impl<typelist<As...>, B> {
+    using type = typelist<As..., B>;
+};
+
+template<typename A, typename... Bs>
+struct concat_impl<A, typelist<Bs...>> {
+    using type = typelist<A, Bs...>;
+};
+
+template<typename... As, typename... Bs>
+struct concat_impl<typelist<As...>, typelist<Bs...>> {
+    using type = typelist<As..., Bs...>;
+};
+
+template<typename A, typename B, typename C>
+struct concat_impl<A, B, C> {
+    using type = typename concat_impl<typename concat_impl<A, B>::type, C>::type;
+};
+
+template<typename A, typename B, typename C, typename D, typename... More>
+struct concat_impl<A, B, C, D, More...> {
+    using type = typename concat_impl<typename concat_impl<A, B>::type, typename concat_impl<C, D>::type, typename concat_impl<More...>::type>::type;
+};
+} // namespace detail
+
+template<typename... Ts>
+using concat = typename detail::concat_impl<Ts...>::type;
+
+// split_at, left_of, right_of ////////////////
+namespace detail {
+template<unsigned N>
+struct splitter;
+
+template<>
+struct splitter<0> {
+    template<typename...>
+    using first = typelist<>;
+    template<typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<1> {
+    template<typename T0, typename...>
+    using first = typelist<T0>;
+    template<typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<2> {
+    template<typename T0, typename T1, typename...>
+    using first = typelist<T0, T1>;
+    template<typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<4> {
+    template<typename T0, typename T1, typename T2, typename T3, typename...>
+    using first = typelist<T0, T1, T2, T3>;
+    template<typename, typename, typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<8> {
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename...>
+    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7>;
+
+    template<typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<>
+struct splitter<16> {
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12, typename T13,
+             typename T14, typename T15, typename...>
+    using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
+
+    template<typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
+    using second = typelist<Ts...>;
+};
+
+template<unsigned N>
+struct splitter {
+    static constexpr unsigned FirstSplit = std::has_single_bit(N) ? N / 2 : std::bit_floor(N);
+    using A                              = splitter<FirstSplit>;
+    using B                              = splitter<N - FirstSplit>;
+
+    template<typename... Ts>
+    using first = concat<typename A::template first<Ts...>, typename B::template first<typename A::template second<Ts...>>>;
+
+    template<typename... Ts>
+    using second = typename B::template second<typename A::template second<Ts...>>;
+};
+
+} // namespace detail
+
+template<unsigned N, typename List>
+struct split_at;
+
+template<unsigned N, typename... Ts>
+struct split_at<N, typelist<Ts...>> {
+    using first  = typename detail::splitter<N>::template first<Ts...>;
+    using second = typename detail::splitter<N>::template second<Ts...>;
+};
+
+template<std::size_t N, typename List>
+using left_of = typename split_at<N, List>::first;
+
+template<std::size_t N, typename List>
+using right_of = typename split_at<N + 1, List>::second;
+
+// remove_at /////////////
+template<std::size_t Idx, typename List>
+using remove_at = concat<left_of<Idx, List>, right_of<Idx, List>>;
+
+// first_type ////////////
+namespace detail {
+template<typename List>
+struct first_type_impl {};
+
+template<typename T0, typename... Ts>
+struct first_type_impl<typelist<T0, Ts...>> {
+    using type = T0;
+};
+} // namespace detail
+
+template<typename List>
+using first_type = typename detail::first_type_impl<List>::type;
+
+// transform_types ////////////
+namespace detail {
+template<template<typename> class Template, typename List>
+struct transform_types_impl;
+
+template<template<typename> class Template, typename... Ts>
+struct transform_types_impl<Template, typelist<Ts...>> {
+    using type = typelist<Template<Ts>...>;
+};
+
+template<template<typename> class Template, typename List>
+struct transform_types_nested_impl;
+
+template<template<typename> class Template, typename... Ts>
+struct transform_types_nested_impl<Template, typelist<Ts...>> {
+    using type = typelist<typename Template<Ts>::type...>;
+};
+} // namespace detail
+
+template<template<typename> class Template, typename List>
+using transform_types = typename detail::transform_types_impl<Template, List>::type;
+
+template<template<typename> class Template, typename List>
+using transform_types_nested = typename detail::transform_types_nested_impl<Template, List>::type;
+
+// transform_value_type
+template<typename T>
+using transform_value_type = typename T::value_type;
+
+namespace detail {
+template<bool Cond, template<typename> class Tpl1, template<typename> class Tpl2, typename T>
+struct conditional_specialization;
+
+template<template<typename> class Tpl1, template<typename> class Tpl2, typename T>
+struct conditional_specialization<true, Tpl1, Tpl2, T> {
+    using type = Tpl1<T>;
+};
+
+template<template<typename> class Tpl1, template<typename> class Tpl2, typename T>
+struct conditional_specialization<false, Tpl1, Tpl2, T> {
+    using type = Tpl2<T>;
+};
+
+template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename List>
+struct transform_conditional_impl;
+
+template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename... Ts>
+struct transform_conditional_impl<CondFun, Tpl1, Tpl2, typelist<Ts...>> {
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> typelist<typename conditional_specialization<CondFun()(Is), Tpl1, Tpl2, Ts>::type...> {
+        return {};
+    }(std::make_index_sequence<sizeof...(Ts)>()));
+};
+} // namespace detail
+
+// Transform all types in List:
+// For all types T with index I in List:
+// If CondFun()(I) is true use Tpl1<T>, otherwise use Tpl2<T>
+template<class CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename List>
+using transform_conditional = typename detail::transform_conditional_impl<CondFun, Tpl1, Tpl2, List>::type;
+
+// reduce ////////////////
+namespace detail {
+template<template<typename, typename> class Method, typename List>
+struct reduce_impl;
+
+template<template<typename, typename> class Method, typename T0>
+struct reduce_impl<Method, typelist<T0>> {
+    using type = T0;
+};
+
+template<template<typename, typename> class Method, typename T0, typename T1, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, Ts...>> {};
+
+template<template<typename, typename> class Method, typename T0, typename T1, typename T2, typename T3, typename... Ts>
+struct reduce_impl<Method, typelist<T0, T1, T2, T3, Ts...>> : public reduce_impl<Method, typelist<typename Method<T0, T1>::type, typename Method<T2, T3>::type, Ts...>> {};
+} // namespace detail
+
+template<template<typename, typename> class Method, typename List>
+using reduce = typename detail::reduce_impl<Method, List>::type;
+
+namespace detail {
+
+template<template<typename> typename Pred, typename... Items>
+struct find_type;
+
+template<template<typename> typename Pred>
+struct find_type<Pred> {
+    using type = typelist<>;
+};
+
+template<template<typename> typename Pred, typename First, typename... Rest>
+struct find_type<Pred, First, Rest...> {
+    using type = typename std::conditional_t<Pred<First>::value, typelist<First, typename find_type<Pred, Rest...>::type>, typename find_type<Pred, Rest...>::type>;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename... Ts>
+struct find_type_or_default_impl {
+    using type = DefaultType;
+};
+
+template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
+struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
+    : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
+
+template<std::size_t Index, typename... Ts>
+struct at_impl;
+
+template<typename T0, typename... Ts>
+struct at_impl<0, T0, Ts...> {
+    using type = T0;
+};
+
+template<typename T0, typename T1, typename... Ts>
+struct at_impl<1, T0, T1, Ts...> {
+    using type = T1;
+};
+
+template<typename T0, typename T1, typename T2, typename... Ts>
+struct at_impl<2, T0, T1, T2, Ts...> {
+    using type = T2;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename... Ts>
+struct at_impl<3, T0, T1, T2, T3, Ts...> {
+    using type = T3;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename... Ts>
+struct at_impl<4, T0, T1, T2, T3, T4, Ts...> {
+    using type = T4;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename... Ts>
+struct at_impl<5, T0, T1, T2, T3, T4, T5, Ts...> {
+    using type = T5;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename... Ts>
+struct at_impl<6, T0, T1, T2, T3, T4, T5, T6, Ts...> {
+    using type = T6;
+};
+
+template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
+struct at_impl<7, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> {
+    using type = T7;
+};
+
+template<std::size_t Index, typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
+    requires(Index >= 8)
+struct at_impl<Index, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> : at_impl<Index - 8, Ts...> {};
+
+} // namespace detail
+
+// typelist /////////////////
+template<typename T>
+concept is_typelist_v = requires { typename T::typelist_tag; };
+
+template<typename... Ts>
+struct typelist {
+    using this_t       = typelist<Ts...>;
+    using typelist_tag = std::true_type;
+
+    static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
+
+    template<template<typename...> class Other>
+    using apply = Other<Ts...>;
+
+    template<class F, std::size_t... Is, typename... LeadingArguments>
+    static constexpr void
+    for_each_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
+        (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
+    }
+
+    template<class F, typename... LeadingArguments>
+    static constexpr void
+    for_each(F &&f, LeadingArguments &&...args) {
+        for_each_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
+    }
+
+    template<std::size_t I>
+    using at = detail::at_impl<I, Ts...>::type;
+
+    template<typename... Heads>
+    using prepend = typelist<Heads..., Ts...>;
+
+    template<typename... Other>
+    static constexpr inline bool are_equal = std::same_as<typelist, meta::typelist<Other...>>;
+
+    template<typename... Other>
+    static constexpr inline bool are_convertible_to = (std::convertible_to<Ts, Other> && ...);
+
+    template<typename... Other>
+    static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
+
+    template<typename F, typename Tup>
+        requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
+    static constexpr auto
+    construct(Tup &&args_tuple) {
+        return std::apply([]<typename... Args>(Args &&...args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
+    }
+
+    template<template<typename> typename Trafo>
+    using transform = meta::transform_types<Trafo, this_t>;
+
+    template<template<typename...> typename Pred>
+    constexpr static bool all_of = (Pred<Ts>::value && ...);
+
+    template<template<typename...> typename Pred>
+    constexpr static bool any_of = (Pred<Ts>::value || ...);
+
+    template<template<typename...> typename Pred>
+    constexpr static bool none_of = (!Pred<Ts>::value && ...);
+
+    template<typename DefaultType>
+    using safe_head_default = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) > 0) {
+            return static_cast<this_t::at<0> *>(nullptr);
+        } else {
+            return static_cast<DefaultType *>(nullptr);
+        }
+    }())>;
+
+    using safe_head = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) > 0) {
+            return static_cast<this_t::at<0> *>(nullptr);
+        } else {
+            return static_cast<void *>(nullptr);
+        }
+    }())>;
+
+    template<typename Matcher = typename this_t::safe_head>
+    constexpr static bool all_same = ((std::is_same_v<Matcher, Ts> && ...));
+
+    template<template<typename...> typename Predicate>
+    using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
+
+    template<template<typename> typename Pred>
+    using find = typename detail::find_type<Pred, Ts...>::type;
+
+    template<template<typename> typename Pred, typename DefaultType>
+    using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
+
+    template<typename Needle>
+    static constexpr std::size_t
+    index_of() {
+        std::size_t result = static_cast<std::size_t>(-1);
+        gr::meta::typelist<Ts...>::for_each([&](auto index, auto &&t) {
+            if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
+                result = index;
+            }
+        });
+        return result;
+    }
+
+    template<typename T>
+    inline static constexpr bool contains = std::disjunction_v<std::is_same<T, Ts>...>;
+
+    using tuple_type    = std::tuple<Ts...>;
+    using tuple_or_type = std::remove_pointer_t<decltype([] {
+        if constexpr (sizeof...(Ts) == 0) {
+            return static_cast<void *>(nullptr);
+        } else if constexpr (sizeof...(Ts) == 1) {
+            return static_cast<at<0> *>(nullptr);
+        } else {
+            return static_cast<tuple_type *>(nullptr);
+        }
+    }())>;
+};
+
+template<typename T, typename... Ts>
+constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Ts>...>;
+
+namespace detail {
+template<template<typename...> typename OtherTypelist, typename... Args>
+meta::typelist<Args...>
+to_typelist_helper(OtherTypelist<Args...> *);
+} // namespace detail
+
+template<typename OtherTypelist>
+using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist *>(nullptr)));
+
+} // namespace gr::meta
+
+#endif // GNURADIO_TYPELIST_HPP
 
 // #include <gnuradio-4.0/meta/utils.hpp>
 #ifndef GNURADIO_GRAPH_UTILS_HPP
 #define GNURADIO_GRAPH_UTILS_HPP
 
 #include <complex>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -10636,7 +10634,11 @@ namespace vir::stdx
 #define DISABLE_SIMD 0
 #endif
 
-namespace gr::meta {
+namespace gr {
+
+using Size_t = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+
+namespace meta {
 
 struct null_type {};
 
@@ -11145,7 +11147,8 @@ is_const_member_function(T) noexcept {
     return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
 }
 
-} // namespace gr::meta
+} // namespace meta
+} // namespace gr
 
 #endif // include guard
 
@@ -11253,13 +11256,13 @@ struct BlockingIO {
  * @tparam denominator Bottom number in the input-to-output sample ratio.
  * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
  */
-template<std::size_t numerator = 1LU, std::size_t denominator = 1LU, bool isConst = false>
+template<gr::Size_t numerator = 1U, gr::Size_t denominator = 1U, bool isConst = false>
 struct ResamplingRatio {
     static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
-    static constexpr std::size_t kNumerator   = numerator;
-    static constexpr std::size_t kDenominator = denominator;
-    static constexpr bool        kIsConst     = isConst;
-    static constexpr bool        kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
+    static constexpr gr::Size_t kNumerator   = numerator;
+    static constexpr gr::Size_t kDenominator = denominator;
+    static constexpr bool       kIsConst     = isConst;
+    static constexpr bool       kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
 };
 
 template<typename T>
@@ -11287,13 +11290,13 @@ static_assert(!is_resampling_ratio<int>::value);
  * @tparam stride The number of samples between data processing events.
  * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
  */
-template<std::size_t stride = 0LU, bool isConst = false>
+template<std::uint64_t stride = 0U, bool isConst = false>
 struct Stride {
-    static_assert(stride >= 0, "Stride must be >= 0");
+    static_assert(stride >= 0U, "Stride must be >= 0");
 
-    static constexpr std::size_t kStride  = stride;
-    static constexpr bool        kIsConst = isConst;
-    static constexpr bool        kEnabled = !isConst || (stride > 0);
+    static constexpr std::uint64_t kStride  = stride;
+    static constexpr bool          kIsConst = isConst;
+    static constexpr bool          kEnabled = !isConst || (stride > 0U);
 };
 
 template<typename T>
@@ -11387,7 +11390,7 @@ template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
 struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
 
 template<typename T>
-concept Limit    = is_limits<T>::value;
+concept Limit = is_limits<T>::value;
 
 using EmptyLimit = Limits<0, 0>; // nomen-est-omen
 
@@ -11408,8 +11411,7 @@ struct Annotated {
 
     template<typename U>
         requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false)
-    Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
+    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
 
     template<typename U>
         requires std::assignable_from<T &, U>
@@ -12761,7 +12763,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 #endif
 
 #ifdef HAS_POSIX_MAP_INTERFACE
-    void  do_deallocate(void* p, std::size_t size, size_t alignment) override { //NOSONAR
+    void  do_deallocate(void* p, std::size_t size, std::size_t alignment) override { //NOSONAR
 
         if (munmap(p, size) == -1) {
             throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
@@ -17665,6 +17667,14 @@ struct fmt::formatter<std::source_location> {
 
 namespace gr {
 
+namespace settings {
+template<typename T>
+inline constexpr static bool
+isSupportedType() {
+    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || gr::meta::vector_type<T> || std::is_same_v<T, property_map>;
+}
+} // namespace settings
+
 namespace detail {
 template<class T>
 inline constexpr void
@@ -17918,7 +17928,7 @@ public:
                         auto iterate_over_member = [&](auto member) {
                             using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                             using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                            if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                                 if (default_tag == get_display_name(member)) {
                                     _auto_forward.emplace(get_display_name(member));
                                 }
@@ -18008,7 +18018,7 @@ public:
                 bool        is_set              = false;
                 auto        iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
@@ -18073,7 +18083,7 @@ public:
                 const auto &value               = localValue;
                 auto        iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
@@ -18163,7 +18173,7 @@ public:
                 auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && isSupportedType<Type>()) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
@@ -18208,7 +18218,7 @@ public:
             // update active parameters
             auto update_active = [this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && settings::isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
@@ -18246,7 +18256,7 @@ public:
             std::lock_guard lg(_lock);
             auto            iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && settings::isSupportedType<Type>()) {
                     _active.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
             };
@@ -18265,7 +18275,7 @@ private:
             auto iterate_over_member = [&, this](auto member) {
                 using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
 
-                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && isSupportedType<Type>()) {
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && is_readable(member) && settings::isSupportedType<Type>()) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
@@ -18274,12 +18284,6 @@ private:
             }
             refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
         }
-    }
-
-    template<typename T>
-    inline constexpr static bool
-    isSupportedType() {
-        return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || gr::meta::vector_type<T> || std::is_same_v<T, property_map>;
     }
 
     template<typename T, typename Func>
@@ -18663,7 +18667,7 @@ outputPorts(Self *self) noexcept {
 namespace work {
 
 class Counter {
-    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<std::uint32_t>::max()) << 32 };
+    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<gr::Size_t>::max()) << 32 };
 
 public:
     void
@@ -18672,12 +18676,12 @@ public:
         uint64_t newCounter;
         do {
             oldCounter         = encodedCounter;
-            auto workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
-            auto workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
-            if (workRequested != std::numeric_limits<std::uint32_t>::max()) {
-                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())));
+            auto workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
+            auto workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
+            if (workRequested != std::numeric_limits<gr::Size_t>::max()) {
+                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<gr::Size_t>::max())));
             }
-            workDone += static_cast<std::uint32_t>(workDoneInc);
+            workDone += static_cast<gr::Size_t>(workDoneInc);
             newCounter = (static_cast<uint64_t>(workRequested) << 32) | workDone;
         } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
     }
@@ -18685,9 +18689,9 @@ public:
     std::pair<std::size_t, std::size_t>
     getAndReset() {
         uint64_t oldCounter    = encodedCounter.exchange(0);
-        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
-        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
-        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+        auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<gr::Size_t>::max()) {
             return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
         }
         return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
@@ -18696,8 +18700,8 @@ public:
     std::pair<std::size_t, std::size_t>
     get() {
         uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
-        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
-        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
         if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
             return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
         }
@@ -18721,6 +18725,11 @@ struct Result {
 } // namespace work
 
 template<typename T>
+concept HasWork = requires(T t, std::size_t requested_work) {
+    { t.work(requested_work) } -> std::same_as<work::Result>;
+};
+
+template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
     { t.unique_name } -> std::same_as<const std::string &>;
     { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
@@ -18730,14 +18739,11 @@ concept BlockLike = requires(T t, std::size_t requested_work) {
     { t.isBlocking() } noexcept -> std::same_as<bool>;
 
     { t.settings() } -> std::same_as<SettingsBase &>;
-    { t.work(requested_work) } -> std::same_as<work::Result>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
     requires !std::is_copy_assignable_v<T>;
-    // requires !std::is_move_constructible_v<T>;
-    // requires !std::is_move_assignable_v<T>;
-};
+} && HasWork<T>;
 
 template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
@@ -18750,6 +18756,10 @@ concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+
+template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
+inline void
+checkBlockContracts();
 
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
@@ -18865,8 +18875,8 @@ public:
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
     using block_template_parameters  = meta::typelist<Arguments...>;
     using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
-    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UZ, 1UZ, true>>;
-    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UZ, true>>;
+    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UL, 1UL, true>>;
+    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     template<typename T>
@@ -18893,10 +18903,10 @@ public:
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
     //
-    using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
-    using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::size_t, std::size_t>;
+    using RatioValue = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>>      numerator   = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator = Resampling::kDenominator;
+    using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
     //
@@ -19032,10 +19042,14 @@ protected:
     }
 
 public:
-    Block() noexcept : Block({}) {}
+    Block() noexcept(false) : Block({}) {} // N.B. throws in case of on contract violations
 
-    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter)
-        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept(false) // N.B. throws in case of on contract violations
+        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) {           // N.B. safe delegated use of this (i.e. not used during construction)
+
+        // check Block<T> contracts
+        checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
+
         if (init_parameter.size() != 0) {
             const auto failed = settings().set(init_parameter);
             if (!failed.empty()) {
@@ -19240,7 +19254,7 @@ public:
             static_assert(!kIsSourceBlock, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
-            if (numerator != 1UZ || denominator != 1UZ) {
+            if (numerator != 1ULL || denominator != 1ULL) {
                 throw std::runtime_error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
         }
@@ -19248,7 +19262,7 @@ public:
         if constexpr (StrideControl::kEnabled) {
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
-            if (stride != 0UZ) {
+            if (stride != 0ULL) {
                 throw std::runtime_error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
             }
         }
@@ -19398,7 +19412,7 @@ public:
 
     constexpr work::Status
     doResampling() {
-        if (numerator != 1UZ || denominator != 1UZ) {
+        if (numerator != 1UL || denominator != 1UL) {
             // TODO: this ill-defined checks can be done only once after parameters were changed
             const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
             bool         is_ill_defined = (denominator > ports_status.in_max_samples)                                                            //
@@ -19732,7 +19746,7 @@ protected:
 
         std::size_t nSamplesToConsume = ports_status.in_samples; // default stride == 0
         if constexpr (StrideControl::kEnabled) {
-            if (stride != 0UZ) {
+            if (stride != 0UL) {
                 const bool firstTimeStride = stride_counter == 0;
                 if (firstTimeStride) {
                     // sample processing are done as usual, portsStatus.in_samples samples will be processed
@@ -19886,6 +19900,7 @@ public:
      * requested_work limit as an affine relation with the returned performed_work.
      * @return { requested_work, performed_work, status}
      */
+    template<typename = void>
     work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
         processScheduledMessages();
@@ -19983,6 +19998,144 @@ public:
         }
     }
 };
+
+namespace detail {
+template<typename List, std::size_t Index = 0, typename StringFunction>
+inline constexpr auto
+for_each_type_to_string(StringFunction func) -> std::string {
+    if constexpr (Index < List::size) {
+        using T = typename List::template at<Index>;
+        return std::string(Index > 0 ? ", " : "") + func(Index, T()) + for_each_type_to_string<List, Index + 1>(func);
+    } else {
+        return "";
+    }
+}
+
+template<typename T>
+inline constexpr std::string
+container_type_name() {
+    if constexpr (requires { typename T::allocator_type; }) {
+        return fmt::format("std::vector<{}>", gr::meta::type_name<typename T::value_type>());
+    } else if constexpr (requires { std::tuple_size<T>::value; }) {
+        return fmt::format("std::array<{}, {}>", gr::meta::type_name<typename T::value_type>(), std::tuple_size<T>::value);
+    } else if constexpr (requires(T a) {
+                             { std::real(a) } -> std::convertible_to<typename T::value_type>;
+                             { std::imag(a) } -> std::convertible_to<typename T::value_type>;
+                         }) {
+        return fmt::format("std::complex<{}>", gr::meta::type_name<typename T::value_type>());
+    } else { // fallback
+        return gr::meta::type_name<T>();
+    }
+}
+} // namespace detail
+
+template<typename TBlock, typename TDecayedBlock>
+inline void
+checkBlockContracts() {
+    // N.B. some checks could be evaluated during compile time but the expressed intent is to do this during runtime to allow
+    // for more verbose feedback on method signatures etc.
+    constexpr static auto processMembers = []<typename Func>(Func func) {
+        if constexpr (detail::HasBaseType<TDecayedBlock>) {
+            using BaseType = typename TDecayedBlock::base_t;
+            if constexpr (refl::is_reflectable<BaseType>()) {
+                refl::util::for_each(refl::reflect<BaseType>().members, func);
+            }
+        }
+        if constexpr (refl::is_reflectable<TDecayedBlock>()) {
+            refl::util::for_each(refl::reflect<TDecayedBlock>().members, func);
+        }
+    };
+
+    constexpr static auto shortTypeName = []<typename T>() {
+        if constexpr (std::is_same_v<T, gr::property_map>) {
+            return "gr::property_map";
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            return "std::string";
+        } else if constexpr (requires { typename T::value_type; }) {
+            return detail::container_type_name<T>();
+        } else {
+            return gr::meta::type_name<T>();
+        }
+    };
+
+    constexpr static auto checkSettingsTypes = [](auto member) {
+        using MemberType           = decltype(member)::value_type;
+        using RawType              = std::remove_cvref_t<MemberType>;
+        using Type                 = std::remove_cvref_t<unwrap_if_wrapped_t<RawType>>;
+        constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
+        // N.B. this function is compile-time ready but static_assert does not allow for configurable error messages
+        if constexpr (!gr::settings::isSupportedType<Type>() && !(traits::port::is_port_v<Type> || traits::port::is_port_collection_v<Type>) ) {
+            throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
+                                                    gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", get_display_name(member), shortTypeName.template operator()<Type>()));
+        }
+    };
+    processMembers(checkSettingsTypes);
+
+    using TDerived = typename TDecayedBlock::derived_t;
+    if constexpr (requires { &TDerived::work; }) {
+        [[deprecated("expert-use-only of raw 'gr::work::Result work(std::size_t requested_work)'")]] constexpr static auto warning = []() {
+            // N.B. implementing this is still allowed for workaround but should be discouraged as default API since this often leads to
+            // important variants not being implemented such as lifecycle::State handling, Tag forwarding, etc.
+            fmt::println(stderr, "DEPRECATION WARNING: block {} implements a raw 'gr::work::Result work(std::size_t requested_work)' ", shortTypeName.template operator()<TDecayedBlock>());
+        };
+        warning();
+        return;
+    }
+
+    using TInputTypes  = traits::block::stream_input_port_types<TDerived>;
+    using TOutputTypes = traits::block::stream_output_port_types<TDerived>;
+
+    if constexpr (((TInputTypes::size.value + TOutputTypes::size.value) > 0UZ) && !gr::HasRequiredProcessFunction<TDecayedBlock>) {
+        const auto b1 = (TOutputTypes::size.value == 1UZ) ? "" : "{ "; // optional opening brackets
+        const auto b2 = (TOutputTypes::size.value == 1UZ) ? "" : " }"; // optional closing brackets
+                                                                       // clang-format off
+        std::string signatureProcessOne = fmt::format("* Option Ia (pure function):\n\n{}\n\n* Option Ib (allows modifications: settings, Tags, state, errors,...):\n\n{}\n\n* Option Ic (explicit return types):\n\n{}\n\n", //
+fmt::format(R"(auto processOne({}) const noexcept {{
+    /* add code here */
+    return {}{}{};
+}})",
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2),
+fmt::format(R"(auto processOne({}) {{
+    /* add code here */
+    return {}{}{};
+}})",
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2),
+fmt::format(R"(std::tuple<{}> processOne({}) {{
+    /* add code here */
+    return {}{}{};
+}})",
+   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}", shortTypeName.template operator()<T>()); }), //
+   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }), //
+   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2)
+);
+
+std::string signaturesProcessBulk = fmt::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
+fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+    /* add code here */
+    return gr::work::Status::OK;
+}})", //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
+    (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<{}> out{}", shortTypeName.template operator()<T>(), index); })),
+fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+    /* add code here */
+    return gr::work::Status::OK;
+}})", //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
+    (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("PublishableSpan auto out{}", shortTypeName.template operator()<T>(), index); })));
+        // clang-format on
+
+        bool has_port_collection = false;
+        TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
+        TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
+        const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
+        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}",
+                                                shortTypeName.template operator()<TDecayedBlock>(), signatures));
+    }
+}
 
 template<typename Derived, typename... Arguments>
 inline std::atomic_size_t Block<Derived, Arguments...>::_unique_id_counter{ 0UZ };
@@ -20109,15 +20262,19 @@ struct fmt::formatter<gr::work::Result> {
 
 #endif // include guard
 
-// #include "Buffer.hpp"
+// #include <gnuradio-4.0/Buffer.hpp>
 
-// #include "CircularBuffer.hpp"
+// #include <gnuradio-4.0/CircularBuffer.hpp>
 
-// #include "Port.hpp"
+// #include <gnuradio-4.0/meta/typelist.hpp>
 
-// #include "Sequence.hpp"
+// #include <gnuradio-4.0/Port.hpp>
 
-// #include "thread/thread_pool.hpp"
+// #include <gnuradio-4.0/reflection.hpp>
+
+// #include <gnuradio-4.0/Sequence.hpp>
+
+// #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 
 #include <algorithm>
@@ -21379,5 +21536,7 @@ this_source_location() {
 #endif // HAVE_SOURCE_LOCATION
 
 } // namespace gr
+
+REFL_TYPE(gr::Graph) REFL_END // minimal reflection declaration
 
 #endif // include guard

@@ -4,7 +4,6 @@
 
 #include <fmt/format.h>
 
-#include "gnuradio-4.0/basic/clock_source.hpp"
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -16,6 +15,168 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
+template<typename T>
+struct BlockSignaturesNone : public gr::Block<BlockSignaturesNone<T>> {
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesNone, in, out);
+static_assert(!gr::HasRequiredProcessFunction<BlockSignaturesNone<float>>);
+
+template<typename T>
+struct BlockSignaturesVoid : public gr::Block<BlockSignaturesVoid<T>> {
+    T value;
+
+    void
+    processOne() {}
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesVoid, value);
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesVoid<float>>);
+
+template<typename T>
+struct BlockSignaturesVoid2 : public gr::Block<BlockSignaturesVoid2<T>> {
+    T value;
+
+    gr::work::Status
+    processBulk() {
+        return gr::work::Status::OK;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesVoid2, value);
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesVoid2<float>>);
+
+template<typename T>
+struct BlockSignaturesProcessOne : public gr::Block<BlockSignaturesProcessOne<T>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    T
+    processOne(T) {
+        return T();
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesProcessOne, in, out);
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessOne<float>>);
+static_assert(gr::HasProcessOneFunction<BlockSignaturesProcessOne<float>>);
+static_assert(!gr::HasConstProcessOneFunction<BlockSignaturesProcessOne<float>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessOne<float>>);
+
+template<typename T>
+struct BlockSignaturesProcessOneConst : public gr::Block<BlockSignaturesProcessOneConst<T>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    T
+    processOne(T) const {
+        return T();
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesProcessOneConst, in, out);
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessOneConst<float>>);
+static_assert(gr::HasProcessOneFunction<BlockSignaturesProcessOneConst<float>>);
+static_assert(gr::HasConstProcessOneFunction<BlockSignaturesProcessOneConst<float>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessOneConst<float>>);
+
+enum class ProcessBulkVariant { VARIANT_SPAN, VARIANT_PUBLISHABLE_SPAN, VARIANT_PUBLISHABLE_SPAN2, VARIANT_CONSUMABLE_SPAN, VARIANT_CONSUMABLE_SPAN2 };
+
+template<typename T, ProcessBulkVariant processVariant>
+struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessBulkSpan<T, processVariant>> {
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
+
+    gr::work::Status
+    processBulk(std::span<const T>, std::span<T>)
+        requires(processVariant == ProcessBulkVariant::VARIANT_SPAN)
+    {
+        // do some bulk-type processing
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status
+    processBulk(std::span<const T>, gr::PublishableSpan auto &)
+        requires(processVariant == ProcessBulkVariant::VARIANT_PUBLISHABLE_SPAN)
+    {
+        // do some bulk-type processing
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status
+    processBulk(std::span<const T>, gr::PublishableSpan auto)
+        requires(processVariant == ProcessBulkVariant::VARIANT_PUBLISHABLE_SPAN2)
+    {
+        // do some bulk-type processing
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status
+    processBulk(gr::ConsumableSpan auto, std::span<T>)
+        requires(processVariant == ProcessBulkVariant::VARIANT_CONSUMABLE_SPAN)
+    {
+        // do some bulk-type processing
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status
+    processBulk(gr::ConsumableSpan auto &, std::span<T>)
+        requires(processVariant == ProcessBulkVariant::VARIANT_CONSUMABLE_SPAN2)
+    {
+        // do some bulk-type processing
+        return gr::work::Status::OK;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVariant processVariant), (BlockSignaturesProcessBulkSpan<T, processVariant>), in, out);
+using enum ProcessBulkVariant;
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_SPAN>>);
+static_assert(!gr::HasProcessOneFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_SPAN>>);
+static_assert(!gr::HasConstProcessOneFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_SPAN>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_SPAN>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_PUBLISHABLE_SPAN>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_PUBLISHABLE_SPAN2>>); // TODO: fix the signature is required to work
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_CONSUMABLE_SPAN>>);   // TODO: fix the signature is required to work
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, VARIANT_CONSUMABLE_SPAN2>>);  // TODO: fix the signature is required to work
+
+struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
+    std::tuple<int> tuple; // this type is not supported and should cause the checkBlockContracts<T>() to throw
+};
+
+ENABLE_REFLECTION(InvalidSettingBlock, tuple);
+
+struct MissingProcessSignature1 : gr::Block<MissingProcessSignature1> {
+    gr::PortIn<int>    in;
+    gr::PortOut<int>   out0;
+    gr::PortOut<float> out1;
+};
+
+ENABLE_REFLECTION(MissingProcessSignature1, in, out0, out1);
+
+struct MissingProcessSignature2 : gr::Block<MissingProcessSignature2> {
+    gr::PortIn<int>    in0;
+    gr::PortIn<float>  in1;
+    gr::PortOut<int>   out0;
+    gr::PortOut<float> out1;
+};
+
+ENABLE_REFLECTION(MissingProcessSignature2, in0, in1, out0, out1);
+
+struct MissingProcessSignature3 : gr::Block<MissingProcessSignature3> {
+    std::vector<gr::PortOut<float>>   outA;
+    std::array<gr::PortOut<float>, 2> outB;
+
+    template<typename PublishableSpan2>
+    gr::work::Status
+    processBulk(std::span<std::vector<float>> &, PublishableSpan2 &) { // TODO: needs proper explicit signature
+        return gr::work::Status::OK;
+    }
+};
+
+ENABLE_REFLECTION(MissingProcessSignature3, outA, outB);
+
 struct ProcessStatus {
     std::size_t      n_inputs{ 0 };
     std::size_t      n_outputs{ 0 };
@@ -26,9 +187,9 @@ struct ProcessStatus {
 };
 
 struct IntDecTestData {
-    std::size_t n_samples{};
-    std::size_t numerator{};
-    std::size_t denominator{};
+    gr::Size_t  n_samples{};
+    gr::Size_t  numerator{};
+    gr::Size_t  denominator{};
     int         out_port_min{ -1 }; // -1 for not used
     int         out_port_max{ -1 }; // -1 for not used
     std::size_t exp_in{};
@@ -43,10 +204,10 @@ struct IntDecTestData {
 };
 
 struct StrideTestData {
-    std::size_t      n_samples{};
-    std::size_t      numerator{ 1 };
-    std::size_t      denominator{ 1 };
-    std::size_t      stride{};
+    gr::Size_t       n_samples{};
+    gr::Size_t       numerator{ 1U };
+    gr::Size_t       denominator{ 1U };
+    gr::Size_t       stride{};
     int              in_port_min{ -1 }; // -1 for not used
     int              in_port_max{ -1 }; // -1 for not used
     std::size_t      exp_in{};
@@ -60,22 +221,6 @@ struct StrideTestData {
     to_string() const {
         return fmt::format("n_samples: {}, numerator: {}, denominator: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}",
                            n_samples, numerator, denominator, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out);
-    }
-};
-
-template<typename T>
-struct CountSource : public gr::Block<CountSource<T>> {
-    gr::PortOut<T> out{};
-    int            count{ 0 };
-    int            n_samples{ 1024 };
-
-    constexpr T
-    processOne() {
-        count++;
-        if (count >= n_samples) {
-            this->requestStop();
-        }
-        return static_cast<T>(count - 1); // -1 to start from 0
     }
 };
 
@@ -120,9 +265,66 @@ struct AsyncBlock : gr::Block<AsyncBlock<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, n_samples);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (IntDecBlock<T>), in, out);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (AsyncBlock<T>), in, out);
+
+const boost::ut::suite _block_signature = [] {
+    using namespace boost::ut;
+
+    "failure"_test = [] {
+        expect(throws([] { throw 0; })) << "throws any exception";
+
+        try {
+            std::ignore = InvalidSettingBlock();
+            expect(false) << "unsupported std::tuple setting not caught";
+        } catch (const std::exception &e) {
+            fmt::println("correctly thrown exception:\n{}", e.what());
+            expect(true);
+        } catch (...) {
+            expect(false);
+        }
+
+        try {
+            std::ignore = BlockSignaturesNone<float>();
+            expect(false) << "missing process function not caught";
+        } catch (const std::exception &e) {
+            fmt::println("correctly thrown exception:\n{}", e.what());
+            expect(true);
+        } catch (...) {
+            expect(false);
+        }
+
+        try {
+            std::ignore = MissingProcessSignature1();
+            expect(false) << "missing process function not caught";
+        } catch (const std::exception &e) {
+            fmt::println("correctly thrown exception:\n{}", e.what());
+            expect(true);
+        } catch (...) {
+            expect(false);
+        }
+
+        try {
+            std::ignore = MissingProcessSignature2();
+            expect(false) << "missing process function not caught";
+        } catch (const std::exception &e) {
+            fmt::println("correctly thrown exception:\n{}", e.what());
+            expect(true);
+        } catch (...) {
+            expect(false);
+        }
+
+        try {
+            std::ignore = MissingProcessSignature3();
+            expect(false) << "missing process function not caught";
+        } catch (const std::exception &e) {
+            fmt::println("correctly thrown exception:\n{}", e.what());
+            expect(true);
+        } catch (...) {
+            expect(false);
+        }
+    };
+};
 
 void
 interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
@@ -130,8 +332,7 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
-    auto     &source = flow.emplaceBlock<CountSource<int>>();
-    source.n_samples = static_cast<int>(data.n_samples);
+    auto     &source = flow.emplaceBlock<gr::testing::TagSource<int>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
 
     auto &int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator } });
     if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
@@ -154,14 +355,10 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
     gr::Graph flow;
-    auto     &source = flow.emplaceBlock<CountSource<int>>();
-    source.n_samples = static_cast<int>(data.n_samples);
+    auto     &source = flow.emplaceBlock<gr::testing::TagSource<int>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
 
-    auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>();
+    auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator }, { "stride", data.stride } });
     int_dec_block.write_to_vector = write_to_vector;
-    int_dec_block.numerator       = data.numerator;
-    int_dec_block.denominator     = data.denominator;
-    int_dec_block.stride          = data.stride;
     if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
     if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
 
@@ -311,15 +508,15 @@ const boost::ut::suite _stride_tests = [] {
     };
     // clang-format on
 
-    "Async ports tests"_test = [&thread_pool] {
+    "Async ports tests"_test = [] {
         using namespace gr;
         using namespace gr::testing;
-        constexpr std::uint64_t n_samples   = 1000;
-        constexpr float         sample_rate = 1000.f;
-        Graph                   testGraph;
-        auto                   &tagSrc     = testGraph.emplaceBlock<TagSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "TagSource" } });
-        auto                   &asyncBlock = testGraph.emplaceBlock<AsyncBlock<float>>({ { "name", "AsyncBlock" } });
-        auto                   &sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
+        constexpr gr::Size_t n_samples   = 1000;
+        constexpr float      sample_rate = 1000.f;
+        Graph                testGraph;
+        auto                &tagSrc     = testGraph.emplaceBlock<TagSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "TagSource" } });
+        auto                &asyncBlock = testGraph.emplaceBlock<AsyncBlock<float>>({ { "name", "AsyncBlock" } });
+        auto                &sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).to<"in">(sink)));
@@ -327,7 +524,7 @@ const boost::ut::suite _stride_tests = [] {
         scheduler::Simple sched{ std::move(testGraph) };
         sched.runAndWait();
 
-        expect(eq(n_samples, static_cast<std::uint32_t>(sink.n_samples_produced))) << "Number of samples does not match";
+        expect(eq(n_samples, static_cast<gr::Size_t>(sink.n_samples_produced))) << "Number of samples does not match";
     };
 };
 

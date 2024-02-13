@@ -89,8 +89,8 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     PortOut<T>       out;
     std::vector<Tag> tags{};
     std::size_t      next_tag{ 0 };
-    std::uint64_t    n_samples_max{ 1024 };
-    std::uint64_t    n_samples_produced{ 0 };
+    gr::Size_t       n_samples_max{ 1024 };
+    gr::Size_t       n_samples_produced{ 0 };
     float            sample_rate     = 1000.0f;
     std::string      signal_name     = "unknown signal";
     bool             verbose_console = false;
@@ -131,7 +131,7 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
             }
         }
 
-        n_samples_produced += static_cast<std::uint64_t>(nSamples);
+        n_samples_produced += static_cast<gr::Size_t>(nSamples);
         output.publish(nSamples);
         return n_samples_produced < n_samples_max ? work::Status::OK : work::Status::DONE;
     }
@@ -159,8 +159,8 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     PortOut<T>                               out;
     std::vector<T>                           samples{};
     std::vector<Tag>                         tags{};
-    std::uint64_t                            n_samples_expected{ 0 };
-    std::uint64_t                            n_samples_produced{ 0 };
+    gr::Size_t                               n_samples_expected{ 0 };
+    gr::Size_t                               n_samples_produced{ 0 };
     float                                    sample_rate = 1000.0f;
     std::string                              signal_name;
     bool                                     log_tags         = true;
@@ -222,7 +222,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             }
         }
         if constexpr (gr::meta::any_simd<V>) {
-            n_samples_produced += static_cast<std::uint64_t>(V::size());
+            n_samples_produced += static_cast<gr::Size_t>(V::size());
         } else {
             n_samples_produced++;
         }
@@ -245,7 +245,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             samples.insert(samples.cend(), input.begin(), input.end());
         }
 
-        n_samples_produced += static_cast<std::uint64_t>(input.size());
+        n_samples_produced += static_cast<gr::Size_t>(input.size());
         std::memcpy(output.data(), input.data(), input.size() * sizeof(T));
 
         return work::Status::OK;
@@ -258,8 +258,8 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     PortIn<T>                                in;
     std::vector<T>                           samples{};
     std::vector<Tag>                         tags{};
-    std::uint64_t                            n_samples_expected{ 0 };
-    std::uint64_t                            n_samples_produced{ 0 };
+    gr::Size_t                               n_samples_expected{ 0 };
+    std::uint32_t                            n_samples_produced{ 0 };
     float                                    sample_rate = 1000.0f;
     std::string                              signal_name;
     bool                                     log_tags         = true;
@@ -331,7 +331,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
         if (log_samples) {
             samples.insert(samples.cend(), input.begin(), input.end());
         }
-        n_samples_produced += static_cast<std::uint64_t>(input.size());
+        n_samples_produced += static_cast<std::uint32_t>(input.size());
         _timeLastSample = ClockSourceType::now();
         return n_samples_expected > 0 && n_samples_produced >= n_samples_expected ? work::Status::DONE : work::Status::OK;
     }

@@ -131,9 +131,9 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using InType  = T::InType;
         using OutType = T::OutType;
 
-        constexpr std::uint32_t N{ 16 };
-        constexpr float         sample_rate{ 1.f };
-        FFT<InType, OutType>    fftBlock({ { "fftSize", N }, { "sample_rate", sample_rate } });
+        constexpr gr::Size_t N{ 16 };
+        constexpr float      sample_rate{ 1.f };
+        FFT<InType, OutType> fftBlock({ { "fftSize", N }, { "sample_rate", sample_rate } });
         std::ignore = fftBlock.settings().applyStagedParameters();
 
         expect(eq(fftBlock.algorithm, gr::meta::type_name<algorithm::FFT<InType, std::complex<typename OutType::value_type>>>()));
@@ -163,7 +163,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         gr::Graph flow1;
         auto     &source1  = flow1.emplaceBlock<CountSource<float>>();
-        auto     &fftBlock = flow1.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
+        auto     &fftBlock = flow1.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
         expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
         auto sched1 = Scheduler(std::move(flow1), threadPool);
 
@@ -171,7 +171,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         for (int i = 0; i < 2; i++) {
             gr::Graph flow2;
             auto     &source2 = flow2.emplaceBlock<CountSource<float>>();
-            auto     &fft2    = flow2.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<std::uint32_t>(16) } });
+            auto     &fft2    = flow2.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
             expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
             auto sched2 = Scheduler(std::move(flow2), threadPool);
             sched2.runAndWait();
@@ -190,7 +190,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using value_type = OutType::value_type;
         constexpr value_type tolerance{ value_type(0.00001) };
 
-        constexpr std::uint32_t N{ 8 };
+        constexpr gr::Size_t N{ 8 };
         for (const auto &[window, windowName] : magic_enum::enum_entries<gr::algorithm::window::Type>()) {
             std::ignore = fftBlock.settings().set({ { "fftSize", N } });
             std::ignore = fftBlock.settings().set({ { "window", std::string(windowName) } });

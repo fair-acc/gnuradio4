@@ -12,8 +12,8 @@
 
 template<typename T>
 struct repeated_source : public gr::Block<repeated_source<T>> {
-    std::uint32_t                  identifier = 0;
-    std::uint32_t                  remaining_events_count;
+    gr::Size_t                     identifier = 0;
+    gr::Size_t                     remaining_events_count;
     std::vector<T>                 values;
     std::vector<T>::const_iterator values_next;
 
@@ -59,7 +59,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (repeated_source<T>), identifi
 
 template<typename T>
 struct validator_sink : public gr::Block<validator_sink<T>> {
-    std::uint32_t identifier = 0;
+    gr::Size_t    identifier = 0;
     gr::PortIn<T> in;
 
     std::vector<T>                 expected_values;
@@ -114,29 +114,29 @@ struct adder : public gr::Block<adder<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (adder<T>), addend0, addend1, sum);
 
 struct test_definition {
-    std::uint32_t                                        value_count;
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> mapping;
-    std::vector<std::vector<double>>                     input_values;
-    std::vector<std::vector<double>>                     output_values;
-    std::uint32_t                                        monitor_source;
-    std::vector<double>                                  monitor_values;
-    bool                                                 back_pressure;
+    gr::Size_t                                     value_count;
+    std::vector<std::pair<gr::Size_t, gr::Size_t>> mapping;
+    std::vector<std::vector<double>>               input_values;
+    std::vector<std::vector<double>>               output_values;
+    gr::Size_t                                     monitor_source;
+    std::vector<double>                            monitor_values;
+    bool                                           back_pressure;
 };
 
 void
 execute_selector_test(test_definition definition) {
     using namespace boost::ut;
 
-    const std::uint32_t sources_count = definition.input_values.size();
-    const std::uint32_t sinks_count   = definition.output_values.size();
+    const gr::Size_t sources_count = definition.input_values.size();
+    const gr::Size_t sinks_count   = definition.output_values.size();
 
     gr::Graph                              graph;
     std::vector<repeated_source<double> *> sources;
     std::vector<validator_sink<double> *>  sinks;
     gr::basic::Selector<double>           *selector;
 
-    std::vector<std::uint32_t> mapIn(definition.mapping.size());
-    std::vector<std::uint32_t> map_out(definition.mapping.size());
+    std::vector<gr::Size_t> mapIn(definition.mapping.size());
+    std::vector<gr::Size_t> map_out(definition.mapping.size());
     std::ranges::transform(definition.mapping, mapIn.begin(), [](auto &p) { return p.first; });
     std::ranges::transform(definition.mapping, map_out.begin(), [](auto &p) { return p.second; });
 

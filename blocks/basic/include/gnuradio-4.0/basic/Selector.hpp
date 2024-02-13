@@ -8,8 +8,6 @@
 namespace gr::basic {
 using namespace gr;
 
-
-
 using SelectorDoc = Doc<R""(
 @brief basic multiplexing class to route arbitrary inputs to outputs
 
@@ -69,25 +67,26 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
     using A = Annotated<U, description, Arguments...>;
 
     // port definitions
-    PortIn<std::uint32_t, Async, Optional> selectOut;
-    PortOut<T, Async, Optional>            monitorOut; // optional monitor output (for diagnostics and debugging purposes)
-    std::vector<PortIn<T, Async>>          inputs;     // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
-    std::vector<PortOut<T, Async>>         outputs;
+    PortIn<gr::Size_t, Async, Optional> selectOut;
+    PortOut<T, Async, Optional>         monitorOut; // optional monitor output (for diagnostics and debugging purposes)
+    std::vector<PortIn<T, Async>>       inputs;     // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
+    std::vector<PortOut<T, Async>>      outputs;
 
     // settings
-    A<std::uint32_t, "n_inputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>    n_inputs  = 0U;
-    A<std::uint32_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>   n_outputs = 0U;
-    A<std::vector<std::uint32_t>, "map_in", Visible, Doc<"input port index to route from">>     map_in; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
-    A<std::vector<std::uint32_t>, "map_out", Visible, Doc<"output port index to route to">>     map_out;
+    A<gr::Size_t, "n_inputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>       n_inputs  = 0U;
+    A<gr::Size_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>      n_outputs = 0U;
+    A<std::vector<gr::Size_t>, "map_in", Visible, Doc<"input port index to route from">>        map_in; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
+    A<std::vector<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>        map_out;
     A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">> back_pressure = false;
-    std::map<std::uint32_t, std::vector<std::uint32_t>>                                         _internalMapping;
-    std::uint32_t                                                                               _selectedSrc = -1U;
+    std::map<gr::Size_t, std::vector<gr::Size_t>>                                               _internalMapping;
+    gr::Size_t                                                                                  _selectedSrc = -1U;
 
     void
     settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
         if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
             fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", static_cast<void *>(this), old_settings.at("n_inputs"),
-                       new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+                       new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"),
+                       new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
             inputs.resize(n_inputs);
             outputs.resize(n_outputs);
         }
@@ -105,7 +104,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
         }
     }
 
-    using select_reader_t  = typename PortIn<std::uint32_t, Async, Optional>::ReaderType;
+    using select_reader_t  = typename PortIn<gr::Size_t, Async, Optional>::ReaderType;
     using monitor_writer_t = typename PortOut<T, Async, Optional>::WriterType;
     using input_reader_t   = typename PortIn<T, Async>::ReaderType;
     using output_writer_t  = typename PortOut<T, Async>::WriterType;

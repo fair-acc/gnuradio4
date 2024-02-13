@@ -132,7 +132,7 @@ outputPorts(Self *self) noexcept {
 namespace work {
 
 class Counter {
-    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<std::uint32_t>::max()) << 32 };
+    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<gr::Size_t>::max()) << 32 };
 
 public:
     void
@@ -141,12 +141,12 @@ public:
         uint64_t newCounter;
         do {
             oldCounter         = encodedCounter;
-            auto workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
-            auto workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
-            if (workRequested != std::numeric_limits<std::uint32_t>::max()) {
-                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())));
+            auto workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
+            auto workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
+            if (workRequested != std::numeric_limits<gr::Size_t>::max()) {
+                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<gr::Size_t>::max())));
             }
-            workDone += static_cast<std::uint32_t>(workDoneInc);
+            workDone += static_cast<gr::Size_t>(workDoneInc);
             newCounter = (static_cast<uint64_t>(workRequested) << 32) | workDone;
         } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
     }
@@ -154,9 +154,9 @@ public:
     std::pair<std::size_t, std::size_t>
     getAndReset() {
         uint64_t oldCounter    = encodedCounter.exchange(0);
-        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
-        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
-        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
+        auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
+        if (workRequested == std::numeric_limits<gr::Size_t>::max()) {
             return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
         }
         return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
@@ -165,8 +165,8 @@ public:
     std::pair<std::size_t, std::size_t>
     get() {
         uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
-        auto     workRequested = static_cast<std::uint32_t>(oldCounter >> 32);
-        auto     workDone      = static_cast<std::uint32_t>(oldCounter & 0xFFFFFFFF);
+        auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
+        auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
         if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
             return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
         }
@@ -190,6 +190,11 @@ struct Result {
 } // namespace work
 
 template<typename T>
+concept HasWork = requires(T t, std::size_t requested_work) {
+    { t.work(requested_work) } -> std::same_as<work::Result>;
+};
+
+template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
     { t.unique_name } -> std::same_as<const std::string &>;
     { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
@@ -199,14 +204,11 @@ concept BlockLike = requires(T t, std::size_t requested_work) {
     { t.isBlocking() } noexcept -> std::same_as<bool>;
 
     { t.settings() } -> std::same_as<SettingsBase &>;
-    { t.work(requested_work) } -> std::same_as<work::Result>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
     requires !std::is_copy_assignable_v<T>;
-    // requires !std::is_move_constructible_v<T>;
-    // requires !std::is_move_assignable_v<T>;
-};
+} && HasWork<T>;
 
 template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
@@ -219,6 +221,10 @@ concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+
+template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
+inline void
+checkBlockContracts();
 
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
@@ -334,8 +340,8 @@ public:
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
     using block_template_parameters  = meta::typelist<Arguments...>;
     using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
-    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UZ, 1UZ, true>>;
-    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UZ, true>>;
+    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UL, 1UL, true>>;
+    using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     template<typename T>
@@ -362,10 +368,10 @@ public:
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
     //
-    using RatioValue = std::conditional_t<Resampling::kIsConst, const std::size_t, std::size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UZ, std::size_t(-1)>> denominator = Resampling::kDenominator;
-    using StrideValue = std::conditional_t<StrideControl::kIsConst, const std::size_t, std::size_t>;
+    using RatioValue = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>>      numerator   = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator = Resampling::kDenominator;
+    using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
     //
@@ -501,10 +507,14 @@ protected:
     }
 
 public:
-    Block() noexcept : Block({}) {}
+    Block() noexcept(false) : Block({}) {} // N.B. throws in case of on contract violations
 
-    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter)
-        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept(false) // N.B. throws in case of on contract violations
+        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) {           // N.B. safe delegated use of this (i.e. not used during construction)
+
+        // check Block<T> contracts
+        checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
+
         if (init_parameter.size() != 0) {
             const auto failed = settings().set(init_parameter);
             if (!failed.empty()) {
@@ -709,7 +719,7 @@ public:
             static_assert(!kIsSourceBlock, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
-            if (numerator != 1UZ || denominator != 1UZ) {
+            if (numerator != 1ULL || denominator != 1ULL) {
                 throw std::runtime_error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
             }
         }
@@ -717,7 +727,7 @@ public:
         if constexpr (StrideControl::kEnabled) {
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
-            if (stride != 0UZ) {
+            if (stride != 0ULL) {
                 throw std::runtime_error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
             }
         }
@@ -867,7 +877,7 @@ public:
 
     constexpr work::Status
     doResampling() {
-        if (numerator != 1UZ || denominator != 1UZ) {
+        if (numerator != 1UL || denominator != 1UL) {
             // TODO: this ill-defined checks can be done only once after parameters were changed
             const double ratio          = static_cast<double>(numerator) / static_cast<double>(denominator);
             bool         is_ill_defined = (denominator > ports_status.in_max_samples)                                                            //
@@ -1201,7 +1211,7 @@ protected:
 
         std::size_t nSamplesToConsume = ports_status.in_samples; // default stride == 0
         if constexpr (StrideControl::kEnabled) {
-            if (stride != 0UZ) {
+            if (stride != 0UL) {
                 const bool firstTimeStride = stride_counter == 0;
                 if (firstTimeStride) {
                     // sample processing are done as usual, portsStatus.in_samples samples will be processed
@@ -1355,6 +1365,7 @@ public:
      * requested_work limit as an affine relation with the returned performed_work.
      * @return { requested_work, performed_work, status}
      */
+    template<typename = void>
     work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
         processScheduledMessages();
@@ -1452,6 +1463,144 @@ public:
         }
     }
 };
+
+namespace detail {
+template<typename List, std::size_t Index = 0, typename StringFunction>
+inline constexpr auto
+for_each_type_to_string(StringFunction func) -> std::string {
+    if constexpr (Index < List::size) {
+        using T = typename List::template at<Index>;
+        return std::string(Index > 0 ? ", " : "") + func(Index, T()) + for_each_type_to_string<List, Index + 1>(func);
+    } else {
+        return "";
+    }
+}
+
+template<typename T>
+inline constexpr std::string
+container_type_name() {
+    if constexpr (requires { typename T::allocator_type; }) {
+        return fmt::format("std::vector<{}>", gr::meta::type_name<typename T::value_type>());
+    } else if constexpr (requires { std::tuple_size<T>::value; }) {
+        return fmt::format("std::array<{}, {}>", gr::meta::type_name<typename T::value_type>(), std::tuple_size<T>::value);
+    } else if constexpr (requires(T a) {
+                             { std::real(a) } -> std::convertible_to<typename T::value_type>;
+                             { std::imag(a) } -> std::convertible_to<typename T::value_type>;
+                         }) {
+        return fmt::format("std::complex<{}>", gr::meta::type_name<typename T::value_type>());
+    } else { // fallback
+        return gr::meta::type_name<T>();
+    }
+}
+} // namespace detail
+
+template<typename TBlock, typename TDecayedBlock>
+inline void
+checkBlockContracts() {
+    // N.B. some checks could be evaluated during compile time but the expressed intent is to do this during runtime to allow
+    // for more verbose feedback on method signatures etc.
+    constexpr static auto processMembers = []<typename Func>(Func func) {
+        if constexpr (detail::HasBaseType<TDecayedBlock>) {
+            using BaseType = typename TDecayedBlock::base_t;
+            if constexpr (refl::is_reflectable<BaseType>()) {
+                refl::util::for_each(refl::reflect<BaseType>().members, func);
+            }
+        }
+        if constexpr (refl::is_reflectable<TDecayedBlock>()) {
+            refl::util::for_each(refl::reflect<TDecayedBlock>().members, func);
+        }
+    };
+
+    constexpr static auto shortTypeName = []<typename T>() {
+        if constexpr (std::is_same_v<T, gr::property_map>) {
+            return "gr::property_map";
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            return "std::string";
+        } else if constexpr (requires { typename T::value_type; }) {
+            return detail::container_type_name<T>();
+        } else {
+            return gr::meta::type_name<T>();
+        }
+    };
+
+    constexpr static auto checkSettingsTypes = [](auto member) {
+        using MemberType           = decltype(member)::value_type;
+        using RawType              = std::remove_cvref_t<MemberType>;
+        using Type                 = std::remove_cvref_t<unwrap_if_wrapped_t<RawType>>;
+        constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
+        // N.B. this function is compile-time ready but static_assert does not allow for configurable error messages
+        if constexpr (!gr::settings::isSupportedType<Type>() && !(traits::port::is_port_v<Type> || traits::port::is_port_collection_v<Type>) ) {
+            throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
+                                                    gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", get_display_name(member), shortTypeName.template operator()<Type>()));
+        }
+    };
+    processMembers(checkSettingsTypes);
+
+    using TDerived = typename TDecayedBlock::derived_t;
+    if constexpr (requires { &TDerived::work; }) {
+        [[deprecated("expert-use-only of raw 'gr::work::Result work(std::size_t requested_work)'")]] constexpr static auto warning = []() {
+            // N.B. implementing this is still allowed for workaround but should be discouraged as default API since this often leads to
+            // important variants not being implemented such as lifecycle::State handling, Tag forwarding, etc.
+            fmt::println(stderr, "DEPRECATION WARNING: block {} implements a raw 'gr::work::Result work(std::size_t requested_work)' ", shortTypeName.template operator()<TDecayedBlock>());
+        };
+        warning();
+        return;
+    }
+
+    using TInputTypes  = traits::block::stream_input_port_types<TDerived>;
+    using TOutputTypes = traits::block::stream_output_port_types<TDerived>;
+
+    if constexpr (((TInputTypes::size.value + TOutputTypes::size.value) > 0UZ) && !gr::HasRequiredProcessFunction<TDecayedBlock>) {
+        const auto b1 = (TOutputTypes::size.value == 1UZ) ? "" : "{ "; // optional opening brackets
+        const auto b2 = (TOutputTypes::size.value == 1UZ) ? "" : " }"; // optional closing brackets
+                                                                       // clang-format off
+        std::string signatureProcessOne = fmt::format("* Option Ia (pure function):\n\n{}\n\n* Option Ib (allows modifications: settings, Tags, state, errors,...):\n\n{}\n\n* Option Ic (explicit return types):\n\n{}\n\n", //
+fmt::format(R"(auto processOne({}) const noexcept {{
+    /* add code here */
+    return {}{}{};
+}})",
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2),
+fmt::format(R"(auto processOne({}) {{
+    /* add code here */
+    return {}{}{};
+}})",
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2),
+fmt::format(R"(std::tuple<{}> processOne({}) {{
+    /* add code here */
+    return {}{}{};
+}})",
+   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}", shortTypeName.template operator()<T>()); }), //
+   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }), //
+   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2)
+);
+
+std::string signaturesProcessBulk = fmt::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
+fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+    /* add code here */
+    return gr::work::Status::OK;
+}})", //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
+    (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<{}> out{}", shortTypeName.template operator()<T>(), index); })),
+fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+    /* add code here */
+    return gr::work::Status::OK;
+}})", //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
+    (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("PublishableSpan auto out{}", shortTypeName.template operator()<T>(), index); })));
+        // clang-format on
+
+        bool has_port_collection = false;
+        TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
+        TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
+        const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
+        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}",
+                                                shortTypeName.template operator()<TDecayedBlock>(), signatures));
+    }
+}
 
 template<typename Derived, typename... Arguments>
 inline std::atomic_size_t Block<Derived, Arguments...>::_unique_id_counter{ 0UZ };

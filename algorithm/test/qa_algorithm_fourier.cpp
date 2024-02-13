@@ -85,11 +85,11 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         typename T::AlgoType fftAlgo{};
         constexpr double     tolerance{ 1.e-5 };
         struct TestParams {
-            std::uint32_t N{ 1024 };           // must be power of 2
-            double        sample_rate{ 128. }; // must be power of 2 (only for the unit test for easy comparison with true result)
-            double        frequency{ 1. };
-            double        amplitude{ 1. };
-            bool          outputInDb{ false };
+            gr::Size_t N{ 1024 };           // must be power of 2
+            double     sample_rate{ 128. }; // must be power of 2 (only for the unit test for easy comparison with true result)
+            double     frequency{ 1. };
+            double     amplitude{ 1. };
+            bool       outputInDb{ false };
         };
 
         std::vector<TestParams> testCases = { { 256, 128., 10., 5., false }, { 512, 4., 1., 1., false }, { 512, 32., 1., 0.1, false }, { 256, 128., 10., 5., false } };
@@ -115,9 +115,9 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
 
     "FFT algo pattern tests"_test = []<typename T>() {
         using InType = T::InType;
-        typename T::AlgoType    fftAlgo{};
-        constexpr double        tolerance{ 1.e-5 };
-        constexpr std::uint32_t N{ 16 };
+        typename T::AlgoType fftAlgo{};
+        constexpr double     tolerance{ 1.e-5 };
+        constexpr gr::Size_t N{ 16 };
         static_assert(N == 16, "expected values are calculated for N == 16");
 
         std::vector<InType> signal(N);

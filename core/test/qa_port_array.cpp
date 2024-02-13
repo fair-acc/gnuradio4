@@ -12,15 +12,15 @@ using namespace std::string_literals;
 
 template<typename T>
 struct RepeatedSource : public gr::Block<RepeatedSource<T>> {
-    std::uint32_t  identifier = 0;
-    std::uint32_t  remaining_events_count;
+    gr::Size_t     identifier = 0;
+    gr::Size_t     remaining_events_count;
     std::vector<T> values;
     std::size_t    values_next = 0;
 
     gr::PortOut<T> out;
 
     void
-    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {}
+    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map & /*new_settings*/) noexcept {}
 
     gr::work::Result
     work(std::size_t requested_work) {
@@ -60,7 +60,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE(RepeatedSource, identifier, remaining_events_coun
 
 template<typename T>
 struct ValidatorSink : public gr::Block<ValidatorSink<T>> {
-    std::uint32_t identifier = 0;
+    gr::Size_t    identifier = 0;
     gr::PortIn<T> in;
 
     std::vector<T>                 expected_values;
@@ -147,7 +147,7 @@ execute_selector_test() {
 
     using TestNode = ArrayPortsNode<double>;
 
-    const std::uint32_t value_count = 5;
+    const gr::Size_t value_count = 5;
 
     gr::Graph                               graph;
     std::array<RepeatedSource<double> *, 4> sources;

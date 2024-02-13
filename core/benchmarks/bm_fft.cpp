@@ -75,11 +75,11 @@ testFFT() {
     using namespace gr;
     using namespace gr::algorithm;
 
-    constexpr std::uint32_t N{ 1024U }; // must be power of 2
-    constexpr double        sampleRate{ 256. };
-    constexpr double        frequency{ 100. };
-    constexpr double        amplitude{ 1. };
-    constexpr int           nRepetitions{ 100 };
+    constexpr gr::Size_t N{ 1024U }; // must be power of 2
+    constexpr double     sampleRate{ 256. };
+    constexpr double     frequency{ 100. };
+    constexpr double     amplitude{ 1. };
+    constexpr int        nRepetitions{ 100 };
 
     using PrecisionType = FFTAlgoPrecision<T>::type;
 
