@@ -369,8 +369,9 @@ public:
 
     //
     using RatioValue = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator = Resampling::kDenominator;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> numerator = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator
+            = Resampling::kDenominator;
     using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
@@ -1338,9 +1339,9 @@ protected:
             // work::Status::OK) : work::Status::ERROR };
             return { requested_work, ports_status.in_samples, success ? work::Status::OK : work::Status::ERROR };
         } // processOne(...) handling
-        //        else {
-        //            static_assert(gr::meta::always_false<Derived>, "neither processBulk(...) nor processOne(...) implemented");
-        //        }
+        else {
+            static_assert(gr::meta::always_false<Derived>, "neither processBulk(...) nor processOne(...) implemented");
+        }
         return { requested_work, 0UZ, work::Status::ERROR };
     } // end: work_return_t work_internal() noexcept { ..}
 

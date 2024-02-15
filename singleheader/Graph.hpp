@@ -13133,8 +13133,8 @@ class CircularBuffer
         }
         ~ConsumableInputRange() = default;
 
-        [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); };
-        [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
+        [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
+        [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
         [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
         [[nodiscard]] constexpr iterator begin() const noexcept { return _internalSpan.begin(); }
         [[nodiscard]] constexpr iterator end() const noexcept { return _internalSpan.end(); }
@@ -15230,20 +15230,61 @@ concept can_processMessagesForPortConsumableSpan = requires(TBlock &block, TPort
 template<typename TBlock, typename TPort>
 concept can_processMessagesForPortStdSpan = requires(TBlock &block, TPort &inPort, std::span<const Message> msgSpan) { block.processMessages(inPort, msgSpan); };
 
+// clang-format off
 namespace detail {
-template<typename T>
-struct dummy_input_span : std::span<const T> {           // NOSONAR
-    dummy_input_span(const dummy_input_span &) = delete; // NOSONAR
-    dummy_input_span(dummy_input_span &&) noexcept;      // NOSONAR
-    constexpr void consume(std::size_t) noexcept;
-};
 
 template<typename T>
-struct dummy_output_span : std::span<T> {                  // NOSONAR
-    dummy_output_span(const dummy_output_span &) = delete; // NOSONAR
-    dummy_output_span(dummy_output_span &&) noexcept;      // NOSONAR
-    constexpr void publish(std::size_t) noexcept;
+struct DummyConsumableSpan {
+    using value_type = typename std::remove_cv_t<T>;
+    using iterator = typename std::span<const T>::iterator;
+
+private:
+    std::span<const T> internalSpan; // Internal span, used for fake implementation
+
+public:
+    DummyConsumableSpan() = default;
+    DummyConsumableSpan(const DummyConsumableSpan& other) = default;
+    DummyConsumableSpan& operator=(const DummyConsumableSpan& other) = default;
+    DummyConsumableSpan(DummyConsumableSpan&& other) noexcept = default;
+    DummyConsumableSpan& operator=(DummyConsumableSpan&& other) noexcept = default;
+    ~DummyConsumableSpan() = default;
+
+    [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    operator const std::span<const T>&() const noexcept { return internalSpan; }
+    operator std::span<const T>&() noexcept  { return internalSpan; }
+    operator std::span<const T>&&() = delete;
+
+    [[nodiscard]] bool consume(std::size_t nSamples) const noexcept { return true; }
 };
+static_assert(ConsumableSpan<DummyConsumableSpan<int>>);
+
+template<typename T>
+struct DummyPublishableSpan {
+    using value_type = typename std::remove_cv_t<T>;
+    using iterator = typename std::span<T>::iterator;
+
+private:
+    std::span<T> internalSpan; // Internal span, used for fake implementation
+
+public:
+    DummyPublishableSpan() = default;
+    DummyPublishableSpan(const DummyPublishableSpan& other) = delete;
+    DummyPublishableSpan& operator=(const DummyPublishableSpan& other) = delete;
+    DummyPublishableSpan(DummyPublishableSpan&& other) noexcept = default;
+    DummyPublishableSpan& operator=(DummyPublishableSpan&& other) noexcept = default;
+    ~DummyPublishableSpan() = default;
+
+    [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    operator const std::span<T>&() const noexcept { return internalSpan; }
+    operator std::span<T>&() noexcept  { return internalSpan; }
+
+    constexpr void publish(std::size_t) noexcept {}
+};
+static_assert(PublishableSpan<DummyPublishableSpan<int>>);
+
+// clang-format on
 
 struct to_any_vector {
     template<typename Any>
@@ -15285,9 +15326,9 @@ port_to_processBulk_argument_helper() {
 
     } else if constexpr (Port::kIsSynch) {
         if constexpr (Port::kIsInput) {
-            return static_cast<dummy_input_span<typename Port::value_type> *>(nullptr);
+            return static_cast<DummyConsumableSpan<typename Port::value_type> *>(nullptr);
         } else if constexpr (Port::kIsOutput) {
-            return static_cast<dummy_output_span<typename Port::value_type> *>(nullptr);
+            return static_cast<DummyPublishableSpan<typename Port::value_type> *>(nullptr);
         }
     } else {
         if constexpr (Port::kIsInput) {
@@ -15331,20 +15372,19 @@ concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nes
  */
 template<typename TDerived, std::size_t I>
 concept processBulk_requires_ith_output_as_span
-        = can_processBulk<TDerived>
-       && requires(TDerived &d, typename meta::transform_types<detail::dummy_input_span, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
-                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::dummy_output_span,
+        = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0)
+       && requires(TDerived &d, typename meta::transform_types<detail::DummyConsumableSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
+                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan,
                                                         traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
                            outputs,
-                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::dummy_output_span,
+                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishableSpan,
                                                         traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
                            bad_outputs) {
               {
-                  []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
-                                                                  std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...)) {
-                      return {};
-                  }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>())
+                  detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(),
+                                                      std::make_index_sequence<stream_output_port_types<TDerived>::size>())
               } -> std::same_as<work::Status>;
+              // TODO: Is this check redundant?
               not requires {
                   []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
                                                                   std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
@@ -18904,8 +18944,9 @@ public:
 
     //
     using RatioValue = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator = Resampling::kDenominator;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> numerator = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator
+            = Resampling::kDenominator;
     using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
 
@@ -19873,9 +19914,9 @@ protected:
             // work::Status::OK) : work::Status::ERROR };
             return { requested_work, ports_status.in_samples, success ? work::Status::OK : work::Status::ERROR };
         } // processOne(...) handling
-        //        else {
-        //            static_assert(gr::meta::always_false<Derived>, "neither processBulk(...) nor processOne(...) implemented");
-        //        }
+        else {
+            static_assert(gr::meta::always_false<Derived>, "neither processBulk(...) nor processOne(...) implemented");
+        }
         return { requested_work, 0UZ, work::Status::ERROR };
     } // end: work_return_t work_internal() noexcept { ..}
 
