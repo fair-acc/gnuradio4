@@ -12354,12 +12354,12 @@ struct NoCapacityException : public std::runtime_error {
 
 template<typename T>
 concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
-        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
+        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> offset, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
     { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
     { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.publish(sequence) } -> std::same_as<void>;
+    { t.publish(offset, n_slots_to_claim) } -> std::same_as<void>;
     { t.isAvailable(sequence) } -> std::same_as<bool>;
     { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
 };
@@ -12438,7 +12438,8 @@ public:
         return static_cast<signed_index_type>(_size) - (produced - consumed);
     }
 
-    void publish(signed_index_type sequence) {
+    void publish(signed_index_type offset, std::size_t n_slots_to_claim) {
+        const auto sequence = offset + static_cast<signed_index_type>(n_slots_to_claim);
         _cursor.setValue(sequence);
         _nextValue = sequence;
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
@@ -12455,8 +12456,9 @@ static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
 template <std::size_t Size>
 struct MultiThreadedStrategySizeMembers
 {
+    static_assert(std::has_single_bit(Size));
     static constexpr std::int32_t _size = Size;
-    static constexpr std::int32_t _indexShift = std::bit_width(Size);
+    static constexpr std::int32_t _indexShift = std::bit_width(Size - 1);
 };
 
 template <>
@@ -12465,13 +12467,15 @@ struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
     const std::int32_t _indexShift;
 
     #ifdef __clang__
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
+    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size - 1))) {} //NOSONAR
     #else
     #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
     #ifndef __clang__
     #pragma GCC diagnostic ignored "-Wuseless-cast"
     #endif
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size))) {} //NOSONAR
+    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size - 1))) {
+        assert(std::has_single_bit(size));
+    } //NOSONAR
     #pragma GCC diagnostic pop
     #endif
 };
@@ -12490,7 +12494,11 @@ class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
 : private MultiThreadedStrategySizeMembers<SIZE> {
     Sequence &_cursor;
     WAIT_STRATEGY &_waitStrategy;
+#if (__cpp_lib_atomic_ref >= 201806L)
     std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
+#else // clang's libc++ does not yet support std::atomic_ref
+    std::unique_ptr<std::atomic<std::int32_t>[]> _availableBuffer; // tracks the state of each ringbuffer slot
+#endif
     std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
     using MultiThreadedStrategySizeMembers<SIZE>::_size;
     using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
@@ -12501,14 +12509,26 @@ public:
 
     explicit
     MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
-    : _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(SIZE, -1) {
+    : _cursor(cursor), _waitStrategy(waitStrategy) {
+#if (__cpp_lib_atomic_ref >= 201806L)
+        _availableBuffer = std::vector<std::int32_t>(SIZE, -1);
+#else // clang's libc++ does not yet support std::atomic_ref
+        _availableBuffer = std::make_unique<std::atomic<std::int32_t>[]>(SIZE);
+        std::fill(_availableBuffer.get(), _availableBuffer.get() + SIZE, -1);
+#endif
     }
 
     explicit
     MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
     requires (SIZE == std::dynamic_extent)
     : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
-      _cursor(cursor), _waitStrategy(waitStrategy), _availableBuffer(buffer_size, -1) {
+      _cursor(cursor), _waitStrategy(waitStrategy) {
+#if (__cpp_lib_atomic_ref >= 201806L)
+        _availableBuffer = std::vector<std::int32_t>(buffer_size, -1);
+#else // clang's libc++ does not yet support std::atomic_ref
+        _availableBuffer = std::make_unique<std::atomic<std::int32_t>[]>(buffer_size);
+        std::fill(_availableBuffer.get(), _availableBuffer.get() + buffer_size, -1);
+#endif
     }
 
     MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
@@ -12588,8 +12608,10 @@ public:
         return static_cast<signed_index_type>(_size) - (produced - consumed);
     }
 
-    void publish(signed_index_type sequence) {
-        setAvailable(sequence);
+    void publish(signed_index_type offset, std::size_t n_slots_to_claim) {
+        for (std::size_t i = 0; i < n_slots_to_claim; i++) {
+            setAvailable(offset + static_cast<signed_index_type>(i) + 1);
+        }
         if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
             _waitStrategy.signalAllWhenBlocking();
         }
@@ -12598,8 +12620,11 @@ public:
     [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
         const auto index = calculateIndex(sequence);
         const auto flag  = calculateAvailabilityFlag(sequence);
-
-        return _availableBuffer[static_cast<std::size_t>(index)] == flag;
+#if (__cpp_lib_atomic_ref >= 201806L)
+        return std::atomic_ref{_availableBuffer[index]} == flag;
+#else // clang's libc++ does not yet support std::atomic_ref
+        return _availableBuffer[index] == flag;
+#endif
     }
 
     [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
@@ -12614,8 +12639,14 @@ public:
 
 private:
     void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept { _availableBuffer[index] = flag; }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(static_cast<signed_index_type>(sequence) >> _indexShift); }
+    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept {
+#if (__cpp_lib_atomic_ref >= 201806L)
+        std::atomic_ref{_availableBuffer[index]} = flag;
+#else // clang's libc++ does not yet support std::atomic_ref
+        _availableBuffer[index] = flag;
+#endif
+    }
+    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(sequence >> _indexShift); }
     [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
 };
 
@@ -12968,7 +12999,7 @@ class CircularBuffer
             std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
             std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
         }
-        _parent->_claim_strategy->publish(_offset + static_cast<signed_index_type>(n_produced));
+        _parent->_claim_strategy->publish(_offset, n_produced);
         _n_slots_to_claim -= n_produced;
         _published_data = true;
     }
@@ -13059,7 +13090,7 @@ class CircularBuffer
                     std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
                     std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
                 }
-                _claim_strategy->publish(publishSequence); // points at first non-writable index
+                _claim_strategy->publish(publishSequence - static_cast<signed_index_type>(n_slots_to_claim), n_slots_to_claim);
             } catch (const std::exception&) {
                 throw;
             } catch (...) {
@@ -13210,9 +13241,11 @@ class CircularBuffer
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = 0UZ) const noexcept -> ConsumableInputRange {
-            std::size_t n = nRequested > 0 ? nRequested : available();
+            std::size_t n;
             if constexpr (strict_check) {
                 n = nRequested > 0 ? std::min(nRequested, available()) : available();
+            } else {
+                n = nRequested > 0 ? nRequested : available();
             }
             std::atomic_store_explicit(&_isRangeConsumed, false, std::memory_order_release);
             _isRangeConsumed.notify_all();
@@ -13242,7 +13275,8 @@ class CircularBuffer
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return static_cast<std::size_t>(_buffer->_cursor.value() - _readIndexCached);
+            const auto last = _buffer->_claim_strategy.getHighestPublishedSequence(_readIndexCached + 1, _buffer->_cursor.value());
+            return static_cast<std::size_t>(last - _readIndexCached);
         }
     }; // class buffer_reader
 

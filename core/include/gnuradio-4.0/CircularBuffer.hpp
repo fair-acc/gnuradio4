@@ -363,7 +363,7 @@ class CircularBuffer
             std::copy(&data[_index], &data[_index + nFirstHalf], &data[_index + size]);
             std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
         }
-        _parent->_claim_strategy->publish(_offset + static_cast<signed_index_type>(n_produced));
+        _parent->_claim_strategy->publish(_offset, n_produced);
         _n_slots_to_claim -= n_produced;
         _published_data = true;
     }
@@ -454,7 +454,7 @@ class CircularBuffer
                     std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
                     std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
                 }
-                _claim_strategy->publish(publishSequence); // points at first non-writable index
+                _claim_strategy->publish(publishSequence - static_cast<signed_index_type>(n_slots_to_claim), n_slots_to_claim);
             } catch (const std::exception&) {
                 throw;
             } catch (...) {
@@ -605,9 +605,11 @@ class CircularBuffer
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = 0UZ) const noexcept -> ConsumableInputRange {
-            std::size_t n = nRequested > 0 ? nRequested : available();
+            std::size_t n;
             if constexpr (strict_check) {
                 n = nRequested > 0 ? std::min(nRequested, available()) : available();
+            } else {
+                n = nRequested > 0 ? nRequested : available();
             }
             std::atomic_store_explicit(&_isRangeConsumed, false, std::memory_order_release);
             _isRangeConsumed.notify_all();
@@ -637,7 +639,8 @@ class CircularBuffer
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return static_cast<std::size_t>(_buffer->_cursor.value() - _readIndexCached);
+            const auto last = _buffer->_claim_strategy.getHighestPublishedSequence(_readIndexCached + 1, _buffer->_cursor.value());
+            return static_cast<std::size_t>(last - _readIndexCached);
         }
     }; // class buffer_reader
 

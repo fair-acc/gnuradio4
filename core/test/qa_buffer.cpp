@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <complex>
 #include <numeric>
 #include <ranges>
@@ -173,6 +175,24 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
     };
 };
 #endif
+
+template<typename Writer, std::size_t N>
+void
+writeVaryingChunkSizes(Writer &writer) {
+    std::size_t pos    = 0;
+    std::size_t iWrite = 0;
+    while (pos < N) {
+        constexpr auto kChunkSizes = std::array{ 1UZ, 2UZ, 3UZ, 5UZ, 7UZ, 42UZ };
+        const auto     chunkSize   = std::min(kChunkSizes[iWrite % kChunkSizes.size()], N - pos);
+        auto           out         = writer.reserve_output_range(chunkSize);
+        for (auto i = 0UZ; i < out.size(); i++) {
+            out[i] = { { 0, static_cast<int>(pos + i) } };
+        }
+        out.publish(out.size());
+        pos += chunkSize;
+        ++iWrite;
+    }
+}
 
 const boost::ut::suite WaitStrategiesTests = [] {
     using namespace boost::ut;
@@ -376,6 +396,100 @@ const boost::ut::suite CircularBufferTests = [] {
 #endif
                   Allocator()
               };
+
+    "MultiProducerStdMapSingleWriter"_test = [] {
+        // Using std::map exposed some race conditions in the multi-producer buffer implementation
+        // that did not surface with trivial types. (two readers for good measure, issues occurred also
+        // with single reader)
+        gr::CircularBuffer<std::map<int, int>, std::dynamic_extent, gr::ProducerType::Multi> buffer(1024);
+
+        gr::BufferWriter auto writer  = buffer.new_writer();
+        gr::BufferReader auto reader1 = buffer.new_reader();
+        gr::BufferReader auto reader2 = buffer.new_reader();
+
+        constexpr auto kWrites      = 200000UZ;
+        auto           writerThread = std::thread(&writeVaryingChunkSizes<decltype(writer), kWrites>, std::ref(writer));
+
+        auto readerFnc = [](auto reader) {
+            std::size_t i = 0;
+            while (i < kWrites) {
+                auto       in        = reader.get().get();
+                for (auto j = 0UZ; j < in.size(); j++) {
+                    auto vIt = in[j].find(0);
+                    expect(vIt != in[j].end());
+                    if (vIt != in[j].end()) {
+                        expect(eq(vIt->second, static_cast<int>(i)));
+                    }
+                    i++;
+                }
+                if (!in.empty()) {
+                    expect(reader.get().consume(in.size()));
+                }
+            }
+        };
+
+        auto reader1Thread = std::thread(readerFnc, std::ref(reader1));
+        auto reader2Thread = std::thread(readerFnc, std::ref(reader2));
+        writerThread.join();
+        reader1Thread.join();
+        reader2Thread.join();
+    };
+
+    "MultiProducerStdMapMultipleWriters"_test = [] {
+        // now actually use multiple writers, and ensure we see all expected values, in a valid order.
+        constexpr auto kNWriters = 5UZ;
+        constexpr auto kWrites   = 20000UZ;
+
+        gr::CircularBuffer<std::map<int, int>, std::dynamic_extent, gr::ProducerType::Multi> buffer(1024);
+        using WriterType              = decltype(buffer.new_writer());
+        gr::BufferReader auto reader1 = buffer.new_reader();
+        gr::BufferReader auto reader2 = buffer.new_reader();
+
+        std::vector<WriterType> writers;
+        for (std::size_t i = 0; i < kNWriters; i++) {
+            writers.push_back(buffer.new_writer());
+        }
+
+        std::array<std::thread, kNWriters> writerThreads;
+        for (std::size_t i = 0; i < kNWriters; i++) {
+            writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]));
+        }
+
+        auto readerFnc = [](auto reader) {
+            std::array<int, kNWriters> next;
+            std::ranges::fill(next, 0);
+            std::size_t read = 0;
+            while (read < kWrites * kNWriters) {
+                auto in = reader.get().get();
+                for (const auto &map : in) {
+                    auto vIt = map.find(0);
+                    expect(vIt != map.end());
+                    if (vIt == map.end()) {
+                        continue;
+                    }
+                    const auto value = vIt->second;
+                    expect(ge(value, 0));
+                    expect(le(value, static_cast<int>(kWrites)));
+                    const auto nextIt = std::ranges::find(next, value);
+                    expect(nextIt != next.end());
+                    if (nextIt == next.end()) continue;
+                    *nextIt = value + 1;
+                }
+                if (!in.empty()) {
+                    read += in.size();
+                    expect(reader.get().consume(in.size()));
+                }
+            }
+        };
+
+        auto reader1Thread = std::thread(readerFnc, std::ref(reader1));
+        auto reader2Thread = std::thread(readerFnc, std::ref(reader2));
+        for (std::size_t i = 0; i < kNWriters; i++) {
+            writerThreads[i].join();
+        }
+        reader1Thread.join();
+        reader2Thread.join();
+    };
 };
 
 const boost::ut::suite CircularBufferExceptionTests = [] {
