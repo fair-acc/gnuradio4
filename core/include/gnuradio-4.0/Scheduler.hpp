@@ -1,8 +1,8 @@
 #ifndef GNURADIO_SCHEDULER_HPP
 #define GNURADIO_SCHEDULER_HPP
 
-#include <barrier>
 #include <set>
+#include <source_location>
 #include <thread>
 #include <utility>
 #include <queue>
@@ -15,6 +15,8 @@
 
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
+using namespace gr::message;
+using namespace std::string_literals;
 
 enum ExecutionPolicy { singleThreaded, multiThreaded };
 
@@ -91,13 +93,15 @@ public:
         waitDone();
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_STOP); !e) {
-                using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                auto                       &port  = msgOut;
+                const lifecycle::ErrorType &error = e.error();
+                emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
             }
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 if (auto e = block.changeState(lifecycle::State::STOPPED); !e) {
-                    using namespace gr::message;
-                    this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    auto                       &port  = msgOut;
+                    const lifecycle::ErrorType &error = e.error();
+                    emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
                 }
             }
         });
@@ -113,8 +117,9 @@ public:
         waitDone();
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_PAUSE); !e) {
-                using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                auto                       &port  = msgOut;
+                const lifecycle::ErrorType &error = e.error();
+                this->emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
             }
         });
         _state = lifecycle::State::PAUSED;
@@ -147,7 +152,9 @@ public:
     connectBlockMessagePorts() {
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                throw fmt::format("Failed to connect scheduler output message port to child {}", block.uniqueName());
+                this->emitMessage(msgOut, { { key::Kind, kind::Error },
+                                      { key::ErrorInfo, fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()) },
+                                      { key::Location, fmt::format("{}", std::source_location::current()) } });
             }
 
             auto buffer = _fromChildMessagePort.buffer();
@@ -158,13 +165,14 @@ public:
     void
     processScheduledMessages() {
         // Process messages in scheduler
-        auto passMessages = [](auto &inPort, auto &outPort) {
+        auto passMessages = [this](auto &inPort, auto &outPort) {
             auto &reader = inPort.streamReader();
             if (const auto available = reader.available(); available > 0) {
                 const auto &input = reader.get(available);
-                outPort.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
+                outPort.streamWriter().publish([&, this](auto &output) { std::ranges::copy(input, output.begin()); }, available);
                 if (!reader.consume(available)) {
-                    throw std::runtime_error("Failed to consume messages from message port");
+
+                    this->emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, "Failed to consume from message port" }, { key::Location, fmt::format("{}", std::source_location::current()) } });
                 }
             }
         };
@@ -208,7 +216,6 @@ public:
         }
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::INITIALISED); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -251,6 +258,7 @@ public:
  */
 template<ExecutionPolicy executionPolicy = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class Simple : public SchedulerBase<TProfiler> {
+    static_assert(executionPolicy == ExecutionPolicy::singleThreaded || executionPolicy == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
@@ -325,7 +333,6 @@ public:
         }
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -341,7 +348,6 @@ public:
 
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -357,11 +363,9 @@ public:
             if (result.status == work::Status::ERROR) {
                 this->_state = lifecycle::State::ERROR;
             }
-        } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
+        } else {
             this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
-        } else {
-            throw std::invalid_argument("Unknown execution Policy");
         }
     }
 };
@@ -372,6 +376,7 @@ public:
  */
 template<ExecutionPolicy executionPolicy = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class BreadthFirst : public SchedulerBase<TProfiler> {
+    static_assert(executionPolicy == ExecutionPolicy::singleThreaded || executionPolicy == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
     std::vector<BlockModel *>              _blocklist;
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
@@ -482,7 +487,6 @@ public:
         this->resumeBlocks();
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -498,7 +502,6 @@ public:
 
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -514,11 +517,9 @@ public:
                     return;
                 }
             }
-        } else if (executionPolicy == multiThreaded) {
+        } else {
             this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
-        } else {
-            throw std::invalid_argument("Unknown execution Policy");
         }
     }
 
