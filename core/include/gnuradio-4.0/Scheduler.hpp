@@ -1,8 +1,9 @@
 #ifndef GNURADIO_SCHEDULER_HPP
 #define GNURADIO_SCHEDULER_HPP
 
-#include <barrier>
 #include <set>
+#include <source_location>
+#include <thread>
 #include <utility>
 #include <queue>
 
@@ -14,6 +15,8 @@
 
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
+using namespace gr::message;
+using namespace std::string_literals;
 
 enum ExecutionPolicy { singleThreaded, multiThreaded };
 
@@ -27,8 +30,7 @@ protected:
     TProfiler                           _profiler;
     decltype(_profiler.forThisThread()) _profiler_handler;
     std::shared_ptr<BasicThreadPool>    _pool;
-    std::atomic_uint64_t                _progress;
-    std::atomic_size_t                  _running_threads;
+    std::atomic_size_t                  _running_jobs;
     std::atomic_bool                    _stop_requested;
 
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
@@ -91,13 +93,15 @@ public:
         waitDone();
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_STOP); !e) {
-                using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                auto                       &port  = msgOut;
+                const lifecycle::ErrorType &error = e.error();
+                emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
             }
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 if (auto e = block.changeState(lifecycle::State::STOPPED); !e) {
-                    using namespace gr::message;
-                    this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    auto                       &port  = msgOut;
+                    const lifecycle::ErrorType &error = e.error();
+                    emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
                 }
             }
         });
@@ -113,8 +117,9 @@ public:
         waitDone();
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_PAUSE); !e) {
-                using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                auto                       &port  = msgOut;
+                const lifecycle::ErrorType &error = e.error();
+                this->emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
             }
         });
         _state = lifecycle::State::PAUSED;
@@ -124,9 +129,11 @@ public:
     waitDone() {
         using enum lifecycle::State;
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.waitDone");
-        for (auto running = _running_threads.load(); running > 0ul; running = _running_threads.load()) {
-            _running_threads.wait(running);
+        for (auto running = _running_jobs.load(); running > 0ul; running = _running_jobs.load()) {
+            this->processScheduledMessages();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        this->processScheduledMessages();
     }
 
     void
@@ -145,7 +152,9 @@ public:
     connectBlockMessagePorts() {
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                throw fmt::format("Failed to connect scheduler output message port to child {}", block.uniqueName());
+                this->emitMessage(msgOut, { { key::Kind, kind::Error },
+                                      { key::ErrorInfo, fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()) },
+                                      { key::Location, fmt::format("{}", std::source_location::current()) } });
             }
 
             auto buffer = _fromChildMessagePort.buffer();
@@ -156,12 +165,15 @@ public:
     void
     processScheduledMessages() {
         // Process messages in scheduler
-        auto passMessages = [](auto &inPort, auto &outPort) {
+        auto passMessages = [this](auto &inPort, auto &outPort) {
             auto &reader = inPort.streamReader();
             if (const auto available = reader.available(); available > 0) {
                 const auto &input = reader.get(available);
-                outPort.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
-                reader.consume(available);
+                outPort.streamWriter().publish([&, this](auto &output) { std::ranges::copy(input, output.begin()); }, available);
+                if (!reader.consume(available)) {
+
+                    this->emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, "Failed to consume from message port" }, { key::Location, fmt::format("{}", std::source_location::current()) } });
+                }
             }
         };
 
@@ -170,7 +182,9 @@ public:
 
         // Process messages in the graph
         _graph.processScheduledMessages();
-        _graph.forEachBlock(&BlockModel::processScheduledMessages);
+        if (_running_jobs.load() == 0) {
+            _graph.forEachBlock(&BlockModel::processScheduledMessages);
+        }
     }
 
     void
@@ -202,7 +216,6 @@ public:
         }
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::INITIALISED); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -218,53 +231,25 @@ public:
     void
     runOnPool(const std::vector<std::vector<BlockModel *>> &jobs, const std::function<work::Result(const std::span<BlockModel *const> &)> work_function) {
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.runOnPool");
-        _progress                      = 0;
-        _running_threads               = jobs.size();
+        _running_jobs                  = jobs.size();
         for (auto &jobset : jobs) {
-            _pool->execute([this, &jobset, work_function, &jobs]() { poolWorker([&work_function, &jobset]() { return work_function(jobset); }, jobs.size()); });
+            _pool->execute([this, &jobset, work_function]() { poolWorker([&work_function, &jobset]() { return work_function(jobset); }); });
         }
     }
 
     void
-    poolWorker(const std::function<work::Result()> &work, std::size_t n_batches) {
-        auto    &profiler_handler = _profiler.forThisThread();
-        uint32_t done             = 0;
-        uint32_t progress_count   = 0;
-        while (done < n_batches && !_stop_requested) {
-            auto                   pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
-            const gr::work::Result workResult         = work();
-            bool                   something_happened = workResult.status == work::Status::OK;
+    poolWorker(const std::function<work::Result()> &work) {
+        auto &profiler_handler   = _profiler.forThisThread();
+        bool  something_happened = true;
+        while (something_happened && !_stop_requested) {
+            auto                   pe         = profiler_handler.startCompleteEvent("scheduler_base.work");
+            const gr::work::Result workResult = work();
             pe.finish();
-            uint64_t progress_local = 0ULL;
-            uint64_t progress_new   = 0ULL;
-            if (something_happened) { // something happened in this thread => increase progress and reset done count
-                do {
-                    progress_local = _progress.load();
-                    progress_count = static_cast<gr::Size_t>((progress_local >> 32) & ((1ULL << 32) - 1));
-                    done           = static_cast<gr::Size_t>(progress_local & ((1ULL << 32) - 1));
-                    progress_new   = (progress_count + 1ULL) << 32;
-                } while (!_progress.compare_exchange_strong(progress_local, progress_new));
-                _progress.notify_all();
-            } else { // nothing happened on this thread
-                uint32_t progress_count_old = progress_count;
-                do {
-                    progress_local = _progress.load();
-                    progress_count = static_cast<gr::Size_t>((progress_local >> 32) & ((1ULL << 32) - 1));
-                    done           = static_cast<gr::Size_t>(progress_local & ((1ULL << 32) - 1));
-                    if (progress_count == progress_count_old) { // nothing happened => increase done count
-                        progress_new = ((progress_count + 0ULL) << 32) + done + 1;
-                    } else { // something happened in another thread => keep progress and done count and rerun this task without waiting
-                        progress_new = ((progress_count + 0ULL) << 32) + done;
-                    }
-                } while (!_progress.compare_exchange_strong(progress_local, progress_new));
-                _progress.notify_all();
-                if (progress_count == progress_count_old && done + 1 < n_batches) {
-                    _progress.wait(progress_new);
-                }
-            }
-        } // while (done < n_batches)
-        _running_threads.fetch_sub(1);
-        _running_threads.notify_all();
+
+            something_happened = workResult.status == work::Status::OK;
+        }
+        _running_jobs.fetch_sub(1);
+        _running_jobs.notify_all();
     }
 };
 
@@ -273,6 +258,7 @@ public:
  */
 template<ExecutionPolicy executionPolicy = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class Simple : public SchedulerBase<TProfiler> {
+    static_assert(executionPolicy == ExecutionPolicy::singleThreaded || executionPolicy == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
 public:
@@ -284,7 +270,7 @@ public:
     isProcessing() const
         requires(executionPolicy == multiThreaded)
     {
-        return this->_running_threads.load() > 0;
+        return this->_running_jobs.load() > 0;
     }
 
     void
@@ -314,11 +300,9 @@ public:
     workOnce(const std::span<block_type> &blocks) {
         constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
         std::size_t           performedWorkAllBlocks = 0UZ;
-
-        this->processScheduledMessages();
-
-        bool something_happened = false;
+        bool                  something_happened     = false;
         for (auto &currentBlock : blocks) {
+            currentBlock->processScheduledMessages();
             const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
             performedWorkAllBlocks += performed_work;
             if (status == work::Status::ERROR) {
@@ -349,7 +333,6 @@ public:
         }
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -365,7 +348,6 @@ public:
 
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -375,16 +357,15 @@ public:
             work::Result                           result;
             std::span<std::unique_ptr<BlockModel>> blocklist = std::span{ this->_graph.blocks() };
             do {
+                this->processScheduledMessages();
                 result = workOnce(blocklist);
             } while (result.status == work::Status::OK);
             if (result.status == work::Status::ERROR) {
                 this->_state = lifecycle::State::ERROR;
             }
-        } else if (executionPolicy == ExecutionPolicy::multiThreaded) {
+        } else {
             this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
-        } else {
-            throw std::invalid_argument("Unknown execution Policy");
         }
     }
 };
@@ -395,6 +376,7 @@ public:
  */
 template<ExecutionPolicy executionPolicy = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class BreadthFirst : public SchedulerBase<TProfiler> {
+    static_assert(executionPolicy == ExecutionPolicy::singleThreaded || executionPolicy == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
     std::vector<BlockModel *>              _blocklist;
     std::vector<std::vector<BlockModel *>> _job_lists{};
 
@@ -407,7 +389,7 @@ public:
     isProcessing() const
         requires(executionPolicy == multiThreaded)
     {
-        return this->_running_threads.load() > 0;
+        return this->_running_jobs.load() > 0;
     }
 
     void
@@ -476,6 +458,7 @@ public:
         std::size_t           performed_work     = 0UZ;
 
         for (auto &currentBlock : blocks) {
+            currentBlock->processScheduledMessages();
             gr::work::Result result = currentBlock->work(requested_work);
             performed_work += result.performed_work;
             if (result.status == work::Status::ERROR) {
@@ -504,7 +487,6 @@ public:
         this->resumeBlocks();
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -520,7 +502,6 @@ public:
 
         this->_graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::RUNNING); !e) {
-                using namespace gr::message;
                 this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         });
@@ -530,16 +511,15 @@ public:
             work::Result result;
             auto         blocklist = std::span{ this->_blocklist };
             while ((result = workOnce(blocklist)).status == work::Status::OK) {
+                this->processScheduledMessages();
                 if (result.status == work::Status::ERROR) {
                     this->_state = lifecycle::State::ERROR;
                     return;
                 }
             }
-        } else if (executionPolicy == multiThreaded) {
+        } else {
             this->_state = lifecycle::State::RUNNING;
             this->runOnPool(this->_job_lists, [this](auto &job) { return this->workOnce(job); });
-        } else {
-            throw std::invalid_argument("Unknown execution Policy");
         }
     }
 
