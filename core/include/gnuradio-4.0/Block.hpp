@@ -1369,8 +1369,6 @@ public:
     template<typename = void>
     work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
-        processScheduledMessages();
-
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
