@@ -91,6 +91,8 @@ if (EMSCRIPTEN)
             -fwasm-exceptions
             -pthread
             "SHELL:-s PTHREAD_POOL_SIZE=30"
+            "SHELL:-s FETCH=1"
+            "SHELL:-s ASSERTIONS=1"
     )
 endif ()
 
@@ -136,7 +138,13 @@ FetchContent_Declare(
         GIT_TAG v0.2.0
 )
 
-FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.15.1
+)
+
+FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd httplib)
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)

@@ -105,6 +105,7 @@ jobs:
           export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk for threading support
           source ~/emsdk/emsdk_env.sh
           emcmake cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}
+          npm install -g xhr2 # needed for emscripten fetch
 
       - name: Build
         if: matrix.configurations.compiler != 'gcc13' || matrix.cmake-build-type != 'Debug'
@@ -123,6 +124,8 @@ jobs:
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: ctest --output-on-failure
+        env:
+          NODE_PATH: /usr/local/lib/node_modules
 
       - name: execute tests with coverage
         if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
