@@ -13884,7 +13884,7 @@ using gr::meta::fixed_string;
 #ifndef PMT_SUPPORTED_TYPE // // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
 #define PMT_SUPPORTED_TYPE
 // Only DataSet<double> and DataSet<float> are added => consider to support more Dataset<T>
-using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, DataSet<float>, DataSet<double> /*, ...*/>;
+using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, DataSet<float>, DataSet<double>, pmtv::map_t /*, ...*/>;
 #endif
 
 enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations

@@ -53,3 +53,8 @@ CMakeLists.txt.user
 virtualenv/
 
 emscripten-toolchain.ini
+
+# node/npm files for emscripten fetch support
+node_modules/
+package.json
+package-lock.json

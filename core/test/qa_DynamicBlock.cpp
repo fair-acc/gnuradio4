@@ -3,6 +3,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/basic/common_blocks.hpp>
+#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 
 template<typename T>
@@ -29,23 +30,9 @@ static_assert(gr::BlockLike<fixed_source<int>>);
 static_assert(gr::traits::block::stream_input_ports<fixed_source<int>>::size() == 0);
 static_assert(gr::traits::block::stream_output_ports<fixed_source<int>>::size() == 1);
 
-template<typename T>
-struct DebugSink : public gr::Block<DebugSink<T>> {
-    T             lastValue = {};
-    gr::PortIn<T> in;
-
-    void
-    processOne(T value) {
-        lastValue = value;
-    }
-};
-
-static_assert(gr::BlockLike<DebugSink<int>>);
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (DebugSink<T>), lastValue, in);
-
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
+    using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
         constexpr const int         sources_count = 10;
         constexpr const std::size_t events_count  = 5;
@@ -56,7 +43,7 @@ const boost::ut::suite DynamicBlocktests = [] {
         // sources_count / 2 inputs on construction, and change the number
         // via settings
         auto &adder = testGraph.addBlock(std::make_unique<multi_adder<double>>(sources_count / 2));
-        auto &sink  = testGraph.emplaceBlock<DebugSink<double>>({});
+        auto &sink  = testGraph.emplaceBlock<InspectSink<double>>({});
 
         // Function that adds a new source node to the graph, and connects
         // it to one of adder's ports
@@ -80,7 +67,7 @@ const boost::ut::suite DynamicBlocktests = [] {
             const auto work = sink.work(1UZ);
             expect(eq(work.performed_work, 1UZ));
 
-            expect(eq(sink.lastValue, static_cast<double>((i + 1) * sources.size())));
+            expect(eq(sink.value, static_cast<double>((i + 1) * sources.size())));
         }
 
         // add yet another sources_count number of ports
@@ -104,7 +91,7 @@ const boost::ut::suite DynamicBlocktests = [] {
             const auto sink_work = sink.work(1UZ);
             expect(eq(sink_work.performed_work, 1UZ));
 
-            expect(eq(sink.lastValue, static_cast<double>((i + 1) * sources_count + (i - events_count + 1) * sources_count)));
+            expect(eq(sink.value, static_cast<double>((i + 1) * sources_count + (i - events_count + 1) * sources_count)));
         }
     };
 };
