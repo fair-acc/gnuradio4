@@ -397,7 +397,7 @@ testMessagesWithoutRunningScheduler() {
         }
     });
 
-    scheduler.init();
+    expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
     while (!isDone()) {
         scheduler.processScheduledMessages();
     }

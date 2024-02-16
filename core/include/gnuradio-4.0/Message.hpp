@@ -39,6 +39,7 @@ const std::string Stopping = "gr::scheduler::update::STOPPING";
 const std::string Stopped  = "gr::scheduler::update::STOPPED";
 const std::string Pausing  = "gr::scheduler::update::PAUSING";
 const std::string Paused   = "gr::scheduler::update::PAUSED";
+const std::string Error    = "gr::scheduler::update::ERROR";
 } // namespace message::scheduler::update
 
 using Message = property_map;
