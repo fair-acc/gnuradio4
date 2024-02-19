@@ -213,7 +213,6 @@ private:
     }
 
 public:
-    PortIn<T>            in;
     PortOut<pmtv::map_t> out;
 
     std::string           url;
@@ -245,18 +244,7 @@ public:
     }
 
     [[nodiscard]] constexpr auto
-    processOne(T value) noexcept {
-        if (type == RequestType::SUBSCRIBE) {
-            // for long polling, the subscription should stay active, if and only if the value on the input port is 1
-            if (value) {
-                if (!_thread) {
-                    startThread();
-                }
-            } else {
-                stopThread();
-            }
-        }
-
+    processOne() noexcept {
         pmtv::map_t     result;
         std::lock_guard lg{ _backlog_mutex };
         if (!_backlog.empty()) {
@@ -274,7 +262,23 @@ public:
 
     void
     processMessages(gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> message) {
-        std::ranges::for_each(message, [this](auto) { trigger(); });
+        std::ranges::for_each(message, [this](auto &m) {
+            if (type == RequestType::SUBSCRIBE) {
+                if (m.contains("active")) {
+                    // for long polling, the subscription should stay active, if and only if the messages's "active" member is truthy
+                    if (std::get<bool>(m.at("active"))) {
+                        if (!_thread) {
+                            startThread();
+                        }
+                    } else {
+                        stopThread();
+                    }
+                }
+            } else {
+                // for all other modes, an incoming message means to trigger a new request
+                trigger();
+            }
+        });
     }
 };
 
@@ -282,6 +286,6 @@ static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
 } // namespace gr::http
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::http::HttpBlock<T>), in, out, url, endpoint);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::http::HttpBlock<T>), out, url, endpoint);
 
 #endif // GNURADIO_HTTP_BLOCK_HPP
