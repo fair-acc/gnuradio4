@@ -86,7 +86,7 @@ public:
         if (_counter < count) {
             _counter++;
             auto &writer = outputPort<"value">(this).streamWriter();
-            auto  data   = writer.reserve_output_range(1);
+            auto  data   = writer.reserve(1);
             data[0]      = val;
             data.publish(1);
 

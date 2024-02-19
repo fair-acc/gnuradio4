@@ -66,7 +66,7 @@ public:
 
         auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
         auto &writer = port.streamWriter();
-        auto  data   = writer.reserve_output_range(1UZ);
+        auto  data   = writer.reserve(1UZ);
         data[0]      = value;
         data.publish(1UZ);
 

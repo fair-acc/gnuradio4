@@ -133,7 +133,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
         }
 
         auto copy_to_output = [](auto input_available, auto &input_span, auto *output_writer) {
-            auto output_span = output_writer->reserve_output_range(input_available);
+            auto output_span = output_writer->reserve(input_available);
 
             for (std::size_t i = 0; i < input_span.size(); ++i) {
                 output_span[i] = input_span[i];

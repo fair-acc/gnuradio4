@@ -60,7 +60,7 @@ inline const boost::ut::suite _buffer_tests = [] {
         "circular_buffer<int>(32) - single producer via reserve"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
-                auto write_data = writer.reserve_output_range(1LU);
+                auto write_data = writer.reserve(1LU);
                 write_data[0]   = counter;
                 write_data.publish(1);
                 gr::ConsumableSpan auto data = reader.get(1);
@@ -111,7 +111,7 @@ inline const boost::ut::suite _buffer_tests = [] {
 
         "circular_buffer<int>(32) - no checks"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter    = 0;
-            auto       write_data = writer.reserve_output_range(1LU);
+            auto       write_data = writer.reserve(1LU);
             write_data[0]         = counter;
             for (std::size_t i = 0; i < samples; i++) {
                 write_data.publish(1);
