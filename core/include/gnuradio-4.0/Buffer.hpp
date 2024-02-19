@@ -74,7 +74,7 @@ concept PublishableSpan = std::ranges::contiguous_range<T> && std::ranges::outpu
 // disable formatting until clang-format (v16) supporting concepts
 template<class T>
 concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
-    { t.get(n_items) } ; // TODO: get returns CircularBuffer::buffer_reader::ConsumableInputRange
+    { t.get(n_items) } ; // TODO: get() returns CircularBuffer::buffer_reader::ConsumableInputRange
     { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.available() }      -> std::same_as<std::size_t>;
     { t.buffer() };
@@ -89,7 +89,7 @@ concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::s
     { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
     { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
-    { t.reserve_output_range(n_items) };// TODO: reserve_output_range returns CircularBuffer::buffer_writer::ReservedOutputRange
+    { t.reserve(n_items) };// TODO: reserve() returns CircularBuffer::buffer_writer::PublishableOutputRange
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
 };

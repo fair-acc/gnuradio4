@@ -3,8 +3,8 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/basic/common_blocks.hpp>
-#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 
 template<typename T>
 std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
@@ -17,7 +17,7 @@ struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out
     work(std::size_t requested_work) {
         auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
         auto &writer = port.streamWriter();
-        auto  data   = writer.reserve_output_range(1UZ);
+        auto  data   = writer.reserve(1UZ);
         data[0]      = value;
         data.publish(1UZ);
 

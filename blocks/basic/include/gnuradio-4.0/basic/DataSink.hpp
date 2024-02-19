@@ -672,11 +672,11 @@ private:
 
                 if (toWrite > 0) {
                     if (tagData0) {
-                        auto tw = poller->tag_writer.reserve_output_range(1);
+                        auto tw = poller->tag_writer.reserve(1);
                         tw[0]   = { static_cast<Tag::signed_index_type>(samples_written), std::move(*tagData0) };
                         tw.publish(1);
                     }
-                    auto writeData = poller->writer.reserve_output_range(toWrite);
+                    auto writeData = poller->writer.reserve(toWrite);
                     std::ranges::copy(data | std::views::take(toWrite), writeData.begin());
                     writeData.publish(writeData.size());
                 }
@@ -743,7 +743,7 @@ private:
                     return;
                 }
 
-                auto writeData = poller->writer.reserve_output_range(1);
+                auto writeData = poller->writer.reserve(1);
                 if (block) {
                     writeData[0] = std::move(data);
                     writeData.publish(1);
@@ -834,7 +834,7 @@ private:
                     return;
                 }
 
-                auto writeData = poller->writer.reserve_output_range(1);
+                auto writeData = poller->writer.reserve(1);
                 if (block) {
                     writeData[0] = std::move(data);
                     writeData.publish(1);
@@ -939,7 +939,7 @@ private:
                     return;
                 }
 
-                auto writeData = poller->writer.reserve_output_range(1);
+                auto writeData = poller->writer.reserve(1);
                 if (block) {
                     writeData[0] = std::move(data);
                     writeData.publish(1);

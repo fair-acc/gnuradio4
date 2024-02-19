@@ -82,7 +82,7 @@ const boost::ut::suite BasicConceptsTests = [] {
                 expect(nothrow([&writer] { expect(writer.try_publish([](const std::span<int32_t> &, std::int64_t) { /* noop */ }, 0)); }));
 
                 // alt expert write interface
-                auto value = writer.reserve_output_range(1);
+                auto value = writer.reserve(1);
                 expect(eq(1LU, value.size())) << "for " << typeName;
                 if constexpr (requires { value.publish(1); }) {
                     value.publish(1);
@@ -184,7 +184,7 @@ writeVaryingChunkSizes(Writer &writer) {
     while (pos < N) {
         constexpr auto kChunkSizes = std::array{ 1UZ, 2UZ, 3UZ, 5UZ, 7UZ, 42UZ };
         const auto     chunkSize   = std::min(kChunkSizes[iWrite % kChunkSizes.size()], N - pos);
-        auto           out         = writer.reserve_output_range(chunkSize);
+        auto           out         = writer.reserve(chunkSize);
         for (auto i = 0UZ; i < out.size(); i++) {
             out[i] = { { 0, static_cast<int>(pos + i) } };
         }
@@ -341,7 +341,7 @@ const boost::ut::suite CircularBufferTests = [] {
                 // basic expert writer api
                 for (int k = 0; k < 3; k++) {
                     // case 0: write fully reserved data
-                    auto data = writer.reserve_output_range(4);
+                    auto data = writer.reserve(4);
                     for (std::size_t i = 0; i < data.size(); i++) {
                         data[i] = static_cast<int>(i + 1);
                     }
@@ -356,7 +356,7 @@ const boost::ut::suite CircularBufferTests = [] {
                 for (int k = 0; k < 3; k++) {
                     // case 1: reserve more than actually written
                     const auto cursor_initial = buffer.cursor_sequence().value();
-                    auto       data           = writer.reserve_output_range(4);
+                    auto       data           = writer.reserve(4);
                     for (std::size_t i = 0; i < data.size(); i++) {
                         data[i] = static_cast<int>(i + 1);
                     }
@@ -373,7 +373,7 @@ const boost::ut::suite CircularBufferTests = [] {
                 for (int k = 0; k < 3; k++) {
                     // case 2: reserve using RAII token
                     const auto         cursor_initial = buffer.cursor_sequence().value();
-                    auto               data           = writer.reserve_output_range(4);
+                    auto               data           = writer.reserve(4);
                     std::span<int32_t> span           = data; // tests conversion operator
                     for (std::size_t i = 0; i < data.size(); i++) {
                         data[i] = static_cast<int>(i + 1);
@@ -413,7 +413,7 @@ const boost::ut::suite CircularBufferTests = [] {
         auto readerFnc = [](auto reader) {
             std::size_t i = 0;
             while (i < kWrites) {
-                auto       in        = reader.get().get();
+                auto in = reader.get().get();
                 for (auto j = 0UZ; j < in.size(); j++) {
                     auto vIt = in[j].find(0);
                     expect(vIt != in[j].end());

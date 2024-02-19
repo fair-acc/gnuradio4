@@ -331,7 +331,7 @@ public:
     auto
     reserveEvent() noexcept {
         const auto elapsed = detail::clock::now() - _profiler.start();
-        auto       r       = _writer.reserve_output_range(1);
+        auto       r       = _writer.reserve(1);
         r[0].thread_id     = std::this_thread::get_id();
         r[0].ts            = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
         return r;

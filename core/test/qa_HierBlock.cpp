@@ -167,7 +167,7 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
 
         if (remaining_events_count != 0) {
             auto &writer = out.streamWriter();
-            auto  data   = writer.reserve_output_range(1UZ);
+            auto  data   = writer.reserve(1UZ);
             data[0]      = value;
             data.publish(1UZ);
 
