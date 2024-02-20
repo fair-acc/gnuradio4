@@ -13,7 +13,7 @@
 namespace gr::testing {
 
 template<typename T>
-struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>> {
+struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawable<UICategory::ChartPane, "console">> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T>   in;
     float       sample_rate = 1000.0f;

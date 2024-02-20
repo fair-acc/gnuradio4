@@ -267,6 +267,10 @@ public:
     work(std::size_t requested_work)
             = 0;
 
+    [[nodiscard]] virtual work::Status
+    draw()
+            = 0;
+
     virtual void
     processScheduledMessages()
             = 0;
@@ -407,6 +411,14 @@ public:
     [[nodiscard]] constexpr work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return blockRef().work(requested_work);
+    }
+
+    constexpr work::Status
+    draw() override {
+        if constexpr ( requires { blockRef().draw(); } ) {
+            return blockRef().draw();
+        }
+        return work::Status::ERROR;
     }
 
     void
