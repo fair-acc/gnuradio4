@@ -139,12 +139,12 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-    httplib
+    cpp-httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
     GIT_TAG v0.15.1
 )
 
-FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd httplib)
+FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd cpp-httplib)
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
