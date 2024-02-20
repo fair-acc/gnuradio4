@@ -96,6 +96,7 @@ const boost::ut::suite TagTests = [] {
         // but the present 'connect' API assumes it to be part of the Graph
         auto &uiSink = testGraph.emplaceBlock<testing::ImChartMonitor<float>>({ { "name", "BasicImChartSink" } });
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(uiSink)));
+        expect(uiSink.meta_information.value.contains("Drawable")) << "drawable";
 
         scheduler::Simple sched{ std::move(testGraph) };
 

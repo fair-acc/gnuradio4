@@ -580,6 +580,28 @@ const boost::ut::suite _stride_tests = [] {
     };
 };
 
+const boost::ut::suite _drawableAnnotations = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+
+    "drawable"_test = [] {
+        struct TestBlock0 : gr::Block<TestBlock0> {
+        } testBlock0;
+        expect(!testBlock0.meta_information.value.contains("Drawable")) << "not drawable";
+
+        struct TestBlock1 : gr::Block<TestBlock1, gr::Drawable<gr::UICategory::Toolbar, "console">> {
+            gr::work::Status draw() {}
+        } testBlock1;
+        expect(testBlock1.meta_information.value.contains("Drawable")) << "drawable";
+        const auto &drawableConfigMap = std::get<gr::property_map>(testBlock1.meta_information.value.at("Drawable"s));
+        expect(drawableConfigMap.contains("Category"));
+        expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
+        expect(drawableConfigMap.contains("Toolkit"));
+        expect(eq(std::get<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+    };
+
+};
+
 int
 main() { /* not needed for UT */
 }

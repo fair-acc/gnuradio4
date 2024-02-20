@@ -342,6 +342,7 @@ public:
     using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UL, 1UL, true>>;
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
+    using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     template<typename T>
@@ -383,12 +384,27 @@ public:
     const std::string unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name = gr::meta::type_name<Derived>();
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
-
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
     //
     constexpr static std::string_view description = static_cast<std::string_view>(Description::value);
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+
+    //
+    static property_map
+    initMetaInfo() {
+        using namespace std::string_literals;
+        property_map ret;
+        if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
+            property_map info;
+            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategorgy)));
+            info.insert_or_assign("Toolkit"s, std::string(DrawableControl::kToolkit));
+
+            ret.insert_or_assign("Drawable"s, info);
+        }
+        return ret;
+    }
+
+    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -1598,6 +1614,13 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
         throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}",
                                                 shortTypeName.template operator()<TDecayedBlock>(), signatures));
+    }
+
+    // test for optional Drawable interface
+    if constexpr (!std::is_same_v<NotDrawable, typename TDecayedBlock::DrawableControl> && !requires(TDecayedBlock t) {
+                      { t.draw() } -> std::same_as<work::Status>;
+                  }) {
+        static_assert(gr::meta::always_false<TDecayedBlock>, "annotated Block<Derived, Drawable<...>, ...> must implement 'work::Status draw() {}'");
     }
 }
 

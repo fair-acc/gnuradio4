@@ -187,6 +187,9 @@ public:
         return { requested_work, available_samples, gr::work::Status::OK };
     }
 
+    gr::work::Status
+    draw() {}
+
     void
     processScheduledMessages() override {}
 
