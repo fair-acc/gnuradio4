@@ -8,6 +8,8 @@
 #include <utility>
 #include <queue>
 
+#include <magic_enum.hpp>
+
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
@@ -66,23 +68,7 @@ public:
 
     void
     stateChanged(lifecycle::State newState) {
-        const auto stateStr = [](lifecycle::State s) {
-            using enum lifecycle::State;
-            using namespace message::scheduler::update;
-            switch (s) {
-            case RUNNING: return Started;
-            case REQUESTED_PAUSE: return Pausing;
-            case PAUSED: return Paused;
-            case REQUESTED_STOP: return Stopping;
-            case STOPPED: return Stopped;
-            case ERROR: return Error;
-            default: return std::string{};
-            }
-        }(newState);
-
-        if (!stateStr.empty()) {
-            emitMessage(msgOut, { { kind::SchedulerUpdate, stateStr } });
-        }
+        emitMessage(msgOut, { { kind::SchedulerStateUpdate, std::string(magic_enum::enum_name(newState)) } });
     }
 
     void
@@ -103,19 +89,19 @@ public:
         if (const auto available = msgInReader.available(); available > 0) {
             const auto &input = msgInReader.get(available);
             for (const auto &msg : input) {
-                const auto                                kind = std::get<std::string>(msg.at(key::Kind));
-                std::expected<void, lifecycle::ErrorType> e;
-                if (kind == gr::message::scheduler::command::Start || kind == gr::message::scheduler::command::Resume) {
-                    e = this->changeStateTo(lifecycle::State::RUNNING);
-                } else if (kind == gr::message::scheduler::command::Stop) {
-                    e = this->changeStateTo(lifecycle::State::REQUESTED_STOP);
-                } else if (kind == gr::message::scheduler::command::Pause) {
-                    e = this->changeStateTo(lifecycle::State::REQUESTED_PAUSE);
+                const auto kind = gr::messageField<std::string>(msg, key::Kind);
+                if (kind == message::kind::SchedulerStateChangeRequest) {
+                    const auto whatStr = gr::messageField<std::string>(msg, key::What).value_or("");
+                    const auto what    = magic_enum::enum_cast<lifecycle::State>(whatStr);
+                    if (!what || (what != lifecycle::State::RUNNING && what != lifecycle::State::REQUESTED_STOP && what != lifecycle::State::REQUESTED_PAUSE)) {
+                        emitError(msgOut, lifecycle::ErrorType(fmt::format("Invalid command '{}'", whatStr), std::source_location::current()));
+                        continue;
+                    }
+                    if (auto e = this->changeStateTo(*what); !e) {
+                        emitError(msgOut, e.error());
+                    }
                 } else {
                     _toChildMessagePort.streamWriter().publish([&](auto &output) { output[0] = msg; });
-                }
-                if (!e) {
-                    emitError(msgOut, e.error());
                 }
             }
 
