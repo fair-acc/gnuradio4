@@ -11312,6 +11312,40 @@ using is_stride = std::bool_constant<IsStride<T>>;
 static_assert(is_stride<Stride<10, true>>::value);
 static_assert(!is_stride<int>::value);
 
+enum class UICategory {
+    None,
+    Toolbar,
+    ChartPane,
+    StatusBar,
+    Menu
+};
+
+/**
+ * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
+ *
+ * @tparam category_ ui category where it
+ * @tparam toolkit_ specifies the applicable UI toolkit (e.g. 'console', 'ImGui', 'Qt', etc.)
+ */
+template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
+struct Drawable {
+    static constexpr UICategory             kCategorgy = category_;
+    static constexpr gr::meta::fixed_string kToolkit   = toolkit_;
+};
+
+template<typename T>
+concept IsDrawable = requires {
+    T::kCategorgy;
+    T::kToolkit;
+} && std::is_base_of_v<Drawable<T::kCategorgy, T::kToolkit>, T>;
+
+template<typename T>
+using is_drawable = std::bool_constant<IsDrawable<T>>;
+
+using NotDrawable = Drawable<UICategory::None, "">; // nomen-est-omen
+static_assert(is_drawable<NotDrawable>::value);
+static_assert(is_drawable<Drawable<UICategory::ChartPane, "console">>::value);
+static_assert(!is_drawable<int>::value);
+
 /**
  * @brief Annotates templated block, indicating which port data types are supported.
  */
@@ -19004,6 +19038,7 @@ public:
     using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UL, 1UL, true>>;
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
+    using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     template<typename T>
@@ -19045,12 +19080,27 @@ public:
     const std::string unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">>                            name = gr::meta::type_name<Derived>();
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information;
-
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
     //
     constexpr static std::string_view description = static_cast<std::string_view>(Description::value);
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+
+    //
+    static property_map
+    initMetaInfo() {
+        using namespace std::string_literals;
+        property_map ret;
+        if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
+            property_map info;
+            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategorgy)));
+            info.insert_or_assign("Toolkit"s, std::string(DrawableControl::kToolkit));
+
+            ret.insert_or_assign("Drawable"s, info);
+        }
+        return ret;
+    }
+
+    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -20261,6 +20311,13 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
         throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}",
                                                 shortTypeName.template operator()<TDecayedBlock>(), signatures));
     }
+
+    // test for optional Drawable interface
+    if constexpr (!std::is_same_v<NotDrawable, typename TDecayedBlock::DrawableControl> && !requires(TDecayedBlock t) {
+                      { t.draw() } -> std::same_as<work::Status>;
+                  }) {
+        static_assert(gr::meta::always_false<TDecayedBlock>, "annotated Block<Derived, Drawable<...>, ...> must implement 'work::Status draw() {}'");
+    }
 }
 
 template<typename Derived, typename... Arguments>
@@ -20660,6 +20717,10 @@ public:
     work(std::size_t requested_work)
             = 0;
 
+    [[nodiscard]] virtual work::Status
+    draw()
+            = 0;
+
     virtual void
     processScheduledMessages()
             = 0;
@@ -20800,6 +20861,14 @@ public:
     [[nodiscard]] constexpr work::Result
     work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
         return blockRef().work(requested_work);
+    }
+
+    constexpr work::Status
+    draw() override {
+        if constexpr ( requires { blockRef().draw(); } ) {
+            return blockRef().draw();
+        }
+        return work::Status::ERROR;
     }
 
     void

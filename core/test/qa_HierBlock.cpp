@@ -115,6 +115,9 @@ public:
         return { requested_work, requested_work, ok ? gr::work::Status::DONE : gr::work::Status::ERROR };
     }
 
+    gr::work::Status
+    draw() {}
+
     void
     processScheduledMessages() override {
         // TODO

@@ -137,6 +137,40 @@ using is_stride = std::bool_constant<IsStride<T>>;
 static_assert(is_stride<Stride<10, true>>::value);
 static_assert(!is_stride<int>::value);
 
+enum class UICategory {
+    None,
+    Toolbar,
+    ChartPane,
+    StatusBar,
+    Menu
+};
+
+/**
+ * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
+ *
+ * @tparam category_ ui category where it
+ * @tparam toolkit_ specifies the applicable UI toolkit (e.g. 'console', 'ImGui', 'Qt', etc.)
+ */
+template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
+struct Drawable {
+    static constexpr UICategory             kCategorgy = category_;
+    static constexpr gr::meta::fixed_string kToolkit   = toolkit_;
+};
+
+template<typename T>
+concept IsDrawable = requires {
+    T::kCategorgy;
+    T::kToolkit;
+} && std::is_base_of_v<Drawable<T::kCategorgy, T::kToolkit>, T>;
+
+template<typename T>
+using is_drawable = std::bool_constant<IsDrawable<T>>;
+
+using NotDrawable = Drawable<UICategory::None, "">; // nomen-est-omen
+static_assert(is_drawable<NotDrawable>::value);
+static_assert(is_drawable<Drawable<UICategory::ChartPane, "console">>::value);
+static_assert(!is_drawable<int>::value);
+
 /**
  * @brief Annotates templated block, indicating which port data types are supported.
  */
