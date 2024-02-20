@@ -35,7 +35,7 @@ struct RepeatedSource : public gr::Block<RepeatedSource<T>> {
         if (remaining_events_count != 0) {
             auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
             auto &writer = port.streamWriter();
-            auto  data   = writer.reserve_output_range(1UZ);
+            auto  data   = writer.reserve(1UZ);
 
             auto value = values[values_next];
             data[0]    = value;
@@ -126,7 +126,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
             if (available == 0) return gr::work::Status::DONE;
 
             gr::ConsumableSpan auto inputSpan  = inputReader->get(available);
-            auto                    outputSpan = outputWriter->reserve_output_range(available);
+            auto                    outputSpan = outputWriter->reserve(available);
 
             for (std::size_t valueIndex = 0; valueIndex < available; ++valueIndex) {
                 outputSpan[valueIndex] = inputSpan[valueIndex];

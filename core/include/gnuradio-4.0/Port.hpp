@@ -28,9 +28,9 @@ enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not
 enum class ConnectionResult { SUCCESS, FAILED };
 
 enum class PortType {
-    STREAM, /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
+    STREAM,  /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
-    ANY // 'ANY' only for querying and not to be used for port declarations
+    ANY      // 'ANY' only for querying and not to be used for port declarations
 };
 
 /**
@@ -328,7 +328,8 @@ public:
         , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
     constexpr Port &
-    operator=(Port &&other)  = delete;
+    operator=(Port &&other)
+            = delete;
 
     ~Port() = default;
 
@@ -584,7 +585,7 @@ public:
         if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
             return false;
         }
-        auto outTags     = tagWriter().reserve_output_range(1UZ);
+        auto outTags     = tagWriter().reserve(1UZ);
         outTags[0].index = _cachedTag.index;
         outTags[0].map   = _cachedTag.map;
         outTags.publish(1UZ);
@@ -648,7 +649,7 @@ using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, At
 template<typename T, fixed_string PortName, typename... Attributes>
 using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
 
-using MsgPortIn = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer>;
+using MsgPortIn  = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer>;
 using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer>;
 template<fixed_string PortName, typename... Attributes>
 using MsgPortInNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
@@ -782,21 +783,17 @@ private:
 
         explicit constexpr wrapper(T &arg) noexcept : _value{ arg } {
             if constexpr (T::kIsInput) {
-                static_assert(
-                        requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
+                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
-                static_assert(
-                        requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
+                static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
             }
         }
 
         explicit constexpr wrapper(T &&arg) noexcept : _value{ std::move(arg) } {
             if constexpr (T::kIsInput) {
-                static_assert(
-                        requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
+                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
-                static_assert(
-                        requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
+                static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
             }
         }
 

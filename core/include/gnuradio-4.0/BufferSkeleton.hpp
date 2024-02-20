@@ -84,7 +84,7 @@ class BufferSkeleton {
         };
 
         [[nodiscard]] constexpr auto
-        reserve_output_range(std::size_t n) noexcept -> std::span<U> {
+        reserve(std::size_t n) noexcept -> std::span<U> {
             return { &_buffer->_data[0], n };
         }
 

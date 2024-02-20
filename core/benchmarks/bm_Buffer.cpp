@@ -74,7 +74,7 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
                     if constexpr (PublisherAPI == WriteApi::via_lambda) {
                         writer.publish([](auto &) {}, vector_length);
                     } else if constexpr (PublisherAPI == WriteApi::via_split_request_publish_RAII) {
-                        auto data = writer.reserve_output_range(vector_length);
+                        auto data = writer.reserve(vector_length);
 
                         data.publish(vector_length);
                     } else {

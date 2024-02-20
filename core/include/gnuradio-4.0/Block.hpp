@@ -967,7 +967,7 @@ public:
 
                     auto process_single_port = [&out_samples]<typename Port>(Port &&port) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).streamWriter().reserve_output_range(out_samples);
+                            return std::forward<Port>(port).streamWriter().reserve(out_samples);
                         } else {
                             return std::addressof(std::forward<Port>(port).streamWriter());
                         }

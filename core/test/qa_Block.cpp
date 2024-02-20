@@ -309,7 +309,7 @@ struct AsyncBlock : gr::Block<AsyncBlock<T>> {
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
         auto inSpan  = inReader->get(available);
-        auto outSpan = outputWriter->reserve_output_range(available);
+        auto outSpan = outputWriter->reserve(available);
         std::copy(inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(available)), outSpan.begin());
         boost::ut::expect(inReader->consume(available)) << "Samples were not consumed";
         outSpan.publish(available);
