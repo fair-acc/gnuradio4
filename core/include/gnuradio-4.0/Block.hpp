@@ -615,9 +615,9 @@ public:
 
         // Handle settings
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
-        if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
+        if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                publishTag(forward_parameters);
+                publishTag(applyResult.forwardParameters);
             }
         }
 
@@ -887,13 +887,25 @@ public:
         }
     }
 
-    constexpr void
-    updateOutputTagsWithSettingParametersIfNeeded() {
+    void
+    applyChangedSettings() {
         if (settings().changed()) {
-            if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
-                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts<PortType::STREAM>(&self()));
+            Message settingsUpdated;
+            settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
+
+            auto applyResult = settings().applyStagedParameters();
+
+            if (!applyResult.forwardParameters.empty()) {
+                publishTag(applyResult.forwardParameters, 0);
             }
+
+            if (!applyResult.appliedParameters.empty()) {
+                settingsUpdated[gr::message::key::Data] = std::move(applyResult.appliedParameters);
+            }
+
             settings()._changed.store(false);
+
+            emitMessage(msgOut, std::move(settingsUpdated));
         }
     }
 
@@ -1166,7 +1178,7 @@ protected:
                 fmt::println("##block {} received EOS tag at {} in_samples {} -> lifecycle::State::STOPPED", name, ports_status.nSamplesToEosTag, ports_status.in_samples);
 #endif
                 updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
-                updateOutputTagsWithSettingParametersIfNeeded();
+                applyChangedSettings();
                 return { requested_work, 0UZ, work::Status::DONE };
             }
 
@@ -1183,7 +1195,7 @@ protected:
                             emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                         }
                         updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
-                        updateOutputTagsWithSettingParametersIfNeeded();
+                        applyChangedSettings();
                         forwardTags();
                         //  EOS is not at 0 position and thus not read by updateInputAndOutputTags(), we need to publish new EOS
                         publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
@@ -1195,6 +1207,9 @@ protected:
 #ifdef _DEBUG
             fmt::println("block {} - mark3 - in {} -> out {}", name, ports_status.in_samples, ports_status.out_samples);
 #endif
+
+            applyChangedSettings();
+
             if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
                 return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
@@ -1222,7 +1237,7 @@ protected:
             updateInputAndOutputTags(0);
         }
 
-        updateOutputTagsWithSettingParametersIfNeeded();
+        applyChangedSettings();
 
         // TODO: check here whether a processOne(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> processOne(...) -> auto-handling of streaming tags
@@ -1474,7 +1489,7 @@ public:
                 }
 
                 Message settingsUpdated;
-                settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
+                settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChangeRequested;
                 settingsUpdated[gr::message::key::Data] = settings().get();
 
                 if (!notSet.empty()) {

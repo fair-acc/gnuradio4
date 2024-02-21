@@ -292,9 +292,9 @@ public:
         return _auto_forward;
     }
 
-    [[nodiscard]] const property_map
+    [[nodiscard]] ApplyStagedParametersResult
     applyStagedParameters() noexcept override {
-        property_map forward_parameters; // parameters that should be forwarded to dependent child nodes
+        ApplyStagedParametersResult result;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
 
@@ -315,7 +315,7 @@ public:
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key                  = localKey;
                 const auto &staged_value         = localStaged_value;
-                auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                auto        apply_member_changes = [&key, &staged, &result, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
@@ -345,6 +345,7 @@ public:
                                 }
                             } else {
                                 member(*_block) = std::get<Type>(staged_value);
+                                result.appliedParameters.insert_or_assign(key, staged_value);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, staged_value);
                                 } else {
@@ -353,7 +354,7 @@ public:
                             }
                         }
                         if (_auto_forward.contains(key)) {
-                            forward_parameters.insert_or_assign(key, staged_value);
+                            result.forwardParameters.insert_or_assign(key, staged_value);
                         }
                     }
                 };
@@ -373,8 +374,8 @@ public:
             if (!staged.empty()) {
                 if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged); }) {
                     _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged);
-                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
-                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
+                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ result.forwardParameters); }) {
+                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ result.forwardParameters);
                 }
             }
 
@@ -392,7 +393,7 @@ public:
         }
 
         SettingsBase::_changed.store(false);
-        return forward_parameters;
+        return result;
     }
 
     void

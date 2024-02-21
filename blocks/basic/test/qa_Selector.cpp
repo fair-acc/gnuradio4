@@ -50,18 +50,18 @@ execute_selector_test(TestParams params) {
 
     for (gr::Size_t i = 0; i < nSources; ++i) {
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", params.nSamples }, { "values", params.inValues[i] } })));
-        expect(sources[i]->settings().applyStagedParameters().empty());
+        expect(sources[i]->settings().applyStagedParameters().forwardParameters.empty());
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], { "out", gr::meta::invalid_index }, *selector, { "inputs", i }));
     }
 
     for (gr::Size_t i = 0; i < nSinks; ++i) {
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>()));
-        expect(sinks[i]->settings().applyStagedParameters().empty());
+        expect(sinks[i]->settings().applyStagedParameters().forwardParameters.empty());
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, { "outputs", i }, *sinks[i], { "in" }));
     }
 
     TagSink<double, ProcessFunction::USE_PROCESS_ONE> *monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
-    expect(monitorSink->settings().applyStagedParameters().empty());
+    expect(monitorSink->settings().applyStagedParameters().forwardParameters.empty());
     expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
 
     gr::scheduler::Simple sched{ std::move(graph) };
@@ -88,7 +88,7 @@ const boost::ut::suite SelectorTest = [] {
 
     "Selector<T> constructor"_test = [] {
         Selector<double> block_nop({ { "name", "block_nop" } });
-        expect(block_nop.settings().applyStagedParameters().empty());
+        expect(block_nop.settings().applyStagedParameters().forwardParameters.empty());
         expect(eq(block_nop.n_inputs, 0U));
         expect(eq(block_nop.n_outputs, 0U));
         expect(eq(block_nop.inputs.size(), 0U));
@@ -96,7 +96,7 @@ const boost::ut::suite SelectorTest = [] {
         expect(eq(block_nop._internalMapping.size(), 0U));
 
         Selector<double> block({ { "name", "block" }, { "n_inputs", 4U }, { "n_outputs", 3U } });
-        expect(block.settings().applyStagedParameters().empty());
+        expect(block.settings().applyStagedParameters().forwardParameters.empty());
         expect(eq(block.n_inputs, 4U));
         expect(eq(block.n_outputs, 3U));
         expect(eq(block.inputs.size(), 4U));
@@ -108,7 +108,7 @@ const boost::ut::suite SelectorTest = [] {
         using T = double;
         const std::vector<uint32_t> outputMap{ 1U, 0U };
         Selector<T>                 block({ { "n_inputs", 3U }, { "n_outputs", 2U }, { "map_in", std::vector<gr::Size_t>{ 0U, 1U } }, { "map_out", outputMap } }); // N.B. 3rd input is unconnected
-        expect(block.settings().applyStagedParameters().empty());
+        expect(block.settings().applyStagedParameters().forwardParameters.empty());
         expect(eq(block._internalMapping.size(), 2U));
 
         using internal_mapping_t = decltype(block._internalMapping);
