@@ -287,14 +287,12 @@ private:
             }
         });
         if (executionPolicy() == ExecutionPolicy::multiThreaded) {
-            // TODO review _job_lists usage
             this->runOnPool(_job_lists, [this](auto &job) { return this->workOnce(job); });
         }
     }
 
     void
     start() {
-        // TODO merge with resume?
         _stop_requested = false;
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::RUNNING); !e) {
