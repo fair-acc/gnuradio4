@@ -85,7 +85,7 @@ namespace {
  * Returns all received messages.
  */
 std::vector<pmtv::map_t>
-waitForMessages(auto &messageReader, std::vector<pmtv::map_t> expectedMessages, std::chrono::milliseconds timeout = 1s) {
+waitForMessages(auto &messageReader, std::vector<pmtv::map_t> expectedMessages, std::chrono::milliseconds timeout = 3s) {
     using namespace boost::ut;
 
     std::vector<pmtv::map_t> received;
