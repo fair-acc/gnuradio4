@@ -109,8 +109,9 @@ const boost::ut::suite TagTests = [] {
                                                                         { "offset", offset },
                                                                         { "phase", std::numbers::pi / 4 } });
             expect(failed.empty()) << fmt::format("settings have mismatching keys or value types. offending keys: {}\n", fmt::join(mismatchedKey(failed), ", "));
-            const auto forwardSettings = signalGen.settings().applyStagedParameters();
-            expect(eq(forwardSettings.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(forwardSettings), ", "));
+            const auto applyResult = signalGen.settings().applyStagedParameters();
+            expect(eq(applyResult.forwardParameters.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n",
+                                                                                 fmt::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
             // expected values corresponds to sample_rate = 1024., frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
             std::map<std::string, std ::vector<double>> expResults = {
@@ -142,8 +143,9 @@ const boost::ut::suite TagTests = [] {
                                                                         { "offset", 0. },
                                                                         { "phase", std::numbers::pi / 4. } });
             expect(failed.empty()) << fmt::format("settings have mismatching keys or value types. offending keys: {}\n", fmt::join(mismatchedKey(failed), ", "));
-            const auto forwardSettings = signalGen.settings().applyStagedParameters();
-            expect(eq(forwardSettings.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(forwardSettings), ", "));
+            const auto applyResult = signalGen.settings().applyStagedParameters();
+            expect(eq(applyResult.forwardParameters.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n",
+                                                                                 fmt::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);

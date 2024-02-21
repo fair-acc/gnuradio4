@@ -19,10 +19,11 @@ const std::string ErrorInfo = "ERROR_INFO_KEY"; // optional: if a message has an
 } // namespace message::key
 
 namespace message::kind {
-const std::string Error           = "ERROR_KIND";
-const std::string Graph_update    = "GRAPH_UPDATE_KIND";
-const std::string UpdateSettings  = "UPDATE_SETTINGS_KIND";
-const std::string SettingsChanged = "SETTINGS_CHANGED_KIND";
+const std::string Error                       = "ERROR_KIND";
+const std::string Graph_update                = "GRAPH_UPDATE_KIND";
+const std::string UpdateSettings              = "UPDATE_SETTINGS_KIND";
+const std::string SettingsChanged             = "SETTINGS_CHANGED_KIND";
+const std::string SettingsChangeRequested     = "REQUESTED_SETTINGS_CHANGE_KIND";
 const std::string SchedulerStateUpdate        = "SCHEDULER_UPDATE_KIND";
 const std::string SchedulerStateChangeRequest = "SCHEDULER_COMMAND_KIND";
 } // namespace message::kind

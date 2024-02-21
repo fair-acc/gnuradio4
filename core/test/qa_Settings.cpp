@@ -285,8 +285,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(not block1.settings().stagedParameters().empty());
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().changed()) << "settings changed";
-        auto forwarding_parameter = block1.settings().applyStagedParameters();
-        expect(eq(forwarding_parameter.size(), 1u)) << "initial forward declarations";
+        auto applyResult = block1.settings().applyStagedParameters();
+        expect(eq(applyResult.forwardParameters.size(), 1u)) << "initial forward declarations";
         block1.settings().updateActiveParameters();
 
         // src -> block1 -> block2 -> sink
@@ -469,7 +469,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.scaling_factor, 2.f));
 
         expect(block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }).empty()) << "successful set returns empty map";
-        expect(block.settings().applyStagedParameters().empty()) << "successful set returns empty map";
+        expect(block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
 
@@ -481,12 +481,12 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.scaling_factor, 2.f));
 
         expect(block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }).empty()) << "successful set returns empty map";
-        expect(block.settings().applyStagedParameters().empty()) << "successful set returns empty map";
+        expect(block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
         block.settings().storeDefaults();
         expect(block.settings().set({ { "name", "TestNameAlt2" }, { "scaling_factor", 43.f } }).empty()) << "successful set returns empty map";
-        expect(block.settings().applyStagedParameters().empty()) << "successful set returns empty map";
+        expect(block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
         expect(block.name == "TestNameAlt2");
         expect(eq(block.scaling_factor, 43.f));
         block.settings().resetDefaults();
@@ -540,7 +540,7 @@ const boost::ut::suite AnnotationTests = [] {
         expect(not needPowerOfTwoAlt.validate_and_set(5));
 
         expect(block.settings().set({ { "sample_rate", -1.0f } }).empty()) << "successful set returns empty map";
-        expect(!block.settings().applyStagedParameters().empty()) << "successful set returns empty map";
+        expect(!block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
         ; // should print out a warning -> TODO: replace with pmt error message on msgOut port
     };
 };
