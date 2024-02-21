@@ -57,7 +57,14 @@ public:
                            const profiling::Options &profiling_options = {})
         : _graph(std::move(graph)), _profiler{ profiling_options }, _profiler_handler{ _profiler.forThisThread() }, _pool(std::move(thread_pool)) {}
 
-    ~SchedulerBase() { std::ignore = this->changeStateTo(lifecycle::State::REQUESTED_STOP); }
+    ~SchedulerBase() {
+        if (this->state() == lifecycle::RUNNING) {
+            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                fmt::println(std::cerr, "Failed to stop execution at destruction of scheduler: {} ({})", e.error().message, e.error().srcLoc());
+                std::abort();
+            }
+        }
+    }
 
     [[nodiscard]] bool
     isProcessing() const
