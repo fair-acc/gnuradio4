@@ -75,7 +75,9 @@ public:
     connectBlockMessagePorts() {
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                emitError(msgOut, lifecycle::ErrorType(fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()), std::source_location::current()));
+                emitMessage(msgOut, { { key::Kind, kind::Error },
+                                      { key::ErrorInfo, fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()) },
+                                      { key::Location, fmt::format("{}", std::source_location::current()) } });
             }
 
             auto buffer = _fromChildMessagePort.buffer();
@@ -94,11 +96,13 @@ public:
                     const auto whatStr = gr::messageField<std::string>(msg, key::What).value_or("");
                     const auto what    = magic_enum::enum_cast<lifecycle::State>(whatStr);
                     if (!what || (what != lifecycle::State::RUNNING && what != lifecycle::State::REQUESTED_STOP && what != lifecycle::State::REQUESTED_PAUSE)) {
-                        emitError(msgOut, lifecycle::ErrorType(fmt::format("Invalid command '{}'", whatStr), std::source_location::current()));
+                        emitMessage(msgOut, { { key::Kind, kind::Error },
+                                              { key::ErrorInfo, fmt::format("Invalid command '{}'", whatStr) },
+                                              { key::Location, fmt::format("{}", std::source_location::current()) } });
                         continue;
                     }
                     if (auto e = this->changeStateTo(*what); !e) {
-                        emitError(msgOut, e.error());
+                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                     }
                 } else {
                     _toChildMessagePort.streamWriter().publish([&](auto &output) { output[0] = msg; });
@@ -106,7 +110,8 @@ public:
             }
 
             if (!msgInReader.consume(available)) {
-                emitError(msgOut, lifecycle::ErrorType("Failed to consume messages from msgIn port", std::source_location::current()));
+                emitMessage(msgOut,
+                            { { key::Kind, kind::Error }, { key::ErrorInfo, "Failed to consume messages from msgIn port" }, { key::Location, fmt::format("{}", std::source_location::current()) } });
             }
         }
 
@@ -115,7 +120,9 @@ public:
             const auto &input = fromChildReader.get(available);
             msgOut.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
             if (!fromChildReader.consume(available)) {
-                emitError(msgOut, lifecycle::ErrorType("Failed to consume messages from child message port", std::source_location::current()));
+                emitMessage(msgOut, { { key::Kind, kind::Error },
+                                      { key::ErrorInfo, "Failed to consume messages from child message port" },
+                                      { key::Location, fmt::format("{}", std::source_location::current()) } });
             }
         }
 
@@ -136,12 +143,12 @@ public:
         [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_base.runAndWait");
         if (this->state() == lifecycle::State::IDLE) {
             if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
-                emitError(msgOut, e.error());
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                 return std::unexpected(e.error().message);
             }
         }
         if (auto e = this->changeStateTo(lifecycle::State::RUNNING); !e) {
-            emitError(msgOut, e.error());
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             return std::unexpected(e.error().message);
         }
 
@@ -150,7 +157,7 @@ public:
 
             if (this->state() == lifecycle::State::RUNNING) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                    emitError(msgOut, e.error());
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                     return std::unexpected(e.error().message);
                 }
             }
@@ -180,20 +187,6 @@ protected:
         port.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
     }
 
-    void
-    emitError(auto &port, const lifecycle::ErrorType &error) {
-        emitMessage(port, { { key::Kind, kind::Error }, { key::ErrorInfo, error.message }, { key::Location, error.srcLoc() } });
-    }
-
-    void
-    setBlocksState(lifecycle::State state) {
-        _graph.forEachBlock([state, this](auto &block) {
-            if (auto e = block.changeState(state); !e) {
-                emitError(msgOut, e.error());
-            }
-        });
-    }
-
     template<typename block_type>
     work::Result
     workOnce(const std::span<block_type> &blocks) {
@@ -219,7 +212,7 @@ protected:
         [[maybe_unused]] const auto pe     = _profiler_handler.startCompleteEvent("scheduler_base.init");
         const auto                  result = _graph.performConnections();
         if (!result) {
-            emitError(msgOut, lifecycle::ErrorType("Failed to connect blocks in graph", std::source_location::current()));
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, "Failed to connect blocks in graph" }, { key::Location, fmt::format("{}", std::source_location::current()) } });
         }
         connectBlockMessagePorts();
     }
@@ -231,16 +224,16 @@ private:
         waitJobsDone();
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_STOP); !e) {
-                emitError(msgOut, e.error());
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 if (auto e = block.changeState(lifecycle::State::STOPPED); !e) {
-                    emitError(msgOut, e.error());
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                 }
             }
         });
         if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-            emitError(msgOut, e.error());
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
         }
     }
 
@@ -250,22 +243,26 @@ private:
         waitJobsDone();
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_PAUSE); !e) {
-                emitError(msgOut, e.error());
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 if (auto e = block.changeState(lifecycle::State::PAUSED); !e) {
-                    emitError(msgOut, e.error());
+                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                 }
             }
         });
         if (auto e = this->changeStateTo(lifecycle::State::PAUSED); !e) {
-            emitError(msgOut, e.error());
+            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
         }
     }
 
     void
     reset() {
-        setBlocksState(lifecycle::INITIALISED);
+        _graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::INITIALISED); !e) {
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
 
         // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
         // clear buffers
@@ -277,7 +274,11 @@ private:
     void
     resume() {
         _stop_requested = false;
-        setBlocksState(lifecycle::RUNNING);
+        _graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::RUNNING); !e) {
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
         if (executionPolicy() == ExecutionPolicy::multiThreaded) {
             // TODO review _job_lists usage
             this->runOnPool(_job_lists, [this](auto &job) { return this->workOnce(job); });
@@ -288,7 +289,11 @@ private:
     start() {
         // TODO merge with resume?
         _stop_requested = false;
-        setBlocksState(lifecycle::RUNNING);
+        _graph.forEachBlock([this](auto &block) {
+            if (auto e = block.changeState(lifecycle::RUNNING); !e) {
+                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            }
+        });
         if constexpr (executionPolicy() == singleThreaded) {
             self().runSingleThreaded();
         } else {
@@ -385,7 +390,7 @@ private:
                 result = this->workOnce(blocklist);
                 if (result.status == work::Status::ERROR) {
                     if (auto e = this->changeStateTo(lifecycle::State::ERROR); !e) {
-                        this->emitError(this->msgOut, e.error());
+                        this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                     }
                 }
             } else {
@@ -395,7 +400,7 @@ private:
         } while (result.status == work::Status::OK && this->state() != lifecycle::State::ERROR && this->state() != lifecycle::State::STOPPED);
         if (this->state() == lifecycle::State::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitError(this->msgOut, e.error());
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         }
     }
@@ -486,7 +491,7 @@ private:
                 result = this->workOnce(blocklist);
                 if (result.status == work::Status::ERROR) {
                     if (auto e = this->changeStateTo(lifecycle::State::ERROR); !e) {
-                        this->emitError(this->msgOut, e.error());
+                        this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                     }
                 }
             } else {
@@ -496,7 +501,7 @@ private:
         } while (result.status == work::Status::OK && this->state() != lifecycle::State::ERROR && this->state() != lifecycle::State::STOPPED);
         if (this->state() == lifecycle::State::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitError(this->msgOut, e.error());
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
             }
         }
     }
