@@ -440,7 +440,7 @@ testSchedulerControl() {
         }
 
         sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_PAUSE } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_PAUSE }, { kind::SchedulerStateUpdate, PAUSED } } });
+        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_PAUSE } }, { { kind::SchedulerStateUpdate, PAUSED } } });
         if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
             expect(!scheduler.isProcessing());
         }
