@@ -1,11 +1,13 @@
-#include "gnuradio-4.0/basic/common_blocks.hpp"
 #include <boost/ut.hpp>
 
+#include "gnuradio-4.0/Message.hpp"
+#include <gnuradio-4.0/basic/common_blocks.hpp>
+#include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
+
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
-
-#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -76,6 +78,49 @@ struct ProcessMessageConsumableSpanBlock : gr::Block<ProcessMessageConsumableSpa
     void
     processMessages(gr::MsgPortInNamed<"__Builtin"> &port, gr::ConsumableSpan auto message);
 };
+
+namespace {
+/**
+ * Waits for messages matching a message in expectedMessages, where matching means that all key-value pairs in the expected message are present in the received message.
+ * Returns all received messages.
+ */
+std::vector<pmtv::map_t>
+waitForMessages(auto &messageReader, std::vector<pmtv::map_t> expectedMessages, std::chrono::milliseconds timeout = 3s) {
+    using namespace boost::ut;
+
+    std::vector<pmtv::map_t> received;
+    auto                     start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < timeout && !expectedMessages.empty()) {
+        const auto available = messageReader.available();
+        if (available == 0) {
+            std::this_thread::sleep_for(20ms);
+            continue;
+        }
+        const auto messages = messageReader.get(available);
+        received.insert(received.end(), messages.begin(), messages.end());
+        std::erase_if(expectedMessages, [&messages](const auto &expected) {
+            return std::ranges::any_of(messages, [&expected](const auto &rec) {
+                return std::ranges::all_of(expected, [&rec](const auto &pair) { return rec.contains(pair.first) && rec.at(pair.first) == pair.second; });
+            });
+        });
+        std::ignore = messageReader.consume(available);
+    }
+
+    for (const auto &expected : expectedMessages) {
+        fmt::println("Expected message not received: {}", expected);
+    }
+    expect(expectedMessages.empty()) << fmt::format("Expected messages not received: {} received: {}", expectedMessages.size(), received.size());
+    return received;
+}
+
+void
+sendMessage(auto &outPort, pmtv::map_t message) {
+    auto out = outPort.streamWriter().reserve(1);
+    out[0]   = std::move(message);
+    out.publish(1);
+}
+
+} // namespace
 
 static_assert(gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
@@ -352,11 +397,68 @@ testMessagesWithoutRunningScheduler() {
         }
     });
 
-    scheduler.init();
+    expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
     while (!isDone()) {
         scheduler.processScheduledMessages();
     }
     messenger.join();
+}
+
+template<typename Scheduler>
+void
+testSchedulerControl() {
+    auto isDone    = [] { return false; };
+    auto scheduler = [&] {
+        gr::Graph flow;
+        auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
+        source.generator = createOnesGenerator(isDone);
+        auto     &sink   = flow.emplaceBlock<gr::basic::DataSink<float>>();
+
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
+
+        return Scheduler(std::move(flow));
+    }();
+
+    gr::MsgPortIn  fromScheduler;
+    gr::MsgPortOut toScheduler;
+    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+    expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+
+    auto client = std::thread([&scheduler, &fromScheduler, &toScheduler] {
+        using namespace gr::lifecycle;
+        using namespace gr::message;
+        auto &reader = fromScheduler.streamReader();
+        const std::string RUNNING         = std::string(magic_enum::enum_name(State::RUNNING));
+        const std::string REQUESTED_PAUSE = std::string(magic_enum::enum_name(State::REQUESTED_PAUSE));
+        const std::string PAUSED          = std::string(magic_enum::enum_name(State::PAUSED));
+        const std::string REQUESTED_STOP  = std::string(magic_enum::enum_name(State::REQUESTED_STOP));
+        const std::string STOPPED         = std::string(magic_enum::enum_name(State::STOPPED));
+
+        waitForMessages(reader, { { { kind::SchedulerStateUpdate, RUNNING } } });
+        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
+            expect(scheduler.isProcessing());
+        }
+
+        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_PAUSE } });
+        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_PAUSE } }, { { kind::SchedulerStateUpdate, PAUSED } } });
+        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
+            expect(!scheduler.isProcessing());
+        }
+
+        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, RUNNING } });
+        waitForMessages(reader, { { { kind::SchedulerStateUpdate, RUNNING } } });
+        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
+            expect(scheduler.isProcessing());
+        }
+
+        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_STOP } });
+        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_STOP } }, { { kind::SchedulerStateUpdate, STOPPED } } });
+        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
+            expect(!scheduler.isProcessing());
+        }
+    });
+    scheduler.runAndWait();
+    client.join();
 }
 
 const boost::ut::suite MessagesTests = [] {
@@ -395,6 +497,14 @@ const boost::ut::suite MessagesTests = [] {
         testMessagesWithoutRunningScheduler<scheduler::BreadthFirst<>>();
         testMessagesWithoutRunningScheduler<scheduler::Simple<scheduler::multiThreaded>>();
         testMessagesWithoutRunningScheduler<scheduler::BreadthFirst<scheduler::multiThreaded>>();
+    };
+
+    // Testing controlling the scheduler via messages
+    "SchedulerControl"_test = [] {
+        testSchedulerControl<scheduler::Simple<>>();
+        testSchedulerControl<scheduler::BreadthFirst<>>();
+        testSchedulerControl<scheduler::Simple<scheduler::multiThreaded>>();
+        testSchedulerControl<scheduler::BreadthFirst<scheduler::multiThreaded>>();
     };
 };
 

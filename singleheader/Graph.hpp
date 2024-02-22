@@ -13945,6 +13945,8 @@ const std::string Error           = "ERROR_KIND";
 const std::string Graph_update    = "GRAPH_UPDATE_KIND";
 const std::string UpdateSettings  = "UPDATE_SETTINGS_KIND";
 const std::string SettingsChanged = "SETTINGS_CHANGED_KIND";
+const std::string SchedulerStateUpdate        = "SCHEDULER_UPDATE_KIND";
+const std::string SchedulerStateChangeRequest = "SCHEDULER_COMMAND_KIND";
 } // namespace message::kind
 
 using Message = property_map;
@@ -18483,6 +18485,9 @@ struct hash<gr::SettingsCtx> {
 // #include <gnuradio-4.0/meta/utils.hpp>
 
 
+// #include <magic_enum.hpp>
+
+
 #include <atomic>
 #include <expected>
 #include <source_location>
@@ -18594,6 +18599,7 @@ struct ErrorType {
  * It is designed to be inherited by blocks (TDerived) to safely and effectively manage their lifecycle state transitions.
  *
  * If implemented in TDerived, the following specific lifecycle methods are called:
+ * - `init()`   when transitioning from IDLE to INITIALISED
  * - `start()`  when transitioning from INITIALISED to RUNNING
  * - `stop()`   when transitioning from any `isActive(State)` to REQUESTED_STOP
  * - `pause()`  when transitioning from RUNNING to REQUESTED_PAUSE
@@ -18601,6 +18607,8 @@ struct ErrorType {
  * - `reset()`  when transitioning from any state (typically ERROR or STOPPED) to INITIALISED.
  * If any of these methods throw an exception, the StateMachine transitions to the ERROR state, captures,
  * and forward the exception details.
+ *
+ * To react to state changes, TDerived can implement the `stateChanged(State newState)` method.
  *
  * @tparam TDerived The derived class type implementing specific lifecycle methods.
  * @tparam storageType Specifies the storage type for the state, allowing for atomic operations
@@ -18614,6 +18622,9 @@ protected:
 
     void
     setAndNotifyState(State newState) {
+        if constexpr (requires(TDerived d) { d.stateChanged(newState); }) {
+            static_cast<TDerived *>(this)->stateChanged(newState);
+        }
         if constexpr (storageType == StorageType::ATOMIC) {
             _state.store(newState, std::memory_order_release);
             _state.notify_all();
@@ -18679,12 +18690,16 @@ public:
             return {};
         } else {
             // Call specific methods in TDerived based on the state
+            if constexpr (requires(TDerived &d) { d.init(); }) {
+                if (oldState == State::IDLE && newState == State::INITIALISED) {
+                    return invokeLifecycleMethod(&TDerived::init, location);
+                }
+            }
             if constexpr (requires(TDerived &d) { d.start(); }) {
                 if (oldState == State::INITIALISED && newState == State::RUNNING) {
                     return invokeLifecycleMethod(&TDerived::start, location);
                 }
             }
-
             if constexpr (requires(TDerived &d) { d.stop(); }) {
                 if (newState == State::REQUESTED_STOP) {
                     return invokeLifecycleMethod(&TDerived::stop, location);
