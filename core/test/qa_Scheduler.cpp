@@ -404,7 +404,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
-        sched.init();
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs().size() == 2u);
         checkBlockNames(sched.jobs()[0], { "s1", "mult2" });
         checkBlockNames(sched.jobs()[1], { "mult1", "out" });
@@ -426,7 +426,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphParallel(trace), threadPool };
-        sched.init();
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs().size() == 2u);
         checkBlockNames(sched.jobs()[0], { "s1", "mult1b", "mult2b", "outb" });
         checkBlockNames(sched.jobs()[1], { "mult1a", "mult2a", "outa" });
@@ -449,7 +449,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphScaledSum(trace), threadPool };
-        sched.init();
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs().size() == 2u);
         checkBlockNames(sched.jobs()[0], { "s1", "mult", "out" });
         checkBlockNames(sched.jobs()[1], { "s2", "add" });
@@ -468,7 +468,7 @@ const boost::ut::suite SchedulerTests = [] {
 
         auto sched = scheduler{ std::move(flow), threadPool };
         sched.runAndWait();
-        sched.reset();
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
 
         expect(eq(lifecycleSource.n_samples_produced, lifecycleSource.n_samples_max)) << "Source n_samples_produced != n_samples_max";
         expect(eq(lifecycleBlock.process_one_count, lifecycleSource.n_samples_max)) << "process_one_count != n_samples_produced";

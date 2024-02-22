@@ -5,21 +5,22 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
 template<typename T>
 class FixedSource : public gr::Block<FixedSource<T>> {
     using super_t = gr::Block<FixedSource<T>>;
+
 public:
     gr::PortOut<T> out;
-    T value       = 1;
+    T              value = 1;
 
     [[nodiscard]] constexpr auto
     processOne() noexcept {
@@ -51,7 +52,8 @@ public:
         }
     }
 
-    void reset() {
+    void
+    reset() {
         value = {};
     }
 };
@@ -90,7 +92,7 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
-        sink.stopFunc = [&]() { sched.stop(); };
+        sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         // make a request
         source.trigger();
         httpBlock.processScheduledMessages();
@@ -121,7 +123,7 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
-        sink.stopFunc = [&]() { sched.stop(); };
+        sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         sched.runAndWait();
         expect(eq(std::get<int>(sink.value.at("status")), 404));
@@ -150,7 +152,7 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
-        sink.stopFunc = [&]() { sched.stop(); };
+        sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         sched.runAndWait();
         expect(eq(std::get<std::string>(sink.value.at("raw-data")), "OK"sv));
@@ -192,7 +194,7 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
-        sink.stopFunc = [&]() { sched.stop(); };
+        sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         sched.runAndWait();
         expect(eq(std::get<std::string>(sink.value.at("raw-data")), "event"sv));
 
