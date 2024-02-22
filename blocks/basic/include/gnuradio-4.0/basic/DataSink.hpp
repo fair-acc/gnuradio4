@@ -103,8 +103,9 @@ struct DataSinkQuery {
 };
 
 class DataSinkRegistry {
-    std::mutex            _mutex;
-    std::vector<std::any> _sinks;
+    std::mutex                      _mutex;
+    std::vector<std::any>           _sinks;
+    std::map<std::string, std::any> _sink_by_signal_name;
 
 public:
     // TODO this shouldn't be a singleton but associated with the flow graph (?)
@@ -120,6 +121,7 @@ public:
     registerSink(DataSink<T> *sink) {
         std::lock_guard lg{ _mutex };
         _sinks.push_back(sink);
+        _sink_by_signal_name[sink->signal_name] = sink;
     }
 
     template<typename T>
@@ -130,6 +132,15 @@ public:
             auto ptr = std::any_cast<DataSink<T> *>(v);
             return ptr && ptr == sink;
         });
+        _sink_by_signal_name.erase(sink->signal_name);
+    }
+
+    template<typename T>
+    void
+    updateSignalName(DataSink<T> *sink, std::string_view oldName, std::string_view newName) {
+        std::lock_guard lg{ _mutex };
+        _sink_by_signal_name.erase(std::string(oldName));
+        _sink_by_signal_name[std::string(newName)] = sink;
     }
 
     template<typename T>
@@ -220,18 +231,27 @@ private:
     template<typename T>
     DataSink<T> *
     findSink(const DataSinkQuery &query) {
-        auto matches = [&query](const std::any &v) {
+        if (query._signal_name) {
+            const auto it = _sink_by_signal_name.find(*query._signal_name);
+            if (it != _sink_by_signal_name.end()) {
+                try {
+                    return std::any_cast<DataSink<T> *>(it->second);
+                } catch (...) {
+                    return nullptr;
+                }
+            }
+            return nullptr;
+        }
+        auto sinkNameMatches = [&query](const std::any &v) {
             try {
-                const auto sink              = std::any_cast<DataSink<T> *>(v);
-                const auto sinkNameMatches   = !query._sink_name || *query._sink_name == sink->name;
-                const auto signalNameMatches = !query._signal_name || *query._signal_name == sink->signal_name;
-                return sinkNameMatches && signalNameMatches;
+                const auto sink = std::any_cast<DataSink<T> *>(v);
+                return query._sink_name == sink->name;
             } catch (...) {
                 return false;
             }
         };
 
-        const auto it = std::find_if(_sinks.begin(), _sinks.end(), matches);
+        const auto it = std::find_if(_sinks.begin(), _sinks.end(), sinkNameMatches);
         if (it == _sinks.end()) {
             return nullptr;
         }
@@ -239,6 +259,22 @@ private:
         return std::any_cast<DataSink<T> *>(*it);
     }
 };
+
+namespace detail {
+template<typename U>
+[[nodiscard]] constexpr inline std::optional<U>
+getProperty(const property_map &m, std::string_view key) {
+    const auto it = m.find(std::string(key));
+    if (it == m.end()) {
+        return std::nullopt;
+    }
+    try {
+        return std::get<U>(it->second);
+    } catch (const std::bad_variant_access &) {
+        return std::nullopt;
+    }
+};
+} // namespace detail
 
 /**
  * @brief generic data sink for exporting arbitrary-typed streams to non-GR C++ APIs.
@@ -359,17 +395,25 @@ public:
         }
     };
 
-    DataSink() { DataSinkRegistry::instance().registerSink(this); }
-
     ~DataSink() {
         stop();
         DataSinkRegistry::instance().unregisterSink(this);
     }
 
     void
-    settingsChanged(const property_map & /*oldSettings*/, const property_map &newSettings) {
+    init() noexcept {
+        DataSinkRegistry::instance().registerSink(this);
+    }
+
+    void
+    settingsChanged(const property_map &oldSettings, const property_map &newSettings) {
         if (applySignalInfo(newSettings)) {
             _has_signal_info_from_settings = true;
+        }
+        const auto oldSignalName = detail::getProperty<std::string>(oldSettings, tag::SIGNAL_NAME.key());
+        const auto newSignalName = detail::getProperty<std::string>(newSettings, tag::SIGNAL_NAME.key());
+        if (oldSignalName != newSignalName) {
+            DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), newSignalName.value_or(""));
         }
     }
 
@@ -483,23 +527,11 @@ public:
 private:
     bool
     applySignalInfo(const property_map &properties) {
-        auto getProperty = [&properties]<typename U>(const property_map &m, const std::string_view &key, U && /* needed to help clang's ADL */) -> std::optional<U> {
-            const auto it = m.find(std::string(key));
-            if (it == m.end()) {
-                return std::nullopt;
-            }
-            try {
-                return std::get<U>(it->second);
-            } catch (const std::bad_variant_access &) {
-                return std::nullopt;
-            }
-        };
-
-        const auto rate_ = getProperty(properties, tag::SAMPLE_RATE.key(), float{});
-        const auto name_ = getProperty(properties, tag::SIGNAL_NAME.key(), std::string());
-        const auto unit_ = getProperty(properties, tag::SIGNAL_UNIT.key(), std::string());
-        const auto min_  = getProperty(properties, tag::SIGNAL_MIN.key(), float{});
-        const auto max_  = getProperty(properties, tag::SIGNAL_MAX.key(), float{});
+        const auto rate_ = detail::getProperty<float>(properties, tag::SAMPLE_RATE.key());
+        const auto name_ = detail::getProperty<std::string>(properties, tag::SIGNAL_NAME.key());
+        const auto unit_ = detail::getProperty<std::string>(properties, tag::SIGNAL_UNIT.key());
+        const auto min_  = detail::getProperty<float>(properties, tag::SIGNAL_MIN.key());
+        const auto max_  = detail::getProperty<float>(properties, tag::SIGNAL_MAX.key());
         if (!rate_ && !name_ && !unit_ && !min_ && !max_) {
             return false;
         }

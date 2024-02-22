@@ -318,10 +318,11 @@ struct isBlockDependent {
  *     * case sinks: HW triggered vs. fixed-size consumer (may block/never finish for insufficient input data and fixed Port::MIN>0)
  * <ul>
  *
- * In addition derived classes can optionally implement any subset of the lifecycle methods ( `start()`, `stop()`, `reset()`, `pause()`, `resume()`).
+ * In addition derived classes can optionally implement any subset of the lifecycle methods ( `init()`, `start()`, `stop()`, `reset()`, `pause()`, `resume()`).
  * The Scheduler invokes these methods on each Block instance, if they are implemented, just before invoking its corresponding method of the same name.
  * @code
  * struct userBlock : public Block<userBlock> {
+ * void init() {...} // Implement any initialisation logic required for the block within this method.
  * void start() {...} // Implement any startup logic required for the block within this method.
  * void stop() {...} // Use this method for handling any clean-up procedures.
  * void pause() {...} // Implement logic to temporarily halt the block's operation, maintaining its current state.
@@ -593,7 +594,7 @@ public:
     }
 
     void
-    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
+    performInit(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
         progress     = std::move(progress_);
         ioThreadPool = std::move(ioThreadPool_);
 

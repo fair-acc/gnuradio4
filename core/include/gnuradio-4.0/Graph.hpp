@@ -179,7 +179,7 @@ public:
      * @brief to be called by scheduler->graph to initialise block
      */
     virtual void
-    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool)
+    performInit(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool)
             = 0;
 
     /**
@@ -403,8 +403,8 @@ public:
     }
 
     void
-    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
-        return blockRef().init(progress, ioThreadPool);
+    performInit(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
+        return blockRef().performInit(progress, ioThreadPool);
     }
 
     [[nodiscard]] constexpr work::Result
@@ -771,7 +771,7 @@ public:
     BlockModel &
     addBlock(std::unique_ptr<BlockModel> block) {
         auto &new_block_ref = _blocks.emplace_back(std::move(block));
-        new_block_ref->init(progress, ioThreadPool);
+        new_block_ref->performInit(progress, ioThreadPool);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *new_block_ref.get();
     }
@@ -782,7 +782,7 @@ public:
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::forward<Args>(args)...));
         auto  raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
-        raw_ref->init(progress, ioThreadPool);
+        raw_ref->performInit(progress, ioThreadPool);
         return *raw_ref;
     }
 
@@ -800,7 +800,7 @@ public:
             }
             throw std::invalid_argument(fmt::format("initial Block settings could not be applied successfully - mismatched keys or value-type: {}\n", fmt::join(keys, ", ")));
         }
-        raw_ref->init(progress, ioThreadPool);
+        raw_ref->performInit(progress, ioThreadPool);
         return *raw_ref;
     }
 
