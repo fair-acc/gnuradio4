@@ -15374,6 +15374,7 @@ public:
 
     [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
     [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
     operator const std::span<const T>&() const noexcept { return internalSpan; }
     operator std::span<const T>&() noexcept  { return internalSpan; }
     operator std::span<const T>&&() = delete;
@@ -15400,6 +15401,7 @@ public:
 
     [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
     [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
     operator const std::span<T>&() const noexcept { return internalSpan; }
     operator std::span<T>&() noexcept  { return internalSpan; }
 
