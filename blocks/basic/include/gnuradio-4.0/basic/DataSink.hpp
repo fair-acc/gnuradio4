@@ -274,6 +274,51 @@ getProperty(const property_map &m, std::string_view key) {
         return std::nullopt;
     }
 };
+
+struct Metadata {
+    float       sampleRate;
+    std::string signalName;
+    std::string signalUnit;
+    float       signalMin;
+    float       signalMax;
+
+    property_map
+    toTagMap() const {
+        return { { std::string(tag::SIGNAL_RATE.shortKey()), sampleRate },
+                 { std::string(tag::SIGNAL_NAME.shortKey()), signalName },
+                 { std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit },
+                 { std::string(tag::SIGNAL_MIN.shortKey()), signalMin },
+                 { std::string(tag::SIGNAL_MAX.shortKey()), signalMax } };
+    }
+};
+
+inline std::optional<property_map>
+tagAndMetadata(const std::optional<property_map> &tagData, const std::optional<Metadata> &metadata) {
+    if (!tagData && !metadata) {
+        return std::nullopt;
+    }
+
+    property_map merged;
+    if (metadata) {
+        merged = metadata->toTagMap();
+    }
+    if (tagData) {
+        merged.insert(tagData->begin(), tagData->end());
+    }
+
+    return merged;
+}
+
+template<typename T>
+[[nodiscard]] inline DataSet<T>
+makeDataSetTemplate(Metadata metadata) {
+    DataSet<T> tmpl;
+    tmpl.signal_names  = { std::move(metadata.signalName) };
+    tmpl.signal_units  = { std::move(metadata.signalUnit) };
+    tmpl.signal_ranges = { { static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax) } };
+    return tmpl;
+}
+
 } // namespace detail
 
 /**
@@ -320,7 +365,6 @@ class DataSink : public Block<DataSink<T>> {
     bool                                          _listeners_finished = false;
     std::mutex                                    _listener_mutex;
     std::optional<gr::HistoryBuffer<T>>           _history;
-    bool                                          _has_signal_info_from_settings = false;
 
 public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
@@ -406,14 +450,14 @@ public:
     }
 
     void
-    settingsChanged(const property_map &oldSettings, const property_map &newSettings) {
-        if (applySignalInfo(newSettings)) {
-            _has_signal_info_from_settings = true;
+    settingsChanged(const property_map &oldSettings, const property_map & /*newSettings*/) {
+        const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
+        if (oldSignalName != signal_name) {
+            DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), signal_name);
         }
-        const auto oldSignalName = detail::getProperty<std::string>(oldSettings, tag::SIGNAL_NAME.key());
-        const auto newSignalName = detail::getProperty<std::string>(newSettings, tag::SIGNAL_NAME.key());
-        if (oldSignalName != newSignalName) {
-            DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), newSignalName.value_or(""));
+        std::lock_guard lg{ _listener_mutex };
+        for (auto &listener : _listeners) {
+            listener->setMetadata(detail::Metadata{ sample_rate, signal_name, signal_unit, signal_min, signal_max });
         }
     }
 
@@ -502,10 +546,6 @@ public:
         if (this->input_tags_present()) {
             assert(this->mergedInputTag().index == 0);
             tagData = this->mergedInputTag().map;
-            // signal info from settings overrides info from tags
-            if (!_has_signal_info_from_settings) {
-                applySignalInfo(this->mergedInputTag().map);
-            }
         }
 
         {
@@ -525,37 +565,6 @@ public:
     }
 
 private:
-    bool
-    applySignalInfo(const property_map &properties) {
-        const auto rate_ = detail::getProperty<float>(properties, tag::SAMPLE_RATE.key());
-        const auto name_ = detail::getProperty<std::string>(properties, tag::SIGNAL_NAME.key());
-        const auto unit_ = detail::getProperty<std::string>(properties, tag::SIGNAL_UNIT.key());
-        const auto min_  = detail::getProperty<float>(properties, tag::SIGNAL_MIN.key());
-        const auto max_  = detail::getProperty<float>(properties, tag::SIGNAL_MAX.key());
-        if (!rate_ && !name_ && !unit_ && !min_ && !max_) {
-            return false;
-        }
-
-        sample_rate = rate_.value_or(sample_rate);
-        signal_name = name_.value_or(signal_name);
-        signal_unit = unit_.value_or(signal_unit);
-        signal_min  = min_.value_or(signal_min);
-        signal_max  = max_.value_or(signal_max);
-
-        // forward to listeners
-        for (auto &listener : _listeners) {
-            std::lock_guard lg{ _listener_mutex };
-            if (rate_) {
-                listener->applySampleRate(sample_rate);
-            }
-            if (name_ || unit_ || min_ || max_) {
-                listener->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { T(signal_min), T(signal_max) } } });
-            }
-        }
-
-        return name_ && unit_ && min_ && max_;
-    }
-
     void
     ensureHistorySize(std::size_t new_size) {
         const auto old_size = _history ? _history->capacity() : std::size_t{ 0 };
@@ -577,8 +586,7 @@ private:
 
     void
     addListener(std::unique_ptr<AbstractListener> &&l, bool block) {
-        l->setDataSetTemplate(DataSet<T>{ .signal_names = { signal_name }, .signal_units = { signal_unit }, .signal_ranges = { { T(signal_min), T(signal_max) } } });
-        l->applySampleRate(sample_rate);
+        l->setMetadata(detail::Metadata{ sample_rate, signal_name, signal_unit, signal_min, signal_max });
         if (block) {
             _listeners.push_back(std::move(l));
         } else {
@@ -596,11 +604,7 @@ private:
             expired = true;
         }
 
-        virtual void
-        applySampleRate(float /*sample_rate*/) {}
-
-        virtual void
-        setDataSetTemplate(DataSet<T>) {}
+        virtual void setMetadata(detail::Metadata) = 0;
 
         virtual void
         process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tagData0)
@@ -618,6 +622,7 @@ private:
         const DataSink<T> &parent_sink;
         bool               block           = false;
         std::size_t        samples_written = 0;
+        std::optional<detail::Metadata> _pendingMetadata;
 
         // callback-only
         std::size_t      buffer_fill = 0;
@@ -626,7 +631,6 @@ private:
 
         // polling-only
         std::weak_ptr<Poller> polling_handler = {};
-
         Callback callback;
 
         template<typename CallbackFW>
@@ -646,6 +650,11 @@ private:
         }
 
         void
+        setMetadata(detail::Metadata metadata) override {
+            _pendingMetadata = std::move(metadata);
+        }
+
+        void
         process(std::span<const T>, std::span<const T> data, std::optional<property_map> tagData0) override {
             if constexpr (hasCallback) {
                 // if there's pending data, fill buffer and send out
@@ -653,10 +662,11 @@ private:
                     const auto n = std::min(data.size(), buffer.size() - buffer_fill);
                     std::ranges::copy(data.first(n), buffer.begin() + static_cast<std::ptrdiff_t>(buffer_fill));
                     if constexpr (callbackTakesTags) {
-                        if (tagData0) {
-                            tag_buffer.emplace_back(static_cast<Tag::signed_index_type>(buffer_fill), *tagData0);
-                            tagData0.reset();
+                        if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
+                            tag_buffer.emplace_back(static_cast<Tag::signed_index_type>(buffer_fill), std::move(*tag));
                         }
+                        _pendingMetadata.reset();
+                        tagData0.reset();
                     }
                     buffer_fill += n;
                     if (buffer_fill == buffer.size()) {
@@ -673,10 +683,11 @@ private:
                 while (data.size() >= buffer.size()) {
                     if constexpr (callbackTakesTags) {
                         std::vector<Tag> tags;
-                        if (tagData0) {
-                            tags.emplace_back(0, std::move(*tagData0));
-                            tagData0.reset();
+                        if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
+                            tags.emplace_back(0, std::move(*tag));
                         }
+                        tagData0.reset();
+                        _pendingMetadata.reset();
                         callCallback(data.first(buffer.size()), std::span(tags));
                     } else {
                         callback(data.first(buffer.size()));
@@ -690,9 +701,10 @@ private:
                     std::ranges::copy(data, buffer.begin());
                     buffer_fill = data.size();
                     if constexpr (callbackTakesTags) {
-                        if (tagData0) {
-                            tag_buffer.emplace_back(0, std::move(*tagData0));
+                        if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
+                            tag_buffer.emplace_back(0, std::move(*tag));
                         }
+                        _pendingMetadata.reset();
                     }
                 }
             } else {
@@ -705,11 +717,12 @@ private:
                 const auto toWrite = block ? data.size() : std::min(data.size(), poller->writer.available());
 
                 if (toWrite > 0) {
-                    if (tagData0) {
+                    if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
                         auto tw = poller->tag_writer.reserve(1);
-                        tw[0]   = { static_cast<Tag::signed_index_type>(samples_written), std::move(*tagData0) };
+                        tw[0]   = { static_cast<Tag::signed_index_type>(samples_written), std::move(*tag) };
                         tw.publish(1);
                     }
+                    _pendingMetadata.reset();
                     auto writeData = poller->writer.reserve(toWrite);
                     std::ranges::copy(data | std::views::take(toWrite), writeData.begin());
                     writeData.publish(writeData.size());
@@ -762,8 +775,8 @@ private:
             : preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), callback{ std::forward<CallbackFW>(cb) } {}
 
         void
-        setDataSetTemplate(DataSet<T> dst) override {
-            dataset_template = std::move(dst);
+        setMetadata(detail::Metadata metadata) override {
+            dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
         }
 
         inline void
@@ -853,8 +866,8 @@ private:
             : block(doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), polling_handler{ std::move(handler) } {}
 
         void
-        setDataSetTemplate(DataSet<T> dst) override {
-            dataset_template = std::move(dst);
+        setMetadata(detail::Metadata metadata) override {
+            dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
         }
 
         inline void
@@ -952,14 +965,9 @@ private:
             : time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), callback(std::forward<CallbackFW>(cb)) {}
 
         void
-        setDataSetTemplate(DataSet<T> dst) override {
-            dataset_template = std::move(dst);
-        }
-
-        void
-        applySampleRate(float rateHz) override {
-            sample_delay = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * rateHz));
-            // TODO do we need to update the requested_samples of pending here? (considering both old and new time_delay)
+        setMetadata(detail::Metadata metadata) override {
+            sample_delay     = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * metadata.sampleRate));
+            dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
         }
 
         inline void
@@ -992,7 +1000,7 @@ private:
         process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0 && trigger_matcher({ 0, *tagData0 }) == TriggerMatchResult::Matching) {
                 auto new_pending = PendingSnapshot{ *tagData0, sample_delay, sample_delay };
-                // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased; TODO unless we adapt them in applySampleRate, see there)
+                // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased)
                 auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });
                 pending.insert(rit.base(), std::move(new_pending));
             }
