@@ -102,17 +102,21 @@ load_grc(PluginLoader &loader, const std::string &yaml_source) {
 
         // TODO: Discuss how GRC should store the node types, how we should
         // in general handle nodes that are parametrised by more than one type
-        auto &currentBlock = loader.instantiateInGraph(testGraph, id, "double");
+        auto currentBlock = loader.instantiate(id, "double");
+        if (!currentBlock) {
+            throw fmt::format("Unable to create block of type '{}'", id);
+        }
 
-        currentBlock.setName(name);
-        createdBlocks[name] = &currentBlock;
-
-        auto currentBlock_settings = currentBlock.settings().get();
-
+        currentBlock->setName(name);
         property_map new_properties;
 
         auto parameters = grc_block["parameters"];
         if (parameters && parameters.IsMap()) {
+            // TODO this applyStagedParameters is a workaround to make sure that currentBlock_settings is not empty
+            // but contains the default values of the block (needed to covert the parameter values to the right type)
+            // should this be based on metadata/reflection?
+            std::ignore                = currentBlock->settings().applyStagedParameters();
+            auto currentBlock_settings = currentBlock->settings().get();
             for (const auto &kv : parameters) {
                 const auto &key = kv.first.as<std::string>();
 
@@ -166,22 +170,20 @@ load_grc(PluginLoader &loader, const std::string &yaml_source) {
                     [&] {
                         // Fallback to string, and non-defined property
                         const auto& value = grc_value.template as<std::string>();
-                        currentBlock.metaInformation()[key] = value;
+                        currentBlock->metaInformation()[key] = value;
                         return true;
                     }();
                     // clang-format on
 
                 } else {
                     const auto &value                   = kv.second.as<std::string>();
-                    currentBlock.metaInformation()[key] = value;
+                    currentBlock->metaInformation()[key] = value;
                 }
             }
         }
 
-        std::ignore = currentBlock.settings().set(new_properties);
-        // currentBlock.init(); TODO: reverse and first initialise block via property_map constructor and then add to flow-graph -> does the init implicitely then, this is a workaround for the
-        // apply_staged_settigns
-        std::ignore = currentBlock.settings().applyStagedParameters();
+        std::ignore         = currentBlock->settings().set(new_properties);
+        createdBlocks[name] = &testGraph.addBlock(std::move(currentBlock));
     }
 
     for (const auto &connection : tree["connections"]) {
