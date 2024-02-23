@@ -134,9 +134,9 @@ getGraphLinear(std::shared_ptr<Tracer> tracer) {
     // Generators
     auto &source1      = flow.emplaceBlock<CountSource<int>>({ { "name", "s1" }, { "n_samples_max", nMaxSamples } });
     source1.tracer     = tracer;
-    auto &scaleBlock1  = flow.emplaceBlock<Scale<int>>({ { "name", "mult1" }, { "scale_factor", int(2) } });
+    auto &scaleBlock1  = flow.emplaceBlock<Scale<int>>({ { "name", "mult1" }, { "scale_factor", 2 } });
     scaleBlock1.tracer = tracer;
-    auto &scaleBlock2  = flow.emplaceBlock<Scale<int>>({ { "name", "mult2" }, { "scale_factor", int(4) } });
+    auto &scaleBlock2  = flow.emplaceBlock<Scale<int>>({ { "name", "mult2" }, { "scale_factor", 4 } });
     scaleBlock2.tracer = tracer;
     auto &sink         = flow.emplaceBlock<ExpectSink<int>>({ { "name", "out" }, { "n_samples_max", nMaxSamples } });
     sink.tracer        = tracer;
@@ -162,16 +162,16 @@ getGraphParallel(std::shared_ptr<Tracer> tracer) {
     // Generators
     auto &source1       = flow.emplaceBlock<CountSource<int>>({ { "name", "s1" }, { "n_samples_max", nMaxSamples } });
     source1.tracer      = tracer;
-    auto &scaleBlock1a  = flow.emplaceBlock<Scale<int>>({ { "name", "mult1a" }, { "scale_factor", int(2) } });
+    auto &scaleBlock1a  = flow.emplaceBlock<Scale<int>>({ { "name", "mult1a" }, { "scale_factor", 2 } });
     scaleBlock1a.tracer = tracer;
-    auto &scaleBlock2a  = flow.emplaceBlock<Scale<int>>({ { "name", "mult2a" }, { "scale_factor", int(3) } });
+    auto &scaleBlock2a  = flow.emplaceBlock<Scale<int>>({ { "name", "mult2a" }, { "scale_factor", 3 } });
     scaleBlock2a.tracer = tracer;
     auto &sinkA         = flow.emplaceBlock<ExpectSink<int>>({ { "name", "outa" }, { "n_samples_max", nMaxSamples } });
     sinkA.tracer        = tracer;
     sinkA.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 6 * count; };
-    auto &scaleBlock1b  = flow.emplaceBlock<Scale<int>>({ { "name", "mult1b" }, { "scale_factor", int(3) } });
+    auto &scaleBlock1b  = flow.emplaceBlock<Scale<int>>({ { "name", "mult1b" }, { "scale_factor", 3 } });
     scaleBlock1b.tracer = tracer;
-    auto &scaleBlock2b  = flow.emplaceBlock<Scale<int>>({ { "name", "mult2b" }, { "scale_factor", int(5) } });
+    auto &scaleBlock2b  = flow.emplaceBlock<Scale<int>>({ { "name", "mult2b" }, { "scale_factor", 5 } });
     scaleBlock2b.tracer = tracer;
     auto &sinkB         = flow.emplaceBlock<ExpectSink<int>>({ { "name", "outb" }, { "n_samples_max", nMaxSamples } });
     sinkB.tracer        = tracer;
@@ -219,7 +219,7 @@ getGraphScaledSum(std::shared_ptr<Tracer> tracer) {
     source1.tracer    = tracer;
     auto &source2     = flow.emplaceBlock<CountSource<int>>({ { "name", "s2" }, { "n_samples_max", nMaxSamples } });
     source2.tracer    = tracer;
-    auto &scaleBlock  = flow.emplaceBlock<Scale<int>>({ { "name", "mult" }, { "scale_factor", int(2) } });
+    auto &scaleBlock  = flow.emplaceBlock<Scale<int>>({ { "name", "mult" }, { "scale_factor", 2 } });
     scaleBlock.tracer = tracer;
     auto &addBlock    = flow.emplaceBlock<Adder<int>>({ { "name", "add" } });
     addBlock.tracer   = tracer;

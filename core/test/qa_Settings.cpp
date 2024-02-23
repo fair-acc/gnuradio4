@@ -215,7 +215,7 @@ struct Sink : public Block<Sink<T>> {
     [[nodiscard]] constexpr auto
     processOne(V) noexcept {
         if constexpr (gr::meta::any_simd<V>) {
-            n_samples_consumed += static_cast<std::int32_t>(V::size());
+            n_samples_consumed += static_cast<gr::Size_t>(V::size());
         } else {
             n_samples_consumed++;
         }

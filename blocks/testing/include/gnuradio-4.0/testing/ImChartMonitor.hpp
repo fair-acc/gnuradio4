@@ -64,13 +64,14 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         std::vector<T> reversedX(_historyBufferX.rbegin(), _historyBufferX.rend());
         std::vector<T> reversedY(_historyBufferY.rbegin(), _historyBufferY.rend());
         std::vector<T> reversedTag(_historyBufferX.size());
-        std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.index < 0 ? T(0) : yValue; });
+        std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(),
+                       [](const Tag &tag, const T &yValue) { return tag.index < 0 ? T(0) : yValue; });
 
         auto adjustRange = [](T min, T max) {
-            min = std::min(min, T(0));
-            max = std::max(max, T(0));
-            const T margin = (max - min) * 0.2;
-            return std::pair<double, double>{min - margin, max + margin};
+            min            = std::min(min, T(0));
+            max            = std::max(max, T(0));
+            const T margin = (max - min) * T(0.2);
+            return std::pair<double, double>{ min - margin, max + margin };
         };
 
         auto chart = gr::graphs::ImChart<130, 28>({ { *xMin, *xMax }, adjustRange(*yMin, *yMax) });

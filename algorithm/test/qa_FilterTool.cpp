@@ -732,26 +732,26 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             yValues[i] = std::sin(static_cast<T>(2) * std::numbers::pi_v<T> * centreFrequency / static_cast<T>(kFilterParameter.fs) * static_cast<T>(i));
         }
 
-        auto processSignal = [](auto &filter, const std::vector<T> &yValues) -> T {
+        auto processSignal = [](auto &filter, const std::vector<T> &signalValues) -> T {
             T           actualGain       = 0.0;
             std::size_t processedSamples = 0UZ;
-            for (auto &yValue : yValues) {
-                T filteredValue = filter.processOne(yValue);
+            for (auto &signalValue : signalValues) {
+                T filteredValue = filter.processOne(signalValue);
                 processedSamples++;
-                if (processedSamples > yValues.size() / 2UZ) { // ignore initial transient
+                if (processedSamples > signalValues.size() / 2UZ) { // ignore initial transient
                     actualGain = std::max(actualGain, std::abs(filteredValue));
                 }
             }
             return actualGain;
         };
 
-        auto processSignalErrors = [](auto &filter, const std::vector<T> &yValues) -> T {
-            T          actualGain       = 0.0;
+        auto processSignalErrors = [](auto &filter, const std::vector<T> &signalValues) -> T {
+            T           actualGain       = 0.0;
             std::size_t processedSamples = 0UZ;
-            for (auto &yValue : yValues) {
-                gr::UncertainValue<T> filteredValue = filter.processOne(yValue);
+            for (auto &signalValue : signalValues) {
+                gr::UncertainValue<T> filteredValue = filter.processOne(signalValue);
                 processedSamples++;
-                if (processedSamples > yValues.size() / 2UZ) { // ignore initial transient
+                if (processedSamples > signalValues.size() / 2UZ) { // ignore initial transient
                     actualGain = std::max(actualGain, std::abs(gr::value(filteredValue)));
                 }
             }
@@ -817,14 +817,14 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
         }
         ::benchmark::results::add_separator();
         {
-            T    actualGain                              = 0.0;
-            auto filter                                  = Filter<gr::UncertainValue<T>>(digitalBandPassFir);
+            T    actualGain                                     = 0.0;
+            auto filter                                         = Filter<gr::UncertainValue<T>>(digitalBandPassFir);
             "FIR w/ uncertainty"_benchmark.repeat<10>(nSamples) = [&processSignalErrors, &actualGain, &filter, &yValues] { actualGain = processSignalErrors(filter, yValues); };
             expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("FIR approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
         {
-            T    actualGain                              = 0.0;
-            auto filter                                  = Filter<gr::UncertainValue<T>>(digitalBandPass);
+            T    actualGain                                     = 0.0;
+            auto filter                                         = Filter<gr::UncertainValue<T>>(digitalBandPass);
             "IIR w/ uncertainty"_benchmark.repeat<10>(nSamples) = [&processSignalErrors, &actualGain, &filter, &yValues] { actualGain = processSignalErrors(filter, yValues); };
             expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << fmt::format("IIR approx settling gain threshold for {}", gr::meta::type_name<T>());
         }

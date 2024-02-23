@@ -617,7 +617,7 @@ private:
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
                     const auto n = std::min(data.size(), buffer.size() - buffer_fill);
-                    std::ranges::copy(data.first(n), buffer.begin() + buffer_fill);
+                    std::ranges::copy(data.first(n), buffer.begin() + static_cast<std::ptrdiff_t>(buffer_fill));
                     if constexpr (callbackTakesTags) {
                         if (tagData0) {
                             tag_buffer.emplace_back(static_cast<Tag::signed_index_type>(buffer_fill), *tagData0);
