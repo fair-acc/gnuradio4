@@ -96,7 +96,10 @@ public:
         // TODO: does one need to check every processBulk call
         bool isAscending = std::ranges::adjacent_find(tag_times, std::greater_equal()) == tag_times.end();
         if (!isAscending) {
-            throw std::invalid_argument("The input tag_times vector should be ascending.");
+            using namespace gr::message;
+            this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, "The input tag_times vector should be ascending." } });
+            output.publish(0UZ);
+            return work::Status::ERROR;
         }
 
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {

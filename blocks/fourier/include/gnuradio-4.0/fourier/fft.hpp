@@ -91,10 +91,10 @@ On the choice of window (mathematically aka. apodisation) functions
     using InDataType  = std::conditional_t<gr::meta::complex_like<T>, std::complex<value_type>, value_type>;
     using OutDataType = std::complex<value_type>;
 
-    PortIn<T>  in;
-    PortOut<U> out;
+    PortIn<T>  in{};
+    PortOut<U> out{};
 
-    FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl;
+    FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl{};
     gr::algorithm::window::Type                               _windowType = gr::algorithm::window::Type::Hann;
     std::vector<value_type>                                   _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
 

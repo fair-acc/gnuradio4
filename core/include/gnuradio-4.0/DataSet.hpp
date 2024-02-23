@@ -83,24 +83,24 @@ struct DataSet {
     std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
     // axis layout:
-    std::vector<std::string>    axis_names;  // e.g. time, frequency, …
-    std::vector<std::string>    axis_units;  // axis base SI-unit
-    std::vector<std::vector<T>> axis_values; // explicit axis values
+    std::vector<std::string>    axis_names{};  // e.g. time, frequency, …
+    std::vector<std::string>    axis_units{};  // axis base SI-unit
+    std::vector<std::vector<T>> axis_values{}; // explicit axis values
 
     // signal data layout:
-    std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout;  // row-major, column-major, “special”
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
 
     // signal data storage:
-    std::vector<std::string>    signal_names;  // size = extents[0]
-    std::vector<std::string>    signal_units;  // size = extents[0]
-    std::vector<T>              signal_values; // size = \PI_i extents[i]
-    std::vector<T>              signal_errors; // size = \PI_i extents[i] or '0' if not applicable
-    std::vector<std::vector<T>> signal_ranges; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+    std::vector<std::string>    signal_names{};  // size = extents[0]
+    std::vector<std::string>    signal_units{};  // size = extents[0]
+    std::vector<T>              signal_values{}; // size = \PI_i extents[i]
+    std::vector<T>              signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<std::vector<T>> signal_ranges{}; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>          meta_information;
-    std::vector<std::vector<Tag>> timing_events;
+    std::vector<pmt_map>          meta_information{};
+    std::vector<std::vector<Tag>> timing_events{};
 };
 
 static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
@@ -113,16 +113,16 @@ using DataSet_double = DataSet<float>;
 
 template<typename T>
 struct Tensor {
-    using value_type                    = T;
-    using tensor_layout_type            = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map                       = std::map<std::string, pmtv::pmt>;
-    std::int64_t              timestamp = 0; // UTC timestamp [ns]
+    using value_type         = T;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map            = std::map<std::string, pmtv::pmt>;
+    std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
     std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
     tensor_layout_type        layout;  // row-major, column-major, “special”
 
-    std::vector<T>            signal_values; // size = \PI_i extents[i]
-    std::vector<T>            signal_errors; // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<T> signal_values; // size = \PI_i extents[i]
+    std::vector<T> signal_errors; // size = \PI_i extents[i] or '0' if not applicable
 
     // meta data
     std::vector<pmt_map> meta_information;
@@ -134,8 +134,8 @@ static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity"
 
 template<typename T>
 struct Packet {
-    using value_type               = T;
-    using pmt_map                  = std::map<std::string, pmtv::pmt>;
+    using value_type = T;
+    using pmt_map    = std::map<std::string, pmtv::pmt>;
 
     std::int64_t         timestamp = 0; // UTC timestamp [ns]
     std::vector<T>       signal_values; // size = \PI_i extents[i

@@ -286,7 +286,7 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
         // Feed-forward path (uncorrelated uncertainties)
         inputHistory.push_back(inputUncertainty * inputUncertainty);
         TBaseType feedForwardUncertainty = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<TBaseType>(0), //
-                                                                 std::plus<>(), [](TBaseType b, TBaseType sigma2) { return b * b * sigma2; });
+                                                                 std::plus<>(), [](TBaseType bVal, TBaseType sigma2) { return bVal * bVal * sigma2; });
 
         if (a.size() <= 1 || autocorrelationFunction.empty()) {
             outputHistory.push_back(feedForwardUncertainty);
@@ -295,9 +295,11 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
 
         // Feedback path (correlated uncertainties)
         TBaseType feedbackUncertainty = 0;
-        for (int j = 1; j < a.size(); ++j) {
-            for (int k = 1; k < a.size(); ++k) {
-                TBaseType correlationFactor = autocorrelationFunction[std::abs(j - k)]; // w/o causality (i.e. causality j - k < 0 -> autoC = 0.0), this is a conservative estimate, to be checked
+        for (std::size_t j = 1; j < a.size(); ++j) {
+            for (std::size_t k = 1; k < a.size(); ++k) {
+                int       jk{ std::abs(static_cast<int>(j) - static_cast<int>(k)) };
+                TBaseType correlationFactor
+                        = autocorrelationFunction[static_cast<std::size_t>(jk)]; // w/o causality (i.e. causality j - k < 0 -> autoC = 0.0), this is a conservative estimate, to be checked
                 feedbackUncertainty += a[j] * a[k] * correlationFactor * std::sqrt(outputHistory[j - 1]) * std::sqrt(outputHistory[k - 1]);
             }
         }
@@ -917,7 +919,7 @@ designFilter(const Type filterType, FilterParameters params, const Design filter
         throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
                                                 magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     } else { // Step 4: convert the poles and zeros into biquad sections.
-        constexpr T epsilon = static_cast<T>(1e-10);
+        constexpr double epsilon = 1e-10;
 
         std::vector<FilterCoefficients<T>> sections;
         while (!digitalPoleZeros.poles.empty()) {
@@ -1000,6 +1002,7 @@ estimateRequiredTransitionWidth(const Type filterType, FilterParameters params) 
     case Type::BANDPASS: return std::min(minTransitionWidth, std::min(std::abs(params.fLow / params.fs), std::abs(0.5 - params.fHigh / params.fs)));
     case Type::BANDSTOP: return std::min(minTransitionWidth, std::min(std::abs(0.5 - params.fHigh / params.fs), std::min(params.fLow, 0.5 * std::abs(params.fHigh - params.fLow)) / params.fs));
     }
+    return 0.;
 }
 
 template<std::floating_point T>

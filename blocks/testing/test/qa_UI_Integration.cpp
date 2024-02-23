@@ -101,7 +101,6 @@ const boost::ut::suite TagTests = [] {
         scheduler::Simple sched{ std::move(testGraph) };
 
         std::thread uiLoop([&uiSink]() {
-            int i = 0;
             fmt::println("start UI thread");
             while (uiSink.draw() != work::Status::DONE) {                   // mocks UI update loop with 25 Hz repetition
                 std::this_thread::sleep_for(std::chrono::milliseconds(40)); // 25 Hz <-> 40 ms period

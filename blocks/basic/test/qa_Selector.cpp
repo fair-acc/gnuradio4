@@ -127,8 +127,8 @@ void
 execute_selector_test(test_definition definition) {
     using namespace boost::ut;
 
-    const gr::Size_t sources_count = definition.input_values.size();
-    const gr::Size_t sinks_count   = definition.output_values.size();
+    const auto sources_count = static_cast<gr::Size_t>(definition.input_values.size());
+    const auto sinks_count   = static_cast<gr::Size_t>(definition.output_values.size());
 
     gr::Graph                              graph;
     std::vector<repeated_source<double> *> sources;

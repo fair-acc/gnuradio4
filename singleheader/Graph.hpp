@@ -11312,13 +11312,7 @@ using is_stride = std::bool_constant<IsStride<T>>;
 static_assert(is_stride<Stride<10, true>>::value);
 static_assert(!is_stride<int>::value);
 
-enum class UICategory {
-    None,
-    Toolbar,
-    ChartPane,
-    StatusBar,
-    Menu
-};
+enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
 
 /**
  * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
@@ -11445,13 +11439,13 @@ struct Annotated {
 
     template<typename U>
         requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
+    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(static_cast<T>(std::forward<U>(input))) {}
 
     template<typename U>
         requires std::assignable_from<T &, U>
     Annotated &
     operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
-        value = std::forward<U>(input);
+        value = static_cast<T>(std::forward<U>(input));
         return *this;
     }
 
@@ -13058,12 +13052,11 @@ class CircularBuffer
         bool              _isRangePublished {true};// controls if publish() was invoked
         std::size_t       _index {0UZ};
         signed_index_type _offset {0};
+        std::span<T> _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
 
 #ifndef NDEBUG
         std::size_t _rangesCounter{0}; // this counter is used only in debug mode to check if publish() was invoked correctly
 #endif
-
-        std::span<T> _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
 
     public:
         buffer_writer() = delete;
@@ -13074,9 +13067,9 @@ class CircularBuffer
             : _buffer(std::move(other._buffer))
             , _isMmapAllocated(_buffer->_isMmapAllocated)
             , _size(_buffer->_size)
+            , _claimStrategy(std::addressof(_buffer->_claimStrategy))
             , _nSlotsPublished(std::exchange(other._nSlotsPublished, 0UZ))
             , _isRangePublished(std::exchange(other._isRangePublished, true))
-            , _claimStrategy(std::addressof(_buffer->_claimStrategy))
             , _index(std::exchange(other._index, 0UZ))
             , _offset(std::exchange(other._offset, 0))
             , _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) { };
@@ -13846,24 +13839,24 @@ struct DataSet {
     std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
     // axis layout:
-    std::vector<std::string>    axis_names;  // e.g. time, frequency, …
-    std::vector<std::string>    axis_units;  // axis base SI-unit
-    std::vector<std::vector<T>> axis_values; // explicit axis values
+    std::vector<std::string>    axis_names{};  // e.g. time, frequency, …
+    std::vector<std::string>    axis_units{};  // axis base SI-unit
+    std::vector<std::vector<T>> axis_values{}; // explicit axis values
 
     // signal data layout:
-    std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout;  // row-major, column-major, “special”
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
 
     // signal data storage:
-    std::vector<std::string>    signal_names;  // size = extents[0]
-    std::vector<std::string>    signal_units;  // size = extents[0]
-    std::vector<T>              signal_values; // size = \PI_i extents[i]
-    std::vector<T>              signal_errors; // size = \PI_i extents[i] or '0' if not applicable
-    std::vector<std::vector<T>> signal_ranges; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+    std::vector<std::string>    signal_names{};  // size = extents[0]
+    std::vector<std::string>    signal_units{};  // size = extents[0]
+    std::vector<T>              signal_values{}; // size = \PI_i extents[i]
+    std::vector<T>              signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<std::vector<T>> signal_ranges{}; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>          meta_information;
-    std::vector<std::vector<Tag>> timing_events;
+    std::vector<pmt_map>          meta_information{};
+    std::vector<std::vector<Tag>> timing_events{};
 };
 
 static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
@@ -13876,16 +13869,16 @@ using DataSet_double = DataSet<float>;
 
 template<typename T>
 struct Tensor {
-    using value_type                    = T;
-    using tensor_layout_type            = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map                       = std::map<std::string, pmtv::pmt>;
-    std::int64_t              timestamp = 0; // UTC timestamp [ns]
+    using value_type         = T;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map            = std::map<std::string, pmtv::pmt>;
+    std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
     std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
     tensor_layout_type        layout;  // row-major, column-major, “special”
 
-    std::vector<T>            signal_values; // size = \PI_i extents[i]
-    std::vector<T>            signal_errors; // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<T> signal_values; // size = \PI_i extents[i]
+    std::vector<T> signal_errors; // size = \PI_i extents[i] or '0' if not applicable
 
     // meta data
     std::vector<pmt_map> meta_information;
@@ -13897,8 +13890,8 @@ static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity"
 
 template<typename T>
 struct Packet {
-    using value_type               = T;
-    using pmt_map                  = std::map<std::string, pmtv::pmt>;
+    using value_type = T;
+    using pmt_map    = std::map<std::string, pmtv::pmt>;
 
     std::int64_t         timestamp = 0; // UTC timestamp [ns]
     std::vector<T>       signal_values; // size = \PI_i extents[i

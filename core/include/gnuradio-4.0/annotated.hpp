@@ -137,13 +137,7 @@ using is_stride = std::bool_constant<IsStride<T>>;
 static_assert(is_stride<Stride<10, true>>::value);
 static_assert(!is_stride<int>::value);
 
-enum class UICategory {
-    None,
-    Toolbar,
-    ChartPane,
-    StatusBar,
-    Menu
-};
+enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
 
 /**
  * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
@@ -270,13 +264,13 @@ struct Annotated {
 
     template<typename U>
         requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(std::forward<U>(input)) {}
+    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(static_cast<T>(std::forward<U>(input))) {}
 
     template<typename U>
         requires std::assignable_from<T &, U>
     Annotated &
     operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
-        value = std::forward<U>(input);
+        value = static_cast<T>(std::forward<U>(input));
         return *this;
     }
 
