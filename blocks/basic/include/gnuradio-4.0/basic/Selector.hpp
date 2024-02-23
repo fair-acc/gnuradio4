@@ -67,18 +67,18 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
     using A = Annotated<U, description, Arguments...>;
 
     // port definitions
-    PortIn<gr::Size_t, Async, Optional> selectOut;
-    PortOut<T, Async, Optional>         monitorOut; // optional monitor output (for diagnostics and debugging purposes)
-    std::vector<PortIn<T, Async>>       inputs;     // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
-    std::vector<PortOut<T, Async>>      outputs;
+    PortIn<gr::Size_t, Async, Optional> selectOut{};
+    PortOut<T, Async, Optional>         monitorOut{}; // optional monitor output (for diagnostics and debugging purposes)
+    std::vector<PortIn<T, Async>>       inputs{};     // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
+    std::vector<PortOut<T, Async>>      outputs{};
 
     // settings
     A<gr::Size_t, "n_inputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>       n_inputs  = 0U;
     A<gr::Size_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>      n_outputs = 0U;
-    A<std::vector<gr::Size_t>, "map_in", Visible, Doc<"input port index to route from">>        map_in; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
-    A<std::vector<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>        map_out;
+    A<std::vector<gr::Size_t>, "map_in", Visible, Doc<"input port index to route from">>        map_in{}; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
+    A<std::vector<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>        map_out{};
     A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">> back_pressure = false;
-    std::map<gr::Size_t, std::vector<gr::Size_t>>                                               _internalMapping;
+    std::map<gr::Size_t, std::vector<gr::Size_t>>                                               _internalMapping{};
     gr::Size_t                                                                                  _selectedSrc = -1U;
 
     void

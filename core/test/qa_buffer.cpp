@@ -33,18 +33,18 @@ struct TestStruct {
 
 void
 consumableInputRangeTest1(auto in) {
-    const auto inFirst = in[0];
+    [[maybe_unused]] const auto inFirst = in[0];
 }
 
 void
 consumableInputRangeTest2(gr::ConsumableSpan auto in) {
-    const auto inFirst = in[0];
+    [[maybe_unused]] const auto inFirst = in[0];
 }
 
 template<typename T>
 void
 consumableInputRangeTest3(std::span<const T> in) {
-    const auto inFirst = in[0];
+    [[maybe_unused]] const auto inFirst = in[0];
 }
 
 const boost::ut::suite BasicConceptsTests = [] {

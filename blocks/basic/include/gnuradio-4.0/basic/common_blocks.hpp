@@ -188,7 +188,9 @@ public:
     }
 
     gr::work::Status
-    draw() {}
+    draw() {
+        return gr::work::Status::OK;
+    }
 
     void
     processScheduledMessages() override {}

@@ -143,8 +143,11 @@ public:
         FFTwImpl<AlgoDataType>::execute(fftwPlan.get());
 
         static_assert(sizeof(TOutput) == sizeof(OutAlgoDataType), "Sizes of TOutput type and OutAlgoDataType are not equal.");
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
+        // Switch off warning: ‘void* memcpy(void*, const void*, size_t)’ copying an object of non-trivial type ‘class std::complex<float>’ from an array of ‘float [2]’
         std::memcpy(out.data(), fftwOut.get(), sizeof(TOutput) * getOutputSize());
-
+#pragma GCC diagnostic pop
         // for the real input to complex a Hermitian output is produced by fftw, perform mirroring and conjugation fftw spectra to the second half
         if (!gr::meta::complex_like<TInput>) {
             const auto halfIt = std::next(out.begin(), static_cast<std::ptrdiff_t>(fftSize / 2));

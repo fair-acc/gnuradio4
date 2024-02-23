@@ -388,12 +388,11 @@ class CircularBuffer
         bool              _isRangePublished {true};// controls if publish() was invoked
         std::size_t       _index {0UZ};
         signed_index_type _offset {0};
+        std::span<T> _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
 
 #ifndef NDEBUG
         std::size_t _rangesCounter{0}; // this counter is used only in debug mode to check if publish() was invoked correctly
 #endif
-
-        std::span<T> _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
 
     public:
         buffer_writer() = delete;
@@ -404,9 +403,9 @@ class CircularBuffer
             : _buffer(std::move(other._buffer))
             , _isMmapAllocated(_buffer->_isMmapAllocated)
             , _size(_buffer->_size)
+            , _claimStrategy(std::addressof(_buffer->_claimStrategy))
             , _nSlotsPublished(std::exchange(other._nSlotsPublished, 0UZ))
             , _isRangePublished(std::exchange(other._isRangePublished, true))
-            , _claimStrategy(std::addressof(_buffer->_claimStrategy))
             , _index(std::exchange(other._index, 0UZ))
             , _offset(std::exchange(other._offset, 0))
             , _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) { };

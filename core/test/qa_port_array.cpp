@@ -132,7 +132,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
                 outputSpan[valueIndex] = inputSpan[valueIndex];
             }
 
-            inputSpan.consume(available);
+            std::ignore = inputSpan.consume(available);
             outputSpan.publish(available);
         }
         return gr::work::Status::OK;

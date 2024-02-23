@@ -52,7 +52,11 @@ struct FFT {
 
         // For the moment no optimization for real data inputs, just create complex with zero imaginary value.
         if constexpr (!gr::meta::complex_like<TInput>) {
-            std::ranges::transform(in.begin(), in.end(), out.begin(), [](const auto c) { return TOutput(c, 0.); });
+            if constexpr (std::is_same_v<TInput, typename TOutput::value_type>) {
+                std::ranges::transform(in.begin(), in.end(), out.begin(), [](const auto c) { return TOutput(c, 0.); });
+            } else {
+                std::ranges::transform(in.begin(), in.end(), out.begin(), [](const auto c) { return TOutput(static_cast<TOutput::value_type>(c), 0.); });
+            }
         } else {
             // precision is defined by output type, if cast is needed, let `std::copy` do the job
             std::ranges::copy(in.begin(), in.end(), out.begin());
