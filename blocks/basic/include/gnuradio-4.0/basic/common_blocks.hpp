@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 
@@ -103,13 +104,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (MultiAdder<T>), inputs, out, n_inputs);
 
-template<typename Registry>
-void
-                       registerBuiltinBlocks(Registry *registry) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
-    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_multiply, double, float);
-    GP_REGISTER_BLOCK_RUNTIME(registry, builtin_counter, double, float);
-#pragma GCC diagnostic pop
-}
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), builtin_multiply, double, float);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), builtin_counter, double, float);
+
 #endif // include guard

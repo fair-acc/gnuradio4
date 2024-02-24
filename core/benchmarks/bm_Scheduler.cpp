@@ -70,8 +70,8 @@ gr::Graph
 test_graph_linear(std::size_t depth = 1) {
     gr::Graph testGraph;
 
-    auto     &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
-    auto     &sink = testGraph.emplaceBlock<test::sink<T>>();
+    auto &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
+    auto &sink = testGraph.emplaceBlock<test::sink<T>>();
 
     create_cascade<T>(testGraph, src, sink, depth);
 
@@ -85,9 +85,9 @@ test_graph_bifurcated(std::size_t depth = 1) {
     using namespace benchmark;
     gr::Graph testGraph;
 
-    auto     &src   = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
-    auto     &sink1 = testGraph.emplaceBlock<test::sink<T>>();
-    auto     &sink2 = testGraph.emplaceBlock<test::sink<T>>();
+    auto &src   = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
+    auto &sink1 = testGraph.emplaceBlock<test::sink<T>>();
+    auto &sink2 = testGraph.emplaceBlock<test::sink<T>>();
 
     create_cascade<T>(testGraph, src, sink1, depth);
     create_cascade<T>(testGraph, src, sink2, depth);
@@ -113,7 +113,7 @@ exec_bm(auto &scheduler, const std::string &test_case) {
     using thread_pool = gr::thread_pool::BasicThreadPool;
     using gr::scheduler::ExecutionPolicy::multiThreaded;
 
-    auto                  pool = std::make_shared<thread_pool>("custom-pool", gr::thread_pool::CPU_BOUND, 2, 2);
+    auto pool = std::make_shared<thread_pool>("custom-pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     gr::scheduler::Simple sched1(test_graph_linear<float>(2 * N_NODES), pool);
     "linear graph - simple scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1]() { exec_bm(sched1, "linear-graph simple-sched"); };

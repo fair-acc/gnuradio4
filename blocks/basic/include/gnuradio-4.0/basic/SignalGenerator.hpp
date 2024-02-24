@@ -2,6 +2,8 @@
 #define GNURADIO_SIGNAL_GENERATOR_HPP
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
+
 #include <numbers>
 
 namespace gr::basic {
@@ -119,6 +121,7 @@ public:
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::SignalGenerator<T>), in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::SignalGenerator, in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::basic::SignalGenerator, double, float);
 
 #endif // GNURADIO_SIGNAL_GENERATOR_HPP

@@ -1,6 +1,7 @@
 #ifndef GNURADIO_TESTING_FUNCTION_BLOCKS_HPP
 #define GNURADIO_TESTING_FUNCTION_BLOCKS_HPP
 
+#include "gnuradio-4.0/BlockRegistry.hpp"
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -283,9 +284,14 @@ public:
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionSource, out);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::FunctionSource, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionProcess, in, out);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::FunctionProcess, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionSink, in);
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::MessageSender, unused)
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::FunctionSink, double, float);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::MessageSender, unused);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::MessageSender, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::InspectSink, in, value);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::InspectSink, double, float);
 
 #endif // GNURADIO_TESTING_FUNCTION_BLOCKS_HPP

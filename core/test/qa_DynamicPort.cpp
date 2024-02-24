@@ -14,22 +14,20 @@ template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
 
-namespace grg = gr;
-
 using namespace std::string_literals;
 
 #ifdef ENABLE_DYNAMIC_PORTS
-class dynamicBlock : public grg::node<dynamicBlock> {
+class dynamicBlock : public gr::node<dynamicBlock> {
 public:
-    dynamicBlock(std::string name) : grg::node<dynamicBlock>(name) {}
+    dynamicBlock(std::string name) : gr::node<dynamicBlock>(name) {}
 };
 #endif
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-class scale : public grg::Block<scale<T, Scale, R>> {
+class scale : public gr::Block<scale<T, Scale, R>> {
 public:
-    grg::PortIn<T>  original;
-    grg::PortOut<R> scaled;
+    gr::PortIn<T>  original;
+    gr::PortOut<R> scaled;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -41,11 +39,11 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-class adder : public grg::Block<adder<T>> {
+class adder : public gr::Block<adder<T>> {
 public:
-    grg::PortIn<T>  addend0;
-    grg::PortIn<T>  addend1;
-    grg::PortOut<T> sum;
+    gr::PortIn<T>  addend0;
+    gr::PortIn<T>  addend1;
+    gr::PortOut<T> sum;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -57,9 +55,9 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
 
 template<typename T>
-class cout_sink : public grg::Block<cout_sink<T>> {
+class cout_sink : public gr::Block<cout_sink<T>> {
 public:
-    grg::PortIn<T> sink;
+    gr::PortIn<T> sink;
 
     void
     processOne(T value) {
@@ -71,10 +69,10 @@ static_assert(gr::BlockLike<cout_sink<float>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10UZ>
-class repeater_source : public grg::Block<repeater_source<T, val>> {
+class repeater_source : public gr::Block<repeater_source<T, val>> {
 public:
-    grg::PortOut<T> value;
-    std::size_t     _counter = 0;
+    gr::PortOut<T> value;
+    std::size_t    _counter = 0;
 
     gr::work::Result
     work(std::size_t requested_work) {
@@ -182,7 +180,7 @@ const boost::ut::suite PortApiTests = [] {
         using PortDirection::OUTPUT;
 
         // Block need to be alive for as long as the flow is
-        grg::Graph flow;
+        gr::Graph flow;
 
         // Generators
         auto &answer = flow.emplaceBlock<repeater_source<int, 42>>();
@@ -224,7 +222,7 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(sink->dynamic_output_ports().size(), 0U));
         expect(eq(sink->dynamic_input_ports().size(), 3U));
 
-        grg::graph graph;
+        gr::graph graph;
 
         expect(eq(graph.edges_count(), 0U));
 

@@ -80,7 +80,7 @@ public:
             return;
         }
 
-        if (_instance->abi_version() != GP_PLUGIN_CURRENT_ABI_VERSION) {
+        if (_instance->abi_version() != GR_PLUGIN_CURRENT_ABI_VERSION) {
             _status = "Wrong ABI version";
             release();
             return;
@@ -133,11 +133,11 @@ private:
     std::unordered_map<std::string, std::string>      _failedPlugins;
     std::unordered_set<std::string>                   _loadedPluginFiles;
 
-    BlockRegistry           *_globalRegistry;
+    BlockRegistry           *_registry;
     std::vector<std::string> _knownBlocks;
 
 public:
-    PluginLoader(BlockRegistry *global_registry, std::span<const std::filesystem::path> plugin_directories) : _globalRegistry(global_registry) {
+    PluginLoader(BlockRegistry &registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
         for (const auto &directory : plugin_directories) {
             std::cerr << std::filesystem::current_path() << std::endl;
 
@@ -178,7 +178,7 @@ public:
     auto
     knownBlocks() const {
         auto        result  = _knownBlocks;
-        const auto &builtin = _globalRegistry->knownBlocks();
+        const auto &builtin = _registry->knownBlocks();
         result.insert(result.end(), builtin.begin(), builtin.end());
         return result;
     }
@@ -186,7 +186,7 @@ public:
     std::unique_ptr<gr::BlockModel>
     instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
         // Try to create a node from the global registry
-        if (auto result = _globalRegistry->createBlock(name, type, params)) {
+        if (auto result = _registry->createBlock(name, type, params)) {
             return result;
         }
         auto it = _handlerForName.find(std::string(name)); // TODO avoid std::string here
@@ -195,6 +195,36 @@ public:
         auto &handler = it->second;
 
         return handler->createBlock(name, type, params);
+    }
+
+    template<typename Graph, typename... InstantiateArgs>
+    gr::BlockModel &
+    instantiateInGraph(Graph &graph, InstantiateArgs &&...args) {
+        auto block_load = instantiate(std::forward<InstantiateArgs>(args)...);
+        if (!block_load) {
+            throw fmt::format("Unable to create node");
+        }
+        return graph.addBlock(std::move(block_load));
+    }
+};
+#else
+// PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
+// same API as proper PluginLoader
+class PluginLoader {
+private:
+    BlockRegistry *_registry;
+
+public:
+    PluginLoader(BlockRegistry &registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
+
+    auto
+    knownBlocks() const {
+        return _registry->knownBlocks();
+    }
+
+    std::unique_ptr<gr::BlockModel>
+    instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
+        return _registry->createBlock(name, type, params));
     }
 
     template<typename Graph, typename... InstantiateArgs>

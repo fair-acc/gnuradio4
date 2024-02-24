@@ -9,6 +9,12 @@
 
 #include <boost/ut.hpp>
 
+#if defined(__clang__) && __clang_major__ >= 16
+// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
+template<>
+auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
+#endif
+
 template<typename T>
 struct ArraySource : public gr::Block<ArraySource<T>> {
     std::array<gr::PortOut<T>, 2> outA;
@@ -16,7 +22,7 @@ struct ArraySource : public gr::Block<ArraySource<T>> {
 
     template<typename PublishableSpan1, typename PublishableSpan2>
     gr::work::Status
-    processBulk(PublishableSpan1&, PublishableSpan2& ) { //TODO: needs proper explicit signature
+    processBulk(PublishableSpan1 &, PublishableSpan2 &) { // TODO: needs proper explicit signature
         return gr::work::Status::OK;
     }
 };
@@ -36,7 +42,7 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
 
     template<typename ConsumableSpan1, typename ConsumableSpan2>
     gr::work::Status
-    processBulk(ConsumableSpan1&, ConsumableSpan2&) { //TODO: needs proper explicit signature
+    processBulk(ConsumableSpan1 &, ConsumableSpan2 &) { // TODO: needs proper explicit signature
         return gr::work::Status::OK;
     }
 };
@@ -44,10 +50,9 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB, bool_setting, string_setting, bool_vector, string_vector, double_vector, int16_vector);
 
 struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths = {}) : registry(), loader(&registry, std::move(paths)) {}
+    explicit TestContext(std::vector<std::filesystem::path> paths = {}) : loader(gr::globalBlockRegistry(), std::move(paths)) {}
 
-    gr::BlockRegistry registry;
-    gr::PluginLoader  loader;
+    gr::PluginLoader loader;
 };
 
 namespace {
@@ -85,9 +90,8 @@ namespace gr::qa_grc_test {
 const boost::ut::suite GrcTests = [] {
     static TestContext context = [] {
         TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
-        registerBuiltinBlocks(&ctx.registry);
-        GP_REGISTER_BLOCK_RUNTIME(&ctx.registry, ArraySource, double);
-        GP_REGISTER_BLOCK_RUNTIME(&ctx.registry, ArraySink, double);
+        GR_REGISTER_BLOCK_RUNTIME(gr::globalBlockRegistry(), ArraySource, double);
+        GR_REGISTER_BLOCK_RUNTIME(gr::globalBlockRegistry(), ArraySink, double);
         return ctx;
     }();
 

@@ -86,19 +86,36 @@
  */
 #define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
 
-#define GP_CONCAT_IMPL(x, y) x##y
-#define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
+#define GR_CONCAT_IMPL(x, y) x##y
+#define GR_MACRO_CONCAT(x, y) GR_CONCAT_IMPL(x, y)
 
-#define GP_REGISTER_BLOCK_IMPL(Register, Name, ...) gr::detail::RegisterBlock<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_BLOCK_, __COUNTER__)(Register, #Name);
-#define GP_REGISTER_BLOCK(Register, Name, ...) \
+#define GR_REGISTER_BLOCK_IMPL(Register, Name, ...) gr::detail::RegisterBlock<Name, __VA_ARGS__> GR_MACRO_CONCAT(GR_REGISTER_BLOCK_, __COUNTER__)(Register, #Name);
+/**
+ * This macro can be used to register a block with the block
+ * registry to be used with the plugin system for runtime instantiation
+ * of blocks based on their stringified types.
+ *
+ * The arguments are:
+ *  - a reference to the registry (common to use gr::globalBlockRegistry)
+ *  - the block template class
+ *  - list of valid template parameters for this block type
+ *
+ * To register adder<T> block to be instantiatiatable with float and double:
+ *     GR_REGISTER_BLOCK(gr::globalBlockRegistry(), adder, float, double)
+ *
+ * To register converter<From, To> block to be instantiatiatable
+ * with <float, double> and <double, float>:
+ *     GR_REGISTER_BLOCK(gr::globalBlockRegistry(), converter, BlockParameters<double, float>, BlockParameters<float, double>)
+ */
+#define GR_REGISTER_BLOCK(Register, Name, ...) \
     namespace { \
     using gr::detail::BlockParameters; \
-    GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
+    GR_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
     }
-#define GP_REGISTER_BLOCK_RUNTIME(Register, Name, ...) \
+#define GR_REGISTER_BLOCK_RUNTIME(Register, Name, ...) \
     { \
         using gr::detail::BlockParameters; \
-        GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
+        GR_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
     }
 
 #pragma GCC diagnostic pop

@@ -35,7 +35,7 @@ public:
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (FixedSource<T>), out);
+ENABLE_REFLECTION_FOR_TEMPLATE(FixedSource, out);
 
 template<typename T>
 class HttpTestSink : public gr::Block<HttpTestSink<T>> {
@@ -58,7 +58,7 @@ public:
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (HttpTestSink<T>), in);
+ENABLE_REFLECTION_FOR_TEMPLATE(HttpTestSink, in);
 
 const boost::ut::suite HttpBlocktests = [] {
     using namespace boost::ut;

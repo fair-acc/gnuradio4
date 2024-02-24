@@ -2,10 +2,13 @@
 #define GNURADIO_HTTP_BLOCK_HPP
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <pmtv/pmt.hpp>
+
 #include <semaphore>
+#include <queue>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -220,6 +223,8 @@ public:
     gr::http::RequestType type = gr::http::RequestType::GET;
     std::string           parameters; // x-www-form-urlencoded encoded POST parameters
 
+    explicit HttpBlock() {}
+
     explicit HttpBlock(const std::string &_url, const std::string &_endpoint = "/", const RequestType _type = RequestType::GET, const std::string &_parameters = "")
         : url(_url), endpoint(_endpoint), type(_type), parameters(_parameters) {}
 
@@ -286,6 +291,7 @@ static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
 } // namespace gr::http
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::http::HttpBlock<T>), out, url, endpoint);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::http::HttpBlock, out, url, endpoint);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::http::HttpBlock, float, double)
 
 #endif // GNURADIO_HTTP_BLOCK_HPP

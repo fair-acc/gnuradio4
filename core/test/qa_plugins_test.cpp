@@ -43,10 +43,11 @@ public:
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 
 struct TestContext {
-    gr::BlockRegistry registry;
-    gr::PluginLoader  loader;
+    gr::PluginLoader loader;
 
-    TestContext() : loader(&registry, std::vector<std::filesystem::path>{ "core/test/plugins", "test/plugins", "plugins" }) { GP_REGISTER_BLOCK_RUNTIME(&registry, builtin_multiply, double, float); }
+    TestContext() : loader(gr::globalBlockRegistry(), std::vector<std::filesystem::path>{ "core/test/plugins", "test/plugins", "plugins" }) {
+        GR_REGISTER_BLOCK_RUNTIME(gr::globalBlockRegistry(), builtin_multiply, double, float);
+    }
 };
 
 TestContext &

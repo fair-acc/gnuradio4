@@ -5,11 +5,9 @@
 
 #include <gnuradio-4.0/plugin.hpp>
 
-GP_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
+GR_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
-
-namespace grg = gr;
 
 template<typename T>
 auto
@@ -26,7 +24,7 @@ read_total_count(const gr::property_map &params) {
 }
 
 template<typename T>
-class cout_sink : public grg::Block<cout_sink<T>, grg::PortInNamed<T, "in">> {
+class cout_sink : public gr::Block<cout_sink<T>, gr::PortInNamed<T, "in">> {
 public:
     std::size_t total_count = -1UZ;
 
@@ -44,12 +42,12 @@ public:
 };
 
 template<typename T>
-class fixed_source : public grg::Block<fixed_source<T>, grg::PortOutNamed<T, "out">> {
+class fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out">> {
 public:
     std::size_t event_count = std::numeric_limits<std::size_t>::max();
     T           value       = 1;
 
-    grg::work::Result
+    gr::work::Result
     work(std::size_t requested_work) {
         if (this->state() == gr::lifecycle::State::STOPPED) {
             return { requested_work, 0UZ, gr::work::Status::DONE };
@@ -61,7 +59,7 @@ public:
                 this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
             }
             this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
-            return { requested_work, 0UZ, grg::work::Status::DONE };
+            return { requested_work, 0UZ, gr::work::Status::DONE };
         }
 
         auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
@@ -72,11 +70,11 @@ public:
 
         value += 1;
         if (event_count == std::numeric_limits<std::size_t>::max()) {
-            return { requested_work, 1UZ, grg::work::Status::OK };
+            return { requested_work, 1UZ, gr::work::Status::OK };
         }
 
         event_count--;
-        return { requested_work, 1UZ, grg::work::Status::OK };
+        return { requested_work, 1UZ, gr::work::Status::OK };
     }
 };
 } // namespace good
@@ -84,7 +82,7 @@ public:
 namespace bts = gr::traits::block;
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::cout_sink, total_count);
-GP_PLUGIN_REGISTER_BLOCK(good::cout_sink, float, double);
+GR_PLUGIN_REGISTER_BLOCK(good::cout_sink, float, double);
 static_assert(bts::all_input_ports<good::cout_sink<float>>::size == 1);
 static_assert(std::is_same_v<bts::all_input_port_types<good::cout_sink<float>>, gr::meta::typelist<float>>);
 static_assert(bts::stream_input_ports<good::cout_sink<float>>::size == 1);
@@ -101,7 +99,7 @@ static_assert(bts::stream_output_ports<good::cout_sink<float>>::size == 0);
 static_assert(std::is_same_v<bts::stream_output_port_types<good::cout_sink<float>>, gr::meta::typelist<>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::fixed_source, event_count);
-GP_PLUGIN_REGISTER_BLOCK(good::fixed_source, float, double);
+GR_PLUGIN_REGISTER_BLOCK(good::fixed_source, float, double);
 static_assert(bts::all_input_ports<good::fixed_source<float>>::size == 0);
 static_assert(std::is_same_v<bts::all_input_port_types<good::fixed_source<float>>, gr::meta::typelist<>>);
 static_assert(bts::stream_input_ports<good::fixed_source<float>>::size == 0);

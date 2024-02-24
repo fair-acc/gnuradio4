@@ -3,7 +3,7 @@
 
 #include <gnuradio-4.0/plugin.hpp>
 
-GP_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
+GR_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
 
 namespace good {
 
@@ -64,7 +64,7 @@ public:
 namespace bts = gr::traits::block;
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::multiply, in, out);
-GP_PLUGIN_REGISTER_BLOCK(good::multiply, float, double);
+GR_PLUGIN_REGISTER_BLOCK(good::multiply, float, double);
 static_assert(bts::all_input_ports<good::multiply<float>>::size == 1);
 static_assert(std::is_same_v<bts::all_input_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
 static_assert(bts::stream_input_ports<good::multiply<float>>::size == 1);
@@ -75,4 +75,4 @@ static_assert(bts::stream_output_ports<good::multiply<float>>::size == 1);
 static_assert(std::is_same_v<bts::stream_output_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(good::divide, in, out);
-GP_PLUGIN_REGISTER_BLOCK(good::divide, float, double);
+GR_PLUGIN_REGISTER_BLOCK(good::divide, float, double);

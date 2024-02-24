@@ -1708,21 +1708,21 @@ template<typename... Types>
 struct BlockParameters {
     template<template<typename...> typename TBlock, typename RegisterInstance>
     void
-    registerOn(RegisterInstance *plugin_instance, std::string block_type) const {
-        plugin_instance->template addBlockType<TBlock, Types...>(block_type);
+    registerOn(RegisterInstance &registerInstance, std::string block_type) const {
+        registerInstance.template addBlockType<TBlock, Types...>(block_type);
     }
 };
 
 template<template<typename...> typename TBlock, typename... TBlockParameters>
 struct RegisterBlock {
     template<typename RegisterInstance>
-    RegisterBlock(RegisterInstance *plugin_instance, std::string block_type) {
+    RegisterBlock(RegisterInstance &registerInstance, std::string block_type) {
         std::cout << "registerBlock " << block_type << std::endl;
         auto addBlockType = [&]<typename Type> {
             if constexpr (meta::is_instantiation_of<Type, BlockParameters>) {
-                Type().template registerOn<TBlock>(plugin_instance, block_type);
+                Type().template registerOn<TBlock>(registerInstance, block_type);
             } else {
-                plugin_instance->template addBlockType<TBlock, Type>(block_type);
+                registerInstance.template addBlockType<TBlock, Type>(block_type);
             }
         };
         ((addBlockType.template operator()<TBlockParameters>()), ...);

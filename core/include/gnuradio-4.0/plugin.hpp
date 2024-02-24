@@ -15,7 +15,7 @@
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-#define GP_PLUGIN_CURRENT_ABI_VERSION 1
+#define GR_PLUGIN_CURRENT_ABI_VERSION 1
 
 struct GNURADIO_PLUGIN_EXPORT gp_plugin_metadata {
     std::string_view plugin_name;
@@ -41,7 +41,7 @@ public:
 };
 
 namespace gr {
-template<std::uint8_t ABI_VERSION = GP_PLUGIN_CURRENT_ABI_VERSION>
+template<std::uint8_t ABI_VERSION = GR_PLUGIN_CURRENT_ABI_VERSION>
 class plugin : public gp_plugin_base {
 private:
     gr::BlockRegistry registry;
@@ -74,8 +74,21 @@ public:
 
 } // namespace gr
 
-#define GP_PLUGIN(Name, Author, License, Version) \
-    inline namespace GP_PLUGIN_DEFINITION_NAMESPACE { \
+/*
+ * Defines a plugin - creates the plugin meta-data and creates
+ * a block registry for the plugin.
+ *
+ * Arguments:
+ *  - plugin name
+ *  - author
+ *  - license of the plugin
+ *  - plugin version
+ *
+ * Example usage:
+ *     GR_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
+ */
+#define GR_PLUGIN(Name, Author, License, Version) \
+    inline namespace GR_PLUGIN_DEFINITION_NAMESPACE { \
     gr::plugin<> * \
     gp_plugin_instance() { \
         static gr::plugin<> *instance = [] { \
@@ -102,6 +115,25 @@ public:
     } \
     }
 
-#define GP_PLUGIN_REGISTER_BLOCK(...) GP_REGISTER_BLOCK(gp_plugin_instance(), __VA_ARGS__);
+/**
+ * This macro can be used to register a block defined in a plugin
+ * (a library that contains block definitions that will be dynamically
+ * loaded by the PluginLoader)
+ *
+ * Note that you first need to call GR_PLUGIN to create the plugin meta-data
+ * and to create the block registry for the plugin.
+ *
+ * The arguments are:
+ *  - the block template class
+ *  - list of valid template parameters for this block type
+ *
+ * To register adder<T> block to be instantiatiatable with float and double:
+ *     GR_PLUGIN_REGISTER_BLOCK(adder, float, double)
+ *
+ * To register converter<From, To> block to be instantiatiatable
+ * with <float, double> and <double, float>:
+ *     GR_PLUGIN_REGISTER_BLOCK(converter, BlockParameters<double, float>, BlockParameters<float, double>)
+ */
+#define GR_PLUGIN_REGISTER_BLOCK(...) GR_REGISTER_BLOCK(*gp_plugin_instance(), __VA_ARGS__);
 
 #endif // include guard

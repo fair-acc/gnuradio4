@@ -398,8 +398,8 @@ struct AsyncBlock : gr::Block<AsyncBlock<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (IntDecBlock<T>), in, out);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (AsyncBlock<T>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE(IntDecBlock, in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE(AsyncBlock, in, out);
 static_assert(gr::HasProcessBulkFunction<AsyncBlock<float>>);
 
 const boost::ut::suite _block_signature = [] {

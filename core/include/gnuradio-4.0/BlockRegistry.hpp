@@ -97,7 +97,16 @@ public:
     knownBlocks() const {
         return _block_types;
     }
+
+    friend inline BlockRegistry &
+    globalBlockRegistry();
 };
+
+inline BlockRegistry &
+globalBlockRegistry() {
+    static BlockRegistry s_instance;
+    return s_instance;
+}
 
 } // namespace gr
 

@@ -13,13 +13,10 @@
 
 using namespace std::chrono_literals;
 
-namespace grg = gr;
-
 struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths) : registry(), loader(&registry, std::move(paths)) {}
+    explicit TestContext(std::vector<std::filesystem::path> paths) : loader(gr::globalBlockRegistry(), std::move(paths)) {}
 
-    grg::BlockRegistry registry;
-    grg::PluginLoader  loader;
+    gr::PluginLoader loader;
 };
 
 namespace names {
@@ -46,7 +43,6 @@ main(int argc, char *argv[]) {
     }
 
     TestContext context(std::move(paths));
-    registerBuiltinBlocks(&context.registry);
 
     fmt::print("PluginLoaderTests\n");
     using namespace gr;
@@ -70,7 +66,7 @@ main(int argc, char *argv[]) {
         assert(std::ranges::find(known, required) != known.end());
     }
 
-    grg::Graph testGraph;
+    gr::Graph testGraph;
 
     // Instantiate the node that is defined in a plugin
     auto &block_source = context.loader.instantiateInGraph(testGraph, names::fixed_source, "double");
@@ -98,10 +94,10 @@ main(int argc, char *argv[]) {
     auto connection_3 [[maybe_unused]] = testGraph.connect(block_multiply_2, 0, block_counter, 0);
     auto connection_4 [[maybe_unused]] = testGraph.connect(block_counter, 0, block_sink, 0);
 
-    assert(connection_1 == grg::ConnectionResult::SUCCESS);
-    assert(connection_2 == grg::ConnectionResult::SUCCESS);
-    assert(connection_3 == grg::ConnectionResult::SUCCESS);
-    assert(connection_4 == grg::ConnectionResult::SUCCESS);
+    assert(connection_1 == gr::ConnectionResult::SUCCESS);
+    assert(connection_2 == gr::ConnectionResult::SUCCESS);
+    assert(connection_3 == gr::ConnectionResult::SUCCESS);
+    assert(connection_4 == gr::ConnectionResult::SUCCESS);
 
     for (std::size_t i = 0; i < repeats; ++i) {
         std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());

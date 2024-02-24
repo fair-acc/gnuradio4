@@ -2,10 +2,11 @@
 #define GNURADIO_FUNCTION_GENERATOR_HPP
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
-#include <numbers>
 
 namespace gr::basic {
 
@@ -321,7 +322,7 @@ private:
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::FunctionGenerator<T>), in, out, sample_rate, signal_type, start_value, final_value, duration, round_off_time, impulse_time0,
-                                    impulse_time1, trigger_meta_info);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::FunctionGenerator, in, out, sample_rate, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, trigger_meta_info);
+GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::basic::FunctionGenerator, float, double);
 
 #endif // GNURADIO_FUNCTION_GENERATOR_HPP
