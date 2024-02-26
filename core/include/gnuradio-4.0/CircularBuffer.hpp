@@ -287,6 +287,9 @@ class CircularBuffer
 
     PublishableOutputRange() = delete;
     explicit PublishableOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {
+        _parent->_index = 0UZ;
+        _parent->_offset = 0;
+        _parent->_internalSpan = std::span<T>();
     #ifndef NDEBUG
         _parent->_rangesCounter++;
     #endif
@@ -318,14 +321,14 @@ class CircularBuffer
     #ifndef NDEBUG
         _parent->_rangesCounter--;
 
-        if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
-            if (_parent->_rangesCounter == 0 && _parent->_internalSpan.size() - _parent->_nSlotsPublished != 0) {
+        if constexpr (isMultiThreadedStrategy()) {
+            if (_parent->_rangesCounter == 0 && !isFullyPublished()) {
                 fmt::print(stderr, "CircularBuffer::multiple_writer::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSlotsPublished);
                 std::abort();
             }
 
         } else {
-            if (_parent->_rangesCounter == 0 && !_parent->_internalSpan.empty() && not isPublished()) {
+            if (_parent->_rangesCounter == 0 && !_parent->_internalSpan.empty() && !isPublished()) {
                 fmt::print(stderr, "CircularBuffer::single_writer::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                 std::abort();
             }
@@ -337,6 +340,17 @@ class CircularBuffer
     isPublished() const noexcept {
         return _parent->_isRangePublished;
     }
+
+    [[nodiscard]] constexpr bool
+    isFullyPublished() const noexcept {
+        return _parent->_internalSpan.size() == _parent->_nSlotsPublished;
+    }
+
+    [[nodiscard]] constexpr static bool
+    isMultiThreadedStrategy() noexcept {
+        return std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>;
+    }
+
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _parent->_internalSpan.size(); };
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
@@ -364,6 +378,7 @@ class CircularBuffer
             std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
         }
         _parent->_claimStrategy->publish(_parent->_offset, nSlotsToPublish);
+        _parent->_offset += static_cast<signed_index_type>(nSlotsToPublish);
         _parent->_nSlotsPublished += nSlotsToPublish;
         _parent->_isRangePublished = true;
     }
@@ -428,9 +443,13 @@ class CircularBuffer
 
         [[nodiscard]] constexpr auto reserve(std::size_t nSlotsToClaim) noexcept -> PublishableOutputRange<U> {
             checkIfCanReserveAndAbortIfNeeded();
-
             _isRangePublished = false;
             _nSlotsPublished = 0UZ;
+
+            if (nSlotsToClaim == 0) {
+                return PublishableOutputRange<U>(this);
+            }
+
             try {
                 const auto sequence = _claimStrategy->next(*_buffer->_read_indices, nSlotsToClaim); // alt: try_next
                 const std::size_t index = (static_cast<std::size_t>(sequence) + _size - nSlotsToClaim) % _size;
@@ -662,6 +681,10 @@ class CircularBuffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
+        [[nodiscard]] constexpr bool isConsumed() const noexcept {
+            return _isRangeConsumed;
+        }
+
         template <bool strict_check = true>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = 0UZ) const noexcept -> ConsumableInputRange<U> {
             std::size_t n;
@@ -676,6 +699,11 @@ class CircularBuffer
 
         template <bool strict_check = true>
         [[nodiscard]] constexpr bool consume(const std::size_t nSamples = 1) noexcept {
+            if (isConsumed()) {
+                fmt::println("An error occurred: The method CircularBuffer::buffer_reader::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
+                std::abort();
+            }
+
             if constexpr (strict_check) {
                 if (nSamples <= 0) {
                     _isRangeConsumed = true;

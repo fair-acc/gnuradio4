@@ -325,7 +325,8 @@ public:
                 fnc(readData, std::span<const Tag>(relevantTags));
                 std::ignore = tag_reader.consume(relevantTags.size());
             } else {
-                std::ignore = tag_reader.consume(tag_reader.available());
+                const auto tags = tag_reader.get();
+                std::ignore     = tag_reader.consume(tags.size());
                 fnc(readData);
             }
 

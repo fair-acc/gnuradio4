@@ -755,31 +755,35 @@ public:
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
                     [available_values_count]<typename OutputRange>(auto i, OutputRange &output_range) {
-                        if constexpr (traits::block::can_processOne<Derived> or traits::block::processBulk_requires_ith_output_as_span<Derived, i>) {
-                            auto process_out = [available_values_count]<typename Out>(Out &out) {
-                                // This will be a pointer if the port was async
-                                // TODO: Make this check more specific
-                                if constexpr (not std::is_pointer_v<std::remove_cvref_t<Out>>) {
+                        // if constexpr (traits::block::can_processOne<Derived> or traits::block::processBulk_requires_ith_output_as_span<Derived, i>) {
+                        auto process_out = [available_values_count]<typename Out>(Out &out) {
+                            // This will be a pointer if the port was async
+                            // TODO: Make this check more specific
+                            if constexpr (not std::is_pointer_v<std::remove_cvref_t<Out>>) {
+                                if (!out.isPublished()) {
                                     out.publish(available_values_count);
+                                    // TODO: We need to publish 0 samples for Async ports if it was not published
                                 }
-                            };
-                            if (available_values_count) {
-                                if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
-                                    for (auto &out : output_range) {
-                                        process_out(out);
-                                    }
-                                } else {
-                                    process_out(output_range);
-                                }
+                            }
+                        };
+                        //  if (available_values_count) {
+                        if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
+                            for (auto &out : output_range) {
+                                process_out(out);
                             }
                         } else {
-                            if constexpr (requires { output_range.is_published(); }) {
-                                if (not output_range.is_published()) {
-                                    fmt::print(stderr, "processBulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish manually.\n");
-                                    std::abort();
-                                }
-                            }
+                            process_out(output_range);
                         }
+                        // }
+                        //   }
+                        //                        else {
+                        //                            if constexpr (requires { output_range.isPublished(); }) {
+                        //                                if (not output_range.isPublished()) {
+                        //                                    fmt::print(stderr, "processBulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish
+                        //                                    manually.\n"); std::abort();
+                        //                                }
+                        //                            }
+                        //                        }
                     },
                     writers_tuple);
         }
@@ -796,10 +800,14 @@ public:
                     [available_values_count, &success](auto &...input_port) {
                         auto consume_port = [&]<typename Port>(Port &port_or_collection) {
                             if constexpr (traits::port::is_port_v<Port>) {
-                                success = success && port_or_collection.streamReader().consume(available_values_count);
+                                if (!port_or_collection.streamReader().isConsumed()) {
+                                    success = success && port_or_collection.streamReader().consume(available_values_count);
+                                }
                             } else {
                                 for (auto &port : port_or_collection) {
-                                    success = success && port.streamReader().consume(available_values_count);
+                                    if (!port.streamReader().isConsumed()) {
+                                        success = success && port.streamReader().consume(available_values_count);
+                                    }
                                 }
                             }
                         };
@@ -956,13 +964,7 @@ public:
                 [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>(PortOrCollection &input_port_or_collection) noexcept {
                     auto in_samples = sync_in_samples;
 
-                    auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
-                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).streamReader().get(in_samples);
-                        } else {
-                            return std::addressof(std::forward<Port>(port).streamReader());
-                        }
-                    };
+                    auto process_single_port = [&in_samples]<typename Port>(Port &&port) { return std::forward<Port>(port).streamReader().get(in_samples); };
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
                         return process_single_port(input_port_or_collection);
                     } else {
@@ -985,7 +987,8 @@ public:
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                             return std::forward<Port>(port).streamWriter().reserve(out_samples);
                         } else {
-                            return std::addressof(std::forward<Port>(port).streamWriter());
+                            // for the Async port reserve all available samples
+                            return std::forward<Port>(port).streamWriter().reserve(port.streamWriter().available());
                         }
                     };
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
@@ -1251,7 +1254,8 @@ protected:
                         nSamplesToConsume = stride.value - stride_counter;
                         stride_counter    = 0;
                     }
-                    const bool success = consumeReaders(self(), nSamplesToConsume);
+                    const auto inputSpans = prepareInputStreams();
+                    const bool success    = consumeReaders(self(), nSamplesToConsume);
                     return { requested_work, nSamplesToConsume, success ? work::Status::OK : work::Status::ERROR };
                 }
             }

@@ -1,14 +1,124 @@
 #ifndef TEST_COMMON_NODES
 #define TEST_COMMON_NODES
 
+#include <algorithm>
 #include <cstdlib> // std::size_t
 #include <list>
+#include <ranges>
 #include <string>
 #include <string_view>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
+
+/**
+ * `RepeatedSource` is a source block which publishes repeatedly a sequence of values from a provided vector.
+ *  Usage example:
+ *  `auto& src = graph.emplaceBlock<RepeatedSource<int>>({ { "nSamples", 1000 }, { "identifier", 1 }, { "values", std::vector{ 1, 2, 3, 4 } } }));`
+ *  It publishes 1000 samples: 1,2,3,4,1,2,3,4 ...
+ */
+
+template<typename T>
+struct RepeatedSource : public gr::Block<RepeatedSource<T>> {
+    gr::PortOut<T> out{};
+
+    gr::Size_t     id{ 0U };
+    gr::Size_t     count{ 0U };
+    gr::Size_t     n_samples_max{ 1024U };
+    gr::Size_t     index{ 0U };
+    std::vector<T> values{};
+
+    constexpr T
+    processOne() {
+        count++;
+        if (index == values.size()) {
+            index = 0;
+        }
+        T value = values[index];
+        index++;
+
+        if (count >= n_samples_max) {
+            this->requestStop();
+        }
+        return value;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(RepeatedSource, id, n_samples_max, count, index, values, out);
+
+/**
+ * `ValidatorSink` is a sink block, it performs a sample-by-sample comparison of input samples against a user-provided std::vector<T> of expected samples.
+ *  It ensures that each incoming sample matches its corresponding expected value.
+ *  Usage example:
+ *  `auto& sink = graph.emplaceBlock<ValidatorSink<int>>({ { "identifier", 0U }, { "expectedValues", std::vector{ 1, 2, 3, 4 } } }));`
+ *  To check if all ok: `assert(sink->verify());`
+ */
+template<typename T>
+struct ValidatorSink : public gr::Block<ValidatorSink<T>> {
+    gr::PortIn<T>  in;
+    gr::Size_t     id{ 0U };
+    std::vector<T> expected_values{};
+    bool           ignore_order{ false }; // if true check that sorted `expected_values` and `received_values` are equal
+
+private:
+    std::vector<T> received_values{};
+    bool           tooManySamples{ false };
+
+public:
+    bool
+    verify() {
+        if (tooManySamples) {
+            return false;
+        }
+        if (ignore_order) {
+            std::ranges::sort(received_values);
+            std::ranges::sort(expected_values);
+        }
+        return std::ranges::equal(received_values, expected_values);
+    }
+
+    void
+    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
+        if (new_settings.contains("expected_values")) {
+            received_values.clear();
+            received_values.reserve(expected_values.size());
+            tooManySamples = false;
+        }
+    }
+
+    void
+    processOne(T value) {
+        tooManySamples = received_values.size() >= expected_values.size();
+        if (tooManySamples) {
+            fmt::print("Error: {}#{}: We got more values than expected ({})\n", this->name, id, expected_values.size());
+            return;
+        }
+
+        received_values.push_back(value);
+        const auto index = received_values.size() - 1U;
+        if (!ignore_order && value != expected_values[index]) {
+            fmt::print("Error: {}#{}: Got a value {}, but wanted {} (position {})\n", this->name, id, value, expected_values[index], index);
+        }
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(ValidatorSink, id, expected_values, ignore_order, in);
+
+template<typename T>
+struct Adder : public gr::Block<Adder<T>> {
+    gr::PortIn<T>  in0;
+    gr::PortIn<T>  in1;
+    gr::PortOut<T> sum;
+
+    template<gr::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto
+    processOne(V a, V b) const noexcept {
+        return a + b;
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (Adder<T>), in0, in1, sum);
 
 template<typename T>
 class builtin_multiply : public gr::Block<builtin_multiply<T>> {
