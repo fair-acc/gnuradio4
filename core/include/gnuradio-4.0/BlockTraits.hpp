@@ -371,23 +371,22 @@ struct dummy_writer {
 template<typename Port>
 constexpr auto *
 port_to_processBulk_argument_helper() {
-    if constexpr (requires(Port p) {
+    if constexpr (requires(Port p) { // array of ports
                       typename Port::value_type;
                       p.cbegin() != p.cend();
                   }) {
-        return static_cast<to_any_vector *>(nullptr);
+        // return static_cast<to_any_vector *>(nullptr);
+        if constexpr (Port::value_type::kIsInput) {
+            return static_cast<std::vector<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+        } else if constexpr (Port::value_type::kIsOutput) {
+            return static_cast<std::vector<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
+        }
 
-    } else if constexpr (Port::kIsSynch) {
+    } else { // single port
         if constexpr (Port::kIsInput) {
             return static_cast<DummyConsumableSpan<typename Port::value_type> *>(nullptr);
         } else if constexpr (Port::kIsOutput) {
             return static_cast<DummyPublishableSpan<typename Port::value_type> *>(nullptr);
-        }
-    } else {
-        if constexpr (Port::kIsInput) {
-            return static_cast<to_any_pointer *>(nullptr);
-        } else if constexpr (Port::kIsOutput) {
-            return static_cast<to_any_pointer *>(nullptr);
         }
     }
 }

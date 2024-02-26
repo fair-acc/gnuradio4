@@ -7,191 +7,72 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
+#include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/basic/Selector.hpp>
 
-template<typename T>
-struct repeated_source : public gr::Block<repeated_source<T>> {
-    gr::Size_t                     identifier = 0;
-    gr::Size_t                     remaining_events_count;
-    std::vector<T>                 values;
-    std::vector<T>::const_iterator values_next;
-
-    gr::PortOut<T> out;
-
-    void
-    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
-        if (new_settings.contains("values")) {
-            values_next = values.cbegin();
-        }
-    }
-
-    gr::work::Result
-    work(std::size_t requested_work) {
-        if (values_next == values.cend()) {
-            values_next = values.cbegin();
-        }
-
-        if (remaining_events_count != 0) {
-            auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
-            auto &writer = port.streamWriter();
-            auto  data   = writer.reserve(1UZ);
-
-            data[0] = *values_next;
-            data.publish(1UZ);
-
-            remaining_events_count--;
-            if (remaining_events_count == 0) {
-                fmt::print("{}: Last value sent was {}\n", static_cast<void *>(this), *values_next);
-            }
-
-            values_next++;
-
-            return { requested_work, 1UL, gr::work::Status::OK };
-        } else {
-            // TODO: Investigate what schedulers do when there is an event written, but we return DONE
-            return { requested_work, 1UL, gr::work::Status::DONE };
-        }
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (repeated_source<T>), identifier, remaining_events_count, values, out);
-
-template<typename T>
-struct validator_sink : public gr::Block<validator_sink<T>> {
-    gr::Size_t    identifier = 0;
-    gr::PortIn<T> in;
-
-    std::vector<T>                 expected_values;
-    std::vector<T>::const_iterator expected_values_next;
-    bool                           all_ok = true;
-
-    bool
-    verify() const {
-        return all_ok && (expected_values_next == expected_values.cend());
-    }
-
-    void
-    settingsChanged(const gr::property_map & /*old_settings*/, const gr::property_map &new_settings) noexcept {
-        if (new_settings.contains("expected_values")) {
-            expected_values_next = expected_values.cbegin();
-        }
-    }
-
-    void
-    processOne(T value) {
-        if (expected_values_next == expected_values.cend()) {
-            all_ok = false;
-            fmt::print("Error: {}#{}: We got more values than expected\n", static_cast<void *>(this), identifier);
-
-        } else {
-            if (value != *expected_values_next) {
-                all_ok = false;
-                fmt::print("Error: {}#{}: Got a value {}, but wanted {} (position {})\n", static_cast<void *>(this), identifier, value, *expected_values_next,
-                           std::distance(expected_values.cbegin(), expected_values_next));
-            }
-
-            expected_values_next++;
-        }
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (validator_sink<T>), identifier, expected_values, in);
-
-template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public gr::Block<adder<T>> {
-    gr::PortIn<T>  addend0;
-    gr::PortIn<T>  addend1;
-    gr::PortOut<T> sum;
-
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(V a, V b) const noexcept {
-        return a + b;
-    }
-};
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (adder<T>), addend0, addend1, sum);
-
-struct test_definition {
-    gr::Size_t                                     value_count;
+struct TestParams {
+    gr::Size_t                                     nSamples;
     std::vector<std::pair<gr::Size_t, gr::Size_t>> mapping;
-    std::vector<std::vector<double>>               input_values;
-    std::vector<std::vector<double>>               output_values;
-    gr::Size_t                                     monitor_source;
-    std::vector<double>                            monitor_values;
-    bool                                           back_pressure;
+    std::vector<std::vector<double>>               inValues;
+    std::vector<std::vector<double>>               outValues;
+    gr::Size_t                                     monitorSource;
+    std::vector<double>                            monitorValues;
+    bool                                           backPressure;
+    bool                                           ignoreOrder{ false };
 };
 
 void
-execute_selector_test(test_definition definition) {
+execute_selector_test(TestParams params) {
     using namespace boost::ut;
 
-    const auto sources_count = static_cast<gr::Size_t>(definition.input_values.size());
-    const auto sinks_count   = static_cast<gr::Size_t>(definition.output_values.size());
+    const gr::Size_t nSources = static_cast<gr::Size_t>(params.inValues.size());
+    const gr::Size_t nSinks   = static_cast<gr::Size_t>(params.outValues.size());
 
-    gr::Graph                              graph;
-    std::vector<repeated_source<double> *> sources;
-    std::vector<validator_sink<double> *>  sinks;
-    gr::basic::Selector<double>           *selector;
+    gr::Graph                             graph;
+    std::vector<RepeatedSource<double> *> sources;
+    std::vector<ValidatorSink<double> *>  sinks;
+    gr::basic::Selector<double>          *selector;
 
-    std::vector<gr::Size_t> mapIn(definition.mapping.size());
-    std::vector<gr::Size_t> map_out(definition.mapping.size());
-    std::ranges::transform(definition.mapping, mapIn.begin(), [](auto &p) { return p.first; });
-    std::ranges::transform(definition.mapping, map_out.begin(), [](auto &p) { return p.second; });
+    std::vector<gr::Size_t> mapIn(params.mapping.size());
+    std::vector<gr::Size_t> mapOut(params.mapping.size());
+    std::ranges::transform(params.mapping, mapIn.begin(), [](auto &p) { return p.first; });
+    std::ranges::transform(params.mapping, mapOut.begin(), [](auto &p) { return p.second; });
 
-    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({ { "n_inputs", sources_count }, //
-                                                                                { "n_outputs", sinks_count },  //
-                                                                                { "map_in", mapIn },           //
-                                                                                { "map_out", map_out },        //
-                                                                                { "back_pressure", definition.back_pressure } }));
+    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({ { "n_inputs", nSources }, //
+                                                                                { "n_outputs", nSinks },  //
+                                                                                { "map_in", mapIn },      //
+                                                                                { "map_out", mapOut },    //
+                                                                                { "back_pressure", params.backPressure } }));
 
-    for (std::uint32_t source_index = 0; source_index < sources_count; ++source_index) {
-        sources.push_back(std::addressof(graph.emplaceBlock<repeated_source<double>>({ { "remaining_events_count", definition.value_count }, //
-                                                                                       { "identifier", source_index },                       //
-                                                                                       { "values", definition.input_values[source_index] } })));
-        expect(sources[source_index]->settings().applyStagedParameters().empty());
-        expect(gr::ConnectionResult::SUCCESS
-               == graph.connect(                                                   //
-                       *sources[source_index], { "out", gr::meta::invalid_index }, //
-                       *selector, { "inputs", source_index }));
+    for (gr::Size_t i = 0; i < nSources; ++i) {
+        sources.push_back(std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "n_samples_max", params.nSamples }, { "id", i }, { "values", params.inValues[i] } })));
+        expect(sources[i]->settings().applyStagedParameters().empty());
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], { "out", gr::meta::invalid_index }, *selector, { "inputs", i }));
     }
 
-    for (std::uint32_t sink_index = 0; sink_index < sinks_count; ++sink_index) {
-        sinks.push_back(std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", sink_index }, //
-                                                                                    { "expected_values", definition.output_values[sink_index] } })));
-        expect(sinks[sink_index]->settings().applyStagedParameters().empty());
-        expect(gr::ConnectionResult::SUCCESS
-               == graph.connect(                             //
-                       *selector, { "outputs", sink_index }, //
-                       *sinks[sink_index], { "in" }));
+    for (gr::Size_t i = 0; i < nSinks; ++i) {
+        sinks.push_back(std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", i }, { "expected_values", params.outValues[i] }, { "ignore_order", params.ignoreOrder } })));
+        expect(sinks[i]->settings().applyStagedParameters().empty());
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, { "outputs", i }, *sinks[i], { "in" }));
     }
 
-    validator_sink<double> *monitor_sink = std::addressof(graph.emplaceBlock<validator_sink<double>>({ { "identifier", static_cast<std::uint32_t>(-1) }, //
-                                                                                                       { "expected_values", definition.monitor_values } }));
-    expect(monitor_sink->settings().applyStagedParameters().empty());
-    expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, 0, *monitor_sink, 0));
+    ValidatorSink<double> *monitorSink = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", static_cast<gr::Size_t>(-1) }, { "expected_values", params.monitorValues } }));
+    expect(monitorSink->settings().applyStagedParameters().empty());
+    expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
 
-    for (std::size_t iterration = 0; iterration < definition.value_count * sources_count; ++iterration) {
-        const auto max = std::numeric_limits<std::size_t>::max();
-        for (auto *source : sources) {
-            source->work(max);
-        }
-        selector->work(max);
-        for (auto *sink : sinks) {
-            sink->work(max);
-        }
-        monitor_sink->work(max);
-    }
+    gr::scheduler::Simple sched{ std::move(graph) };
+    sched.runAndWait();
 
-    if (!definition.back_pressure) {
+    if (!params.backPressure) {
         for (const auto &input : selector->inputs) {
-            expect(eq(input.streamReader().available(), 0));
+            expect(eq(input.streamReader().available(), 0U));
         }
     }
 
     for (auto *sink : sinks) {
-        expect(sink->verify());
+        expect(sink->verify()) << fmt::format("{}#{}::verify() failed\n", sink->name, sink->id);
     }
 }
 
@@ -220,7 +101,7 @@ const boost::ut::suite SelectorTest = [] {
     "basic Selector<T>"_test = [] {
         using T = double;
         const std::vector<uint32_t> outputMap{ 1U, 0U };
-        Selector<T>                 block({ { "n_inputs", 3U }, { "n_outputs", 2U }, { "map_in", std::vector<uint32_t>{ 0U, 1U } }, { "map_out", outputMap } }); // N.B. 3rd input is unconnected
+        Selector<T>                 block({ { "n_inputs", 3U }, { "n_outputs", 2U }, { "map_in", std::vector<gr::Size_t>{ 0U, 1U } }, { "map_out", outputMap } }); // N.B. 3rd input is unconnected
         expect(block.settings().applyStagedParameters().empty());
         expect(eq(block._internalMapping.size(), 2U));
 
@@ -231,127 +112,139 @@ const boost::ut::suite SelectorTest = [] {
     // Tests without the back pressure
 
     "Selector<T> 1 to 1 mapping"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
-                                .monitor_source = -1U,                                                         //
-                                .monitor_values = {},                                                          //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
+                                .monitorSource = -1U,                                                         //
+                                .monitorValues = {},                                                          //
+                                .backPressure  = false,
+                                .ignoreOrder   = false });
     };
 
     "Selector<T> only one input used"_test = [] {
-        execute_selector_test({ .value_count    = 5,                             //
-                                .mapping        = { { 1, 1 } },                  //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },       //
-                                .output_values  = { {}, { 2, 2, 2, 2, 2 }, {} }, //
-                                .monitor_source = -1U,                           //
-                                .monitor_values = {},                            //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                             //
+                                .mapping       = { { 1, 1 } },                  //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },       //
+                                .outValues     = { {}, { 2, 2, 2, 2, 2 }, {} }, //
+                                .monitorSource = -1U,                           //
+                                .monitorValues = {},                            //
+                                .backPressure  = false,
+                                .ignoreOrder   = false });
     };
 
     "Selector<T> all for one"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
-                                .monitor_source = -1U,                                                         //
-                                .monitor_values = {},                                                          //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
+                                .monitorSource = -1U,                                                         //
+                                .monitorValues = {},                                                          //
+                                .backPressure  = false,
+                                .ignoreOrder   = true });
     };
 
     "Selector<T> one for all"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
-                                .monitor_source = -1U,                                                         //
-                                .monitor_values = {},                                                          //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
+                                .monitorSource = -1U,                                                         //
+                                .monitorValues = {},                                                          //
+                                .backPressure  = false,
+                                .ignoreOrder   = false });
     };
 
     // tests with the back pressure
 
     "Selector<T> 1 to 1 mapping, with back pressure"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
-                                .monitor_source = -1U,                                                         //
-                                .monitor_values = {},                                                          //
-                                .back_pressure  = true });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
+                                .monitorSource = -1U,                                                         //
+                                .monitorValues = {},                                                          //
+                                .backPressure  = true,
+                                .ignoreOrder   = false });
     };
 
     "Selector<T> only one input used, with back pressure"_test = [] {
-        execute_selector_test({ .value_count    = 5,                             //
-                                .mapping        = { { 1, 1 } },                  //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },       //
-                                .output_values  = { {}, { 2, 2, 2, 2, 2 }, {} }, //
-                                .monitor_source = -1U,                           //
-                                .monitor_values = {},                            //
-                                .back_pressure  = true });
+        execute_selector_test({ .nSamples      = 5,                             //
+                                .mapping       = { { 1, 1 } },                  //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },       //
+                                .outValues     = { {}, { 2, 2, 2, 2, 2 }, {} }, //
+                                .monitorSource = -1U,                           //
+                                .monitorValues = {},                            //
+                                .backPressure  = true,
+                                .ignoreOrder   = false });
     };
 
     "Selector<T> all for one, with back pressure"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
-                                .monitor_source = -1U,                                                         //
-                                .monitor_values = {},                                                          //
-                                .back_pressure  = true });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
+                                .monitorSource = -1U,                                                         //
+                                .monitorValues = {},                                                          //
+                                .backPressure  = true,
+                                .ignoreOrder   = true });
     };
 
     "Selector<T> one for all, with back pressure"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
-                                .monitor_source = -1U,                                                         //
-                                .monitor_values = {},                                                          //
-                                .back_pressure  = true });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
+                                .monitorSource = -1U,                                                         //
+                                .monitorValues = {},                                                          //
+                                .backPressure  = true,
+                                .ignoreOrder   = false });
     };
 
     // Tests with a monitor
 
     "Selector<T> 1 to 1 mapping, with monitor, monitor source already mapped"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
-                                .monitor_source = 0U,                                                          //
-                                .monitor_values = { 1, 1, 1, 1, 1 },                                           //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 0, 0 }, { 1, 1 }, { 2, 2 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { { 1, 1, 1, 1, 1 }, { 2, 2, 2, 2, 2 }, { 3, 3, 3, 3, 3 } }, //
+                                .monitorSource = 0U,                                                          //
+                                .monitorValues = { 1, 1, 1, 1, 1 },                                           //
+                                .backPressure  = false,
+                                .ignoreOrder   = false });
     };
 
     "Selector<T> only one input used, with monitor, monitor source not mapped"_test = [] {
-        execute_selector_test({ .value_count    = 5,                             //
-                                .mapping        = { { 1, 1 } },                  //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },       //
-                                .output_values  = { {}, { 2, 2, 2, 2, 2 }, {} }, //
-                                .monitor_source = 0U,                            //
-                                .monitor_values = { 1, 1, 1, 1, 1 },             //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                             //
+                                .mapping       = { { 1, 1 } },                  //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },       //
+                                .outValues     = { {}, { 2, 2, 2, 2, 2 }, {} }, //
+                                .monitorSource = 0U,                            //
+                                .monitorValues = { 1, 1, 1, 1, 1 },             //
+                                .backPressure  = false,
+                                .ignoreOrder   = false });
     };
 
     "Selector<T> all for one, with monitor, monitor source already mapped"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
-                                .monitor_source = 1U,                                                          //
-                                .monitor_values = { 2, 2, 2, 2, 2 },                                           //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 0, 1 }, { 1, 1 }, { 2, 1 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { {}, { 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 }, {} }, //
+                                .monitorSource = 1U,                                                          //
+                                .monitorValues = { 2, 2, 2, 2, 2 },                                           //
+                                .backPressure  = false,
+                                .ignoreOrder   = true });
     };
 
     "Selector<T> one for all, with monitor, monitor source already mapped"_test = [] {
-        execute_selector_test({ .value_count    = 5,                                                           //
-                                .mapping        = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
-                                .input_values   = { { 1 }, { 2 }, { 3 } },                                     //
-                                .output_values  = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
-                                .monitor_source = 1U,                                                          //
-                                .monitor_values = { 2, 2, 2, 2, 2 },                                           //
-                                .back_pressure  = false });
+        execute_selector_test({ .nSamples      = 5,                                                           //
+                                .mapping       = { { 1, 0 }, { 1, 1 }, { 1, 2 } },                            //
+                                .inValues      = { { 1 }, { 2 }, { 3 } },                                     //
+                                .outValues     = { { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 }, { 2, 2, 2, 2, 2 } }, //
+                                .monitorSource = 1U,                                                          //
+                                .monitorValues = { 2, 2, 2, 2, 2 },                                           //
+                                .backPressure  = false,
+                                .ignoreOrder   = false });
     };
 };
 
