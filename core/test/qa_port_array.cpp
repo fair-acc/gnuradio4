@@ -5,6 +5,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <unordered_set>
 #include <vector>
@@ -45,28 +46,29 @@ ENABLE_REFLECTION_FOR_TEMPLATE(ArrayPortsNode, inputs, outputs);
 static_assert(gr::HasProcessBulkFunction<ArrayPortsNode<int>>);
 
 void
-execute_selector_test() {
+executeTest() {
     using namespace boost::ut;
+    using namespace gr::testing;
 
     using TestNode = ArrayPortsNode<double>;
 
     const gr::Size_t nSamples = 5;
 
-    gr::Graph                               graph;
-    std::array<RepeatedSource<double> *, 4> sources;
-    std::array<ValidatorSink<double> *, 4>  sinks;
+    gr::Graph                                                          graph;
+    std::array<TagSource<double> *, 4>                                 sources;
+    std::array<TagSink<double, ProcessFunction::USE_PROCESS_ONE> *, 4> sinks;
 
     auto *testNode = std::addressof(graph.emplaceBlock<TestNode>());
 
-    sources[0] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "n_samples_max", nSamples }, { "id", 0U }, { "values", std::vector{ 0. } } }));
-    sources[1] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "n_samples_max", nSamples }, { "id", 1U }, { "values", std::vector{ 1. } } }));
-    sources[2] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "n_samples_max", nSamples }, { "id", 2U }, { "values", std::vector{ 2. } } }));
-    sources[3] = std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "n_samples_max", nSamples }, { "id", 3U }, { "values", std::vector{ 3. } } }));
+    sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 0. } } }));
+    sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 1. } } }));
+    sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 2. } } }));
+    sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 3. } } }));
 
-    sinks[0] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", 0U }, { "expected_values", std::vector{ 0., 0., 0., 0., 0. } } }));
-    sinks[1] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", 1U }, { "expected_values", std::vector{ 1., 1., 1., 1., 1. } } }));
-    sinks[2] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", 2U }, { "expected_values", std::vector{ 2., 2., 2., 2., 2. } } }));
-    sinks[3] = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", 3U }, { "expected_values", std::vector{ 3., 3., 3., 3., 3. } } }));
+    sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+    sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+    sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+    sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"inputs", 0UZ>(*testNode)));
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"inputs", 1UZ>(*testNode)));
@@ -82,15 +84,17 @@ execute_selector_test() {
     gr::scheduler::Simple sched{ std::move(graph) };
     sched.runAndWait();
 
-    for (auto *sink : sinks) {
-        assert(sink->verify());
+    std::vector<std::vector<double>> expected_values{ { 0., 0., 0., 0., 0. }, { 1., 1., 1., 1., 1. }, { 2., 2., 2., 2., 2. }, { 3., 3., 3., 3., 3. } };
+    for (std::size_t i = 0; i < sinks.size(); i++) {
+        expect(sinks[i]->n_samples_produced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
+        expect(std::ranges::equal(sinks[i]->samples, expected_values[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
     }
 }
 
 const boost::ut::suite SelectorTest = [] {
     using namespace boost::ut;
 
-    "basic ports in arrays"_test = [] { execute_selector_test(); };
+    "basic ports in arrays"_test = [] { executeTest(); };
 };
 
 int
