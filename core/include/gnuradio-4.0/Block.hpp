@@ -755,18 +755,24 @@ public:
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
                     [available_values_count]<typename OutputRange>(auto i, OutputRange &output_range) {
-                        // if constexpr (traits::block::can_processOne<Derived> or traits::block::processBulk_requires_ith_output_as_span<Derived, i>) {
                         auto process_out = [available_values_count]<typename Out>(Out &out) {
-                            // This will be a pointer if the port was async
-                            // TODO: Make this check more specific
-                            if constexpr (not std::is_pointer_v<std::remove_cvref_t<Out>>) {
-                                if (!out.isPublished()) {
+                            if constexpr (Out::isMultiThreadedStrategy()) {
+                                if (!out.isFullyPublished()) {
+                                    fmt::print(stderr, "Block::write_to_outputs - did not publish all samples for MultiThreadedStrategy\n");
+                                    std::abort();
+                                }
+                            }
+                            if (!out.isPublished()) {
+                                if constexpr (Out::spanReleasePolicy() == SpanReleasePolicy::Terminate) {
+                                    fmt::print(stderr, "Block::write_to_outputs - did not publish samples, default SpanReleasePolicy is {}\n", magic_enum::enum_name(SpanReleasePolicy::Terminate));
+                                    std::abort();
+                                } else if constexpr (Out::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
                                     out.publish(available_values_count);
-                                    // TODO: We need to publish 0 samples for Async ports if it was not published
+                                } else if constexpr (Out::spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
+                                    out.publish(0U);
                                 }
                             }
                         };
-                        //  if (available_values_count) {
                         if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
                             for (auto &out : output_range) {
                                 process_out(out);
@@ -774,16 +780,6 @@ public:
                         } else {
                             process_out(output_range);
                         }
-                        // }
-                        //   }
-                        //                        else {
-                        //                            if constexpr (requires { output_range.isPublished(); }) {
-                        //                                if (not output_range.isPublished()) {
-                        //                                    fmt::print(stderr, "processBulk failed to publish one of its outputs. Use a std::span argument if you do not want to publish
-                        //                                    manually.\n"); std::abort();
-                        //                                }
-                        //                            }
-                        //                        }
                     },
                     writers_tuple);
         }
@@ -794,6 +790,7 @@ public:
     template<typename Self>
     bool
     consumeReaders(Self &self, std::size_t available_values_count) {
+        // TODO: When this function takes ConsumableSpans as input -> implement SpanReleasePolicy similar to write_to_outputs
         bool success = true;
         if constexpr (traits::block::stream_input_ports<Derived>::size > 0) {
             std::apply(
@@ -966,11 +963,11 @@ public:
 
                     auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).streamReader().get(in_samples);
+                            return std::forward<Port>(port).streamReader().template get<SpanReleasePolicy::ProcessAll>(in_samples);
                         } else {
                             // For the Async port return all available samples
                             const auto available = port.streamReader().available();
-                            return std::forward<Port>(port).streamReader().get(available);
+                            return std::forward<Port>(port).streamReader().template get<SpanReleasePolicy::ProcessNone>(available);
                         }
                     };
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
@@ -993,10 +990,10 @@ public:
 
                     auto process_single_port = [&out_samples]<typename Port>(Port &&port) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).streamWriter().reserve(out_samples);
+                            return std::forward<Port>(port).streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(out_samples);
                         } else {
                             // for the Async port reserve all available samples
-                            return std::forward<Port>(port).streamWriter().reserve(port.streamWriter().available());
+                            return std::forward<Port>(port).streamWriter().template reserve<SpanReleasePolicy::ProcessNone>(port.streamWriter().available());
                         }
                     };
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
