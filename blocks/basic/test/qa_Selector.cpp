@@ -11,6 +11,7 @@
 
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/basic/Selector.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 struct TestParams {
     gr::Size_t                                     nSamples;
@@ -26,14 +27,15 @@ struct TestParams {
 void
 execute_selector_test(TestParams params) {
     using namespace boost::ut;
+    using namespace gr::testing;
 
     const gr::Size_t nSources = static_cast<gr::Size_t>(params.inValues.size());
     const gr::Size_t nSinks   = static_cast<gr::Size_t>(params.outValues.size());
 
-    gr::Graph                             graph;
-    std::vector<RepeatedSource<double> *> sources;
-    std::vector<ValidatorSink<double> *>  sinks;
-    gr::basic::Selector<double>          *selector;
+    gr::Graph                                                        graph;
+    std::vector<TagSource<double> *>                                 sources;
+    std::vector<TagSink<double, ProcessFunction::USE_PROCESS_ONE> *> sinks;
+    gr::basic::Selector<double>                                     *selector;
 
     std::vector<gr::Size_t> mapIn(params.mapping.size());
     std::vector<gr::Size_t> mapOut(params.mapping.size());
@@ -47,18 +49,18 @@ execute_selector_test(TestParams params) {
                                                                                 { "back_pressure", params.backPressure } }));
 
     for (gr::Size_t i = 0; i < nSources; ++i) {
-        sources.push_back(std::addressof(graph.emplaceBlock<RepeatedSource<double>>({ { "n_samples_max", params.nSamples }, { "id", i }, { "values", params.inValues[i] } })));
+        sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", params.nSamples }, { "values", params.inValues[i] } })));
         expect(sources[i]->settings().applyStagedParameters().empty());
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], { "out", gr::meta::invalid_index }, *selector, { "inputs", i }));
     }
 
     for (gr::Size_t i = 0; i < nSinks; ++i) {
-        sinks.push_back(std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", i }, { "expected_values", params.outValues[i] }, { "ignore_order", params.ignoreOrder } })));
+        sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>()));
         expect(sinks[i]->settings().applyStagedParameters().empty());
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, { "outputs", i }, *sinks[i], { "in" }));
     }
 
-    ValidatorSink<double> *monitorSink = std::addressof(graph.emplaceBlock<ValidatorSink<double>>({ { "id", static_cast<gr::Size_t>(-1) }, { "expected_values", params.monitorValues } }));
+    TagSink<double, ProcessFunction::USE_PROCESS_ONE> *monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
     expect(monitorSink->settings().applyStagedParameters().empty());
     expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
 
@@ -71,8 +73,12 @@ execute_selector_test(TestParams params) {
         }
     }
 
-    for (auto *sink : sinks) {
-        expect(sink->verify()) << fmt::format("{}#{}::verify() failed\n", sink->name, sink->id);
+    for (std::size_t i = 0; i < sinks.size(); i++) {
+        if (params.ignoreOrder) {
+            std::ranges::sort(sinks[i]->samples);
+            std::ranges::sort(params.outValues[i]);
+        }
+        expect(std::ranges::equal(sinks[i]->samples, params.outValues[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
     }
 }
 

@@ -88,17 +88,20 @@ template<typename T, ProcessFunction UseProcessVariant = ProcessFunction::USE_PR
 struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     PortOut<T>       out;
     std::vector<Tag> tags{};
+    std::vector<T>   values{};         // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
+    std::size_t      value_index{ 0 }; // current index in values array
     std::size_t      next_tag{ 0 };
     gr::Size_t       n_samples_max{ 1024 };
     gr::Size_t       n_samples_produced{ 0 };
     float            sample_rate     = 1000.0f;
     std::string      signal_name     = "unknown signal";
     bool             verbose_console = false;
-    bool             mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ]
+    bool             mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
 
     void
     start() {
         n_samples_produced = 0U;
+        value_index        = 0U;
     }
 
     T
@@ -110,6 +113,14 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         if (n_samples_produced >= n_samples_max) {
             fmt::println("terminate n_samples_produced {}", n_samples_produced);
             this->requestStop();
+        }
+        if (!values.empty()) {
+            if (value_index == values.size()) {
+                value_index = 0;
+            }
+            T currentValue = values[value_index];
+            value_index++;
+            return currentValue;
         }
         return mark_tag ? (generatedTag ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(n_samples_produced);
     }
@@ -123,11 +134,21 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
                                                                      : static_cast<Tag::signed_index_type>(n_samples_max - n_samples_produced);
         const std::size_t nSamples = n_samples_produced < n_samples_max ? std::min(static_cast<std::size_t>(std::max(1L, nextTagIn)), output.size()) : 0UZ; // '0UZ' -> DONE, produced enough samples
 
-        if (mark_tag) {
-            output[0] = generatedTag ? static_cast<T>(1) : static_cast<T>(0);
-        } else {
+        if (!values.empty()) {
             for (std::size_t i = 0; i < nSamples; ++i) {
-                output[i] = static_cast<T>(n_samples_produced + i);
+                if (value_index == values.size()) {
+                    value_index = 0;
+                }
+                output[i] = values[value_index];
+                value_index++;
+            }
+        } else {
+            if (mark_tag) {
+                output[0] = generatedTag ? static_cast<T>(1) : static_cast<T>(0);
+            } else {
+                for (std::size_t i = 0; i < nSamples; ++i) {
+                    output[i] = static_cast<T>(n_samples_produced + i);
+                }
             }
         }
 
@@ -345,7 +366,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 
 } // namespace gr::testing
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max, sample_rate, signal_name, verbose_console, mark_tag);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max, sample_rate, signal_name, verbose_console, mark_tag, values);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags,
                                     log_samples, verbose_console, samples);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags,
