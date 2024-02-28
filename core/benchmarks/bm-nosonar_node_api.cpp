@@ -206,7 +206,7 @@ public:
 
         writer.publish( //
                 [&reader, n_to_publish, this](std::span<T> output) {
-                    const auto input = reader.get();
+                    const auto input = reader.get(reader.available());
                     // #### N.B. later high-level user-function starts here
 
                     using namespace vir::stdx;
@@ -298,7 +298,7 @@ public:
         if constexpr (use_memcopy) {
             // fmt::print("n_to_publish {} - {} {}\n", n_to_publish, use_bulk_operation, use_memcopy);
             writer.publish( //
-                    [&reader, n_to_publish](std::span<T> output) { std::memcpy(output.data(), reader.get().data(), n_to_publish * sizeof(T)); }, n_to_publish);
+                    [&reader, n_to_publish](std::span<T> output) { std::memcpy(output.data(), reader.get(reader.available()).data(), n_to_publish * sizeof(T)); }, n_to_publish);
         } else {
             writer.publish( //
                     [&reader, n_to_publish](std::span<T> output) {
@@ -465,8 +465,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char *test_name) {
         auto gen_mult_block = [&factor] { return merge<"out", "in">(multiply<T>({ { { "factor", factor } } }), merge<"out", "in">(divide<T>({ { { "factor", factor } } }), add<T, -1>())); };
         auto mergedBlock    = merge<"out", "in">(merge<"out", "in">(test::source<T>(N_SAMPLES), //
-                                                                 test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(), gen_mult_block)),
-                                              test::sink<T>());
+                                                                    test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(), gen_mult_block)),
+                                                 test::sink<T>());
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     };
     templated_cascaded_test_10(static_cast<float>(2.0), "merged src->(mult(2.0)->div(2.0)->add(-1))^10->sink - float");

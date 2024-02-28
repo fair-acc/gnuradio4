@@ -520,7 +520,7 @@ public:
         requires(kIsInput)
     {
         const auto  readPos           = streamReader().position();
-        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
+        const auto  tags              = tagReader().get(tagReader().available()); // N.B. returns all old/available/pending tags
         std::size_t nTagsProcessed    = 0UZ;
         bool        properTagDistance = false;
 
@@ -967,7 +967,8 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag
 
 inline constexpr std::optional<std::size_t>
 nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
-    const gr::ConsumableSpan auto tagData = port.tagReader().template get<false>();
+    const auto                    available = port.tagReader().available();
+    const gr::ConsumableSpan auto tagData   = port.tagReader().get(available);
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
