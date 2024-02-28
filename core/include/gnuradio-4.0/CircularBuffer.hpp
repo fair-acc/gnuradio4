@@ -183,7 +183,14 @@ public:
     }
 };
 
-
+/*
+ * The enum determines how to handle samples if consume() or publish() was not called by the user in `processBulk` function.
+ */
+enum class SpanReleasePolicy {
+    Terminate, //  terminates the program
+    ProcessAll, // consume/publish all samples
+    ProcessNone // consume/publish zero samples
+};
 
 /**
  * @brief circular buffer implementation using double-mapped memory allocations
@@ -274,7 +281,7 @@ class CircularBuffer
     template<typename U = T>
     class buffer_writer;
 
-    template<typename U = T>
+    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
     class PublishableOutputRange {
         buffer_writer<U>* _parent = nullptr;
 
@@ -351,6 +358,10 @@ class CircularBuffer
         return std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>;
     }
 
+    [[nodiscard]] constexpr static SpanReleasePolicy
+    spanReleasePolicy() noexcept {
+        return policy;
+    }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _parent->_internalSpan.size(); };
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
@@ -388,7 +399,9 @@ class CircularBuffer
 
     template <typename U>
     class buffer_writer {
-        friend class PublishableOutputRange<U>;
+        friend class PublishableOutputRange<U, SpanReleasePolicy::Terminate>;
+        friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessAll>;
+        friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
@@ -441,21 +454,22 @@ class CircularBuffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] constexpr auto reserve(std::size_t nSlotsToClaim) noexcept -> PublishableOutputRange<U> {
+        template<SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+        [[nodiscard]] constexpr auto reserve(std::size_t nSlotsToClaim) noexcept -> PublishableOutputRange<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isRangePublished = false;
             _nSlotsPublished = 0UZ;
 
             if (nSlotsToClaim == 0) {
-                return PublishableOutputRange<U>(this);
+                return PublishableOutputRange<U, policy>(this);
             }
 
             try {
                 const auto sequence = _claimStrategy->next(*_buffer->_read_indices, nSlotsToClaim); // alt: try_next
                 const std::size_t index = (static_cast<std::size_t>(sequence) + _size - nSlotsToClaim) % _size;
-                return PublishableOutputRange<U>(this, index, sequence, nSlotsToClaim);
+                return PublishableOutputRange<U, policy>(this, index, sequence, nSlotsToClaim);
             } catch (const NoCapacityException &) {
-                return PublishableOutputRange<U>(this);
+                return PublishableOutputRange<U, policy>(this);
             }
         }
 
@@ -545,7 +559,7 @@ class CircularBuffer
     template<typename U = T>
     class buffer_reader;
 
-    template<typename U = T>
+    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
     class ConsumableInputRange {
         const buffer_reader<U>* _parent = nullptr;
         std::span<const T>      _internalSpan{};
@@ -586,6 +600,11 @@ class CircularBuffer
         return *this;
     }
     ~ConsumableInputRange() = default;
+
+    [[nodiscard]] constexpr static SpanReleasePolicy
+    spanReleasePolicy() noexcept {
+        return policy;
+    }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
@@ -639,7 +658,9 @@ class CircularBuffer
     template<typename U>
     class buffer_reader
     {
-        friend class ConsumableInputRange<U>;
+        friend class ConsumableInputRange<U, SpanReleasePolicy::Terminate>;
+        friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessAll>;
+        friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
@@ -685,9 +706,10 @@ class CircularBuffer
             return _isRangeConsumed;
         }
 
-        [[nodiscard]] constexpr auto get(const std::size_t nRequested) const noexcept -> ConsumableInputRange<U> {
+        template<SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested) const noexcept -> ConsumableInputRange<U, policy> {
             _isRangeConsumed = false;
-            return ConsumableInputRange<U>(this, buffer_index(), nRequested);
+            return ConsumableInputRange<U, policy>(this, buffer_index(), nRequested);
         }
 
         template <bool strict_check = true>
