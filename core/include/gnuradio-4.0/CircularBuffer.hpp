@@ -685,16 +685,9 @@ class CircularBuffer
             return _isRangeConsumed;
         }
 
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr auto get(const std::size_t nRequested = 0UZ) const noexcept -> ConsumableInputRange<U> {
-            std::size_t n;
-            if constexpr (strict_check) {
-                n = nRequested > 0 ? std::min(nRequested, available()) : available();
-            } else {
-                n = nRequested > 0 ? nRequested : available();
-            }
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested) const noexcept -> ConsumableInputRange<U> {
             _isRangeConsumed = false;
-            return ConsumableInputRange<U>(this, buffer_index(), n);
+            return ConsumableInputRange<U>(this, buffer_index(), nRequested);
         }
 
         template <bool strict_check = true>

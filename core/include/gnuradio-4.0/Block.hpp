@@ -964,7 +964,15 @@ public:
                 [&self = self(), sync_in_samples = self().ports_status.in_samples]<typename PortOrCollection>(PortOrCollection &input_port_or_collection) noexcept {
                     auto in_samples = sync_in_samples;
 
-                    auto process_single_port = [&in_samples]<typename Port>(Port &&port) { return std::forward<Port>(port).streamReader().get(in_samples); };
+                    auto process_single_port = [&in_samples]<typename Port>(Port &&port) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                            return std::forward<Port>(port).streamReader().get(in_samples);
+                        } else {
+                            // For the Async port return all available samples
+                            const auto available = port.streamReader().available();
+                            return std::forward<Port>(port).streamReader().get(available);
+                        }
+                    };
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
                         return process_single_port(input_port_or_collection);
                     } else {
@@ -1024,7 +1032,8 @@ public:
     constexpr void
     processScheduledMessages() {
         auto processPort = [this]<PortLike TPort>(TPort &inPort) {
-            ConsumableSpan auto inSpan = inPort.streamReader().get();
+            const auto          available = inPort.streamReader().available();
+            ConsumableSpan auto inSpan    = inPort.streamReader().get(available);
             if constexpr (traits::block::can_processMessagesForPortConsumableSpan<Derived, TPort>) {
                 if (inSpan.size() > 0) {
                     self().processMessages(inPort, inSpan);
