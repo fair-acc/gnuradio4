@@ -450,25 +450,25 @@ testSchedulerControl() {
         const std::string REQUESTED_STOP  = std::string(magic_enum::enum_name(State::REQUESTED_STOP));
         const std::string STOPPED         = std::string(magic_enum::enum_name(State::STOPPED));
 
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, RUNNING } } });
+        waitForMessages(reader, { { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, RUNNING } } });
         if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
             expect(scheduler.isProcessing());
         }
 
-        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_PAUSE } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_PAUSE } }, { { kind::SchedulerStateUpdate, PAUSED } } });
+        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::Data, REQUESTED_PAUSE } });
+        waitForMessages(reader, { { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, REQUESTED_PAUSE } }, { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, PAUSED } } });
         if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
             expect(!scheduler.isProcessing());
         }
 
-        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, RUNNING } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, RUNNING } } });
+        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::Data, RUNNING } });
+        waitForMessages(reader, { { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, RUNNING } } });
         if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
             expect(scheduler.isProcessing());
         }
 
-        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_STOP } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_STOP } }, { { kind::SchedulerStateUpdate, STOPPED } } });
+        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::Data, REQUESTED_STOP } });
+        waitForMessages(reader, { { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, REQUESTED_STOP } }, { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, STOPPED } } });
         if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
             expect(!scheduler.isProcessing());
         }
