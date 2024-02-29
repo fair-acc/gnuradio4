@@ -1,8 +1,10 @@
 #ifndef TEST_COMMON_NODES
 #define TEST_COMMON_NODES
 
+#include <algorithm>
 #include <cstdlib> // std::size_t
 #include <list>
+#include <ranges>
 #include <string>
 #include <string_view>
 

@@ -316,7 +316,7 @@ public:
 
             const auto readData = reader.get(nProcess);
             if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
-                const auto tags         = tag_reader.get();
+                const auto tags         = tag_reader.get(tag_reader.available());
                 const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto &tag) { return tag.index < until; });
                 auto       relevantTags = std::vector<Tag>(tags.begin(), it);
                 for (auto &t : relevantTags) {
@@ -325,7 +325,8 @@ public:
                 fnc(readData, std::span<const Tag>(relevantTags));
                 std::ignore = tag_reader.consume(relevantTags.size());
             } else {
-                std::ignore = tag_reader.consume(tag_reader.available());
+                const auto tags = tag_reader.get(tag_reader.available());
+                std::ignore     = tag_reader.consume(tags.size());
                 fnc(readData);
             }
 
