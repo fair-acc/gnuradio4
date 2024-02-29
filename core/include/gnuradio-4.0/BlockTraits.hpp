@@ -368,18 +368,25 @@ struct dummy_writer {
     using type = to_any_pointer;
 };
 
-template<typename Port>
+template<typename Port, bool isVectorOfSpansReturned>
 constexpr auto *
 port_to_processBulk_argument_helper() {
     if constexpr (requires(Port p) { // array of ports
                       typename Port::value_type;
                       p.cbegin() != p.cend();
                   }) {
-        // return static_cast<to_any_vector *>(nullptr);
         if constexpr (Port::value_type::kIsInput) {
-            return static_cast<std::vector<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+            if constexpr (isVectorOfSpansReturned) {
+                return static_cast<std::vector<std::span<const typename Port::value_type::value_type>> *>(nullptr);
+            } else {
+                return static_cast<std::vector<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+            }
         } else if constexpr (Port::value_type::kIsOutput) {
-            return static_cast<std::vector<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
+            if constexpr (isVectorOfSpansReturned) {
+                return static_cast<std::vector<std::span<typename Port::value_type::value_type>> *>(nullptr);
+            } else {
+                return static_cast<std::vector<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
+            }
         }
 
     } else { // single port
@@ -392,8 +399,13 @@ port_to_processBulk_argument_helper() {
 }
 
 template<typename Port>
-struct port_to_processBulk_argument {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port>())>;
+struct port_to_processBulk_argument_consumable_publishable {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false>())>;
+};
+
+template<typename Port>
+struct port_to_processBulk_argument_std_span {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true>())>;
 };
 
 template<typename>
@@ -409,13 +421,16 @@ can_processBulk_invoke_test(auto &block, const auto &inputs, auto &outputs, std:
         -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
-template<typename TBlock>
-concept can_processBulk = requires(TBlock &n, typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::stream_input_ports<TBlock>>::tuple_type inputs,
-                                   typename meta::transform_types_nested<detail::port_to_processBulk_argument, traits::block::stream_output_ports<TBlock>>::tuple_type outputs) {
+template<typename TBlock, template<typename> typename TArguments>
+concept can_processBulk_helper = requires(TBlock &n, typename meta::transform_types_nested<TArguments, traits::block::stream_input_ports<TBlock>>::tuple_type inputs,
+                                          typename meta::transform_types_nested<TArguments, traits::block::stream_output_ports<TBlock>>::tuple_type outputs) {
     {
         detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<stream_input_port_types<TBlock>::size>(), std::make_index_sequence<stream_output_port_types<TBlock>::size>())
     } -> std::same_as<work::Status>;
 };
+
+template<typename TBlock>
+concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_consumable_publishable> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_span>;
 
 /**
  * Satisfied if `TDerived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a

@@ -211,7 +211,7 @@ static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockS
 static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::PUBLISHABLE_PUBLISHABLE>, 1>);
 static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::SPAN_SPAN>, 2>); // out-of-range check
 
-enum class ProcessBulkVectorVariant { SPAN_SPAN, CONSUMABLE_SPAN, CONSUMABLE_PUBLISHABLE, SPAN_PUBLISHABLE };
+enum class ProcessBulkVectorVariant { SPAN_SPAN, SPAN_SPAN2, CONSUMABLE_SPAN, CONSUMABLE_PUBLISHABLE, CONSUMABLE_PUBLISHABLE2, SPAN_PUBLISHABLE };
 
 template<typename T, ProcessBulkVectorVariant processVariant>
 struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProcessBulkVector<T, processVariant>> {
@@ -221,6 +221,13 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
     gr::work::Status
     processBulk(const std::vector<std::span<const T>> &, std::vector<std::span<T>> &)
         requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN)
+    {
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status
+    processBulk(std::span<std::span<const T>>, std::span<std::span<T>>)
+        requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN2)
     {
         return gr::work::Status::OK;
     }
@@ -241,6 +248,14 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
         return gr::work::Status::OK;
     }
 
+    template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
+    gr::work::Status
+    processBulk(std::span<TInput>, std::span<TOutput>)
+        requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2)
+    {
+        return gr::work::Status::OK;
+    }
+
     template<gr::PublishableSpan TOutput>
     gr::work::Status
     processBulk(const std::vector<std::span<const T>> &, std::vector<TOutput> &)
@@ -252,10 +267,12 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVectorVariant processVariant), (BlockSignaturesProcessBulkVector<T, processVariant>), inputs, outputs);
 
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN>>);       // TODO: fix the signature is required to work
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_SPAN>>); // TODO: fix the signature is required to work
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN2>>);      // TODO: fix the signature is required to work
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_SPAN>>); // combinations are not supported yet
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_PUBLISHABLE>>); // TODO: fix the signature is required to work
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2>>); // TODO: fix the signature is required to work
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_PUBLISHABLE>>);        // combinations are not supported yet
 
 struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
     std::tuple<int> tuple; // this type is not supported and should cause the checkBlockContracts<T>() to throw
