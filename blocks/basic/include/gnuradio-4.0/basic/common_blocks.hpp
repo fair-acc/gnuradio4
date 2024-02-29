@@ -104,7 +104,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (MultiAdder<T>), inputs, out, n_inputs);
 
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), builtin_multiply, double, float);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), builtin_counter, double, float);
+auto registerMultiply = gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry());
+auto registerCounter  = gr::registerBlock<builtin_counter, double, float>(gr::globalBlockRegistry());
 
 #endif // include guard

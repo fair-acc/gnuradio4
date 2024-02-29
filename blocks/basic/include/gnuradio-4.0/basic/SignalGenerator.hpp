@@ -122,6 +122,6 @@ public:
 } // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::SignalGenerator, in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::basic::SignalGenerator, double, float);
+auto registerSignalGenerator = gr::registerBlock<gr::basic::SignalGenerator, double, float>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_SIGNAL_GENERATOR_HPP

@@ -292,6 +292,6 @@ static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 } // namespace gr::http
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::http::HttpBlock, out, url, endpoint);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::http::HttpBlock, float, double)
+auto registerHttpBlock = gr::registerBlock<gr::http::HttpBlock, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_HTTP_BLOCK_HPP

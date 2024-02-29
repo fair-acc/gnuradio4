@@ -994,6 +994,6 @@ private:
 } // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::DataSink, in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::basic::DataSink, float, double);
+auto registerDataSink = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
 
 #endif

@@ -19,7 +19,10 @@ const boost::ut::suite KnownBlockTests = [] {
             "gr::testing::FunctionProcess"s, //
             "gr::testing::FunctionSink"s,    //
             "gr::testing::MessageSender"s,   //
-            "gr::testing::InspectSink"s      //
+            "gr::testing::InspectSink"s,     //
+            "gr::testing::TagSource"s,       //
+            "gr::testing::TagMonitor"s,      //
+            "gr::testing::TagSink"s          //
         };
         std::ranges::sort(desired);
 

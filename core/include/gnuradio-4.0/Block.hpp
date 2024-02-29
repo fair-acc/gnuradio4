@@ -1703,32 +1703,95 @@ blockDescription() noexcept {
     return ret;
 }
 
-namespace detail {
 template<typename... Types>
-struct BlockParameters {
+struct BlockParameters : meta::typelist<Types...> {
     template<template<typename...> typename TBlock, typename RegisterInstance>
     void
-    registerOn(RegisterInstance &registerInstance, std::string block_type) const {
-        registerInstance.template addBlockType<TBlock, Types...>(block_type);
+    registerOn(RegisterInstance &registerInstance, std::string blockType = {}) const {
+        registerInstance.template addBlockType<TBlock, Types...>(blockType);
     }
 };
 
-template<template<typename...> typename TBlock, typename... TBlockParameters>
-struct RegisterBlock {
-    template<typename RegisterInstance>
-    RegisterBlock(RegisterInstance &registerInstance, std::string block_type) {
-        std::cout << "registerBlock " << block_type << std::endl;
-        auto addBlockType = [&]<typename Type> {
-            if constexpr (meta::is_instantiation_of<Type, BlockParameters>) {
-                Type().template registerOn<TBlock>(registerInstance, block_type);
-            } else {
-                registerInstance.template addBlockType<TBlock, Type>(block_type);
-            }
-        };
-        ((addBlockType.template operator()<TBlockParameters>()), ...);
-    }
-};
-} // namespace detail
+/**
+ * This function (and overloads) can be used to register a block with
+ * the block registry to be used for runtime instantiation of blocks
+ * based on their stringified types.
+ *
+ * The arguments are:
+ *  - registerInstance -- a reference to the registry (common to use gr::globalBlockRegistry)
+ *  - TBlock -- the block class template
+ *  - Value0 and Value1 -- if the block has non-template-type parameters,
+ *    set these to the values of NTTPs you want to register
+ *  - TBlockParameters -- types that the block can be instantiated with
+ */
+template<template<typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
+int
+registerBlock(TRegisterInstance &registerInstance) {
+    auto addBlockType = [&]<typename Type> {
+        static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
+        registerInstance.template addBlockType<TBlock<Type>>();
+    };
+    ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+template<template<typename, typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
+int
+registerBlock(TRegisterInstance &registerInstance) {
+    auto addBlockType = [&]<typename Type> {
+        static_assert(meta::is_instantiation_of<Type, BlockParameters>);
+        static_assert(Type::size == 2);
+        registerInstance.template addBlockType<TBlock<typename Type::template at<0>, typename Type::template at<1>>>();
+    };
+    ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+template<template<typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
+int
+registerBlock(TRegisterInstance &registerInstance) {
+    auto addBlockType = [&]<typename Type> {
+        static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
+        registerInstance.template addBlockType<TBlock<Type, Value0>>();
+    };
+    ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+template<template<typename, typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
+int
+registerBlock(TRegisterInstance &registerInstance) {
+    auto addBlockType = [&]<typename Type> {
+        static_assert(meta::is_instantiation_of<Type, BlockParameters>);
+        static_assert(Type::size == 2);
+        registerInstance.template addBlockType<TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>>();
+    };
+    ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+template<template<typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
+int
+registerBlock(TRegisterInstance &registerInstance) {
+    auto addBlockType = [&]<typename Type> {
+        static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
+        registerInstance.template addBlockType<TBlock<Type, Value0, Value1>>();
+    };
+    ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+template<template<typename, typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
+int
+registerBlock(TRegisterInstance &registerInstance) {
+    auto addBlockType = [&]<typename Type> {
+        static_assert(meta::is_instantiation_of<Type, BlockParameters>);
+        static_assert(Type::size == 2);
+        registerInstance.template addBlockType<TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>>();
+    };
+    ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
 
 template<typename Function, typename Tuple, typename... Tuples>
 auto

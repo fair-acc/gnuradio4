@@ -284,14 +284,15 @@ public:
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionSource, out);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::FunctionSource, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionProcess, in, out);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::FunctionProcess, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::FunctionSink, in);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::FunctionSink, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::MessageSender, unused);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::MessageSender, double, float);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::InspectSink, in, value);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::InspectSink, double, float);
+
+auto registerFunctionSource  = gr::registerBlock<gr::testing::FunctionSource, double, float, int>(gr::globalBlockRegistry());
+auto registerFunctionProcess = gr::registerBlock<gr::testing::FunctionProcess, double, float, int>(gr::globalBlockRegistry());
+auto registerFunctionSink    = gr::registerBlock<gr::testing::FunctionSink, double, float, int>(gr::globalBlockRegistry());
+auto registerMessageSender   = gr::registerBlock<gr::testing::MessageSender, double, float, int>(gr::globalBlockRegistry());
+auto registerInspectSink     = gr::registerBlock<gr::testing::InspectSink, double, float, int>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_TESTING_FUNCTION_BLOCKS_HPP

@@ -90,8 +90,8 @@ namespace gr::qa_grc_test {
 const boost::ut::suite GrcTests = [] {
     static TestContext context = [] {
         TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
-        GR_REGISTER_BLOCK_RUNTIME(gr::globalBlockRegistry(), ArraySource, double);
-        GR_REGISTER_BLOCK_RUNTIME(gr::globalBlockRegistry(), ArraySink, double);
+        gr::registerBlock<ArraySource, double>(gr::globalBlockRegistry());
+        gr::registerBlock<ArraySink, double>(gr::globalBlockRegistry());
         return ctx;
     }();
 

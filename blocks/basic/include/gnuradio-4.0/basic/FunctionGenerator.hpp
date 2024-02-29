@@ -323,6 +323,6 @@ private:
 } // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::FunctionGenerator, in, out, sample_rate, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, trigger_meta_info);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::basic::FunctionGenerator, float, double);
+auto registerFunctionGenerator = gr::registerBlock<gr::basic::FunctionGenerator, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_FUNCTION_GENERATOR_HPP

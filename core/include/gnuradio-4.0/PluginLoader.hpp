@@ -16,8 +16,8 @@
 #include "Graph.hpp"
 #include "plugin.hpp"
 
-using plugin_create_function_t  = void (*)(gp_plugin_base **);
-using plugin_destroy_function_t = void (*)(gp_plugin_base *);
+using plugin_create_function_t  = void (*)(gr_plugin_base **);
+using plugin_destroy_function_t = void (*)(gr_plugin_base *);
 
 namespace gr {
 
@@ -32,7 +32,7 @@ private:
     void                     *_dl_handle  = nullptr;
     plugin_create_function_t  _create_fn  = nullptr;
     plugin_destroy_function_t _destroy_fn = nullptr;
-    gp_plugin_base           *_instance   = nullptr;
+    gr_plugin_base           *_instance   = nullptr;
 
     std::string _status;
 
@@ -59,16 +59,16 @@ public:
             return;
         }
 
-        _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gp_plugin_make"));
+        _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gr_plugin_make"));
         if (!_create_fn) {
-            _status = "Failed to load symbol gp_plugin_make";
+            _status = "Failed to load symbol gr_plugin_make";
             release();
             return;
         }
 
-        _destroy_fn = reinterpret_cast<plugin_destroy_function_t>(dlsym(_dl_handle, "gp_plugin_free"));
+        _destroy_fn = reinterpret_cast<plugin_destroy_function_t>(dlsym(_dl_handle, "gr_plugin_free"));
         if (!_destroy_fn) {
-            _status = "Failed to load symbol gp_plugin_free";
+            _status = "Failed to load symbol gr_plugin_free";
             release();
             return;
         }
@@ -129,7 +129,7 @@ public:
 class PluginLoader {
 private:
     std::vector<PluginHandler>                        _handlers;
-    std::unordered_map<std::string, gp_plugin_base *> _handlerForName;
+    std::unordered_map<std::string, gr_plugin_base *> _handlerForName;
     std::unordered_map<std::string, std::string>      _failedPlugins;
     std::unordered_set<std::string>                   _loadedPluginFiles;
 

@@ -1,6 +1,7 @@
 #ifndef GNURADIO_TAGMONITORS_HPP
 #define GNURADIO_TAGMONITORS_HPP
 
+#include "gnuradio-4.0/BlockRegistry.hpp"
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -371,6 +372,13 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b)
                                     log_samples, verbose_console, samples);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags,
                                     log_samples, verbose_console, samples);
+
+auto registerTagSource = gr::registerBlock<gr::testing::TagSource, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry())
+                       | gr::registerBlock<gr::testing::TagSource, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
+auto registerTagMonitor = gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry())
+                        | gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
+auto registerTagSink = gr::registerBlock<gr::testing::TagSink, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry())
+                     | gr::registerBlock<gr::testing::TagSink, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
 
 namespace gr::testing {
 // the concepts can only work as expected after ENABLE_REFLECTION_FOR_TEMPLATE_FULL

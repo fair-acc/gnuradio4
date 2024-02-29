@@ -37,17 +37,14 @@ H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
     }
 };
 
-namespace IIRForm {
-class DF_I {}; /// direct form I: preferred for fixed-point arithmetics (e.g. no overflow)
+enum class IIRForm {
+    DF_I,  /// direct form I: preferred for fixed-point arithmetics (e.g. no overflow)
+    DF_II, /// direct form II: preferred for floating-point arithmetics (less operations)
+    DF_I_TRANSPOSED,
+    DF_II_TRANSPOSED,
+};
 
-class DF_II {}; /// direct form II: preferred for floating-point arithmetics (less operations)
-
-class DF_I_TRANSPOSED {};
-
-class DF_II_TRANSPOSED {};
-} // namespace IIRForm
-
-template<typename T, typename form = std::conditional_t<std::is_floating_point_v<T>, IIRForm::DF_II, IIRForm::DF_I>>
+template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
     requires std::floating_point<T>
 struct iir_filter : Block<iir_filter<T, form>, Doc<R""(
 @brief Infinite Impulse Response (IIR) filter class
@@ -73,7 +70,7 @@ a are the feedback coefficients
 
     [[nodiscard]] T
     processOne(T input) noexcept {
-        if constexpr (std::is_same_v<form, IIRForm::DF_I>) {
+        if constexpr (form == IIRForm::DF_I) {
             // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
             //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]
             inputHistory.push_back(input);
@@ -81,19 +78,19 @@ a are the feedback coefficients
                            - std::inner_product(a.cbegin() + 1, a.cend(), outputHistory.cbegin(), static_cast<T>(0)); // feedback path
             outputHistory.push_back(output);
             return output;
-        } else if constexpr (std::is_same_v<form, IIRForm::DF_II>) {
+        } else if constexpr (form == IIRForm::DF_II) {
             // w[n] = x[n] - a[1] * w[n-1] - a[2] * w[n-2] - ... - a[M] * w[n-M]
             // y[n] =        b[0] * w[n]   + b[1] * w[n-1] + ... + b[N] * w[n-N]
             const T w = input - std::inner_product(a.cbegin() + 1, a.cend(), inputHistory.cbegin(), T{ 0 });
             inputHistory.push_back(w);
             return std::inner_product(b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 });
-        } else if constexpr (std::is_same_v<form, IIRForm::DF_I_TRANSPOSED>) {
+        } else if constexpr (form == IIRForm::DF_I_TRANSPOSED) {
             // w_1[n] = x[n] - a[1] * w_2[n-1] - a[2] * w_2[n-2] - ... - a[M] * w_2[n-M]
             // y[n]   = b[0] * w_2[n] + b[1] * w_2[n-1] + ... + b[N] * w_2[n-N]
             T v0 = input - std::inner_product(a.cbegin() + 1, a.cend(), outputHistory.cbegin(), static_cast<T>(0));
             outputHistory.push_back(v0);
             return std::inner_product(b.cbegin(), b.cend(), outputHistory.cbegin(), static_cast<T>(0));
-        } else if constexpr (std::is_same_v<form, IIRForm::DF_II_TRANSPOSED>) {
+        } else if constexpr (form == IIRForm::DF_II_TRANSPOSED) {
             // y[n] = b_0*f[n] + \sum_(k=1)^N(b_k*f[n−k] − a_k*y[n−k])
             const T output = b[0] * input                                                                           //
                            + std::inner_product(b.cbegin() + 1, b.cend(), inputHistory.cbegin(), static_cast<T>(0)) //
@@ -109,10 +106,12 @@ a are the feedback coefficients
 } // namespace gr::filter
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::filter::fir_filter, in, out, b);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::filter::fir_filter, double, float);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename form), (gr::filter::iir_filter<T, form>), in, out, b, a);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::filter::iir_filter, BlockParameters<float, gr::filter::IIRForm::DF_I>, BlockParameters<float, gr::filter::IIRForm::DF_II>,
-                  BlockParameters<float, gr::filter::IIRForm::DF_I_TRANSPOSED>, BlockParameters<float, gr::filter::IIRForm::DF_II_TRANSPOSED>, BlockParameters<double, gr::filter::IIRForm::DF_I>,
-                  BlockParameters<double, gr::filter::IIRForm::DF_II>, BlockParameters<double, gr::filter::IIRForm::DF_I_TRANSPOSED>, BlockParameters<double, gr::filter::IIRForm::DF_II_TRANSPOSED>);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::filter::IIRForm form), (gr::filter::iir_filter<T, form>), in, out, b, a);
+
+auto registerFirFilter = gr::registerBlock<gr::filter::fir_filter, double, float>(gr::globalBlockRegistry());
+auto registerIirFilter = gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_I, double, float>(gr::globalBlockRegistry())
+                       | gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_II, double, float>(gr::globalBlockRegistry())
+                       | gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_I_TRANSPOSED, double, float>(gr::globalBlockRegistry())
+                       | gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_II_TRANSPOSED, double, float>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_TIME_DOMAIN_FILTER_HPP

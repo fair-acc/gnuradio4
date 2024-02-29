@@ -194,7 +194,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
 } // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure);
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::basic::Selector, float, double);
+auto registerSelector = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 
 #endif // include guard

@@ -87,6 +87,6 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::ImChartMonitor, in, sample_rate, signal_name)
-GR_REGISTER_BLOCK(gr::globalBlockRegistry(), gr::testing::ImChartMonitor, double, float);
+auto registerImChartMonitor = gr::registerBlock<gr::testing::ImChartMonitor, double, float>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_IMCHARTMONITOR_HPP

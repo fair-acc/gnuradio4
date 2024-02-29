@@ -46,7 +46,7 @@ struct TestContext {
     gr::PluginLoader loader;
 
     TestContext() : loader(gr::globalBlockRegistry(), std::vector<std::filesystem::path>{ "core/test/plugins", "test/plugins", "plugins" }) {
-        GR_REGISTER_BLOCK_RUNTIME(gr::globalBlockRegistry(), builtin_multiply, double, float);
+        gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry());
     }
 };
 
@@ -102,13 +102,13 @@ const boost::ut::suite BlockInstantiationTests = [] {
         expect(context().loader.instantiate(names::cout_sink, "double") != nullptr);
         expect(context().loader.instantiate(names::multiply, "double") != nullptr);
         expect(context().loader.instantiate(names::divide, "double") != nullptr);
-        expect(context().loader.instantiate(names::convert, "double;float") != nullptr);
+        expect(context().loader.instantiate(names::convert, "double,float") != nullptr);
 
         expect(context().loader.instantiate(names::fixed_source, "something") == nullptr);
         expect(context().loader.instantiate(names::cout_sink, "something") == nullptr);
         expect(context().loader.instantiate(names::multiply, "something") == nullptr);
         expect(context().loader.instantiate(names::divide, "something") == nullptr);
-        expect(context().loader.instantiate(names::convert, "float;float") == nullptr);
+        expect(context().loader.instantiate(names::convert, "float,float") == nullptr);
     };
 
     "UnknownBlocks"_test = [] { expect(context().loader.instantiate("ThisBlockDoesNotExist", "double") == nullptr); };
@@ -164,8 +164,8 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         // Instantiate a built-in node via the plugin loader
         auto &block_multiply_float = context().loader.instantiateInGraph(testGraph, names::builtin_multiply, "float");
 
-        auto &block_convert_to_float  = context().loader.instantiateInGraph(testGraph, names::convert, "double;float");
-        auto &block_convert_to_double = context().loader.instantiateInGraph(testGraph, names::convert, "float;double");
+        auto &block_convert_to_float  = context().loader.instantiateInGraph(testGraph, names::convert, "double,float");
+        auto &block_convert_to_double = context().loader.instantiateInGraph(testGraph, names::convert, "float,double");
 
         //
         std::size_t      repeats = 10;
