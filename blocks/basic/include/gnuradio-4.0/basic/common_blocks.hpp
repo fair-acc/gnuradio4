@@ -56,179 +56,52 @@ template<typename T>
 std::size_t builtin_counter<T>::s_event_count = 0;
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 
-// TODO: Unify blocks with static and dynamic ports
-//  - Port to gr::block
-//  - use Block::set_name instead of returning an empty name
-// TODO: Inherit from Block class when create new block.
 template<typename T>
-class multi_adder : public gr::lifecycle::StateMachine<multi_adder<T>>, public gr::BlockModel {
-    static std::atomic_size_t _unique_id_counter;
+struct MultiAdder : public gr::Block<MultiAdder<T>> {
+    std::vector<gr::PortIn<T>> inputs;
+    gr::PortOut<T>             out;
 
-public:
-    int               input_port_count;
-    const std::size_t unique_id    = _unique_id_counter++;
-    const std::string unique_name_ = fmt::format("multi_adder#{}", unique_id); // TODO: resolve symbol duplication
-
-protected:
-    using TPortIn = gr::PortIn<T>;
-    std::vector<TPortIn> _input_ports;
-    gr::PortOut<T>       _output_port;
-
-protected:
-    using setting_map                            = std::map<std::string, int, std::less<>>;
-    std::string                       _name      = "multi_adder";
-    std::string                       _type_name = "multi_adder";
-    gr::property_map                  _meta_information; /// used to store non-graph-processing information like UI block position etc.
-    bool                              _input_tags_present  = false;
-    bool                              _output_tags_changed = false;
-    std::vector<gr::property_map>     _tags_at_input;
-    std::vector<gr::property_map>     _tags_at_output;
-    std::unique_ptr<gr::SettingsBase> _settings = std::make_unique<gr::BasicSettings<multi_adder<T>>>(*this);
+    gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Doc<"variable number of inputs">, gr::Limits<1U, 32U>> n_inputs = 0U;
 
     void
-    applyInputCount() {
-        if (_input_ports.size() == static_cast<std::size_t>(input_port_count)) return;
-
-        _input_ports.resize(static_cast<std::size_t>(input_port_count));
-
-        _dynamicInputPorts.clear();
-        for (auto &input_port : _input_ports) {
-            _dynamicInputPorts.emplace_back(gr::DynamicPort(input_port, gr::DynamicPort::non_owned_reference_tag{}));
-        }
-        if (_dynamicOutputPorts.empty()) {
-            _dynamicOutputPorts.emplace_back(gr::DynamicPort(_output_port, gr::DynamicPort::non_owned_reference_tag{}));
-        }
-        _dynamicPortsLoaded = true;
-    }
-
-public:
-    explicit multi_adder(int input_ports_size) : input_port_count(input_ports_size) { applyInputCount(); };
-
-    ~multi_adder() override = default;
-
-    void
-    settingsChanged(const gr::property_map & /*old_setting*/, const gr::property_map & /*new_setting*/) noexcept {
-        applyInputCount();
-    }
-
-    void
-    init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
-
-    [[nodiscard]] std::string_view
-    name() const override {
-        return unique_name_;
-    }
-
-    std::string_view
-    typeName() const override {
-        return _type_name;
-    }
-
-    constexpr bool
-    isBlocking() const noexcept override {
-        return false;
-    }
-
-    [[nodiscard]] std::expected<void, gr::lifecycle::ErrorType>
-    changeState(gr::lifecycle::State newState) noexcept override {
-        return this->changeStateTo(newState);
-    }
-
-    [[nodiscard]] constexpr gr::lifecycle::State
-    state() const noexcept override {
-        return this->state();
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    availableInputSamples(std::vector<std::size_t> &) const noexcept override {
-        return 0UZ;
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    availableOutputSamples(std::vector<std::size_t> &) const noexcept override {
-        return 0UZ;
-    }
-
-    // TODO: integrate with Block::work
-    gr::work::Result
-    work(std::size_t requested_work) override {
-        // TODO: Rewrite with ranges once we can use them
-        std::size_t available_samples = std::numeric_limits<std::size_t>::max();
-        for (const auto &input_port : _input_ports) {
-            auto available_samples_for_port = input_port.streamReader().available();
-            if (available_samples_for_port < available_samples) {
-                available_samples = available_samples_for_port;
+    settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
+        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+            // if one of the port is already connected and  n_inputs was changed then throw
+            if (std::any_of(inputs.begin(), inputs.end(), [](const auto &port) { return port.isConnected(); })) {
+                // TODO: for the moment keep both: throw exception and emit message
+                using namespace gr::message;
+                std::string messageError{ "Number of input ports cannot be changed after Graph initialization." };
+                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, messageError } });
+                throw std::range_error(messageError);
             }
+            fmt::print("{}: configuration changed: n_inputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.at("n_inputs"));
+            inputs.resize(n_inputs);
         }
-
-        if (available_samples == 0) {
-            return { requested_work, 0UZ, gr::work::Status::OK };
-        }
-
-        std::vector<std::span<const double>> readers;
-        for (auto &input_port : _input_ports) {
-            gr::ConsumableSpan auto r = input_port.streamReader().get(available_samples);
-            readers.push_back(static_cast<std::span<const double>>(r));
-        }
-
-        auto &writer = _output_port.streamWriter();
-        writer.publish(
-                [available_samples, &readers](std::span<T> output) {
-                    // const auto input = reader.get(n_to_publish);
-                    for (std::size_t i = 0; i < available_samples; ++i) {
-                        output[i] = std::accumulate(readers.cbegin(), readers.cend(), 0, [i](T sum, auto span) { return sum + span[i]; });
-                    }
-                },
-                available_samples);
-
-        for (auto &input_port [[maybe_unused]] : _input_ports) {
-            auto consumed = input_port.streamReader().consume(available_samples);
-            assert(available_samples == consumed);
-            std::ignore = consumed;
-        }
-        return { requested_work, available_samples, gr::work::Status::OK };
     }
 
+    template<gr::ConsumableSpan TInput>
     gr::work::Status
-    draw() {
+    processBulk(const std::vector<TInput> &inSpans, gr::PublishableSpan auto &outSpan) {
+        std::size_t minSizeIn = std::ranges::min_element(inSpans, [](const auto &lhs, const auto &rhs) { return lhs.size() < rhs.size(); })->size();
+        std::size_t available = std::min(outSpan.size(), minSizeIn);
+
+        if (available == 0) {
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+
+        for (std::size_t i = 0; i < available; i++) {
+            outSpan[i] = std::accumulate(inSpans.cbegin(), inSpans.cend(), 0, [i](T sum, auto span) { return sum + span[i]; });
+        }
+        outSpan.publish(available);
+        for (auto &inSpan : inSpans) {
+            inSpan.consume(available);
+        }
+
         return gr::work::Status::OK;
-    }
-
-    void
-    processScheduledMessages() override {}
-
-    void *
-    raw() override {
-        return this;
-    }
-
-    void
-    setName(std::string /*name*/) noexcept override {}
-
-    [[nodiscard]] gr::property_map &
-    metaInformation() noexcept override {
-        return _meta_information;
-    }
-
-    [[nodiscard]] const gr::property_map &
-    metaInformation() const override {
-        return _meta_information;
-    }
-
-    [[nodiscard]] gr::SettingsBase &
-    settings() const override {
-        return *_settings;
-    }
-
-    [[nodiscard]] std::string_view
-    uniqueName() const override {
-        return unique_name_;
     }
 };
 
-// static_assert(gr::BlockLike<multi_adder<int>>);
-
-ENABLE_REFLECTION_FOR_TEMPLATE(multi_adder, input_port_count);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (MultiAdder<T>), inputs, out, n_inputs);
 
 template<typename Registry>
 void
@@ -239,5 +112,4 @@ void
     GP_REGISTER_BLOCK_RUNTIME(registry, builtin_counter, double, float);
 #pragma GCC diagnostic pop
 }
-
 #endif // include guard
