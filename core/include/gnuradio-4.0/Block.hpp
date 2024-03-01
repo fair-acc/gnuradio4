@@ -1053,11 +1053,8 @@ public:
                 }
             }
 
-            if (inSpan.size() > 0) {
-                if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
-                    throw fmt::format("Could not consume the messages from the message port");
-                }
-            }
+            // User could have consumed the span in the custom processMessages handler
+            std::ignore = inSpan.tryConsume(inSpan.size());
         };
         processPort(msgIn);
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
