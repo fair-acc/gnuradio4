@@ -28,6 +28,11 @@ isSupportedType() {
 }
 } // namespace settings
 
+struct ApplyStagedParametersResult {
+    property_map forwardParameters; // parameters that should be forwarded to dependent child blocks
+    property_map appliedParameters;
+};
+
 namespace detail {
 template<class T>
 inline constexpr void
@@ -146,7 +151,7 @@ concept SettingsLike = requires(T t, std::span<const std::string> parameter_keys
     /**
      * @brief synchronise map-based with actual block field-based settings
      */
-    { t.applyStagedParameters() } -> std::same_as<const property_map>;
+    { t.applyStagedParameters() } -> std::same_as<ApplyStagedParametersResult>;
 
     /**
      * @brief synchronises the map-based with the block's field-based parameters
@@ -233,7 +238,7 @@ struct SettingsBase {
      * returns map with key-value tags that should be forwarded
      * to dependent/child blocks.
      */
-    [[nodiscard]] virtual const property_map
+    [[nodiscard]] virtual ApplyStagedParametersResult
     applyStagedParameters() noexcept
             = 0;
 
@@ -497,12 +502,14 @@ public:
 
     /**
      * @brief synchronise map-based with actual block field-based settings
-     * returns map with key-value tags that should be forwarded
-     * to dependent/child blocks.
+     * returns a structure containing three maps:
+     *  - forwardParameters -- map with key-value tags that should be forwarded
+     *    to dependent/child blocks.
+     *  - appliedParameters -- map with peoperties that were successfully set
      */
-    [[nodiscard]] const property_map
+    [[nodiscard]] ApplyStagedParametersResult
     applyStagedParameters() noexcept override {
-        property_map forward_parameters; // parameters that should be forwarded to dependent child blocks
+        ApplyStagedParametersResult result;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
 
@@ -523,13 +530,14 @@ public:
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key                  = localKey;
                 const auto &staged_value         = localStaged_value;
-                auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                auto        apply_member_changes = [&key, &staged, &result, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
+                                    result.appliedParameters.insert_or_assign(key, staged_value);
                                     if constexpr (HasSettingsChangedCallback<TBlock>) {
                                         staged.insert_or_assign(key, staged_value);
                                     } else {
@@ -553,6 +561,7 @@ public:
                                 }
                             } else {
                                 member(*_block) = std::get<Type>(staged_value);
+                                result.appliedParameters.insert_or_assign(key, staged_value);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, staged_value);
                                 } else {
@@ -561,7 +570,7 @@ public:
                             }
                         }
                         if (_auto_forward.contains(key)) {
-                            forward_parameters.insert_or_assign(key, staged_value);
+                            result.forwardParameters.insert_or_assign(key, staged_value);
                         }
                     }
                 };
@@ -581,8 +590,8 @@ public:
             if (!staged.empty()) {
                 if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged); }) {
                     _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged);
-                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
-                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
+                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ result.forwardParameters); }) {
+                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ result.forwardParameters);
                 }
             }
 
@@ -600,7 +609,7 @@ public:
         }
 
         SettingsBase::_changed.store(false);
-        return forward_parameters;
+        return result;
     }
 
     void

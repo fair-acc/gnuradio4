@@ -13977,10 +13977,11 @@ const std::string ErrorInfo = "ERROR_INFO_KEY"; // optional: if a message has an
 } // namespace message::key
 
 namespace message::kind {
-const std::string Error           = "ERROR_KIND";
-const std::string Graph_update    = "GRAPH_UPDATE_KIND";
-const std::string UpdateSettings  = "UPDATE_SETTINGS_KIND";
-const std::string SettingsChanged = "SETTINGS_CHANGED_KIND";
+const std::string Error                       = "ERROR_KIND";
+const std::string Graph_update                = "GRAPH_UPDATE_KIND";
+const std::string UpdateSettings              = "UPDATE_SETTINGS_KIND";
+const std::string SettingsChanged             = "SETTINGS_CHANGED_KIND";
+const std::string SettingsChangeRequested     = "REQUESTED_SETTINGS_CHANGE_KIND";
 const std::string SchedulerStateUpdate        = "SCHEDULER_UPDATE_KIND";
 const std::string SchedulerStateChangeRequest = "SCHEDULER_COMMAND_KIND";
 } // namespace message::kind
@@ -17891,6 +17892,11 @@ isSupportedType() {
 }
 } // namespace settings
 
+struct ApplyStagedParametersResult {
+    property_map forwardParameters; // parameters that should be forwarded to dependent child blocks
+    property_map appliedParameters;
+};
+
 namespace detail {
 template<class T>
 inline constexpr void
@@ -18009,7 +18015,7 @@ concept SettingsLike = requires(T t, std::span<const std::string> parameter_keys
     /**
      * @brief synchronise map-based with actual block field-based settings
      */
-    { t.applyStagedParameters() } -> std::same_as<const property_map>;
+    { t.applyStagedParameters() } -> std::same_as<ApplyStagedParametersResult>;
 
     /**
      * @brief synchronises the map-based with the block's field-based parameters
@@ -18096,7 +18102,7 @@ struct SettingsBase {
      * returns map with key-value tags that should be forwarded
      * to dependent/child blocks.
      */
-    [[nodiscard]] virtual const property_map
+    [[nodiscard]] virtual ApplyStagedParametersResult
     applyStagedParameters() noexcept
             = 0;
 
@@ -18360,12 +18366,14 @@ public:
 
     /**
      * @brief synchronise map-based with actual block field-based settings
-     * returns map with key-value tags that should be forwarded
-     * to dependent/child blocks.
+     * returns a structure containing three maps:
+     *  - forwardParameters -- map with key-value tags that should be forwarded
+     *    to dependent/child blocks.
+     *  - appliedParameters -- map with peoperties that were successfully set
      */
-    [[nodiscard]] const property_map
+    [[nodiscard]] ApplyStagedParametersResult
     applyStagedParameters() noexcept override {
-        property_map forward_parameters; // parameters that should be forwarded to dependent child blocks
+        ApplyStagedParametersResult result;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
 
@@ -18386,13 +18394,14 @@ public:
             for (const auto &[localKey, localStaged_value] : _staged) {
                 const auto &key                  = localKey;
                 const auto &staged_value         = localStaged_value;
-                auto        apply_member_changes = [&key, &staged, &forward_parameters, &staged_value, this](auto member) {
+                auto        apply_member_changes = [&key, &staged, &result, &staged_value, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(staged_value)) {
                             if constexpr (is_annotated<RawType>()) {
                                 if (member(*_block).validate_and_set(std::get<Type>(staged_value))) {
+                                    result.appliedParameters.insert_or_assign(key, staged_value);
                                     if constexpr (HasSettingsChangedCallback<TBlock>) {
                                         staged.insert_or_assign(key, staged_value);
                                     } else {
@@ -18416,6 +18425,7 @@ public:
                                 }
                             } else {
                                 member(*_block) = std::get<Type>(staged_value);
+                                result.appliedParameters.insert_or_assign(key, staged_value);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, staged_value);
                                 } else {
@@ -18424,7 +18434,7 @@ public:
                             }
                         }
                         if (_auto_forward.contains(key)) {
-                            forward_parameters.insert_or_assign(key, staged_value);
+                            result.forwardParameters.insert_or_assign(key, staged_value);
                         }
                     }
                 };
@@ -18444,8 +18454,8 @@ public:
             if (!staged.empty()) {
                 if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged); }) {
                     _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged);
-                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ forward_parameters); }) {
-                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ forward_parameters);
+                } else if constexpr (requires { _block->settingsChanged(/* old settings */ _active, /* new settings */ staged, /* new forward settings */ result.forwardParameters); }) {
+                    _block->settingsChanged(/* old settings */ oldSettings, /* new settings */ staged, /* new forward settings */ result.forwardParameters);
                 }
             }
 
@@ -18463,7 +18473,7 @@ public:
         }
 
         SettingsBase::_changed.store(false);
-        return forward_parameters;
+        return result;
     }
 
     void
@@ -19379,9 +19389,9 @@ public:
 
         // Handle settings
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
-        if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
+        if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                publishTag(forward_parameters);
+                publishTag(applyResult.forwardParameters);
             }
         }
 
@@ -19651,13 +19661,25 @@ public:
         }
     }
 
-    constexpr void
-    updateOutputTagsWithSettingParametersIfNeeded() {
+    void
+    applyChangedSettings() {
         if (settings().changed()) {
-            if (const auto forward_parameters = settings().applyStagedParameters(); !forward_parameters.empty()) {
-                for_each_port([&forward_parameters](PortLike auto &outPort) { outPort.publishTag(forward_parameters, 0); }, outputPorts<PortType::STREAM>(&self()));
+            Message settingsUpdated;
+            settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
+
+            auto applyResult = settings().applyStagedParameters();
+
+            if (!applyResult.forwardParameters.empty()) {
+                publishTag(applyResult.forwardParameters, 0);
             }
+
+            if (!applyResult.appliedParameters.empty()) {
+                settingsUpdated[gr::message::key::Data] = std::move(applyResult.appliedParameters);
+            }
+
             settings()._changed.store(false);
+
+            emitMessage(msgOut, std::move(settingsUpdated));
         }
     }
 
@@ -19930,7 +19952,7 @@ protected:
                 fmt::println("##block {} received EOS tag at {} in_samples {} -> lifecycle::State::STOPPED", name, ports_status.nSamplesToEosTag, ports_status.in_samples);
 #endif
                 updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
-                updateOutputTagsWithSettingParametersIfNeeded();
+                applyChangedSettings();
                 return { requested_work, 0UZ, work::Status::DONE };
             }
 
@@ -19947,7 +19969,7 @@ protected:
                             emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                         }
                         updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
-                        updateOutputTagsWithSettingParametersIfNeeded();
+                        applyChangedSettings();
                         forwardTags();
                         //  EOS is not at 0 position and thus not read by updateInputAndOutputTags(), we need to publish new EOS
                         publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
@@ -19959,6 +19981,9 @@ protected:
 #ifdef _DEBUG
             fmt::println("block {} - mark3 - in {} -> out {}", name, ports_status.in_samples, ports_status.out_samples);
 #endif
+
+            applyChangedSettings();
+
             if (ports_status.has_sync_input_ports && ports_status.in_available == 0) {
                 return { requested_work, 0UZ, work::Status::INSUFFICIENT_INPUT_ITEMS };
             }
@@ -19986,7 +20011,7 @@ protected:
             updateInputAndOutputTags(0);
         }
 
-        updateOutputTagsWithSettingParametersIfNeeded();
+        applyChangedSettings();
 
         // TODO: check here whether a processOne(...) or a bulk access process has been defined, cases:
         // case 1a: N-in->N-out -> processOne(...) -> auto-handling of streaming tags
@@ -20238,7 +20263,7 @@ public:
                 }
 
                 Message settingsUpdated;
-                settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
+                settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChangeRequested;
                 settingsUpdated[gr::message::key::Data] = settings().get();
 
                 if (!notSet.empty()) {

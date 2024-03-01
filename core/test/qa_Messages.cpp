@@ -202,11 +202,14 @@ testMulticastMessagingWithTheWorld() {
 template<typename Scheduler>
 void
 testSettingsManagement() {
-    constexpr std::atomic_size_t requiredMessageCount        = 4;
-    std::atomic_size_t           settingsSuccessMessageCount = 0;
-    std::atomic_size_t           settingsFailureMessageCount = 0;
+    constexpr std::atomic_size_t requiredMessageCount               = 4;
+    std::atomic_size_t           settingsSuccessRequestMessageCount = 0;
+    std::atomic_size_t           settingsSuccessAppliedMessageCount = 0;
+    std::atomic_size_t           settingsFailureMessageCount        = 0;
     //
-    auto isDone = [&] { return settingsSuccessMessageCount >= requiredMessageCount && settingsFailureMessageCount >= requiredMessageCount; };
+    auto isDone = [&] {
+        return settingsSuccessAppliedMessageCount >= requiredMessageCount && settingsSuccessRequestMessageCount >= requiredMessageCount && settingsFailureMessageCount >= requiredMessageCount;
+    };
 
     auto scheduler = [&] {
         gr::Graph flow;
@@ -242,18 +245,31 @@ testSettingsManagement() {
     messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
         for (const auto &message : messages) {
             const auto kind = *gr::messageField<std::string>(message, gr::message::key::Kind);
-            if (kind == gr::message::kind::SettingsChanged) {
+            if (kind == gr::message::kind::SettingsChangeRequested) {
                 const auto sender    = gr::messageField<std::string>(message, gr::message::key::Sender);
+                const auto data      = gr::messageField<property_map>(message, gr::message::key::Data);
                 const auto errorInfo = gr::messageField<property_map>(message, gr::message::key::ErrorInfo);
 
+                if (data.has_value() && !data->empty()) {
+                    settingsSuccessRequestMessageCount++;
+                }
+
                 if (errorInfo.has_value()) {
-                    settingsSuccessMessageCount++;
-                } else {
                     settingsFailureMessageCount++;
+                }
+            } else if (kind == gr::message::kind::SettingsChanged) {
+                const auto data = gr::messageField<property_map>(message, gr::message::key::Data);
+                if (data) {
+                    for (const auto &[k, v] : *data) {
+                        if (k == "factor"s) {
+                            settingsSuccessAppliedMessageCount++;
+                        }
+                    }
                 }
             }
         }
     };
+
     expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
 
     std::thread messenger([&] {
@@ -412,7 +428,7 @@ testSchedulerControl() {
         gr::Graph flow;
         auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
         source.generator = createOnesGenerator(isDone);
-        auto     &sink   = flow.emplaceBlock<gr::basic::DataSink<float>>();
+        auto &sink       = flow.emplaceBlock<gr::basic::DataSink<float>>();
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
 
@@ -427,7 +443,7 @@ testSchedulerControl() {
     auto client = std::thread([&scheduler, &fromScheduler, &toScheduler] {
         using namespace gr::lifecycle;
         using namespace gr::message;
-        auto &reader = fromScheduler.streamReader();
+        auto             &reader          = fromScheduler.streamReader();
         const std::string RUNNING         = std::string(magic_enum::enum_name(State::RUNNING));
         const std::string REQUESTED_PAUSE = std::string(magic_enum::enum_name(State::REQUESTED_PAUSE));
         const std::string PAUSED          = std::string(magic_enum::enum_name(State::PAUSED));
