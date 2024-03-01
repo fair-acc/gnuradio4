@@ -1,9 +1,11 @@
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-
-#include <gnuradio-4.0/basic/all.hpp>
+#include <gnuradio-4.0/basic/clock_source.hpp>
+#include <gnuradio-4.0/basic/common_blocks.hpp>
+#include <gnuradio-4.0/basic/DataSink.hpp>
+#include <gnuradio-4.0/basic/FunctionGenerator.hpp>
+#include <gnuradio-4.0/basic/Selector.hpp>
+#include <gnuradio-4.0/basic/SignalGenerator.hpp>
 
 const boost::ut::suite KnownBlockTests = [] {
     using namespace boost::ut;

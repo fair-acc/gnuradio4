@@ -85,8 +85,9 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/echo");
-        auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/echo" } });
+
+        auto &sink = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -116,7 +117,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/does-not-exist");
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/does-not-exist" } });
         auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
@@ -145,7 +146,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/number", http::RequestType::POST, "param=42");
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/number" }, { "type"s, "POST" }, { "parameters"s, "param=42" } });
         auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
@@ -187,7 +188,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/notify", http::RequestType::SUBSCRIBE);
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/notify" }, { "type"s, "SUBSCRIBE" } });
         auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));

@@ -1,13 +1,12 @@
-#ifndef GNURADIO_NODE_REGISTRY_H
-#define GNURADIO_NODE_REGISTRY_H
+#ifndef BLOCK_REGISTRY_HPP
+#define BLOCK_REGISTRY_HPP
 
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
-
-#include "Graph.hpp"
 
 namespace gr {
 
@@ -51,24 +50,6 @@ private:
         }
     }
 
-    template<typename... Types>
-    static std::string
-    encoded_list_of_types() {
-        struct accumulator {
-            std::string value;
-
-            accumulator &
-            operator%(const std::string &type) {
-                if (value.empty()) value = type;
-                else
-                    value += ","s + type;
-                return *this;
-            }
-        };
-
-        return (accumulator{} % ... % meta::type_name<Types>()).value;
-    }
-
 public:
     template<typename TBlock>
     void
@@ -85,7 +66,6 @@ public:
             }
         }
         auto &block_handlers = findBlock_type_handlers_map(blockType);
-        fmt::print("Registering {} {}\n", blockType, blockParams);
         block_handlers[std::move(blockParams)] = createHandler<TBlock>();
     }
 
@@ -125,4 +105,4 @@ globalBlockRegistry() {
 
 } // namespace gr
 
-#endif // include guard
+#endif // BLOCK_REGISTRY_HPP

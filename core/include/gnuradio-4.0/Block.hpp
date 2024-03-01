@@ -226,6 +226,11 @@ template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
 inline void
 checkBlockContracts();
 
+template<typename T>
+struct isBlockDependent {
+    static constexpr bool value = PortLike<T> || BlockLike<T>;
+};
+
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -329,7 +334,10 @@ checkBlockContracts();
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : public lifecycle::StateMachine<Derived>, protected std::tuple<Arguments...> {
+class Block : public lifecycle::StateMachine<Derived>, //
+              protected std::tuple<Arguments...> // all arguments -> may cause code binary size bloat
+//              protected std::tuple<typename gr::meta::typelist<Arguments...>::template filter<gr::isBlockDependent>> // only add port types to the tuple, the other info are kept in the using statements below
+{
     static std::atomic_size_t _unique_id_counter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -754,7 +762,7 @@ public:
     write_to_outputs(std::size_t available_values_count, auto &writers_tuple) noexcept {
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
-                    [available_values_count]<typename OutputRange>(auto i, OutputRange &output_range) {
+                    [available_values_count]<typename OutputRange>(auto, OutputRange &output_range) {
                         auto process_out = [available_values_count]<typename Out>(Out &out) {
                             if constexpr (Out::isMultiThreadedStrategy()) {
                                 if (!out.isFullyPublished()) {
@@ -1041,20 +1049,21 @@ public:
     constexpr void
     processScheduledMessages() {
         auto processPort = [this]<PortLike TPort>(TPort &inPort) {
-            const auto          available = inPort.streamReader().available();
-            ConsumableSpan auto inSpan    = inPort.streamReader().get(available);
+            const auto available = inPort.streamReader().available();
+            if (available == 0UZ) {
+                return;
+            }
+            ConsumableSpan auto inSpan = inPort.streamReader().get(available);
             if constexpr (traits::block::can_processMessagesForPortConsumableSpan<Derived, TPort>) {
-                if (inSpan.size() > 0) {
-                    self().processMessages(inPort, inSpan);
-                }
+                self().processMessages(inPort, inSpan);
+                // User could have consumed the span in the custom processMessages handler
+                std::ignore = inSpan.tryConsume(inSpan.size());
             } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
-                if (inSpan.size() > 0) {
-                    self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
+                self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
+                if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
+                    throw fmt::format("Could not consume the messages from the message port");
                 }
             }
-
-            // User could have consumed the span in the custom processMessages handler
-            std::ignore = inSpan.tryConsume(inSpan.size());
         };
         processPort(msgIn);
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
@@ -1725,7 +1734,7 @@ struct BlockParameters : meta::typelist<Types...> {
  *  - TBlockParameters -- types that the block can be instantiated with
  */
 template<template<typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
-int
+inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
@@ -1736,7 +1745,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
-int
+inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
@@ -1748,7 +1757,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
-int
+inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
@@ -1759,7 +1768,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
-int
+inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
@@ -1771,7 +1780,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
-int
+inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
@@ -1782,7 +1791,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
-int
+inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
@@ -1794,7 +1803,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto
+inline constexpr auto
 for_each_port(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
     return gr::meta::tuple_for_each(
             [&function](auto &&...args) {

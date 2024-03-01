@@ -67,7 +67,6 @@ public:
     template<typename TBlock>
     void
     addBlockType(std::string blockType = {}, std::string blockParams = {}) {
-        std::cout << "New block type: " << blockType << std::endl;
         registry.addBlockType<TBlock>(std::move(blockType), std::move(blockParams));
     }
 };

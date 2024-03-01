@@ -10,6 +10,19 @@
 #include <semaphore>
 #include <queue>
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#ifndef __clang__
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+#include <magic_enum.hpp>
+#include <magic_enum_utility.hpp>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
 #include <emscripten/fetch.h>
@@ -23,10 +36,10 @@ using namespace std::chrono_literals;
 
 namespace gr::http {
 
-enum class RequestType {
-    GET,
-    SUBSCRIBE,
-    POST,
+enum class RequestType : char {
+    GET = 1,
+    SUBSCRIBE = 2,
+    POST = 3,
 };
 
 using HttpBlockDoc = Doc<R""(
@@ -82,7 +95,7 @@ private:
     doRequestEmscripten() {
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
-        if (type == RequestType::POST) {
+        if (_type == RequestType::POST) {
             strcpy(attr.requestMethod, "POST");
             if (!parameters.empty()) {
                 attr.requestData     = parameters.c_str();
@@ -110,7 +123,7 @@ private:
 
     void
     runThreadEmscripten() {
-        if (type == RequestType::SUBSCRIBE) {
+        if (_type == RequestType::SUBSCRIBE) {
             while (!_shutdownThread) {
                 // long polling, just keep doing requests
                 std::thread thread{ &HttpBlock::doRequestEmscripten, this };
@@ -132,7 +145,7 @@ private:
     runThreadNative() {
         _client = std::make_unique<httplib::Client>(url);
         _client->set_follow_location(true);
-        if (type == RequestType::SUBSCRIBE) {
+        if (_type == RequestType::SUBSCRIBE) {
             // it's long polling, be generous with timeouts
             _client->set_read_timeout(1h);
             _client->Get(endpoint, [&](const char *data, size_t len) {
@@ -150,7 +163,7 @@ private:
                 while (_pendingRequests > 0) {
                     _pendingRequests--;
                     httplib::Result resp;
-                    if (type == RequestType::POST) {
+                    if (_type == RequestType::POST) {
                         resp = parameters.empty() ? _client->Post(endpoint) : _client->Post(endpoint, parameters, "application/x-www-form-urlencoded");
                     } else {
                         resp = _client->Get(endpoint);
@@ -184,30 +197,37 @@ private:
     }
 
     void
-    runThread() {
-#ifdef __EMSCRIPTEN__
-        runThreadEmscripten();
-#else
-        runThreadNative();
-#endif
-    }
-
-    void
     startThread() {
-        _thread = std::shared_ptr<std::thread>(new std::thread([this]() { runThread(); }), [this](std::thread *t) {
-            _shutdownThread = true;
-            _ready.release();
-#ifndef __EMSCRIPTEN__
-            _client->stop();
+        if (_thread) {
+            _thread.reset();
+        }
+        _thread = std::shared_ptr<std::thread>(new std::thread([this]() {
+#ifdef __EMSCRIPTEN__
+                                                   runThreadEmscripten();
+#else
+                                                   runThreadNative();
 #endif
-            if (t->joinable()) {
-                t->join();
-            }
-            _shutdownThread = false;
-            delete t;
-
-            std::ignore = this->changeStateTo(gr::lifecycle::State::STOPPED);
-        });
+                                               }),
+                                               [this](std::thread *t) {
+                                                   if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
+                                                       throw std::invalid_argument(fmt::format("{}::startThread() could not change state to REQUESTED_STOP", this->name));
+                                                   }
+                                                   _shutdownThread = true;
+                                                   _ready.release();
+#ifndef __EMSCRIPTEN__
+                                                   if (_client) {
+                                                       _client->stop();
+                                                   }
+#endif
+                                                   if (t->joinable()) {
+                                                       t->join();
+                                                   }
+                                                   _shutdownThread = false;
+                                                   delete t;
+                                                    if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
+                                                        throw std::invalid_argument(fmt::format("{}::startThread() could not change state to STOPPED", this->name));
+                                                    }
+                                               });
     }
 
     void
@@ -215,25 +235,25 @@ private:
         _thread.reset();
     }
 
+    gr::http::RequestType _type = gr::http::RequestType::GET;
+
 public:
     PortOut<pmtv::map_t> out;
 
-    std::string           url;
-    std::string           endpoint;
-    gr::http::RequestType type = gr::http::RequestType::GET;
-    std::string           parameters; // x-www-form-urlencoded encoded POST parameters
-
-    explicit HttpBlock() {}
-
-    explicit HttpBlock(const std::string &_url, const std::string &_endpoint = "/", const RequestType _type = RequestType::GET, const std::string &_parameters = "")
-        : url(_url), endpoint(_endpoint), type(_type), parameters(_parameters) {}
+    std::string url;
+    std::string endpoint   = "/";
+    std::string type       = std::string(magic_enum::enum_name(_type));
+    std::string parameters; // x-www-form-urlencoded encoded POST parameters
 
     ~HttpBlock() { stopThread(); }
 
     void
-    settingsChanged(const property_map & /*oldSettings*/, property_map &newSettings) noexcept {
+    settingsChanged(const property_map & /*oldSettings*/, property_map &newSettings) {
         if (newSettings.contains("url") || newSettings.contains("type")) {
-            // other setting changes are hot-swappble without restarting the Client
+            if (newSettings.contains("type")) {
+                _type = magic_enum::enum_cast<gr::http::RequestType>(type, magic_enum::case_insensitive).value_or(_type);
+            }
+            // other setting changes are hot-swappable without restarting the Client
             startThread();
         }
     }
@@ -268,7 +288,7 @@ public:
     void
     processMessages(gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> message) {
         std::ranges::for_each(message, [this](auto &m) {
-            if (type == RequestType::SUBSCRIBE) {
+            if (_type == RequestType::SUBSCRIBE) {
                 if (m.contains("active")) {
                     // for long polling, the subscription should stay active, if and only if the messages's "active" member is truthy
                     if (std::get<bool>(m.at("active"))) {
@@ -291,7 +311,7 @@ static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
 } // namespace gr::http
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::http::HttpBlock, out, url, endpoint);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::http::HttpBlock, out, url, endpoint, type, parameters);
 auto registerHttpBlock = gr::registerBlock<gr::http::HttpBlock, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_HTTP_BLOCK_HPP

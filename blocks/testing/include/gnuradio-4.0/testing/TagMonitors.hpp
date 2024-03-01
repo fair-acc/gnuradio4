@@ -17,8 +17,8 @@ enum class ProcessFunction {
     USE_PROCESS_ONE_SIMD = 2  ///
 };
 
-void
-print_tag(const Tag &tag, std::string_view prefix = {}) {
+inline constexpr void
+print_tag(const Tag &tag, std::string_view prefix = {}) noexcept {
     if (tag.map.empty()) {
         fmt::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
         return;
@@ -27,7 +27,7 @@ print_tag(const Tag &tag, std::string_view prefix = {}) {
 }
 
 template<typename MapType>
-void
+inline constexpr void
 map_diff_report(const MapType &map1, const MapType &map2, const std::string &name1, const std::string &name2, const std::optional<std::string> &ignoreKey = std::nullopt) {
     for (const auto &[key, value] : map1) {
         if (ignoreKey && key == *ignoreKey) {
@@ -43,7 +43,7 @@ map_diff_report(const MapType &map1, const MapType &map2, const std::string &nam
 }
 
 template<typename IterType>
-void
+inline constexpr void
 mismatch_report(const IterType &mismatchedTag1, const IterType &mismatchedTag2, const IterType &tags1_begin, const std::optional<std::string> &ignoreKey = std::nullopt) {
     const auto index = static_cast<size_t>(std::distance(tags1_begin, mismatchedTag1));
     fmt::print("mismatch at index {}", index);
@@ -58,7 +58,7 @@ mismatch_report(const IterType &mismatchedTag1, const IterType &mismatchedTag2, 
     }
 }
 
-bool
+inline constexpr bool
 equal_tag_lists(const std::vector<Tag> &tags1, const std::vector<Tag> &tags2, const std::optional<std::string> &ignoreKey = std::nullopt) {
     if (tags1.size() != tags2.size()) {
         fmt::println("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
@@ -379,27 +379,5 @@ auto registerTagMonitor = gr::registerBlock<gr::testing::TagMonitor, gr::testing
                         | gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
 auto registerTagSink = gr::registerBlock<gr::testing::TagSink, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry())
                      | gr::registerBlock<gr::testing::TagSink, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
-
-namespace gr::testing {
-// the concepts can only work as expected after ENABLE_REFLECTION_FOR_TEMPLATE_FULL
-static_assert(HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(not HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(not HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
-static_assert(HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
-static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>);
-
-static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE_SIMD>>);
-static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE_SIMD>>);
-static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
-
-static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
-} // namespace gr::testing
 
 #endif // GNURADIO_TAGMONITORS_HPP
