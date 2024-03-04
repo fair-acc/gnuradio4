@@ -32,5 +32,5 @@ const boost::ut::suite KnownBlockTests = [] {
 
 int
 main() {
-    boost::ut::cfg<boost::ut::override>.run();
+    return boost::ut::cfg<boost::ut::override>.run();
 }
