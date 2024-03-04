@@ -4,95 +4,45 @@
 
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/FunctionBlocks.hpp>
-
-template<typename T>
-std::atomic_size_t multi_adder<T>::_unique_id_counter = 0;
-
-template<typename T>
-struct fixed_source : public gr::Block<fixed_source<T>, gr::PortOutNamed<T, "out">> {
-    T value = 1;
-
-    gr::work::Result
-    work(std::size_t requested_work) {
-        auto &port   = gr::outputPort<0, gr::PortType::STREAM>(this);
-        auto &writer = port.streamWriter();
-        auto  data   = writer.reserve(1UZ);
-        data[0]      = value;
-        data.publish(1UZ);
-
-        value += 1;
-        return { requested_work, 1UZ, gr::work::Status::OK };
-    }
-};
-
-static_assert(gr::BlockLike<fixed_source<int>>);
-static_assert(gr::traits::block::stream_input_ports<fixed_source<int>>::size() == 0);
-static_assert(gr::traits::block::stream_output_ports<fixed_source<int>>::size() == 1);
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
     using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
-        constexpr const int         sources_count = 10;
-        constexpr const std::size_t events_count  = 5;
+        const gr::Size_t nInputs           = 10;
+        const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
+        const gr::Size_t nSamples          = 5;
 
-        gr::Graph testGraph;
+        gr::Graph graph;
 
-        // Adder has sources_count inputs in total, but let's create
-        // sources_count / 2 inputs on construction, and change the number
-        // via settings
-        auto &adder = testGraph.addBlock(std::make_unique<multi_adder<double>>(sources_count / 2));
-        auto &sink  = testGraph.emplaceBlock<InspectSink<double>>({});
+        auto &adder = graph.emplaceBlock<MultiAdder<double>>({ { "n_inputs", nInputs } });
+        expect(adder.settings().applyStagedParameters().forwardParameters.empty());
+        auto &sink = graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({});
 
-        // Function that adds a new source node to the graph, and connects
-        // it to one of adder's ports
-        std::ignore = adder.settings().set({ { "input_port_count", sources_count } });
-        std::ignore = adder.settings().applyStagedParameters();
-
-        std::vector<fixed_source<double> *> sources;
-        for (std::size_t i = 0; i < sources_count; ++i) {
-            auto &source = testGraph.emplaceBlock<fixed_source<double>>();
-            sources.push_back(&source);
-            testGraph.connect(source, 0, adder, sources.size() - 1);
+        std::vector<TagSource<double> *> sources;
+        for (std::size_t i = 0; i < nInputs; ++i) {
+            sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "mark_tag", false } })));
+            expect(sources.back()->settings().applyStagedParameters().forwardParameters.empty());
+            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), { "out", gr::meta::invalid_index }, adder, { "inputs", sources.size() - 1 }));
         }
+        expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));
 
-        testGraph.connect(adder, 0, sink, 0);
+        gr::scheduler::Simple sched(std::move(graph));
 
-        for (std::size_t i = 0; i < events_count; ++i) {
-            for (auto *source : sources) {
-                source->work(1UZ);
-            }
-            std::ignore     = adder.work(1UZ);
-            const auto work = sink.work(1UZ);
-            expect(eq(work.performed_work, 1UZ));
+        sched.runAndWait();
 
-            expect(eq(sink.value, static_cast<double>((i + 1) * sources.size())));
-        }
+        std::vector<double> expectedOutput{ 0., 10., 20., 30., 40 };
+        expect(std::ranges::equal(sink.samples, expectedOutput)) << "sinks samples does not match to expected values";
 
-        // add yet another sources_count number of ports
-        std::ignore = adder.settings().set({ { "input_port_count", 2 * sources_count } });
-        std::ignore = adder.settings().applyStagedParameters();
-
-        // if we add even more ports (and connections), the old connections should still stay connected
-        for (std::size_t i = 0; i < sources_count; ++i) {
-            auto &source = testGraph.emplaceBlock<fixed_source<double>>();
-            sources.push_back(&source);
-            testGraph.connect(source, 0, adder, sources.size() - 1);
-        }
-
-        for (std::size_t i = events_count; i < 2 * events_count; ++i) {
-            for (auto *source : sources) {
-                const auto source_work = source->work(1UZ);
-                expect(eq(source_work.performed_work, 1UZ));
-            }
-            const auto adder_work = adder.work(1UZ);
-            expect(eq(adder_work.performed_work, 1UZ));
-            const auto sink_work = sink.work(1UZ);
-            expect(eq(sink_work.performed_work, 1UZ));
-
-            expect(eq(sink.value, static_cast<double>((i + 1) * sources_count + (i - events_count + 1) * sources_count)));
-        }
+        // TODO: for the moment it s not allowed to change number of ports after they are connected
+        // TODO: Emscripten does not like this test
+        // expect(aborts([&adder] {
+        //    std::ignore = adder.settings().set({ { "n_inputs", nInputs + nAdditionalInputs } });
+        //    expect(adder.settings().applyStagedParameters().forwardParameters.empty());
+        //}));
     };
 };
 
