@@ -335,8 +335,9 @@ struct isBlockDependent {
  */
 template<typename Derived, typename... Arguments>
 class Block : public lifecycle::StateMachine<Derived>, //
-              protected std::tuple<Arguments...> // all arguments -> may cause code binary size bloat
-//              protected std::tuple<typename gr::meta::typelist<Arguments...>::template filter<gr::isBlockDependent>> // only add port types to the tuple, the other info are kept in the using statements below
+              protected std::tuple<Arguments...>       // all arguments -> may cause code binary size bloat
+//              protected std::tuple<typename gr::meta::typelist<Arguments...>::template filter<gr::isBlockDependent>> // only add port types to the tuple, the other info are kept in the using
+//              statements below
 {
     static std::atomic_size_t _unique_id_counter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
@@ -1712,12 +1713,65 @@ blockDescription() noexcept {
     return ret;
 }
 
+namespace detail {
+using namespace std::string_literals;
+
+template<typename Type>
+std::string
+reflFirstTypeName() {
+    if constexpr (refl::is_reflectable<Type>()) {
+        return refl::reflect<Type>().name.str();
+
+    } else {
+        return meta::type_name<Type>;
+    }
+}
+
+template<typename... Types>
+std::string
+encodeListOfTypes() {
+    struct accumulator {
+        std::string value;
+
+        accumulator &
+        operator%(const std::string &type) {
+            if (value.empty()) value = type;
+            else
+                value += ","s + type;
+
+            return *this;
+        }
+    };
+
+    return (accumulator{} % ... % reflFirstTypeName<Types>()).value;
+}
+
+template<typename TBlock>
+std::string
+blockBaseName() {
+    auto blockName = reflFirstTypeName<TBlock>();
+    auto it        = std::ranges::find(blockName, '<');
+    return std::string(blockName.begin(), it);
+}
+
+template<auto Value>
+std::string
+nttpToString() {
+    if constexpr (magic_enum::is_scoped_enum_v<decltype(Value)>) {
+        return std::string(magic_enum::enum_name(Value));
+    } else if constexpr (magic_enum::is_unscoped_enum_v<decltype(Value)>) {
+        return std::string(magic_enum::enum_name(Value));
+    } else {
+        return std::to_string(Value);
+    }
+}
+} // namespace detail
+
 template<typename... Types>
 struct BlockParameters : meta::typelist<Types...> {
-    template<template<typename...> typename TBlock, typename RegisterInstance>
-    void
-    registerOn(RegisterInstance &registerInstance, std::string blockType = {}) const {
-        registerInstance.template addBlockType<TBlock, Types...>(blockType);
+    static std::string
+    toString() {
+        return detail::encodeListOfTypes<Types...>();
     }
 };
 
@@ -1737,8 +1791,10 @@ template<template<typename> typename TBlock, typename... TBlockParameters, typen
 inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
+        using ThisBlock = TBlock<Type>;
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<TBlock<Type>>();
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), //
+                detail::reflFirstTypeName<Type>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1748,9 +1804,11 @@ template<template<typename, typename> typename TBlock, typename... TBlockParamet
 inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
+        using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>>;
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
-        registerInstance.template addBlockType<TBlock<typename Type::template at<0>, typename Type::template at<1>>>();
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
+                Type::toString());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1761,7 +1819,9 @@ inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<TBlock<Type, Value0>>();
+        using ThisBlock = TBlock<Type, Value0>;
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
+                detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1773,7 +1833,9 @@ registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
-        registerInstance.template addBlockType<TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>>();
+        using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
+                Type::toString() + "," + detail::nttpToString<Value0>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1784,7 +1846,9 @@ inline constexpr int
 registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<TBlock<Type, Value0, Value1>>();
+        using ThisBlock = TBlock<Type, Value0, Value1>;
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
+                detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1796,7 +1860,9 @@ registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
-        registerInstance.template addBlockType<TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>>();
+        using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
+                Type::toString() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};

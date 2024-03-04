@@ -53,19 +53,8 @@ private:
 public:
     template<typename TBlock>
     void
-    addBlockType(std::string blockType = {}, std::string blockParams = {}) {
-        if (blockType.empty()) {
-            auto fullName = meta::type_name<TBlock>();
-            auto sep      = std::ranges::find(fullName, '<');
-            if (sep == fullName.end()) {
-                blockParams = "";
-            } else {
-                blockType   = std::string(fullName.begin(), sep);
-                blockParams = std::string(sep + 1, fullName.end() - 1); // Trim < and >
-                std::erase(blockParams, ' ');
-            }
-        }
-        auto &block_handlers = findBlock_type_handlers_map(blockType);
+    addBlockType(const std::string& blockType, const std::string& blockParams) {
+        auto &block_handlers                   = findBlock_type_handlers_map(blockType);
         block_handlers[std::move(blockParams)] = createHandler<TBlock>();
     }
 
