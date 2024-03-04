@@ -248,6 +248,7 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
                 && (ioctl(_fd_misses, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_accesses, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_branch_misses, PERF_EVENT_IOC_DISABLE) == -1
                     || ioctl(_fd_branch, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_instructions, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_DISABLE) == -1)) {
                 print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
+                return;
             }
             close(_fd_misses);
             close(_fd_accesses);

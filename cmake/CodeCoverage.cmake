@@ -158,7 +158,7 @@ elseif(NOT CMAKE_COMPILER_IS_GNUCXX)
     endif()
 endif()
 
-set(COVERAGE_COMPILER_FLAGS "-g -fprofile-arcs -ftest-coverage -fprofile-update=atomic"
+set(COVERAGE_COMPILER_FLAGS "-g -fprofile-arcs -ftest-coverage -fprofile-update=atomic -gz -gdwarf-2 -gstrict-dwarf"
     CACHE INTERNAL "")
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
     include(CheckCXXCompilerFlag)

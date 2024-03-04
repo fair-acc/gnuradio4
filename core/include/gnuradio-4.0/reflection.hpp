@@ -86,20 +86,5 @@
  */
 #define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
 
-#define GP_CONCAT_IMPL(x, y) x##y
-#define GP_MACRO_CONCAT(x, y) GP_CONCAT_IMPL(x, y)
-
-#define GP_REGISTER_BLOCK_IMPL(Register, Name, ...) gr::detail::RegisterBlock<Name, __VA_ARGS__> GP_MACRO_CONCAT(GP_REGISTER_BLOCK_, __COUNTER__)(Register, #Name);
-#define GP_REGISTER_BLOCK(Register, Name, ...) \
-    namespace { \
-    using gr::detail::BlockParameters; \
-    GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
-    }
-#define GP_REGISTER_BLOCK_RUNTIME(Register, Name, ...) \
-    { \
-        using gr::detail::BlockParameters; \
-        GP_REGISTER_BLOCK_IMPL(Register, Name, __VA_ARGS__); \
-    }
-
 #pragma GCC diagnostic pop
 #endif // GNURADIO_REFLECTION_HPP

@@ -195,7 +195,7 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (fixed_source<T>), out, remaining_events_count);
+ENABLE_REFLECTION_FOR_TEMPLATE(fixed_source, out, remaining_events_count);
 
 template<typename T>
 struct cout_sink : public gr::Block<cout_sink<T>> {
@@ -211,7 +211,7 @@ struct cout_sink : public gr::Block<cout_sink<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), in, remaining);
+ENABLE_REFLECTION_FOR_TEMPLATE(cout_sink, in, remaining);
 
 gr::Graph
 make_graph(std::size_t events_count) {

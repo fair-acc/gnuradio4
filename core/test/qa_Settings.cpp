@@ -223,10 +223,10 @@ struct Sink : public Block<Sink<T>> {
 };
 } // namespace gr::setting_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Source<T>), out, n_samples_produced, n_samples_max, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::TestBlock<T>), in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Source, out, n_samples_produced, n_samples_max, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::TestBlock, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::setting_test::Sink<T>), in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Sink, in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
 
 const boost::ut::suite SettingsTests = [] {
     using namespace boost::ut;

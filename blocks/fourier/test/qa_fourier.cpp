@@ -35,7 +35,7 @@ struct CountSource : public gr::Block<CountSource<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, count, nSamples);
+ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, out, count, nSamples);
 
 template<typename T>
 std::vector<T>

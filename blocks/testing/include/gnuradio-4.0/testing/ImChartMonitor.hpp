@@ -1,6 +1,7 @@
 #ifndef GNURADIO_IMCHARTMONITOR_HPP
 #define GNURADIO_IMCHARTMONITOR_HPP
 
+#include "gnuradio-4.0/BlockRegistry.hpp"
 #include <algorithm>
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
@@ -86,5 +87,6 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 } // namespace gr::testing
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::ImChartMonitor, in, sample_rate, signal_name)
+auto registerImChartMonitor = gr::registerBlock<gr::testing::ImChartMonitor, double, float>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_IMCHARTMONITOR_HPP

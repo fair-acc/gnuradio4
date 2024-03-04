@@ -2,6 +2,7 @@
 #define GNURADIO_DATA_SINK_HPP
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/CircularBuffer.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
@@ -992,6 +993,7 @@ private:
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::basic::DataSink<T>), in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::DataSink, in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+auto registerDataSink = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
 
 #endif
