@@ -15,20 +15,20 @@
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-#define GP_PLUGIN_CURRENT_ABI_VERSION 1
+#define GR_PLUGIN_CURRENT_ABI_VERSION 1
 
-struct GNURADIO_PLUGIN_EXPORT gp_plugin_metadata {
+struct GNURADIO_PLUGIN_EXPORT gr_plugin_metadata {
     std::string_view plugin_name;
     std::string_view plugin_author;
     std::string_view plugin_license;
     std::string_view plugin_version;
 };
 
-class GNURADIO_PLUGIN_EXPORT gp_plugin_base {
+class GNURADIO_PLUGIN_EXPORT gr_plugin_base {
 public:
-    gp_plugin_metadata *metadata = nullptr;
+    gr_plugin_metadata *metadata = nullptr;
 
-    virtual ~gp_plugin_base();
+    virtual ~gr_plugin_base();
 
     virtual std::uint8_t
     abi_version() const
@@ -41,8 +41,8 @@ public:
 };
 
 namespace gr {
-template<std::uint8_t ABI_VERSION = GP_PLUGIN_CURRENT_ABI_VERSION>
-class plugin : public gp_plugin_base {
+template<std::uint8_t ABI_VERSION = GR_PLUGIN_CURRENT_ABI_VERSION>
+class plugin : public gr_plugin_base {
 private:
     gr::BlockRegistry registry;
 
@@ -64,44 +64,54 @@ public:
         return registry.createBlock(name, type, params);
     }
 
-    template<template<typename...> typename TBlock, typename... Args>
+    template<typename TBlock>
     void
-    addBlockType(std::string block_type) {
-        std::cout << "New block type: " << block_type << std::endl;
-        registry.addBlockType<TBlock, Args...>(std::move(block_type));
+    addBlockType(std::string blockType = {}, std::string blockParams = {}) {
+        registry.addBlockType<TBlock>(std::move(blockType), std::move(blockParams));
     }
 };
 
 } // namespace gr
 
-#define GP_PLUGIN(Name, Author, License, Version) \
-    inline namespace GP_PLUGIN_DEFINITION_NAMESPACE { \
-    gr::plugin<> * \
-    gp_plugin_instance() { \
+/*
+ * Defines a plugin - creates the plugin meta-data and creates
+ * a block registry (grPluginInstance()) for the plugin.
+ *
+ * Arguments:
+ *  - plugin name
+ *  - author
+ *  - license of the plugin
+ *  - plugin version
+ *
+ * Example usage:
+ *     GR_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
+ */
+#define GR_PLUGIN(Name, Author, License, Version) \
+    inline namespace GR_PLUGIN_DEFINITION_NAMESPACE { \
+    gr::plugin<> & \
+    grPluginInstance() { \
         static gr::plugin<> *instance = [] { \
             auto                     *result = new gr::plugin<>(); \
-            static gp_plugin_metadata plugin_metadata{ Name, Author, License, Version }; \
+            static gr_plugin_metadata plugin_metadata{ Name, Author, License, Version }; \
             result->metadata = &plugin_metadata; \
             return result; \
         }(); \
-        return instance; \
+        return *instance; \
     } \
     } \
     extern "C" { \
     void GNURADIO_PLUGIN_EXPORT \
-    gp_plugin_make(gp_plugin_base **plugin) { \
-        *plugin = gp_plugin_instance(); \
+    gr_plugin_make(gr_plugin_base **plugin) { \
+        *plugin = &grPluginInstance(); \
     } \
     void GNURADIO_PLUGIN_EXPORT \
-    gp_plugin_free(gp_plugin_base *plugin) { \
-        if (plugin != gp_plugin_instance()) { \
+    gr_plugin_free(gr_plugin_base *plugin) { \
+        if (plugin != &grPluginInstance()) { \
             assert(false && "Requested to delete something that is not us"); \
             return; \
         } \
         delete plugin; \
     } \
     }
-
-#define GP_PLUGIN_REGISTER_BLOCK(...) GP_REGISTER_BLOCK(gp_plugin_instance(), __VA_ARGS__);
 
 #endif // include guard

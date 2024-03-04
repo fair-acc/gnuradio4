@@ -14,6 +14,12 @@
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
+#if defined(__clang__) && __clang_major__ >= 16
+// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
+template<>
+auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
+#endif
+
 template<typename T>
 class FixedSource : public gr::Block<FixedSource<T>> {
     using super_t = gr::Block<FixedSource<T>>;
@@ -35,7 +41,7 @@ public:
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (FixedSource<T>), out);
+ENABLE_REFLECTION_FOR_TEMPLATE(FixedSource, out);
 
 template<typename T>
 class HttpTestSink : public gr::Block<HttpTestSink<T>> {
@@ -58,7 +64,7 @@ public:
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (HttpTestSink<T>), in);
+ENABLE_REFLECTION_FOR_TEMPLATE(HttpTestSink, in);
 
 const boost::ut::suite HttpBlocktests = [] {
     using namespace boost::ut;
@@ -85,8 +91,9 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/echo");
-        auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/echo" } });
+
+        auto &sink = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -116,7 +123,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/does-not-exist");
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/does-not-exist" } });
         auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
@@ -145,7 +152,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/number", http::RequestType::POST, "param=42");
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/number" }, { "type"s, "POST" }, { "parameters"s, "param=42" } });
         auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
@@ -187,7 +194,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>("http://localhost:8080", "/notify", http::RequestType::SUBSCRIBE);
+        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/notify" }, { "type"s, "SUBSCRIBE" } });
         auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
@@ -213,4 +220,5 @@ const boost::ut::suite HttpBlocktests = [] {
 
 int
 main() { /* tests are statically executed */
+    return boost::ut::cfg<boost::ut::override>.run();
 }

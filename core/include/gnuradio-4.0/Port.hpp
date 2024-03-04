@@ -661,6 +661,8 @@ static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
 static_assert(PortLike<MsgPortIn>);
 static_assert(PortLike<MsgPortOut>);
+static_assert(PortLike<PortInNamed<float, "test">>);
+static_assert(PortLike<PortOutNamed<float, "test">>);
 
 static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 

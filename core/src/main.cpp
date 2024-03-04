@@ -6,11 +6,9 @@
 #include <gnuradio-4.0/config.h> // contains the project and compiler flags definitions
 #include <gnuradio-4.0/Graph.hpp>
 
-namespace grg = gr;
-
 template<typename T>
-struct CountSource : public grg::Block<CountSource<T>> {
-    grg::PortOut<T> random;
+struct CountSource : public gr::Block<CountSource<T>> {
+    gr::PortOut<T> random;
 
     constexpr T
     processOne() {
@@ -18,11 +16,11 @@ struct CountSource : public grg::Block<CountSource<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), random);
+ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, random);
 
 template<typename T>
-struct ExpectSink : public grg::Block<ExpectSink<T>> {
-    grg::PortIn<T> sink;
+struct ExpectSink : public gr::Block<ExpectSink<T>> {
+    gr::PortIn<T> sink;
 
     void
     processOne(T value) {
@@ -30,12 +28,12 @@ struct ExpectSink : public grg::Block<ExpectSink<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (ExpectSink<T>), sink);
+ENABLE_REFLECTION_FOR_TEMPLATE(ExpectSink, sink);
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public grg::Block<scale<T, Scale, R>> {
-    grg::PortIn<T>  original;
-    grg::PortOut<R> scaled;
+struct scale : public gr::Block<scale<T, Scale, R>> {
+    gr::PortIn<T>  original;
+    gr::PortOut<R> scaled;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -47,10 +45,10 @@ struct scale : public grg::Block<scale<T, Scale, R>> {
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public grg::Block<adder<T>> {
-    grg::PortIn<T>  addend0;
-    grg::PortIn<T>  addend1;
-    grg::PortOut<R> sum;
+struct adder : public gr::Block<adder<T>> {
+    gr::PortIn<T>  addend0;
+    gr::PortIn<T>  addend1;
+    gr::PortOut<R> sum;
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
@@ -60,15 +58,14 @@ struct adder : public grg::Block<adder<T>> {
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
-
-using grg::PortType::STREAM, grg::PortDirection::INPUT, grg::PortDirection::OUTPUT;
+using gr::PortType::STREAM, gr::PortDirection::INPUT, gr::PortDirection::OUTPUT;
 
 template<typename T, std::size_t Count = 2>
-class duplicate : public grg::Block<duplicate<T, Count>, gr::meta::typelist<grg::PortInNamed<T, "in">>, grg::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
-    using base = grg::Block<duplicate<T, Count>, gr::meta::typelist<grg::PortInNamed<T, "in">>, grg::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
+class duplicate : public gr::Block<duplicate<T, Count>, gr::meta::typelist<gr::PortInNamed<T, "in">>, gr::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
+    using base = gr::Block<duplicate<T, Count>, gr::meta::typelist<gr::PortInNamed<T, "in">>, gr::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
 
 public:
-    using return_type = typename grg::traits::block::stream_return_type<base>;
+    using return_type = typename gr::traits::block::stream_return_type<base>;
 
     [[nodiscard]] constexpr return_type
     processOne(T a) const noexcept {
@@ -78,9 +75,9 @@ public:
 
 template<typename T, std::size_t Depth>
     requires(Depth > 0)
-struct delay : public grg::Block<delay<T, Depth>> {
-    grg::PortIn<T>       in;
-    grg::PortOut<T>      out;
+struct delay : public gr::Block<delay<T, Depth>> {
+    gr::PortIn<T>        in;
+    gr::PortOut<T>       out;
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
@@ -101,8 +98,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t Depth), (delay<T, D
 
 int
 main() {
-    using grg::merge;
-    using grg::mergeByIndex;
+    using gr::merge;
+    using gr::mergeByIndex;
 
     fmt::print("Project compiler: '{}' - version '{}'\n", CXX_COMPILER_ID, CXX_COMPILER_VERSION);
     fmt::print("Project compiler path: '{}' - arg1 '{}'\n", CXX_COMPILER_PATH, CXX_COMPILER_ARG1);

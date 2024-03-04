@@ -268,8 +268,7 @@ public:
             = 0;
 
     [[nodiscard]] virtual work::Status
-    draw()
-            = 0;
+    draw() = 0;
 
     virtual void
     processScheduledMessages()
@@ -415,7 +414,7 @@ public:
 
     constexpr work::Status
     draw() override {
-        if constexpr ( requires { blockRef().draw(); } ) {
+        if constexpr (requires { blockRef().draw(); }) {
             return blockRef().draw();
         }
         return work::Status::ERROR;
@@ -1217,6 +1216,7 @@ public:
         return a;
     }
 };
+
 } // namespace test
 #endif
 } // namespace gr

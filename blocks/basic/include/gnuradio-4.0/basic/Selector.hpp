@@ -2,6 +2,7 @@
 #define GNURADIO_SELECTOR_HPP
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -193,6 +194,7 @@ struct Selector : Block<Selector<T>, SelectorDoc> {
 } // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure);
+auto registerSelector = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 
 #endif // include guard

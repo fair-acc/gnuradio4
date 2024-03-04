@@ -51,7 +51,7 @@ struct CountSource : public gr::Block<CountSource<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (CountSource<T>), out, n_samples_max);
+ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, out, n_samples_max);
 
 static_assert(gr::BlockLike<CountSource<float>>);
 
@@ -83,7 +83,7 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (ExpectSink<T>), in, n_samples_max);
+ENABLE_REFLECTION_FOR_TEMPLATE(ExpectSink, in, n_samples_max);
 
 template<typename T>
 struct Scale : public gr::Block<Scale<T>> {
@@ -101,7 +101,7 @@ struct Scale : public gr::Block<Scale<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (Scale<T>), original, scaled, scale_factor);
+ENABLE_REFLECTION_FOR_TEMPLATE(Scale, original, scaled, scale_factor);
 
 template<typename T>
 struct Adder : public gr::Block<Adder<T>> {
@@ -119,7 +119,7 @@ struct Adder : public gr::Block<Adder<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (Adder<T>), addend0, addend1, sum);
+ENABLE_REFLECTION_FOR_TEMPLATE(Adder, addend0, addend1, sum);
 
 gr::Graph
 getGraphLinear(std::shared_ptr<Tracer> tracer) {
@@ -261,7 +261,7 @@ struct LifecycleSource : public gr::Block<LifecycleSource<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (LifecycleSource<T>), out);
+ENABLE_REFLECTION_FOR_TEMPLATE(LifecycleSource, out);
 
 template<typename T>
 struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
@@ -307,7 +307,7 @@ struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (LifecycleBlock<T>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE(LifecycleBlock, in, out);
 
 const boost::ut::suite SchedulerTests = [] {
     using namespace boost::ut;
