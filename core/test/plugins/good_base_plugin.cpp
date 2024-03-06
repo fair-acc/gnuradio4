@@ -56,7 +56,7 @@ public:
             std::cerr << "fixed_source done\n";
             if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
                 using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+                this->emitErrorMessage("work()", ret.error());
             }
             this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 0UZ, gr::work::Status::DONE };

@@ -87,4 +87,18 @@
 #define ENABLE_REFLECTION_FOR_TEMPLATE(Type, ...) ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename... Ts), (Type<Ts...>), __VA_ARGS__)
 
 #pragma GCC diagnostic pop
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#ifndef __clang__
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+#include <magic_enum.hpp>
+#include <magic_enum_utility.hpp>
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
 #endif // GNURADIO_REFLECTION_HPP

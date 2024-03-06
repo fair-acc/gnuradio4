@@ -287,12 +287,14 @@ public:
     }
 
     void
-    processMessages(gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> message) {
+    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> message) {
+        gr::Block<HttpBlock<T>, BlockingIO<false>>::processMessages(port, message);
+
         std::ranges::for_each(message, [this](auto &m) {
             if (_type == RequestType::SUBSCRIBE) {
-                if (m.contains("active")) {
-                    // for long polling, the subscription should stay active, if and only if the messages's "active" member is truthy
-                    if (std::get<bool>(m.at("active"))) {
+                if (m.data.has_value() && m.data.value().contains("active")) {
+                    // for long polling, the subscription should stay active, if and only if the messages' "active" member is true
+                    if (std::get<bool>(m.data.value().at("active"))) {
                         if (!_thread) {
                             startThread();
                         }

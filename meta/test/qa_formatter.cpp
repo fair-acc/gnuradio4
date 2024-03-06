@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <complex>
+#include <expected>
 
 #include <fmt/format.h>
 
@@ -91,8 +92,22 @@ const boost::ut::suite sourceLocationFormatter = [] {
     "fmt::formatter<std::source_location>"_test = [] {
         auto loc = fmt::format("{}", std::source_location::current());
         fmt::println("location formatter test: {}", loc);
-        expect(ge(loc.size(), 0));
+        expect(ge(loc.size(), 0UZ));
     };
+};
+
+const boost::ut::suite expectedFormatter = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+    using Expected = std::expected<int, std::string>;
+
+    auto value = fmt::format("{}", Expected(5));
+    fmt::println("expected formatter test: {}", value);
+    expect(eq(value, "<std::expected-value: 5>"s));
+
+    auto error = fmt::format("{}", Expected(std::unexpected("Error")));
+    fmt::println("expected formatter test: {}", error);
+    expect(eq(error, "<std::unexpected: Error>"s));
 };
 
 } // namespace gr::meta::test

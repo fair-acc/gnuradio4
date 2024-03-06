@@ -1,13 +1,15 @@
 #include <boost/ut.hpp>
 
+#include "gnuradio-4.0/Block.hpp"
 #include "gnuradio-4.0/Message.hpp"
-#include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
+
+#include <optional>
 
 #if defined(__clang__) && __clang_major__ >= 16
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
@@ -18,509 +20,633 @@ auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
-template<typename IsDone>
-auto
-createOnesGenerator(IsDone &isDone) {
-    return [&isDone](auto * /*_this */) -> std::optional<float> {
-        if (!isDone()) {
-            return 1.0f;
-        } else {
-            return {};
+using namespace gr::message;
+
+namespace gr::testing {
+
+template<typename T>
+struct TestBlock : public gr::Block<TestBlock<T>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+    T              factor = static_cast<T>(1.0f);
+
+    void
+    settingsChanged(const property_map & /* oldSettings */, const property_map &newSettings) {
+        if (newSettings.contains("factor")) {
+            this->notifyListeners("Settings", { { "factor", newSettings.at("factor") } });
+            ; // notifies only subscribed listeners
+            // alt: sendMessage<message::Command::Notify>(this->msgOut, this->unique_name /* serviceName */, "Settings", { { "factor", newSettings.at("factor") } }); // notifies all
         }
-    };
-}
+    }
 
-template<gr::fixed_string which>
-auto
-messageProcessorCounter(std::atomic_size_t &countdown, std::atomic_size_t &totalCounter, std::string inMessageKind, gr::Message replyMessage) {
-    return [&, inMessageKind, replyMessage](auto *_this, gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message> messages) {
-        if (countdown > 0) {
-            for (const auto &message : messages) {
-                const auto target = gr::messageField<std::string>(message, gr::message::key::Target);
-
-                // Filtering on target is block's job now
-                if (target && !target->empty() && *target != _this->unique_name) continue;
-
-                const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
-                assert(kind);
-                if (kind != "custom_kind") {
-                    continue;
-                }
-
-                fmt::print("Got a message, countdown was {}\n", countdown.load());
-                if (countdown > 0) countdown--;
-                totalCounter++;
-
-                if (!replyMessage.empty()) _this->emitMessage(_this->msgOut, std::move(replyMessage));
-            }
+    std::optional<Message>
+    unmatchedPropertyHandler(std::string_view propertyName, Message msg) {
+        fmt::println("called Block's {} unmatchedPropertyHandler({}, {})", this->name, propertyName, msg);
+        if (msg.endpoint == "Unknown") {
+            // special case for the unit-test to mimic unknown properties
+            return std::nullopt;
         }
-    };
-}
+
+        if (msg.endpoint == "CustomEndpoint") {
+            sendMessage<message::Command::Notify>(this->msgOut, "", "custom_reply_kind", property_map{ { "key", "testReplyData" } });
+            return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("Blocks {} unsupported property in unmatchedPropertyHandler({}, {})", this->name, propertyName, msg));
+    }
+
+    [[nodiscard]] constexpr auto
+    processOne(T a) const noexcept {
+        return a * factor;
+    }
+};
+
+} // namespace gr::testing
+
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::TestBlock, in, out, factor);
 
 template<typename T>
 struct ProcessMessageStdSpanBlock : gr::Block<ProcessMessageStdSpanBlock<T>> {
     gr::PortIn<T> in;
 
     T
-    processOne(T value);
+    processOne(T) {
+        return {};
+    }
 
     void
-    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> message);
+    processMessages(gr::MsgPortInNamed<"__Builtin"> &, std::span<const gr::Message>) {}
 };
+
+static_assert(!gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 
 template<typename T>
 struct ProcessMessageConsumableSpanBlock : gr::Block<ProcessMessageConsumableSpanBlock<T>> {
     gr::PortIn<T> in;
 
     T
-    processOne(T value);
+    processOne(T) {
+        return {};
+    }
 
     void
-    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, gr::ConsumableSpan auto message);
+    processMessages(gr::MsgPortInNamed<"__Builtin"> &, gr::ConsumableSpan auto) {}
 };
-
-namespace {
-/**
- * Waits for messages matching a message in expectedMessages, where matching means that all key-value pairs in the expected message are present in the received message.
- * Returns all received messages.
- */
-std::vector<pmtv::map_t>
-waitForMessages(auto &messageReader, std::vector<pmtv::map_t> expectedMessages, std::chrono::milliseconds timeout = 3s) {
-    using namespace boost::ut;
-
-    std::vector<pmtv::map_t> received;
-    auto                     start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < timeout && !expectedMessages.empty()) {
-        const auto available = messageReader.available();
-        if (available == 0) {
-            std::this_thread::sleep_for(20ms);
-            continue;
-        }
-        const auto messages = messageReader.get(available);
-        received.insert(received.end(), messages.begin(), messages.end());
-        std::erase_if(expectedMessages, [&messages](const auto &expected) {
-            return std::ranges::any_of(messages, [&expected](const auto &rec) {
-                return std::ranges::all_of(expected, [&rec](const auto &pair) { return rec.contains(pair.first) && rec.at(pair.first) == pair.second; });
-            });
-        });
-        std::ignore = messageReader.consume(available);
-    }
-
-    for (const auto &expected : expectedMessages) {
-        fmt::println("Expected message not received: {}", expected);
-    }
-    expect(expectedMessages.empty()) << fmt::format("Expected messages not received: {} received: {}", expectedMessages.size(), received.size());
-    return received;
-}
-
-void
-sendMessage(auto &outPort, pmtv::map_t message) {
-    auto out = outPort.streamWriter().reserve(1);
-    out[0]   = std::move(message);
-    out.publish(1);
-}
-
-} // namespace
 
 static_assert(gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 
-static_assert(!gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
-static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
-
 using namespace boost::ut;
 using namespace gr;
 
-template<typename Scheduler>
-void
-testMulticastMessagingWithTheWorld() {
-    std::atomic_size_t    collectedEventCount     = 0;
-    std::atomic_size_t    sourceMessagesCountdown = 1;
-    std::atomic_size_t    sinkMessagesCountdown   = 1;
-    constexpr std::size_t requiredEventCount      = 2;
-    std::atomic_bool      receiverGotAMessage     = false;
-    auto                  isDone                  = [&] { return requiredEventCount <= collectedEventCount && receiverGotAMessage; };
-
-    auto scheduler = [&] {
-        gr::Graph flow;
-        auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
-
-        source.generator        = createOnesGenerator(isDone);
-        source.messageProcessor = messageProcessorCounter<"MulticastMessagingWithTheWorld_source.messageProcessor">(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
-
-        auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
-
-        auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-        sink.messageProcessor = messageProcessorCounter<"MulticastMessagingWithTheWorld_sink.messageProcessor">(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
-            gr::Message outMessage;
-            outMessage[gr::message::key::Kind] = "custom_reply_kind";
-            return outMessage;
-        }());
-
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
-
-        return Scheduler(std::move(flow));
-    }();
-
-    gr::testing::MessageSender<float> messageSender;
-    messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
-        if (!isDone()) {
-            gr::Message message;
-            message[gr::message::key::Kind]   = "custom_kind";
-            message[gr::message::key::Target] = "";
-            return message;
-        } else {
-            return {};
-        }
-    };
-    expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
-
-    gr::testing::FunctionSink<float> messageReceiver;
-    messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
-        for (const auto &message : messages) {
-            const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
-            if (kind == "custom_reply_kind") {
-                receiverGotAMessage = true;
-            }
-        }
-    };
-    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
-
-    std::thread messenger([&] {
-        while (!isDone()) {
-            std::this_thread::sleep_for(100ms);
-            messageSender.processOne();
-            messageReceiver.processScheduledMessages();
-        }
-    });
-
-    scheduler.runAndWait();
-    messenger.join();
-}
-
-template<typename Scheduler>
-void
-testSettingsManagement() {
-    constexpr std::atomic_size_t requiredMessageCount               = 4;
-    std::atomic_size_t           settingsSuccessRequestMessageCount = 0;
-    std::atomic_size_t           settingsSuccessAppliedMessageCount = 0;
-    std::atomic_size_t           settingsFailureMessageCount        = 0;
-    //
-    auto isDone = [&] {
-        return settingsSuccessAppliedMessageCount >= requiredMessageCount && settingsSuccessRequestMessageCount >= requiredMessageCount && settingsFailureMessageCount >= requiredMessageCount;
-    };
-
-    auto scheduler = [&] {
-        gr::Graph flow;
-        auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
-
-        source.generator = createOnesGenerator(isDone);
-
-        auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
-        auto &sink    = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
-
-        return Scheduler(std::move(flow));
-    }();
-
-    gr::testing::MessageSender<float> messageSender;
-    messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
-        if (!isDone()) {
-            gr::Message message;
-            message[gr::message::key::Kind]   = gr::message::kind::UpdateSettings;
-            message[gr::message::key::Target] = std::string();
-            message[gr::message::key::Data]   = gr::property_map{ { "factor", 4.4f } };
-            return message;
-        } else {
-            return {};
-        }
-    };
-
-    expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
-
-    gr::testing::FunctionSink<float> messageReceiver;
-    messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
-        for (const auto &message : messages) {
-            const auto kind = *gr::messageField<std::string>(message, gr::message::key::Kind);
-            if (kind == gr::message::kind::SettingsChangeRequested) {
-                const auto sender    = gr::messageField<std::string>(message, gr::message::key::Sender);
-                const auto data      = gr::messageField<property_map>(message, gr::message::key::Data);
-                const auto errorInfo = gr::messageField<property_map>(message, gr::message::key::ErrorInfo);
-
-                if (data.has_value() && !data->empty()) {
-                    settingsSuccessRequestMessageCount++;
-                }
-
-                if (errorInfo.has_value()) {
-                    settingsFailureMessageCount++;
-                }
-            } else if (kind == gr::message::kind::SettingsChanged) {
-                const auto data = gr::messageField<property_map>(message, gr::message::key::Data);
-                if (data) {
-                    for (const auto &[k, v] : *data) {
-                        if (k == "factor"s) {
-                            settingsSuccessAppliedMessageCount++;
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
-
-    std::thread messenger([&] {
-        while (!isDone()) {
-            std::this_thread::sleep_for(100ms);
-            messageSender.processOne();
-            messageReceiver.processScheduledMessages();
-        }
-    });
-
-    scheduler.runAndWait();
-    messenger.join();
-}
-
-template<typename Scheduler>
-void
-testTargetedMessageForABlock() {
-    std::atomic_size_t    collectedEventCount     = 0;
-    std::atomic_size_t    sourceMessagesCountdown = 1; // not a target, should not go down
-    std::atomic_size_t    sinkMessagesCountdown   = 2;
-    constexpr std::size_t requiredEventCount      = 2;
-    auto                  isDone                  = [&] { return requiredEventCount <= collectedEventCount; };
-
-    auto scheduler = [&] {
-        gr::Graph flow;
-        auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
-
-        source.generator        = createOnesGenerator(isDone);
-        source.messageProcessor = messageProcessorCounter<"TargetedMessageForABlock_source.messageProcessor">(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
-
-        auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
-
-        auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-        sink.messageProcessor = messageProcessorCounter<"TargetedMessageForABlock_sink.messageProcessor">(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, {});
-
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
-
-        return Scheduler(std::move(flow));
-    }();
-
-    auto &flow = scheduler.graph();
-
-    std::string target;
-    for (const auto &block : flow.blocks()) {
-        if (block->uniqueName().contains("FunctionSink")) {
-            target = block->uniqueName();
-        }
-    }
-
-    gr::testing::MessageSender<float> messageSender;
-    messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
-        if (!isDone()) {
-            gr::Message message;
-            message[gr::message::key::Kind]   = "custom_kind";
-            message[gr::message::key::Target] = target;
-
-            return message;
-        } else {
-            return {};
-        }
-    };
-    expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
-
-    std::thread messenger([&] {
-        while (!isDone()) {
-            std::this_thread::sleep_for(100ms);
-            messageSender.processOne();
-        }
-    });
-
-    scheduler.runAndWait();
-    messenger.join();
-
-    expect(eq(sourceMessagesCountdown.load(), 1UZ));
-    fmt::print("This is the sinkMessagesCountdown {}\n", sinkMessagesCountdown.load());
-    expect(eq(sinkMessagesCountdown.load(), 0UZ));
-}
-
-template<typename Scheduler>
-void
-testMessagesWithoutRunningScheduler() {
-    std::atomic_size_t    collectedEventCount     = 0;
-    std::atomic_size_t    sourceMessagesCountdown = 1;
-    std::atomic_size_t    sinkMessagesCountdown   = 1;
-    constexpr std::size_t requiredEventCount      = 2;
-    std::atomic_bool      receiverGotAMessage     = false;
-    auto                  isDone                  = [&] { return requiredEventCount <= collectedEventCount && receiverGotAMessage; };
-
-    auto scheduler = [&] {
-        gr::Graph flow;
-        auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
-
-        source.generator        = createOnesGenerator(isDone);
-        source.messageProcessor = messageProcessorCounter<"MessagesWithoutARunningScheduler_source.messageProcessor">(sourceMessagesCountdown, collectedEventCount, "custom_kind"s, {});
-
-        auto &process = flow.emplaceBlock<builtin_multiply<float>>(property_map{});
-
-        auto &sink            = flow.emplaceBlock<gr::testing::FunctionSink<float>>();
-        sink.messageProcessor = messageProcessorCounter<"MessagesWithoutARunningScheduler_sink.messageProcessor">(sinkMessagesCountdown, collectedEventCount, "custom_kind"s, [] {
-            gr::Message outMessage;
-            outMessage[gr::message::key::Kind] = "custom_reply_kind";
-            return outMessage;
-        }());
-
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
-
-        return Scheduler(std::move(flow));
-    }();
-
-    gr::testing::MessageSender<float> messageSender;
-    messageSender.messageGenerator = [&](auto * /*this*/) -> std::optional<gr::Message> {
-        if (!isDone()) {
-            gr::Message message;
-            message[gr::message::key::Kind]   = "custom_kind";
-            message[gr::message::key::Target] = "";
-            return message;
-        } else {
-            return {};
-        }
-    };
-    expect(eq(ConnectionResult::SUCCESS, messageSender.msgOut.connect(scheduler.msgIn)));
-
-    gr::testing::FunctionSink<float> messageReceiver;
-    messageReceiver.messageProcessor = [&](auto * /*_this*/, gr::MsgPortInNamed<"__Builtin"> & /*port*/, std::span<const gr::Message> messages) {
-        for (const auto &message : messages) {
-            const auto kind = gr::messageField<std::string>(message, gr::message::key::Kind);
-            if (kind == "custom_reply_kind") {
-                receiverGotAMessage = true;
-            }
-        }
-    };
-    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(messageReceiver.msgIn)));
-
-    std::thread messenger([&] {
-        while (!isDone()) {
-            std::this_thread::sleep_for(100ms);
-            messageSender.processOne();
-            messageReceiver.processScheduledMessages();
-        }
-    });
-
-    expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
-    while (!isDone()) {
-        scheduler.processScheduledMessages();
-    }
-    messenger.join();
-}
-
-template<typename Scheduler>
-void
-testSchedulerControl() {
-    auto isDone    = [] { return false; };
-    auto scheduler = [&] {
-        gr::Graph flow;
-        auto     &source = flow.emplaceBlock<gr::testing::FunctionSource<float>>();
-        source.generator = createOnesGenerator(isDone);
-        auto &sink       = flow.emplaceBlock<gr::basic::DataSink<float>>();
-
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
-
-        return Scheduler(std::move(flow));
-    }();
-
-    gr::MsgPortIn  fromScheduler;
-    gr::MsgPortOut toScheduler;
-    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
-    expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
-
-    auto client = std::thread([&scheduler, &fromScheduler, &toScheduler] {
-        using namespace gr::lifecycle;
-        using namespace gr::message;
-        auto             &reader          = fromScheduler.streamReader();
-        const std::string RUNNING         = std::string(magic_enum::enum_name(State::RUNNING));
-        const std::string REQUESTED_PAUSE = std::string(magic_enum::enum_name(State::REQUESTED_PAUSE));
-        const std::string PAUSED          = std::string(magic_enum::enum_name(State::PAUSED));
-        const std::string REQUESTED_STOP  = std::string(magic_enum::enum_name(State::REQUESTED_STOP));
-        const std::string STOPPED         = std::string(magic_enum::enum_name(State::STOPPED));
-
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, RUNNING } } });
-        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
-            expect(scheduler.isProcessing());
-        }
-
-        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_PAUSE } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_PAUSE } }, { { kind::SchedulerStateUpdate, PAUSED } } });
-        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
-            expect(!scheduler.isProcessing());
-        }
-
-        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, RUNNING } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, RUNNING } } });
-        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
-            expect(scheduler.isProcessing());
-        }
-
-        sendMessage(toScheduler, { { key::Kind, kind::SchedulerStateChangeRequest }, { key::What, REQUESTED_STOP } });
-        waitForMessages(reader, { { { kind::SchedulerStateUpdate, REQUESTED_STOP } }, { { kind::SchedulerStateUpdate, STOPPED } } });
-        if constexpr (Scheduler::executionPolicy() == scheduler::multiThreaded) {
-            expect(!scheduler.isProcessing());
-        }
-    });
-    scheduler.runAndWait();
-    client.join();
-}
-
 const boost::ut::suite MessagesTests = [] {
+    using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr;
 
-    // Testing if multicast messages sent from outside of the graph reach
-    // the nodes inside, and if messages sent from the node reach the outside
-    "MulticastMessagingWithTheWorld"_test = [] {
-        testMulticastMessagingWithTheWorld<scheduler::Simple<>>();
-        testMulticastMessagingWithTheWorld<scheduler::BreadthFirst<>>();
-        testMulticastMessagingWithTheWorld<scheduler::Simple<scheduler::multiThreaded>>();
-        testMulticastMessagingWithTheWorld<scheduler::BreadthFirst<scheduler::multiThreaded>>();
+    static auto returnReplyMsg = [](gr::MsgPortIn &port) {
+        ConsumableSpan auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
+        Message             msg  = span[0];
+        expect(span.consume(span.size()));
+        return msg;
     };
 
-    // Testing if targeted messages sent from outside of the graph reach
-    // the node
-    "TargetedMessageForABlock"_test = [] {
-        testTargetedMessageForABlock<scheduler::Simple<>>();
-        testTargetedMessageForABlock<scheduler::BreadthFirst<>>();
-        testTargetedMessageForABlock<scheduler::Simple<scheduler::multiThreaded>>();
-        testTargetedMessageForABlock<scheduler::BreadthFirst<scheduler::multiThreaded>>();
+    "Block<T>-level message tests"_test = [] {
+        using namespace gr::testing;
+        using enum gr::message::Command;
+
+        "Block<T>-level heartbeat tests"_test = [] {
+            gr::MsgPortOut toBlock;
+            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            gr::MsgPortIn  fromBlock;
+
+            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
+            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+
+            "w/o explicit serviceName"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kHeartbeat /* endpoint */, { { "myKey", "value" } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive heartbeat reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kHeartbeat)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("heartbeat"));
+            };
+
+            "w/ explicit serviceName = unique_name"_test = [&] {
+                sendMessage<Get>(toBlock, unitTestBlock.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, { { "myKey", "value" } } /* data  */, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive heartbeat reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, "client#42"s));
+                expect(eq(reply.endpoint, std::string(block::property::kHeartbeat)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("heartbeat"));
+            };
+
+            "subscription"_test = [&] {
+                sendMessage<Subscribe>(toBlock, unitTestBlock.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {} /* data  */, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply";
+
+                // trigger any message action
+                sendMessage<Get>(toBlock, "", "Unknown", {});
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should receive heartbeat";
+                const Message heartbeat1 = returnReplyMsg(fromBlock);
+                expect(heartbeat1.cmd == Notify) << fmt::format("mismatch between heartbeat1.cmd = {} and expected {} command", heartbeat1.cmd, Notify);
+                expect(eq(heartbeat1.endpoint, std::string(block::property::kHeartbeat)));
+                expect(heartbeat1.data.has_value());
+                expect(heartbeat1.data.value().contains("heartbeat"));
+
+                // unsubscribe
+                sendMessage<Unsubscribe>(toBlock, "", block::property::kHeartbeat, {}, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should receive heartbeat";
+                const Message heartbeat2 = returnReplyMsg(fromBlock);
+                expect(heartbeat2.cmd == Notify) << fmt::format("mismatch between heartbeat2.cmd = {} and expected {} command", heartbeat2.cmd, Notify);
+                expect(eq(heartbeat2.endpoint, std::string(block::property::kHeartbeat)));
+                expect(heartbeat2.data.has_value());
+                expect(heartbeat2.data.value().contains("heartbeat"));
+
+                sendMessage<Get>(toBlock, "", "Unknown", {});
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive heartbeat";
+            };
+        };
+
+        "Block<T>-level echo tests"_test = [] {
+            gr::MsgPortOut toBlock;
+            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            gr::MsgPortIn  fromBlock;
+
+            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
+            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+
+            "w/o explicit serviceName"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kEcho /* endpoint */, { { "myKey", "value" } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kEcho)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("myKey"));
+            };
+
+            "w/ explicit serviceName = unique_name"_test = [&] {
+                sendMessage<Set>(toBlock, unitTestBlock.unique_name /* serviceName */, block::property::kEcho /* endpoint */, { { "myKey", "value" } } /* data  */, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, "client#42"s));
+                expect(eq(reply.endpoint, std::string(block::property::kEcho)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("myKey"));
+            };
+
+            "w/ explicit serviceName = name"_test = [&] {
+                sendMessage<Set>(toBlock, unitTestBlock.name /* serviceName */, block::property::kEcho /* endpoint */, { { "myKey", "value" } } /* data  */, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, "client#42"s));
+                expect(eq(reply.endpoint, std::string(block::property::kEcho)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("myKey"));
+            };
+
+            "w/ explicit serviceName = <unknown>"_test = [&] {
+                sendMessage<Set>(toBlock, "<unknown>" /* serviceName */, block::property::kEcho /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply message for unknown/mismatching service";
+            };
+
+            "w/ unknown endpoint"_test = [&] {
+                sendMessage<Set>(toBlock, unitTestBlock.name /* serviceName */, "Unknown" /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply message for unknown property";
+            };
+
+            "w/ unknown command"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kEcho /* endpoint */, { { "myKey", "value" } } /* data  */, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, "client#42"s));
+                expect(eq(reply.endpoint, std::string(block::property::kEcho)));
+                expect(!reply.data.has_value());
+            };
+        };
+
+        "Block<T>-level lifecycle::State tests"_test = [] {
+            gr::MsgPortOut toBlock;
+            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            gr::MsgPortIn  fromBlock;
+
+            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
+            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+
+            "get - state"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {} /* data  */, "client#42");
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, "client#42"s));
+                expect(eq(reply.endpoint, std::string(block::property::kLifeCycleState)));
+                expect(reply.data.has_value());
+            };
+
+            "set - state"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, { { "state", "INITIALISED" } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
+                expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
+            };
+
+            "set - state - error cases"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {} /* no data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should not receive a reply";
+                expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
+                expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
+
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, { { "MisSpelledStateKey", "INITIALISED" } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error";
+                expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
+                expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
+
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, { { "state", "UNKNOWN_STATE" } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error";
+                expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
+                expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
+
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, { { "state", 6 } } /* wrong state type  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error";
+                expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
+                expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
+            };
+        };
+
+        "Block<T>-level (staged) settings tests"_test = [] {
+            gr::MsgPortOut toBlock;
+            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            std::ignore = unitTestBlock.settings().applyStagedParameters(); // call manually (N.B. normally initialised by Graph/Scheduler)
+            gr::MsgPortIn fromBlock;
+
+            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
+            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+
+            "get - Settings"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.endpoint, std::string(block::property::kSetting)));
+                expect(reply.data.has_value());
+                expect(!reply.data.value().empty());
+                expect(reply.data.value().contains("factor"));
+                expect(eq(1, std::get<int>(reply.data.value().at("factor"))));
+            };
+
+            "get - StagedSettings"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive staged setting reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.endpoint, std::string(block::property::kStagedSetting)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().empty());
+            };
+
+            "set - StagedSettings"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, { { "factor", 42 } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
+                property_map stagedSettings = unitTestBlock.settings().stagedParameters();
+                expect(stagedSettings.contains("factor"));
+                expect(eq(42, std::get<int>(stagedSettings.at("factor"))));
+
+                // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, { { "factor", 43 } } /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
+                stagedSettings = unitTestBlock.settings().stagedParameters();
+                expect(stagedSettings.contains("factor"));
+                expect(eq(43, std::get<int>(stagedSettings.at("factor"))));
+            };
+        };
     };
 
-    // Testing if settings messages work
-    "SettingsManagement"_test = [] {
-        testSettingsManagement<scheduler::Simple<>>();
-        testSettingsManagement<scheduler::BreadthFirst<>>();
-        testSettingsManagement<scheduler::Simple<scheduler::multiThreaded>>();
-        testSettingsManagement<scheduler::BreadthFirst<scheduler::multiThreaded>>();
+    "Multi-Block<T> message passing tests"_test = [] {
+        using namespace gr::testing;
+        using enum gr::message::Command;
+
+        gr::MsgPortOut toBlock;
+        TestBlock<int> unitTestBlock1({ { "name", "UnitTestBlock1" } });
+        TestBlock<int> unitTestBlock2({ { "name", "UnitTestBlock2" } });
+        gr::MsgPortIn  fromBlock;
+
+        const auto processMessage = [&]() {
+            expect(nothrow([&] { unitTestBlock1.processScheduledMessages(); })) << "manually execute processing of messages";
+            expect(nothrow([&] { unitTestBlock2.processScheduledMessages(); })) << "manually execute processing of messages";
+        };
+
+        expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock1.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock2.msgIn)));
+
+        // bug/missing connect API, second connect invalidates first unitTestBlock1.msgOut connections
+        // expect(eq(ConnectionResult::SUCCESS, unitTestBlock1.msgOut.connect(fromBlock)));
+        // expect(eq(ConnectionResult::SUCCESS, unitTestBlock2.msgOut.connect(fromBlock)));
+        // workaround
+        expect(eq(ConnectionResult::SUCCESS, unitTestBlock1.msgOut.connect(fromBlock)));
+        auto buffer = fromBlock.buffer();
+        // unitTestBlock1.msgOut.setBuffer(buffer.streamBuffer, buffer.tagBuffer);
+        unitTestBlock2.msgOut.setBuffer(buffer.streamBuffer, buffer.tagBuffer);
+
+        expect(eq(toBlock.buffer().streamBuffer.n_readers(), 2UZ)) << "need two consumer";
+        expect(eq(unitTestBlock1.msgOut.buffer().streamBuffer.n_readers(), 1UZ)) << "need one consumer";
+        expect(eq(unitTestBlock2.msgOut.buffer().streamBuffer.n_readers(), 1UZ)) << "need one consumer";
+
+        sendMessage<Subscribe>(toBlock, unitTestBlock1.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {} /* data  */, "client#42");
+        sendMessage<Subscribe>(toBlock, unitTestBlock2.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {} /* data  */, "client#42");
+        processMessage();
+        expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply";
+
+        // trigger any message action
+        sendMessage<Get>(toBlock, "", "Unknown", {});
+        processMessage();
+
+        expect(eq(fromBlock.streamReader().available(), 2UZ)) << "should receive two heartbeats";
+        const Message heartbeat1 = returnReplyMsg(fromBlock);
+        expect(heartbeat1.cmd == Notify) << fmt::format("mismatch between heartbeat1.cmd = {} and expected {} command", heartbeat1.cmd, Notify);
+        expect(eq(heartbeat1.endpoint, std::string(block::property::kHeartbeat)));
+        expect(heartbeat1.data.has_value());
+        expect(heartbeat1.data.value().contains("heartbeat"));
     };
 
-    // Testing message passing without a running scheduler
-    "MessagesWithoutARunningScheduler"_test = [] {
-        testMessagesWithoutRunningScheduler<scheduler::Simple<>>();
-        testMessagesWithoutRunningScheduler<scheduler::BreadthFirst<>>();
-        testMessagesWithoutRunningScheduler<scheduler::Simple<scheduler::multiThreaded>>();
-        testMessagesWithoutRunningScheduler<scheduler::BreadthFirst<scheduler::multiThreaded>>();
+    "Message passing via Scheduler"_test = []<typename SchedulerPolicy> {
+        using namespace gr::testing;
+        gr::Graph flow;
+
+        auto &source  = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TestSource" }, { "n_samples_max", gr::Size_t(-1) } });
+        auto &process = flow.emplaceBlock<TestBlock<float>>({ { "name", "UnitTestBlock" } });
+        auto &sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TestSink" }, { "log_samples", false } });
+
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        auto           scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+
+        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+
+        using namespace block;
+        auto sendCommand = [&toScheduler](std::string_view msg, gr::message::Command cmd, std::string_view serviceName, std::string_view endPoint, property_map data) {
+            using enum gr::message::Command;
+
+            std::fflush(stderr);
+            fmt::print("launch test: {}", msg);
+            std::fflush(stdout);
+            switch (cmd) {
+            case Set: sendMessage<Set>(toScheduler, serviceName, endPoint, std::move(data), "uniqueUserID#42"); return;
+            case Get: sendMessage<Get>(toScheduler, serviceName, endPoint, std::move(data), "uniqueUserID#42"); return;
+            default: throw gr::exception(fmt::format("unknown/unhandled cmd {}", cmd));
+            };
+        };
+
+        auto checkReply = [&fromScheduler](std::size_t nReplyExpected, std::string_view serviceName, std::string_view endPoint, auto data) -> std::optional<bool> {
+            std::size_t nAvailable = fromScheduler.streamReader().available();
+            if (nReplyExpected == 0UZ) {
+                if (nAvailable == 0UZ) {
+                    return true;
+                } else {
+                    return false;
+                }
+            } else if (nAvailable == 0UZ) {
+                return std::nullopt;
+            }
+            expect(eq(nAvailable, nReplyExpected)) << fmt::format("actual {} vs. expected {} reply messages", nAvailable, nReplyExpected);
+            if (nReplyExpected == 0) {
+                return false;
+            }
+            const Message reply = returnReplyMsg(fromScheduler);
+            expect(eq(reply.clientRequestID, "uniqueUserID#42"s));
+            expect(eq(reply.serviceName, serviceName));
+            expect(eq(reply.endpoint, std::string(endPoint)));
+            if constexpr (std::is_same_v<decltype(data), property_map>) {
+                auto is_contained = [](const property_map &haystack, const property_map &needle) -> bool {
+                    for (const auto &[key, val] : needle) {
+                        auto it = haystack.find(key);
+                        if (it == haystack.end() || it->second != val) {
+                            return false; // key not found or value mismatch
+                        }
+                    }
+                    return true;
+                };
+
+                if (!data.empty()) {
+                    expect(reply.data.has_value());
+                    expect(is_contained(reply.data.value(), data));
+                }
+            } else if constexpr (std::is_same_v<decltype(data), property_map>) {
+                expect(!reply.data.has_value());
+            } else {
+                static_assert(gr::meta::always_false<decltype(data)>, "data type not supported");
+            }
+            return true;
+        };
+
+        using namespace std::literals;
+        struct MessageTestCase {
+            using SendCommand                 = std::function<void()>;
+            using ResultCheck                 = std::function<std::optional<bool>()>;
+            SendCommand               cmd     = [] {};
+            ResultCheck               check   = [] { return true; };
+            std::chrono::milliseconds delay   = 0ms; // delay after 'cmd' which the reply is being checked
+            std::chrono::milliseconds timeout = 1s;  // time-out for the 'check' test
+        };
+
+        using enum gr::message::Command;
+        // clang-format off
+        std::vector<MessageTestCase> commands = {
+                { .cmd = [&] { fmt::print("executing failing test"); /* simulate work */ }, .check = [&] { return false; /* simulate failure */ } },
+                { .cmd = [&] { fmt::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
+                { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }},
+                { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 10ms },
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply(0UZ, "", "", property_map{ }); }, .delay = 100ms },
+                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 10ms },
+                { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
+        };
+        // clang-format on
+
+        fmt::println("##### starting test for scheduler {}", gr::meta::type_name<decltype(scheduler)>());
+        std::fflush(stdout);
+
+        std::thread testWorker([&commands] {
+            std::this_thread::sleep_for(1s);
+            for (auto &[command, resultCheck, delay, timeout] : commands) {
+                command();                          // execute the command
+                std::this_thread::sleep_for(delay); // wait for approximate time when command should be expected to be applied
+
+                // poll for result until timeout
+                bool gotResult = false;
+                auto startTime = std::chrono::steady_clock::now();
+                while (std::chrono::steady_clock::now() - startTime < timeout) {
+                    if (auto result = resultCheck()) { // if result check passes
+                        gotResult = true;
+                        if (*result) {
+                            fmt::println(" - passed.");
+                            std::fflush(stdout);
+                        } else {
+                            fmt::println(" - failed.");
+                            std::fflush(stdout);
+                            // optional: throw gr::exception("command execution timed out");
+                        }
+                        break; // move on to the next command
+                    }
+                    // sleep a bit before polling again to reduce CPU usage
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                if (!gotResult) {
+                    fmt::println(" - test timed-out after {}", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime));
+                    std::fflush(stdout);
+                }
+            }
+        });
+
+        scheduler.runAndWait();
+
+        testWorker.join();
+
+        fmt::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink.n_samples_produced);
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::multiThreaded>>{};
+};
+
+inline Error
+generateError(std::string_view msg) {
+    return Error(msg);
+}
+
+const boost::ut::suite messageFormatter = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+    fmt::println("\n\nmessageFormatter test suite (explicitly verbose):");
+
+    "message::Command-Formatter"_test = [] {
+        using enum gr::message::Command;
+        magic_enum::enum_for_each<Command>([](Command value) { expect(eq(fmt::format("{}", value), std::string(magic_enum::enum_name(value)))); });
+
+        expect(eq(gr::message::commandName<Set>(), std::string(magic_enum::enum_name<Set>())));
     };
 
-    // Testing controlling the scheduler via messages
-    "SchedulerControl"_test = [] {
-        testSchedulerControl<scheduler::Simple<>>();
-        testSchedulerControl<scheduler::BreadthFirst<>>();
-        testSchedulerControl<scheduler::Simple<scheduler::multiThreaded>>();
-        testSchedulerControl<scheduler::BreadthFirst<scheduler::multiThreaded>>();
+    "Message-Formatter"_test = [] {
+        using enum gr::message::Command;
+        auto loc = fmt::format("{}", Message{ .cmd = Set, .serviceName = "MyCustomBlock", .endpoint = "<propertyName>", .data = property_map{ { "key", "value" } }, .rbac = "<rbac token>" });
+        fmt::println("Message formatter test: {}", loc);
+        expect(ge(loc.size(), 0UZ));
+    };
+
+    "Error-Formatter"_test = [] {
+        using enum gr::message::Command;
+        auto loc1 = fmt::format("{}", generateError("ErrorMsg"));
+        fmt::println("Error formatter test: {}", loc1);
+        expect(ge(loc1.size(), 0UZ));
+
+        auto loc2 = fmt::format("{:s}", generateError("ErrorMsg"));
+        fmt::println("Error formatter test: {}", loc2);
+        expect(ge(loc2.size(), 0UZ));
+
+        auto loc3 = fmt::format("{:f}", generateError("ErrorMsg"));
+        fmt::println("Error formatter test: {}", loc3);
+        expect(ge(loc3.size(), 0UZ));
+
+        auto loc4 = fmt::format("{:t}", generateError("ErrorMsg"));
+        fmt::println("Error formatter test: {}", loc4);
+        expect(ge(loc4.size(), 0UZ));
+    };
+};
+
+const boost::ut::suite testExceptions = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+
+    "test gr::exception basic functionality"_test = [] {
+        gr::exception ex("test exception");
+        expect(eq(std::string_view(ex.what()).substr(0, 14), "test exception"sv));
+    };
+
+    "test Error class basic functionality"_test = [] {
+        const std::source_location location = std::source_location::current();
+        Error                      error("test error");
+        expect(eq(error.message, "test error"sv));
+        expect(eq(error.methodName(), location.function_name()));
+        expect(ge(error.isoTime().size(), 10UZ));
+        expect(ge(error.srcLoc().size(), 10UZ));
+    };
+
+    "test Error class with std::exception"_test = [] {
+        const std::source_location location = std::source_location::current();
+        std::exception             stdEx;
+        Error                      error(stdEx);
+        expect(eq(error.message, "std::exception"sv)) << "Error message should fall back to 'std::exception'";
+
+        gr::exception grEx("custom exception message");
+        Error         errorFromGrEx(grEx);
+        expect(eq(errorFromGrEx.message, "custom exception message"sv));
+        expect(eq(errorFromGrEx.methodName(), location.function_name()));
+        expect(ge(errorFromGrEx.isoTime().size(), 10UZ));
+        expect(ge(errorFromGrEx.srcLoc().size(), 10UZ));
+    };
+
+    "test Error class with gr::exception"_test = [] {
+        const std::source_location location = std::source_location::current();
+        gr::exception              grEx("test gr::exception");
+        Error                      error(grEx);
+        expect(eq(error.message, "test gr::exception"sv));
+        expect(eq(error.methodName(), location.function_name()));
+        expect(ge(error.isoTime().size(), 10UZ));
+        expect(ge(error.srcLoc().size(), 10UZ));
     };
 };
 

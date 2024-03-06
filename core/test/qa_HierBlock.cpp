@@ -85,14 +85,14 @@ public:
         return false;
     }
 
-    [[nodiscard]] std::expected<void, gr::lifecycle::ErrorType>
+    [[nodiscard]] std::expected<void, gr::Error>
     changeState(gr::lifecycle::State newState) noexcept override {
         return this->changeStateTo(newState);
     }
 
     constexpr gr::lifecycle::State
     state() const noexcept override {
-        return this->state();
+        return gr::lifecycle::StateMachine<HierBlock<T>>::state();
     }
 
     [[nodiscard]] constexpr std::size_t
@@ -116,7 +116,7 @@ public:
     }
 
     gr::work::Status
-    draw() {
+    draw() override {
         return gr::work::Status::OK;
     }
 
@@ -186,8 +186,7 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
         } else {
             // TODO: Investigate what schedulers do when there is an event written, but we return DONE
             if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
-                using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+                this->emitErrorMessage("requested STOPPED", ret.error());
             }
             this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
             return { requested_work, 1UL, gr::work::Status::DONE };

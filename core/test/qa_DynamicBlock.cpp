@@ -5,14 +5,13 @@
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
     using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
-        const gr::Size_t nInputs           = 10;
+        const gr::Size_t nInputs           = 5;
         const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
         const gr::Size_t nSamples          = 5;
 
@@ -34,8 +33,7 @@ const boost::ut::suite DynamicBlocktests = [] {
 
         sched.runAndWait();
 
-        std::vector<double> expectedOutput{ 0., 10., 20., 30., 40 };
-        expect(std::ranges::equal(sink.samples, expectedOutput)) << "sinks samples does not match to expected values";
+        expect(eq(sink.samples, std::vector<double>{ 0., 5., 10., 15., 20 })) << "sinks samples does not match to expected values";
 
         // TODO: for the moment it s not allowed to change number of ports after they are connected
         // TODO: Emscripten does not like this test

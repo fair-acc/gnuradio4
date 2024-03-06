@@ -69,11 +69,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
             // if one of the port is already connected and  n_inputs was changed then throw
             if (std::any_of(inputs.begin(), inputs.end(), [](const auto &port) { return port.isConnected(); })) {
-                // TODO: for the moment keep both: throw exception and emit message
-                using namespace gr::message;
-                std::string messageError{ "Number of input ports cannot be changed after Graph initialization." };
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, messageError } });
-                throw std::range_error(messageError);
+                this->emitErrorMessage("settingsChanged(..)", gr::Error("Number of input ports cannot be changed after Graph initialization."));
             }
             fmt::print("{}: configuration changed: n_inputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.at("n_inputs"));
             inputs.resize(n_inputs);
