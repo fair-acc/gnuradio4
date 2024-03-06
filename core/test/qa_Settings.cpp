@@ -349,7 +349,7 @@ const boost::ut::suite SettingsTests = [] {
     "constructor"_test = [] {
         "empty"_test = [] {
             auto block = TestBlock<float>();
-            block.performInit(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+            block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().get().size(), 12UL));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
@@ -358,7 +358,7 @@ const boost::ut::suite SettingsTests = [] {
         "with init parameter"_test = [] {
             auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
             expect(eq(block.settings().stagedParameters().size(), 1u));
-            block.performInit(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+            block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().stagedParameters().size(), 0u));
             block.settings().updateActiveParameters();
             expect(eq(block.settings().get().size(), 12UL));
@@ -393,7 +393,7 @@ const boost::ut::suite SettingsTests = [] {
         block.debug    = true;
         const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } }, { "string_vector_setting", std::vector<std::string>{ "A", "B", "C" } } });
         expect(val.empty()) << "unable to stage settings";
-        block.performInit(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+        block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
         expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
         expect(eq(block.string_vector_setting.value, std::vector<std::string>{ "A", "B", "C" }));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
@@ -417,7 +417,7 @@ const boost::ut::suite SettingsTests = [] {
         auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
         //
         auto wrapped1 = BlockWrapper<TestBlock<float>>();
-        wrapped1.performInit(progress, ioThreadPool);
+        wrapped1.init(progress, ioThreadPool);
         wrapped1.setName("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped1.uniqueName().empty()) << "unique name";
@@ -428,7 +428,7 @@ const boost::ut::suite SettingsTests = [] {
         // via constructor
         auto wrapped2 = BlockWrapper<TestBlock<float>>({ { "name", "test_name" } });
         expect(wrapped2.settings().set({ { "context", "a string" } }).empty()) << "successful set returns empty map";
-        wrapped2.performInit(progress, ioThreadPool);
+        wrapped2.init(progress, ioThreadPool);
         expect(eq(wrapped2.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped2.uniqueName().empty()) << "unique name";
         expect(wrapped2.settings().set({ { "context", "a string" } }).empty()) << "successful set returns empty map";

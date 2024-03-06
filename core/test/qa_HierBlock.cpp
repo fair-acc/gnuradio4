@@ -68,7 +68,7 @@ public:
     ~HierBlock() override = default;
 
     void
-    performInit(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
+    init(std::shared_ptr<gr::Sequence> /*progress*/, std::shared_ptr<gr::thread_pool::BasicThreadPool> /*ioThreadPool*/) override {}
 
     [[nodiscard]] std::string_view
     name() const override {

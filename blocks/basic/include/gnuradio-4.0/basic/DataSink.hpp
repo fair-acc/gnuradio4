@@ -439,16 +439,6 @@ public:
         }
     };
 
-    ~DataSink() {
-        stop();
-        DataSinkRegistry::instance().unregisterSink(this);
-    }
-
-    void
-    init() noexcept {
-        DataSinkRegistry::instance().registerSink(this);
-    }
-
     void
     settingsChanged(const property_map &oldSettings, const property_map & /*newSettings*/) {
         const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
@@ -530,9 +520,14 @@ public:
         addListener(std::make_unique<SnapshotListener<Callback, M>>(std::forward<M>(matcher), delay, std::forward<Callback>(callback)), false);
     }
 
-    // TODO this code should be called at the end of graph processing
+    void
+    start() noexcept {
+        DataSinkRegistry::instance().registerSink(this);
+    }
+
     void
     stop() noexcept {
+        DataSinkRegistry::instance().unregisterSink(this);
         std::lock_guard lg(_listener_mutex);
         for (auto &listener : _listeners) {
             listener->stop();
