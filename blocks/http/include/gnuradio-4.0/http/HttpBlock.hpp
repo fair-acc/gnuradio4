@@ -42,7 +42,10 @@ enum class RequestType : char {
     POST = 3,
 };
 
-using HttpBlockDoc = Doc<R""(
+template<typename T>
+class HttpBlock : public gr::Block<HttpBlock<T>, BlockingIO<false>> {
+public:
+    using Description = Doc<R""(
 The HttpBlock allows to use the responses from HTTP APIs (e.g. REST APIs) as the value for this block's output port.
 The block can be used either on-demand to do single requests, or can use long polling to subscribe to an event stream.
 The result is provided on a single output port as a map with the following keys:
@@ -51,8 +54,6 @@ The result is provided on a single output port as a map with the following keys:
 - mime-type: The mime-type of the response
 )"">;
 
-template<typename T>
-class HttpBlock : public gr::Block<HttpBlock<T>, BlockingIO<false>, HttpBlockDoc> {
 private:
     // used for queuing GET responses for the consumer
     std::queue<pmtv::map_t> _backlog;

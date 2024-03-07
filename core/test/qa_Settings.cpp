@@ -106,12 +106,11 @@ struct Source : public Block<Source<T>> {
 template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
 using A = Annotated<T, description, Arguments...>;
 
-using TestBlockDoc = Doc<R""(
+template<typename T>
+struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, SupportedTypes<float, double>> {
+    using Description = Doc<R""(
 some test doc documentation
 )"">;
-
-template<typename T>
-struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, TestBlockDoc, SupportedTypes<float, double>> {
     PortIn<T>  in{};
     PortOut<T> out{};
     // parameters
@@ -164,9 +163,10 @@ static_assert(BlockLike<TestBlock<float>>);
 static_assert(BlockLike<TestBlock<double>>);
 
 template<typename T, bool Average = false>
-struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, double>, ResamplingRatio<>, Doc<R""(
+struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, double>, ResamplingRatio<>> {
+    using Description = Doc<R""(
 @brief reduces sample rate by given fraction controlled by denominator
-)"">> {
+)"">;
     PortIn<T>                        in{};
     PortOut<T>                       out{};
     A<float, "sample rate", Visible> sample_rate = 1.f;
@@ -508,8 +508,8 @@ const boost::ut::suite AnnotationTests = [] {
     "basic node annotations"_test = [] {
         Graph             testGraph;
         TestBlock<float> &block = testGraph.emplaceBlock<TestBlock<float>>();
-        expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlockDoc::value)) != std::string_view::npos);
-        expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlockDoc::value))) << "type-erased block description";
+        expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlock<float>::Description::value)) != std::string_view::npos);
+        expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlock<float>::Description::value))) << "type-erased block description";
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::documentation")), "y = a * x"sv));
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::unit")), "As"sv));

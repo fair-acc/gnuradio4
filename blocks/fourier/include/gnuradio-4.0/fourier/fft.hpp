@@ -28,7 +28,8 @@ struct OutputDataSet<T> {
 
 template<typename T, typename U = OutputDataSet<T>::type, template<typename, typename> typename FourierAlgorithm = gr::algorithm::FFT>
     requires((gr::meta::complex_like<T> || std::floating_point<T>) && (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>) )
-struct FFT : public Block<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>, Doc<R""(
+struct FFT : public Block<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>> {
+    using Description = Doc<R""(
 @brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
 The FFT block is capable of performing Fourier Transform computations on real or complex data,
@@ -86,7 +87,7 @@ On the choice of window (mathematically aka. apodisation) functions
 @tparam T type of the input signal.
 @tparam U type of the output data (presently limited to DataSet<float> and DataSet<double>)
 @tparam FourierAlgorithm the specific algorithm used to perform the Fourier Transform (can be DFT, FFT, FFTW).
-)"">> {
+)"">;
     using value_type  = U::value_type;
     using InDataType  = std::conditional_t<gr::meta::complex_like<T>, std::complex<value_type>, value_type>;
     using OutDataType = std::complex<value_type>;

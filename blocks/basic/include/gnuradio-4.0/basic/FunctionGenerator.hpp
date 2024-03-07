@@ -86,7 +86,10 @@ createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
 
 } // namespace function_generator
 
-using FunctionGeneratorDoc = Doc<R""(
+template<typename T>
+    requires(std::floating_point<T>)
+struct FunctionGenerator : public gr::Block<FunctionGenerator<T>, BlockingIO<true>> {
+    using Description = Doc<R""(
 @brief The `FunctionGenerator` class generates a variety of functions and their combinations.
 It supports multiple function types, including Constant, Linear Ramp, Parabolic Ramp, Cubic Spline, and Impulse Response.
 Each function type is configurable with specific parameters, enabling precise tailoring to meet the user's requirements.
@@ -153,10 +156,6 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
 @endcode
 
 )"">;
-
-template<typename T>
-    requires(std::floating_point<T>)
-struct FunctionGenerator : public gr::Block<FunctionGenerator<T>, BlockingIO<true>, FunctionGeneratorDoc> {
     /**
      * TODO: Taken from CtxSettings
      * A predicate for matching two contexts

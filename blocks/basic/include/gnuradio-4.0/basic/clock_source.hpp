@@ -27,12 +27,11 @@ template<typename T, gr::meta::fixed_string description = "", typename... Argume
 using A = gr::Annotated<T, description, Arguments...>;
 using namespace gr;
 
-using ClockSourceDoc = Doc<R""(
+template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
+struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {
+    using Description = Doc<R""(
 ClockSource Documentation -- add here
 )"">;
-
-template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
-struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>, ClockSourceDoc> {
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
 
     PortOut<T> out;
