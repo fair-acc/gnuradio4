@@ -27,7 +27,9 @@ parse(std::string_view name) {
 
 } // namespace signal_generator
 
-using SignalGeneratorDoc = Doc<R""(
+template<std::floating_point T>
+struct SignalGenerator : public gr::Block<SignalGenerator<T>, BlockingIO<true>> {
+    using Description = Doc<R""(
 @brief The SignalGenerator class generates various types of signal waveforms, including sine, cosine, square, constant, saw, and triangle signals.
 Users can set parameters such as amplitude, frequency, offset, and phase for the desired waveform.
 Note that not all parameters are supported for all signals.
@@ -60,9 +62,6 @@ s(t) = 2 * A * (t * f - floor(t * f + 0.5)) + O
 This waveform linearly increases from -amplitude to amplitude in the first half of its period and then decreases back to -amplitude in the second half, forming a triangle shape.
 s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
 )"">;
-
-template<std::floating_point T>
-struct SignalGenerator : public gr::Block<SignalGenerator<T>, BlockingIO<true>, SignalGeneratorDoc> {
     PortIn<T>  in; // ClockSource input
     PortOut<T> out;
 

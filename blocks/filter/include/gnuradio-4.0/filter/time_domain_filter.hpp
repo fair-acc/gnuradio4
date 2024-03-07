@@ -12,12 +12,13 @@ using namespace gr;
 
 template<typename T>
     requires std::floating_point<T>
-struct fir_filter : Block<fir_filter<T>, Doc<R""(
+struct fir_filter : Block<fir_filter<T>> {
+    using Description = Doc<R""(
 @brief Finite Impulse Response (FIR) filter class
 
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
-)"">> {
+)"">;
     PortIn<T>        in;
     PortOut<T>       out;
     std::vector<T>   b{}; // feedforward coefficients
@@ -46,12 +47,13 @@ enum class IIRForm {
 
 template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
     requires std::floating_point<T>
-struct iir_filter : Block<iir_filter<T, form>, Doc<R""(
+struct iir_filter : Block<iir_filter<T, form>> {
+    using Description = Doc<R""(
 @brief Infinite Impulse Response (IIR) filter class
 
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
 a are the feedback coefficients
-)"">> {
+)"">;
     PortIn<T>        in;
     PortOut<T>       out;
     std::vector<T>   b{ 1 }; // feed-forward coefficients

@@ -9,7 +9,9 @@
 namespace gr::basic {
 using namespace gr;
 
-using SelectorDoc = Doc<R""(
+template<typename T>
+struct Selector : Block<Selector<T>> {
+    using Description = Doc<R""(
 @brief basic multiplexing class to route arbitrary inputs to outputs
 
 See https://wiki.gnuradio.org/index.php/Selector
@@ -60,9 +62,6 @@ to any output port (thus reading and ignoring all the values from the input),
 you can set the `backPressure` property to false.
 
 )"">;
-
-template<typename T>
-struct Selector : Block<Selector<T>, SelectorDoc> {
     // optional shortening
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = Annotated<U, description, Arguments...>;

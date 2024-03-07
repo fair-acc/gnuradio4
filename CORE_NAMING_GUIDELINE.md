@@ -96,16 +96,17 @@ concept IsGraph = requires(T t) {
 
 /** @brief Represents a simple graph structure for signals. (alt documentation)*/
 template <typename TBlock>
-class Graph : public Block<Graph<TBlock>, Doc<R"(
+class Graph : public Block<Graph<TBlock>> {
+    bool               _initialised = true; // private member using `_` prefix
+
+public:
+    using Description = Doc<R"(
   @brief Represents a simple graph structure for signals. (preferred documentation)
 
   ... you may use markdown etc.
   This documentation can also be processed by the compiler w/o needing additional
   macro-processors or documentation-generating tools.
-)">> {
-    bool               _initialised = true; // private member using `_` prefix
-
-public:
+)">;
     static const int   kDefaultSize = 10;
     std::vector<TBlock> nodes;
     bool               is_valid; // field is public API using snake_case
