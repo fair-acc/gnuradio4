@@ -358,6 +358,40 @@ makeDataSetTemplate(Metadata metadata) {
  */
 template<typename T>
 class DataSink : public Block<DataSink<T>> {
+    using Description = Doc<R""(@brief generic data sink for exporting arbitrary-typed streams to non-GR C++ APIs.
+
+Each sink registers with a (user-defined/exchangeable) global registry that can be
+queried by the non-GR caller to find the sink responsible for a given signal name, etc.
+and either retrieve a poller handler that allows asynchronous data from a different thread,
+or register a callback that is invoked by the sink if the user-conditions are met.
+
+<pre>
+@code
+        ╔═══════════════╗
+   in0 ━╢   data sink   ║                      ┌──── caller ────┐
+(err0) ━╢ (opt. error)  ║                      │                │
+        ║               ║  retrieve poller or  │ (custom non-GR │
+        ║ :signal_name  ║←--------------------→│  user code...) │
+        ║ :signal_unit  ║  register            │                │
+        ║ :...          ║  callback function   └───┬────────────┘
+        ╚═ GR block ═╤══╝                          │
+                     │                             │
+                     │                             │
+                     │      ╭─registry─╮           │
+           register/ │      ╞══════════╡           │ queries for specific
+         deregister  ╰─────→│ [sinks]  │←──────────╯ signal_info_t list/criteria
+                            ╞══════════╡
+                            ╰──────────╯
+
+</pre>
+Pollers can be configured to be blocking, i.e. blocks the flow-graph
+if data is not being retrieved in time, or non-blocking, i.e. data being dropped when
+the user-defined buffer size is full.
+N.B. due to the nature of the GR scheduler, signals from the same sink are notified
+synchronously (/asynchronously) if handled by the same (/different) sink block.
+
+@tparam T input sample type
+)"">;
     struct AbstractListener;
 
     static constexpr std::size_t                  _listener_buffer_size = 65536;

@@ -1,5 +1,11 @@
+#include <algorithm>
 #include <fstream>
+#include <iostream>
+#include <ranges>
 #include <sstream>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -102,9 +108,31 @@ const boost::ut::suite GrcTests = [] {
         auto graph              = gr::load_grc(context.loader, graph_source);
         auto graph_saved_source = gr::save_grc(graph);
 
-        auto graph_expected_source = readFile(TESTS_SOURCE_PATH "/grc/test.grc.expected");
-        expect(eq(graph_saved_source + "\n",
-                  graph_expected_source)); // TODO: this is not a good assert since we will add new parameters regularly... should not be identity but checking critical parameter/aspects
+        auto checkAndPrintMissingLines = [](const std::string& first, const std::string& second) -> bool {
+            std::istringstream ssSecond(second);
+            std::unordered_set<std::string> linesSecond;
+            std::string line;
+            while (std::getline(ssSecond, line)) {
+                linesSecond.insert(line);
+            }
+
+            std::istringstream ssFirst(first);
+            bool allLinesFound = true;
+            size_t lineNumber = 0;
+            while (std::getline(ssFirst, line)) {
+                ++lineNumber;
+                if (!linesSecond.contains(line)) {
+                    fmt::println(stderr, "missing line {}:\n{}", lineNumber, line);
+                    allLinesFound = false;
+                }
+            }
+            if (!allLinesFound) {
+                fmt::println(stderr, "\nin:\n{}", second);
+            }
+
+            return allLinesFound;
+        };
+        expect(checkAndPrintMissingLines(graph_source, graph_saved_source));
 
         gr::scheduler::Simple scheduler(std::move(graph));
         scheduler.runAndWait();

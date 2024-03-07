@@ -348,7 +348,6 @@ public:
     using derived_t                  = Derived;
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
     using block_template_parameters  = meta::typelist<Arguments...>;
-    using Description                = typename block_template_parameters::template find_or_default<is_doc, EmptyDoc>;
     using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UL, 1UL, true>>;
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
@@ -395,7 +394,13 @@ public:
     //
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
     //
-    constexpr static std::string_view description = static_cast<std::string_view>(Description::value);
+    constexpr static std::string_view description = [] {
+        if constexpr (requires { typename Derived::Description; }) {
+            return static_cast<std::string_view>(Derived::Description::value);
+        } else {
+            return "please add a public 'using Description = Doc<\"...\">' documentation annotation to your block definition";
+        }
+    }();
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
 
     //
@@ -1585,12 +1590,9 @@ checkBlockContracts() {
 
     using TDerived = typename TDecayedBlock::derived_t;
     if constexpr (requires { &TDerived::work; }) {
-        [[deprecated("expert-use-only of raw 'gr::work::Result work(std::size_t requested_work)'")]] constexpr static auto warning = []() {
-            // N.B. implementing this is still allowed for workaround but should be discouraged as default API since this often leads to
-            // important variants not being implemented such as lifecycle::State handling, Tag forwarding, etc.
-            fmt::println(stderr, "DEPRECATION WARNING: block {} implements a raw 'gr::work::Result work(std::size_t requested_work)' ", shortTypeName.template operator()<TDecayedBlock>());
-        };
-        warning();
+        // N.B. implementing this is still allowed for workaround but should be discouraged as default API since this often leads to
+        // important variants not being implemented such as lifecycle::State handling, Tag forwarding, etc.
+        fmt::println(stderr, "DEPRECATION WARNING: block {} implements a raw 'gr::work::Result work(std::size_t requested_work)' ", shortTypeName.template operator()<TDecayedBlock>());
         return;
     }
 
@@ -1672,13 +1674,12 @@ template<BlockLike TBlock>
 blockDescription() noexcept {
     using DerivedBlock         = typename TBlock::derived_t;
     using ArgumentList         = typename TBlock::block_template_parameters;
-    using Description          = typename ArgumentList::template find_or_default<is_doc, EmptyDoc>;
     using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
     constexpr bool kIsBlocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
-                                                gr::meta::type_name<DerivedBlock>(), Description::value._data,
+                                                gr::meta::type_name<DerivedBlock>(), TBlock::description,
                                                 kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
     gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto &&t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
@@ -1794,7 +1795,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         using ThisBlock = TBlock<Type>;
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), //
-                detail::reflFirstTypeName<Type>());
+                                                          detail::reflFirstTypeName<Type>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1808,7 +1809,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                Type::toString());
+                                                          Type::toString());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1821,7 +1822,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>());
+                                                          detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1835,7 +1836,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                Type::toString() + "," + detail::nttpToString<Value0>());
+                                                          Type::toString() + "," + detail::nttpToString<Value0>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1848,7 +1849,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
+                                                          detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1862,7 +1863,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                Type::toString() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
+                                                          Type::toString() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
