@@ -1,11 +1,13 @@
 #ifndef GNURADIO_TAGMONITORS_HPP
 #define GNURADIO_TAGMONITORS_HPP
 
-#include "gnuradio-4.0/BlockRegistry.hpp"
+#include <limits>
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
@@ -96,6 +98,9 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     gr::Size_t       n_samples_produced{ 0 };
     float            sample_rate     = 1000.0f;
     std::string      signal_name     = "unknown signal";
+    std::string      signal_unit     = "unknown unit";
+    float            signal_min      = std::numeric_limits<float>::lowest();
+    float            signal_max      = std::numeric_limits<float>::max();
     bool             verbose_console = false;
     bool             mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
 
@@ -367,7 +372,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 
 } // namespace gr::testing
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max, sample_rate, signal_name, verbose_console, mark_tag, values);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSource<T, b>), out, n_samples_max, sample_rate, signal_name, signal_unit, signal_min, signal_max, verbose_console, mark_tag, values);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagMonitor<T, b>), in, out, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags,
                                     log_samples, verbose_console, samples);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::testing::ProcessFunction b), (gr::testing::TagSink<T, b>), in, n_samples_expected, sample_rate, signal_name, n_samples_produced, log_tags,

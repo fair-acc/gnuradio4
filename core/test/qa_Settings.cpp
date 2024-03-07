@@ -8,6 +8,9 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#ifndef __EMSCRIPTEN__
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#endif
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -630,6 +633,40 @@ const boost::ut::suite TransactionTests = [] {
         expect(block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0).empty()) << "successful set returns empty map";
         expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 42.f));
     };
+
+#ifndef __EMSCRIPTEN__
+    // TODO enable this when load_grc works in emscripten (not relying on plugins here)
+    "Property auto-forwarding with GRC-loaded graph"_test = [&] {
+        constexpr std::string_view grc = R"(
+blocks:
+  - name: source
+    id: gr::setting_test::Source
+    parameters:
+      n_samples_max: 100
+      sample_rate: 123456
+  - name: test_block
+    id: gr::setting_test::TestBlock
+  - name: sink
+    id: gr::setting_test::Sink
+connections:
+  - [source, 0, test_block, 0]
+  - [test_block, 0, sink, 0]
+)";
+        BlockRegistry              registry;
+        gr::registerBlock<Source, double>(registry);
+        gr::registerBlock<TestBlock, double>(registry);
+        gr::registerBlock<Sink, double>(registry);
+        PluginLoader loader(registry, {});
+        try {
+            scheduler::Simple sched{ load_grc(loader, std::string(grc)) };
+            expect(sched.runAndWait().has_value());
+            sched.graph().forEachBlock([](auto &block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
+        } catch (const std::string &e) {
+            fmt::print(std::cerr, "GRC loading failed: {}\n", e);
+            expect(false);
+        }
+    };
+#endif
 };
 
 int
