@@ -399,6 +399,7 @@ synchronously (/asynchronously) if handled by the same (/different) sink block.
     bool                                          _listeners_finished = false;
     std::mutex                                    _listener_mutex;
     std::optional<gr::HistoryBuffer<T>>           _history;
+    bool                                          _registered = false;
 
 public:
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
@@ -476,7 +477,7 @@ public:
     void
     settingsChanged(const property_map &oldSettings, const property_map & /*newSettings*/) {
         const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
-        if (oldSignalName != signal_name) {
+        if (oldSignalName != signal_name && _registered) {
             DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), signal_name);
         }
         std::lock_guard lg{ _listener_mutex };
@@ -557,11 +558,13 @@ public:
     void
     start() noexcept {
         DataSinkRegistry::instance().registerSink(this);
+        _registered = true;
     }
 
     void
     stop() noexcept {
         DataSinkRegistry::instance().unregisterSink(this);
+        _registered = false;
         std::lock_guard lg(_listener_mutex);
         for (auto &listener : _listeners) {
             listener->stop();
