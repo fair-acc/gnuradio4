@@ -85,7 +85,7 @@ public:
 
     void
     stateChanged(lifecycle::State newState) {
-        emitMessage(msgOut, { { key::Kind, kind::SchedulerStateUpdate }, { key::Data, std::string(magic_enum::enum_name(newState)) } });
+        emitMessage(msgOut, { { kind::SchedulerStateUpdate, std::string(magic_enum::enum_name(newState)) } });
     }
 
     void
@@ -110,15 +110,15 @@ public:
             for (const auto &msg : input) {
                 const auto kind = gr::messageField<std::string>(msg, key::Kind);
                 if (kind == message::kind::SchedulerStateChangeRequest) {
-                    const auto dataStr        = gr::messageField<std::string>(msg, key::Data).value_or("");
-                    const auto requestedState = magic_enum::enum_cast<lifecycle::State>(dataStr);
-                    if (!requestedState || (requestedState != lifecycle::State::RUNNING && requestedState != lifecycle::State::REQUESTED_STOP && requestedState != lifecycle::State::REQUESTED_PAUSE)) {
+                    const auto whatStr = gr::messageField<std::string>(msg, key::What).value_or("");
+                    const auto what    = magic_enum::enum_cast<lifecycle::State>(whatStr);
+                    if (!what || (what != lifecycle::State::RUNNING && what != lifecycle::State::REQUESTED_STOP && what != lifecycle::State::REQUESTED_PAUSE)) {
                         emitMessage(msgOut, { { key::Kind, kind::Error },
-                                              { key::ErrorInfo, fmt::format("Invalid command '{}'", dataStr) },
+                                              { key::ErrorInfo, fmt::format("Invalid command '{}'", whatStr) },
                                               { key::Location, fmt::format("{}", std::source_location::current()) } });
                         continue;
                     }
-                    if (auto e = this->changeStateTo(*requestedState); !e) {
+                    if (auto e = this->changeStateTo(*what); !e) {
                         emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
                     }
                 } else {
