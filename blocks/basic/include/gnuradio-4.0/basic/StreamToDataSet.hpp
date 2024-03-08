@@ -320,10 +320,8 @@ private:
 
     void copyInputSamplesToHistory(InputSpanLike auto& inSamples, std::size_t maxSamplesToCopy) {
         if (n_pre > 0) {
-            const auto samplesToCopy          = std::min(maxSamplesToCopy, inSamples.size());
-            const auto end                    = std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy));
-            const auto optimizedSamplesToCopy = std::min(static_cast<std::size_t>(_history.capacity()), samplesToCopy);
-            _history.push_back_bulk(std::prev(end, static_cast<std::ptrdiff_t>(optimizedSamplesToCopy)), end);
+            const auto samplesToCopy = std::min(maxSamplesToCopy, inSamples.size());
+            _history.push_back_bulk(inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy)));
         }
     }
 

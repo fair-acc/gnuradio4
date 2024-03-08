@@ -792,10 +792,10 @@ const boost::ut::suite HistoryBufferTest = [] {
         auto               in = std::vector{1, 2, 3, 4, 5, 6};
         hb_overflow.push_back_bulk(in.begin(), in.end());
         expect(eq(hb_overflow[0], 6));
-        hb_overflow.push_back_bulk(std::vector{7, 8, 9});
-        expect(eq(hb_overflow[0], 9));
-        hb_overflow.push_back_bulk(std::array{10, 11, 12});
-        expect(eq(hb_overflow[0], 12));
+        hb_overflow.push_back_bulk(std::vector{7, 8, 9, 10, 11, 12, 13, 14});
+        expect(eq(hb_overflow[0], 14));
+        hb_overflow.push_back_bulk(std::array{15, 16, 17});
+        expect(eq(hb_overflow[0], 17));
 
         // Test with different types, e.g., double
         HistoryBuffer<double> hb_double(5);
