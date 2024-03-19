@@ -87,8 +87,14 @@ jobs:
         env:
           cache-name: cache-fetchContent-cache
         with:
-          path: ${{runner.workspace}}/build/_deps
-          key: ${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          path: /_w/graph-prototype/build/_deps
+          key: "${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}"
+
+      - name: Set cores to get stored in /cores
+        run: |
+          sudo mkdir /__w/graph-prototype/cores
+          sudo chmod 777 /__w/graph-prototype/cores
+          sudo bash -c 'echo "/__w/graph-prototype/build/cores/%e.%p.%t" > /proc/sys/kernel/core_pattern'
 
       - name: Configure
         if: matrix.compiler.cmake_wrapper == null
@@ -117,27 +123,31 @@ jobs:
 
       - name: execute tests
         if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
-        working-directory: ${{runner.workspace}}/build
+        working-directory: /__w/graph-prototype/build
         shell: bash
-        run: ctest --output-on-failure
+        run: |
+          ulimit -c unlimited # Allow core dumps
+          ctest --output-on-failure
 
       - name: execute tests with coverage
         if: matrix.compiler.cc == 'gcc-14' && matrix.cmake-build-type == 'Debug'
         env:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
-        working-directory: ${{runner.workspace}}/build
+        working-directory: /__w/graph-prototype/build//build
         shell: bash
-        run: cmake --build . --target coverage
+        run: |
+          ulimit -c unlimited # Allow core dumps
+          cmake --build . --target coverage
 
       - name: execute native main binary
         if: matrix.compiler.cmake_wrapper == null
-        working-directory: ${{runner.workspace}}/build
+        working-directory: /__w/graph-prototype/build
         shell: bash
         run: ./core/src/main
 
       - name: execute wasm main binary with nodejs
         if: matrix.compiler.cmake_wrapper != null
-        working-directory: ${{runner.workspace}}/build
+        working-directory: /__w/graph-prototype/build
         shell: bash
         run: node --experimental-wasm-threads ./core/src/main.js
 
@@ -149,3 +159,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: sonar-scanner
+
+      - name: Copy dumped executable to coredump directory
+        shell: bash
+        if: ${{ failure() }}  # Run only if something went wrong
+        run: |
+          # copy every binary for which a coredump file exists into the cores directory which will be uploaded
+          cd /__w/graph-prototype/cores
+          for core in * ; do
+          echo "copy executable for core file ${core}"
+          find ${{runner.workspace}}/build/ -name ${core%%\.*} -exec cp {} . \;
+          done;
+
+      - uses: actions/upload-artifact@v3
+        name: Upload coredumps and coresponding binaries
+        if: ${{ failure() }}  # Run only if something went wrong
+        with:
+          name: cores
+          path: /__w/graph-prototype${{runner.workspace}}/cores
