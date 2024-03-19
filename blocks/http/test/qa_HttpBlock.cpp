@@ -10,7 +10,6 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/testing/FunctionBlocks.hpp>
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
@@ -35,9 +34,7 @@ public:
 
     void
     trigger() {
-        gr::Message message;
-        message[gr::message::key::Kind] = "custom_kind";
-        super_t::emitMessage(super_t::msgOut, message);
+        super_t::emitMessage("custom_kind", {});
     }
 };
 
@@ -71,7 +68,6 @@ const boost::ut::suite HttpBlocktests = [] {
     using namespace gr;
     using namespace std::literals;
     using namespace std::chrono_literals;
-    using namespace gr::testing;
 
 #ifdef __EMSCRIPTEN__
     std::thread emscriptenThread{ [&]() {

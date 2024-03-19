@@ -8,18 +8,6 @@
 #include <pmtv/pmt.hpp>
 
 #include <fmt/format.h>
-#ifdef __GNUC__
-#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
-#ifndef __clang__
-#pragma GCC diagnostic ignored "-Wuseless-cast"
-#endif
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#endif
-#include <magic_enum.hpp>
-#include <magic_enum_utility.hpp>
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
 
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -231,6 +219,18 @@ struct isBlockDependent {
     static constexpr bool value = PortLike<T> || BlockLike<T>;
 };
 
+namespace block::property {
+inline static const char *kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
+inline static const char *kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
+inline static const char *kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
+inline static const char *kSetting        = "Settings";       ///< asynchronous message-based setting handling,
+                                                              // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
+inline static const char *kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
+
+inline static const char *kStoreDefaults = "StoreDefaults"; ///< store present settings as default, for counterpart @see kResetDefaults
+inline static const char *kResetDefaults = "ResetDefaults"; ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
+} // namespace block::property
+
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -330,6 +330,52 @@ struct isBlockDependent {
  * };
  * @endcode
  *
+ * Properties System:
+ * Properties offer a standardized way to manage runtime configuration and state. This system is built upon a message-passing model, allowing blocks
+ * to dynamically adjust their behavior, respond to queries, and notify about state changes. Defined under the `block::property` namespace,
+ * these properties leverage the Majordomo Protocol (MDP) pattern for structured and efficient communication.
+ *
+ * Predefined properties include:
+ * - `kHeartbeat`: Monitors and reports the block's operational state.
+ * - `kEcho`: Responds to messages by echoing them back, aiding in communication testing.
+ * - `kLifeCycleState`: Manages and reports the block's lifecycle state.
+ * - `kSetting` & `kStagedSetting`: Handle real-time and non-real-time configuration adjustments.
+ * - `kStoreDefaults` & `kResetDefaults`: Facilitate storing and reverting to default settings.
+ *
+ * These properties can be interacted with through messages, supporting operations like setting values, querying states, and subscribing to updates.
+ * This model provides a flexible interface for blocks to adapt their processing based on runtime conditions and external inputs.
+ *
+ * Implementing a Property:
+ * Blocks can implement custom properties by registering them in the `propertyCallbacks` map within the `start()` method.
+ * This allows the block to handle `SET`, `GET`, `SUBSCRIBE`, and `UNSUBSCRIBE` commands targeted at the property, enabling dynamic interaction with the block's functionality and configuration.
+ *
+ * @code
+ * struct MyBlock : public Block<MyBlock> {
+ *     static inline const char* kMyCustomProperty = "MyCustomProperty";
+ *     std::optional<Message> propertyCallbackMyCustom(std::string_view propertyName, Message message) {
+ *         using enum gr::message::Command;
+ *         assert(kMyCustomProperty  == propertyName); // internal check that the property-name to callback is correct
+ *
+ *         switch (message.cmd) {
+ *           case Set: // handle property setting
+ *             break;
+ *           case Get: // handle property querying
+ *             return Message{ populate reply message };
+ *           case Subscribe: // handle subscription
+ *             break;
+ *           case Unsubscribe: // handle unsubscription
+ *             break;
+ *           default: throw gr::exception(fmt::format("unsupported command {} for property {}", message.cmd, propertyName));
+ *         }
+ *       return std::nullopt; // no reply needed for Set, Subscribe, Unsubscribe
+ *     }
+ *
+ *     void start() override {
+ *         propertyCallbacks.emplace(kMyCustomProperty, &MyBlock::propertyCallbackMyCustom);
+ *     }
+ * };
+ * @endcode
+ *
  * @tparam Derived the user-defined block CRTP: https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
@@ -425,6 +471,18 @@ public:
     // so these are handled in a special way
     MsgPortInNamed<"__Builtin">  msgIn;
     MsgPortOutNamed<"__Builtin"> msgOut;
+
+    using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
+    std::map<std::string, PropertyCallback>         propertyCallbacks{
+                { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
+                { block::property::kEcho, &Block::propertyCallbackEcho },                     //
+                { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
+                { block::property::kSetting, &Block::propertyCallbackSettings },              //
+                { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
+                { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
+                { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
+    };
+    std::map<std::string, std::set<std::string>> propertySubscriptions;
 
     struct PortsStatus {
         std::size_t in_min_samples{ 1UZ };                                             // max of `port.min_samples()` of all input ports
@@ -578,8 +636,7 @@ public:
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                using namespace gr::message;
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                emitErrorMessage("~Block()", e.error());
             }
         }
         if (isBlocking()) {
@@ -592,8 +649,7 @@ public:
         }
 
         if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-            using namespace gr::message;
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            emitErrorMessage("~Block()", e.error());
         }
     }
 
@@ -633,13 +689,13 @@ public:
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
                 publishTag(applyResult.forwardParameters);
             }
+            notifyListeners(block::property::kSetting, settings().get());
         }
 
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
         if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
-            using namespace gr::message;
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            emitErrorMessage("init(..) -> INITIALISED", e.error());
         }
     }
 
@@ -904,22 +960,18 @@ public:
     void
     applyChangedSettings() {
         if (settings().changed()) {
-            Message settingsUpdated;
-            settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChanged;
-
             auto applyResult = settings().applyStagedParameters();
 
             if (!applyResult.forwardParameters.empty()) {
                 publishTag(applyResult.forwardParameters, 0);
             }
 
-            if (!applyResult.appliedParameters.empty()) {
-                settingsUpdated[gr::message::key::Data] = std::move(applyResult.appliedParameters);
-            }
-
             settings()._changed.store(false);
 
-            emitMessage(msgOut, std::move(settingsUpdated));
+            if (!applyResult.appliedParameters.empty()) {
+                notifyListeners(block::property::kStagedSetting, applyResult.appliedParameters);
+            }
+            notifyListeners(block::property::kSetting, settings().get());
         }
     }
 
@@ -1047,13 +1099,16 @@ public:
     constexpr void
     requestStop() noexcept {
         if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-            using namespace gr::message;
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            emitErrorMessage("requestStop()", e.error());
         }
     }
 
     constexpr void
     processScheduledMessages() {
+        using namespace std::chrono;
+        const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
+        notifyListeners(block::property::kHeartbeat, { { "heartbeat", nanoseconds_count } });
+
         auto processPort = [this]<PortLike TPort>(TPort &inPort) {
             const auto available = inPort.streamReader().available();
             if (available == 0UZ) {
@@ -1067,7 +1122,7 @@ public:
             } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
                 self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
-                    throw fmt::format("Could not consume the messages from the message port");
+                    throw gr::exception(fmt::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
                 }
             }
         };
@@ -1075,13 +1130,187 @@ public:
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
     }
 
-    void
-    emitMessage(auto &port, Message message) {
-        message[gr::message::key::Sender] = unique_name;
-        port.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
+protected:
+    std::optional<Message>
+    propertyCallbackHeartbeat(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kHeartbeat);
+
+        if (message.cmd == Set || message.cmd == Get) {
+            std::uint64_t nanoseconds_count = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+            message.data                    = { { "heartbeat", nanoseconds_count } };
+            return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
+                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            }
+            return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message>
+    propertyCallbackEcho(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kEcho);
+
+        if (message.cmd == Set) {
+            return message; // mirror message as is
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message>
+    propertyCallbackLifecycleState(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kLifeCycleState);
+
+        if (message.cmd == Set) {
+            if (!message.data.has_value() && !message.data.value().contains("state")) {
+                throw gr::exception(fmt::format("block {} (aka. {}) cannot set block state w/o 'state' data msg: {}", unique_name, name, message));
+            }
+
+            std::string stateStr;
+            try {
+                stateStr = std::get<std::string>(message.data.value().at("state"));
+            } catch (const std::exception &e) {
+                throw gr::exception(fmt::format("block {} property {} state conversion throws {}, msg: {}", unique_name, propertyName, e.what(), message));
+            } catch (...) {
+                throw gr::exception(fmt::format("block {} property {} state conversion throws unknown exception, msg: {}", unique_name, propertyName, message));
+            }
+            auto state = magic_enum::enum_cast<lifecycle::State>(stateStr);
+            if (!state.has_value()) {
+                throw gr::exception(fmt::format("block {} property {} invalid lifecycle::State conversion from {}, msg: {}", unique_name, propertyName, stateStr, message));
+            }
+            if (auto e = this->changeStateTo(state.value()); !e) {
+                throw gr::exception(fmt::format("error in state transition block {} property {} - what: {}", //
+                                                unique_name, propertyName, e.error().message, e.error().sourceLocation, e.error().errorTime));
+            }
+            return std::nullopt;
+        } else if (message.cmd == Get) {
+            message.data = { { "state", std::string(magic_enum::enum_name(this->state())) } };
+            return message;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message>
+    propertyCallbackSettings(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kSetting);
+
+        if (message.cmd == Set) {
+            if (!message.data.has_value()) {
+                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            }
+            // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
+            // settings are applied during the next work(...) invocation.
+            propertyCallbackStagedSettings(block::property::kStagedSetting, message);
+            return std::nullopt;
+        } else if (message.cmd == Get) {
+            message.data = self().settings().get();
+            return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
+                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            }
+            return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message>
+    propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kStagedSetting);
+
+        if (message.cmd == Set) {
+            if (!message.data.has_value()) {
+                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            }
+
+            property_map stagedParameter = self().settings().stagedParameters();
+            property_map notSet          = self().settings().set(*message.data);
+
+            if (notSet.empty()) {
+                if (!message.clientRequestID.empty()) {
+                    message.cmd  = Final;
+                    message.data = stagedParameter;
+                    return message;
+                }
+                return std::nullopt;
+            }
+
+            const auto keys = [](const auto &map) { return fmt::join(map | std::views::transform([](const auto &pair) { return pair.first; }), ", "); };
+            throw gr::exception(fmt::format("block {} (aka. {}) could not set fields: {}\nvs. available: {}", unique_name, name, keys(notSet), keys(settings().get())));
+        } else if (message.cmd == Get) {
+            message.data = self().settings().stagedParameters();
+            return message;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message>
+    propertyCallbackStoreDefaults(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kStoreDefaults);
+
+        if (message.cmd == Set) {
+            settings().storeDefaults();
+            return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message>
+    propertyCallbackResetDefaults(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kResetDefaults);
+
+        if (message.cmd == Set) {
+            settings().resetDefaults();
+            return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
 protected:
+    void
+    emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept {
+        sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(message), clientRequestID);
+    }
+
+    void
+    notifyListeners(std::string_view endpoint, property_map message) noexcept {
+        if (!propertySubscriptions[std::string(endpoint)].empty()) {
+            for (const auto &clientID : propertySubscriptions[std::string(endpoint)]) {
+                emitMessage(endpoint, message, clientID);
+            }
+        }
+    }
+
+    void
+    emitErrorMessage(std::string_view endpoint, Error e, std::string_view clientRequestID = "") noexcept {
+        sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(e), clientRequestID);
+    }
+
     /**
      * @brief
      * @return struct { std::size_t produced_work, work_return_t}
@@ -1099,7 +1328,7 @@ protected:
             if (this->state() == lifecycle::State::REQUESTED_STOP) {
                 if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
                     using namespace gr::message;
-                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    emitErrorMessage("workInternal(): REQUESTED_STOP -> STOPPED", e.error());
                 }
             }
         }
@@ -1183,8 +1412,7 @@ protected:
 
             if (isEOSTagPresent || lifecycle::isShuttingDown(this->state())) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                    using namespace gr::message;
-                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    emitErrorMessage("workInternal(): EOS tag arrived -> REQUESTED_STOP", e.error());
                 }
 #ifdef _DEBUG
                 fmt::println("##block {} received EOS tag at {} in_samples {} -> lifecycle::State::STOPPED", name, ports_status.nSamplesToEosTag, ports_status.in_samples);
@@ -1199,12 +1427,10 @@ protected:
                 if (resamplingStatus != work::Status::OK) {
                     if (resamplingStatus == work::Status::INSUFFICIENT_INPUT_ITEMS || isEOSTagPresent) {
                         if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                            using namespace gr::message;
-                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                            emitErrorMessage("workInternal(): REQUESTED_STOP", e.error());
                         }
                         if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                            using namespace gr::message;
-                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                            emitErrorMessage("workInternal(): STOPPED", e.error());
                         }
                         updateInputAndOutputTags(static_cast<Tag::signed_index_type>(ports_status.in_min_samples));
                         applyChangedSettings();
@@ -1307,8 +1533,7 @@ protected:
             if constexpr (kIsSourceBlock) {
                 if (ret == work::Status::DONE) {
                     if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                        using namespace gr::message;
-                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        emitErrorMessage("block return DONE -> REQUESTED_STOP", e.error());
                     }
                     publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                     return { requested_work, ports_status.in_samples, work::Status::DONE };
@@ -1381,8 +1606,7 @@ protected:
             const bool success = consumeReaders(self(), nSamplesToConsume);
             if (lifecycle::isShuttingDown(this->state())) [[unlikely]] {
                 if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                    using namespace gr::message;
-                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    emitErrorMessage("isShuttingDown -> STOPPED", e.error());
                 }
                 publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                 return { requested_work, ports_status.in_samples, success ? work::Status::DONE : work::Status::ERROR };
@@ -1439,8 +1663,7 @@ public:
                                 if (invokeWork() == work::Status::DONE) {
                                     actualThreadState = lifecycle::State::REQUESTED_STOP;
                                     if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                                        using namespace gr::message;
-                                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                                        emitErrorMessage("REQUESTED_STOP -> REQUESTED_STOP", e.error());
                                     }
                                     break;
                                 }
@@ -1448,8 +1671,7 @@ public:
                             actualThreadState = this->state();
                         }
                         if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                            using namespace gr::message;
-                            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                            emitErrorMessage("-> STOPPED", e.error());
                         }
                         ioThreadRunning.store(false);
                     });
@@ -1477,44 +1699,57 @@ public:
     }
 
     void
-    processMessages(MsgPortInNamed<"__Builtin"> &port, std::span<const Message> messages) {
-        if (std::addressof(port) != std::addressof(msgIn)) {
-            fmt::print("{} got a message on a wrong port\n", self().unique_name);
-            return;
-        }
+    processMessages([[maybe_unused]] const MsgPortInNamed<"__Builtin"> &port, std::span<const Message> messages) {
+        using enum gr::message::Command;
+        assert(std::addressof(port) == std::addressof(msgIn) && "got a message on wrong port");
 
         for (const auto &message : messages) {
-            const auto kind   = messageField<std::string>(message, gr::message::key::Kind).value_or(std::string{});
-            const auto target = messageField<std::string>(message, gr::message::key::Target);
-
-            if (target && !target->empty() && *target != self().unique_name) {
+            if (!message.serviceName.empty() && message.serviceName != unique_name && message.serviceName != name) {
+                // Skip if target does not match the block's (unique) name and is not empty.
                 continue;
             }
 
-            if (kind == gr::message::kind::UpdateSettings) {
-                const auto data   = messageField<property_map>(message, gr::message::key::Data).value();
-                auto       notSet = settings().set(data);
-
-                std::string keysNotSet;
-                for (const auto &[k, v] : notSet) {
-                    keysNotSet += " " + k;
+            PropertyCallback callback = nullptr;
+            // Attempt to find a matching property callback or use the unmatchedPropertyHandler.
+            if (auto it = propertyCallbacks.find(message.endpoint); it != propertyCallbacks.end()) {
+                callback = it->second;
+            } else {
+                if constexpr (requires(std::string_view sv, Message m) {
+                                  { self().unmatchedPropertyHandler(sv, m) } -> std::same_as<std::optional<Message>>;
+                              }) {
+                    callback = &Derived::unmatchedPropertyHandler;
                 }
-
-                Message settingsUpdated;
-                settingsUpdated[gr::message::key::Kind] = gr::message::kind::SettingsChangeRequested;
-                settingsUpdated[gr::message::key::Data] = settings().get();
-
-                if (!notSet.empty()) {
-                    Message errorMessage;
-                    errorMessage[gr::message::key::Kind]         = gr::message::kind::Error;
-                    errorMessage[gr::message::key::Data]         = notSet;
-                    settingsUpdated[gr::message::key::ErrorInfo] = std::move(errorMessage);
-                }
-                emitMessage(msgOut, std::move(settingsUpdated));
             }
-        }
+
+            if (callback == nullptr) {
+                return; // did not find matching property callback
+            }
+
+            std::optional<Message> retMessage;
+            try {
+                retMessage = (self().*callback)(message.endpoint, message); // N.B. life-time: message is copied
+            } catch (const gr::exception &e) {
+                retMessage       = Message{ message };
+                retMessage->data = std::unexpected(Error(e));
+            } catch (const std::exception &e) {
+                retMessage       = Message{ message };
+                retMessage->data = std::unexpected(Error(e));
+            } catch (...) {
+                retMessage       = Message{ message };
+                retMessage->data = std::unexpected(Error(fmt::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
+            }
+
+            if (!retMessage.has_value()) {
+                return; // function does not produce any return message
+            }
+
+            retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
+            retMessage->serviceName = unique_name;
+            msgOut.streamWriter().publish([&](auto &out) { out[0] = *retMessage; }, 1UZ);
+        } // - end - for (const auto &message : messages) { ..
     }
-};
+
+}; // template<typename Derived, typename... Arguments> class Block : ...
 
 namespace detail {
 template<typename List, std::size_t Index = 0, typename StringFunction>

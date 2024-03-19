@@ -8,23 +8,12 @@
 #include <utility>
 #include <queue>
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
-#ifndef __clang__
-#pragma GCC diagnostic ignored "-Wuseless-cast"
-#endif
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#endif
-#include <magic_enum.hpp>
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Profiler.hpp>
+#include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 namespace gr::scheduler {
@@ -37,8 +26,9 @@ enum ExecutionPolicy { singleThreaded, multiThreaded };
 constexpr std::chrono::milliseconds kMessagePollInterval{ 10 };
 
 template<typename Derived, ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class SchedulerBase : public lifecycle::StateMachine<Derived> {
+class SchedulerBase : public Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
+    using base_t = Block<Derived>;
 
 protected:
     gr::Graph                              _graph;
@@ -52,12 +42,7 @@ protected:
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
     MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
 
-    std::string unique_name = gr::meta::type_name<Derived>(); // TODO: to be replaced if scheduler derives from Block<T>
-
 public:
-    MsgPortInNamed<"__Builtin">  msgIn;
-    MsgPortOutNamed<"__Builtin"> msgOut;
-
     [[nodiscard]] static constexpr auto
     executionPolicy() {
         return execution;
@@ -85,16 +70,14 @@ public:
 
     void
     stateChanged(lifecycle::State newState) {
-        emitMessage(msgOut, { { kind::SchedulerStateUpdate, std::string(magic_enum::enum_name(newState)) } });
+        this->notifyListeners(block::property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(newState)) } });
     }
 
     void
     connectBlockMessagePorts() {
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                emitMessage(msgOut, { { key::Kind, kind::Error },
-                                      { key::ErrorInfo, fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()) },
-                                      { key::Location, fmt::format("{}", std::source_location::current()) } });
+                this->emitErrorMessage("connectBlockMessagePorts()", gr::Error(fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName())));
             }
 
             auto buffer = _fromChildMessagePort.buffer();
@@ -103,50 +86,46 @@ public:
     }
 
     void
+    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
+        base_t::processMessages(port, messages); // filters messages and calls own property handler
+        for (const gr::Message &msg : messages) {
+            if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
+                // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
+                _toChildMessagePort.streamWriter().publish([&](auto &out) { out[0] = std::move(msg); }, 1UZ);
+            }
+        }
+    }
+
+    void
     processScheduledMessages() {
-        auto &msgInReader = msgIn.streamReader();
-        if (const auto available = msgInReader.available(); available > 0) {
-            const auto &input = msgInReader.get(available);
-            for (const auto &msg : input) {
-                const auto kind = gr::messageField<std::string>(msg, key::Kind);
-                if (kind == message::kind::SchedulerStateChangeRequest) {
-                    const auto whatStr = gr::messageField<std::string>(msg, key::What).value_or("");
-                    const auto what    = magic_enum::enum_cast<lifecycle::State>(whatStr);
-                    if (!what || (what != lifecycle::State::RUNNING && what != lifecycle::State::REQUESTED_STOP && what != lifecycle::State::REQUESTED_PAUSE)) {
-                        emitMessage(msgOut, { { key::Kind, kind::Error },
-                                              { key::ErrorInfo, fmt::format("Invalid command '{}'", whatStr) },
-                                              { key::Location, fmt::format("{}", std::source_location::current()) } });
-                        continue;
-                    }
-                    if (auto e = this->changeStateTo(*what); !e) {
-                        emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
-                    }
-                } else {
-                    _toChildMessagePort.streamWriter().publish([&](auto &output) { output[0] = msg; });
-                }
-            }
-
-            if (!msgInReader.consume(available)) {
-                emitMessage(msgOut,
-                            { { key::Kind, kind::Error }, { key::ErrorInfo, "Failed to consume messages from msgIn port" }, { key::Location, fmt::format("{}", std::source_location::current()) } });
-            }
-        }
-
-        auto &fromChildReader = _fromChildMessagePort.streamReader();
-        if (const auto available = fromChildReader.available(); available > 0) {
-            const auto &input = fromChildReader.get(available);
-            msgOut.streamWriter().publish([&](auto &output) { std::ranges::copy(input, output.begin()); }, available);
-            if (!fromChildReader.consume(available)) {
-                emitMessage(msgOut, { { key::Kind, kind::Error },
-                                      { key::ErrorInfo, "Failed to consume messages from child message port" },
-                                      { key::Location, fmt::format("{}", std::source_location::current()) } });
-            }
-        }
+        base_t::processScheduledMessages(); // filters messages and calls own property handler
 
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_running_jobs.load() == 0) {
             _graph.forEachBlock(&BlockModel::processScheduledMessages);
+        }
+
+        auto &fromChildReader = _fromChildMessagePort.streamReader();
+        if (fromChildReader.available() == 0) {
+            return;
+        }
+
+        const auto &messagesFromChildren = fromChildReader.get(fromChildReader.available());
+
+        if (this->msgOut.buffer().streamBuffer.n_readers() == 0) {
+            // nobody is listening on messages -> convert errors to exceptions
+            for (const auto &msg : messagesFromChildren) {
+                if (!msg.data.has_value()) {
+                    throw gr::exception(fmt::format("scheduler {}: throwing ignored exception {:t}", this->name, msg.data.error()));
+                }
+            }
+            return;
+        }
+
+        this->msgOut.streamWriter().publish([&](auto &output) { std::ranges::copy(messagesFromChildren, output.begin()); }, messagesFromChildren.size());
+        if (!messagesFromChildren.consume(messagesFromChildren.size())) {
+            this->emitErrorMessage("process child return messages", gr::Error("Failed to consume messages from child message port"));
         }
     }
 
@@ -160,22 +139,32 @@ public:
         [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_base.runAndWait");
         if (this->state() == lifecycle::State::IDLE) {
             if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                 return std::unexpected(e.error().message);
             }
         }
         if (auto e = this->changeStateTo(lifecycle::State::RUNNING); !e) {
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
             return std::unexpected(e.error().message);
         }
 
+        // N.B. for ExecutionPolicy::singleThreaded the lifecycle::StateMachine will call
+        // start() which is implemented in the derived specific scheduler
+        // which in turn, for example, calls and blocks on runSingleThreaded()
+        // until the processing is finished or stopped through a StateMachine state
+        // or nominal/error condition of the graph execution
         if constexpr (executionPolicy() == ExecutionPolicy::multiThreaded) {
             waitDone();
 
             if (this->state() == lifecycle::State::RUNNING) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                     return std::unexpected(e.error().message);
+                }
+            }
+            if (this->state() == lifecycle::State::REQUESTED_STOP) {
+                if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                    this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                 }
             }
         }
@@ -187,9 +176,9 @@ public:
         [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.waitDone");
         for (auto running = _running_jobs.load(); this->state() == lifecycle::REQUESTED_PAUSE || this->state() == lifecycle::PAUSED || running > 0ul; running = _running_jobs.load()) {
             std::this_thread::sleep_for(kMessagePollInterval);
-            processScheduledMessages();
+            this->processScheduledMessages();
         }
-        processScheduledMessages();
+        this->processScheduledMessages();
     }
 
     [[nodiscard]] const std::vector<std::vector<BlockModel *>> &
@@ -198,12 +187,6 @@ public:
     }
 
 protected:
-    void
-    emitMessage(auto &port, Message message) { // TODO: to be replaced if scheduler derives from Block<T>
-        message[key::Sender] = unique_name;
-        port.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1);
-    }
-
     template<typename block_type>
     work::Result
     workOnce(const std::span<block_type> &blocks) {
@@ -215,12 +198,11 @@ protected:
             const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
             performedWorkAllBlocks += performed_work;
             if (status == work::Status::ERROR) {
-                return { requested_work, performed_work, work::Status::ERROR };
+                return { requested_work, performedWorkAllBlocks, work::Status::ERROR };
             } else if (status != work::Status::DONE) {
                 something_happened = true;
             }
         }
-
         return { requestedWorkAllBlocks, performedWorkAllBlocks, something_happened ? work::Status::OK : work::Status::DONE };
     }
 
@@ -229,7 +211,7 @@ protected:
         [[maybe_unused]] const auto pe     = _profiler_handler.startCompleteEvent("scheduler_base.init");
         const auto                  result = _graph.performConnections();
         if (!result) {
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, "Failed to connect blocks in graph" }, { key::Location, fmt::format("{}", std::source_location::current()) } });
+            this->emitErrorMessage("init()", gr::Error("Failed to connect blocks in graph"));
         }
         connectBlockMessagePorts();
     }
@@ -241,16 +223,16 @@ private:
         waitJobsDone();
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_STOP); !e) {
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("stop() -> LifecycleState", e.error());
             }
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 if (auto e = block.changeState(lifecycle::State::STOPPED); !e) {
-                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    this->emitErrorMessage("stop() -> LifecycleState", e.error());
                 }
             }
         });
         if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            this->emitErrorMessage("stop() -> LifecycleState", e.error());
         }
     }
 
@@ -260,16 +242,16 @@ private:
         waitJobsDone();
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::State::REQUESTED_PAUSE); !e) {
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("pause() -> LifecycleState", e.error());
             }
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 if (auto e = block.changeState(lifecycle::State::PAUSED); !e) {
-                    emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                    this->emitErrorMessage("pause() -> LifecycleState", e.error());
                 }
             }
         });
         if (auto e = this->changeStateTo(lifecycle::State::PAUSED); !e) {
-            emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+            this->emitErrorMessage("pause() -> LifecycleState", e.error());
         }
     }
 
@@ -277,7 +259,7 @@ private:
     reset() {
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::INITIALISED); !e) {
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("reset() -> LifecycleState", e.error());
             }
         });
 
@@ -293,7 +275,7 @@ private:
         _stop_requested = false;
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::RUNNING); !e) {
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("resume() -> LifecycleState", e.error());
             }
         });
         if (executionPolicy() == ExecutionPolicy::multiThreaded) {
@@ -306,11 +288,11 @@ private:
         _stop_requested = false;
         _graph.forEachBlock([this](auto &block) {
             if (auto e = block.changeState(lifecycle::RUNNING); !e) {
-                emitMessage(msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("start() -> LifecycleState", e.error());
             }
         });
         if constexpr (executionPolicy() == singleThreaded) {
-            self().runSingleThreaded();
+            static_cast<Derived *>(this)->runSingleThreaded();
         } else {
             runOnPool(_job_lists, [this](auto &job) { return this->workOnce(job); });
         }
@@ -345,16 +327,6 @@ private:
         }
         _running_jobs.fetch_sub(1);
         _running_jobs.notify_all();
-    }
-
-    [[nodiscard]] constexpr auto &
-    self() noexcept {
-        return *static_cast<Derived *>(this);
-    }
-
-    [[nodiscard]] constexpr const auto &
-    self() const noexcept {
-        return *static_cast<const Derived *>(this);
     }
 };
 
@@ -399,23 +371,34 @@ private:
     {
         work::Result result;
         auto         blocklist = std::span{ this->_graph.blocks() };
+
         do {
             this->processScheduledMessages();
             if (this->state() == lifecycle::State::RUNNING) {
                 result = this->workOnce(blocklist);
-                if (result.status == work::Status::ERROR) {
+                if (result.status == work::Status::DONE) {
+                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (DONE)", e.error());
+                    }
+                } else if (result.status == work::Status::ERROR) {
                     if (auto e = this->changeStateTo(lifecycle::State::ERROR); !e) {
-                        this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (ERROR)", e.error());
                     }
                 }
             } else {
                 std::this_thread::sleep_for(kMessagePollInterval);
                 result = { 0, 0, work::Status::OK };
             }
-        } while (result.status == work::Status::OK && this->state() != lifecycle::State::ERROR && this->state() != lifecycle::State::STOPPED);
+        } while (this->state() != lifecycle::State::ERROR && lifecycle::isActive(this->state()));
+
         if (this->state() == lifecycle::State::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
+            }
+        }
+        if (this->state() == lifecycle::State::REQUESTED_STOP) {
+            if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
             }
         }
     }
@@ -504,19 +487,28 @@ private:
             this->processScheduledMessages();
             if (this->state() == lifecycle::State::RUNNING) {
                 result = this->workOnce(blocklist);
-                if (result.status == work::Status::ERROR) {
+                if (result.status == work::Status::DONE) {
+                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (DONE)", e.error());
+                    }
+                } else if (result.status == work::Status::ERROR) {
                     if (auto e = this->changeStateTo(lifecycle::State::ERROR); !e) {
-                        this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (ERROR)", e.error());
                     }
                 }
             } else {
                 std::this_thread::sleep_for(kMessagePollInterval);
                 result = { 0, 0, work::Status::OK };
             }
-        } while (result.status == work::Status::OK && this->state() != lifecycle::State::ERROR && this->state() != lifecycle::State::STOPPED);
+        } while (this->state() != lifecycle::State::ERROR && lifecycle::isActive(this->state()));
         if (this->state() == lifecycle::State::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, e.error().message }, { key::Location, e.error().srcLoc() } });
+                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
+            }
+        }
+        if (this->state() == lifecycle::State::REQUESTED_STOP) {
+            if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
             }
         }
     }

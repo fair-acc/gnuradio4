@@ -193,7 +193,7 @@ public:
      * @brief change Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
      * See enum description for details.
      */
-    [[nodiscard]] virtual std::expected<void, lifecycle::ErrorType>
+    [[nodiscard]] virtual std::expected<void, Error>
     changeState(lifecycle::State newState) noexcept = 0;
 
     /**
@@ -430,7 +430,7 @@ public:
         return blockRef().isBlocking();
     }
 
-    [[nodiscard]] std::expected<void, lifecycle::ErrorType>
+    [[nodiscard]] std::expected<void, Error>
     changeState(lifecycle::State newState) noexcept override {
         return blockRef().changeStateTo(newState);
     }
@@ -676,8 +676,8 @@ private:
                 fmt::print("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
                 return ConnectionResult::FAILED;
             }
-            self._connectionDefinitions.push_back([source = &source, source_port = &port, destination = &destination, destinationPort = &destinationPort](Graph &graph) {
-                return graph.connectImpl<sourcePortIndex, sourcePortSubIndex, destinationPortIndex, destinationPortSubIndex>(*source, *source_port, *destination, *destinationPort);
+            self._connectionDefinitions.push_back([src = &source, source_port = &port, destination = &destination, destinationPort = &destinationPort](Graph &graph) {
+                return graph.connectImpl<sourcePortIndex, sourcePortSubIndex, destinationPortIndex, destinationPortSubIndex>(*src, *source_port, *destination, *destinationPort);
             });
             return ConnectionResult::SUCCESS;
         }
@@ -1073,7 +1073,7 @@ public:
             using LeftResult = typename traits::block::stream_return_type<Left>;
             using V          = meta::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
-            for (std::size_t i = 0; i < V::size(); ++i) {
+            for (std::size_t i = 0UZ; i < V::size(); ++i) {
                 tmp[i] = invokeProcessOneWithOrWithoutOffset(left, offset + i);
             }
             return invokeProcessOneWithOrWithoutOffset(right, offset, V(tmp, stdx::vector_aligned));
