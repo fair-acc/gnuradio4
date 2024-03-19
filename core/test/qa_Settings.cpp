@@ -123,7 +123,7 @@ some test doc documentation
     int                                                                              update_count          = 0;
     bool                                                                             debug                 = true;
     bool                                                                             resetCalled           = false;
-    std::int32_t                                                                     n_samples_consumed    = 0;
+    gr::Size_t                                                                       n_samples_consumed    = 0;
 
     void
     settingsChanged(const property_map &oldSettings, property_map &newSettings, property_map &fwdSettings) noexcept {

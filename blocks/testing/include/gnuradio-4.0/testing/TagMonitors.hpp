@@ -117,7 +117,6 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         const bool generatedTag = generateTag("processOne(...)", offset);
         n_samples_produced++;
         if (n_samples_produced >= n_samples_max) {
-            fmt::println("terminate n_samples_produced {}", n_samples_produced);
             this->requestStop();
         }
         if (!values.empty()) {
@@ -333,10 +332,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
         }
         n_samples_produced++;
         if (n_samples_expected > 0 && n_samples_produced >= n_samples_expected) {
-            if (auto ret = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !ret) {
-                using namespace gr::message;
-                this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
-            }
+            this->requestStop();
         }
         _timeLastSample = ClockSourceType::now();
     }

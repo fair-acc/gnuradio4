@@ -1,10 +1,10 @@
 #ifndef GNURADIO_LIFECYCLE_HPP
 #define GNURADIO_LIFECYCLE_HPP
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
-
-#include <magic_enum.hpp>
+#include <gnuradio-4.0/reflection.hpp>
 
 #include <atomic>
 #include <expected>
@@ -98,20 +98,6 @@ isValidTransition(const State from, const State to) noexcept {
 
 enum class StorageType { ATOMIC, NON_ATOMIC };
 
-struct ErrorType {
-    std::string          message;
-    std::source_location sourceLocation;
-
-    constexpr ErrorType() = default;
-
-    ErrorType(std::string_view msg, const std::source_location &location) : message(msg), sourceLocation(location) {}
-
-    std::string
-    srcLoc() const noexcept {
-        return fmt::format("{}", sourceLocation);
-    }
-};
-
 /**
  * @brief StateMachine class template that manages the lifecycle states of a Scheduler or Block.
  * It is designed to be inherited by blocks (TDerived) to safely and effectively manage their lifecycle state transitions.
@@ -163,17 +149,17 @@ protected:
     }
 
     template<typename TMethod>
-    std::expected<void, ErrorType>
+    std::expected<void, Error>
     invokeLifecycleMethod(TMethod method, const std::source_location &location) {
         try {
             (static_cast<TDerived *>(this)->*method)();
             return {};
         } catch (const std::exception &e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(ErrorType{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location });
+            return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location });
         } catch (...) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(ErrorType{ fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location });
+            return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location });
         }
     }
 
@@ -188,7 +174,7 @@ public:
         requires(storageType != StorageType::ATOMIC)
         : _state(other._state) {} // plain enum
 
-    [[nodiscard]] constexpr std::expected<void, ErrorType>
+    [[nodiscard]] std::expected<void, Error>
     changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
         State oldState = _state;
         if (oldState == newState || (oldState == STOPPED && newState == REQUESTED_STOP) || (oldState == PAUSED && newState == REQUESTED_PAUSE)) {
@@ -196,9 +182,10 @@ public:
         }
 
         if (!isValidTransition(oldState, newState)) {
-            return std::unexpected(ErrorType{ fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", getBlockName(), gr::meta::type_name<TDerived>(), magic_enum::enum_name(state()),
-                                                          magic_enum::enum_name(newState)),
-                                              location });
+            return std::unexpected(Error{ fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", //
+                                                                   getBlockName(), gr::meta::type_name<TDerived>(),              //
+                                                                   magic_enum::enum_name(state()), magic_enum::enum_name(newState)),
+                                                       location });
             ;
         }
 

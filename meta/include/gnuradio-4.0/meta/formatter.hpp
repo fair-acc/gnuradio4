@@ -2,10 +2,12 @@
 #define GNURADIO_FORMATTER_HPP
 
 #include <complex>
+#include <expected>
 #include <fmt/format.h>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <source_location>
+#include <vector>
 
 template<typename T>
 struct fmt::formatter<std::complex<T>> {
@@ -142,6 +144,25 @@ struct fmt::formatter<std::source_location> {
     format(const std::source_location &loc, FormatContext &ctx) const -> decltype(ctx.out()) {
         // Example format: "file:line"
         return fmt::format_to(ctx.out(), "{}:{}", loc.file_name(), loc.line());
+    }
+};
+
+template<typename Value, typename Error>
+struct fmt::formatter<std::expected<Value, Error>> {
+    constexpr auto
+    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+        return ctx.begin();
+    }
+
+    // Formats the source_location, using 'f' for file and 'l' for line
+    template<typename FormatContext>
+    auto
+    format(const std::expected<Value, Error> &ret, FormatContext &ctx) const -> decltype(ctx.out()) {
+        if (ret.has_value()) {
+            return fmt::format_to(ctx.out(), "<std::expected-value: {}>", ret.value());
+        } else {
+            return fmt::format_to(ctx.out(), "<std::unexpected: {}>", ret.error());
+        }
     }
 };
 

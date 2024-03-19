@@ -29,7 +29,7 @@ using namespace gr;
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
 struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {
-    using Description = Doc<R""(
+    using Description                                      = Doc<R""(
 ClockSource Documentation -- add here
 )"">;
     std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
@@ -96,7 +96,7 @@ public:
         bool isAscending = std::ranges::adjacent_find(tag_times, std::greater_equal()) == tag_times.end();
         if (!isAscending) {
             using namespace gr::message;
-            this->emitMessage(this->msgOut, { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, "The input tag_times vector should be ascending." } });
+            this->emitErrorMessage("error()", Error("The input tag_times vector should be ascending."));
             output.publish(0UZ);
             return work::Status::ERROR;
         }
@@ -213,13 +213,7 @@ private:
                             // invoke and execute work function from user-provided thread
                             const work::Status status = this->invokeWork();
                             if (status == work::Status::DONE) {
-                                if (auto ret = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !ret) {
-                                    using namespace gr::message;
-                                    this->emitMessage(this->msgOut, { { key::Sender, this->unique_name },
-                                                                      { key::Kind, kind::Error },
-                                                                      { key::ErrorInfo, ret.error().message },
-                                                                      { key::Location, ret.error().srcLoc() } });
-                                }
+                                this->requestStop();
                                 break;
                             }
                             actualThreadState = this->state();
@@ -231,15 +225,13 @@ private:
                         }
                         if (auto ret = this->changeStateTo(lifecycle::State::STOPPED); !ret) {
                             using namespace gr::message;
-                            this->emitMessage(this->msgOut,
-                                              { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+                            this->emitErrorMessage("requested STOPPED", ret.error());
                         }
                     },
                     [this](std::thread *t) {
                         if (auto ret = this->changeStateTo(lifecycle::State::STOPPED); !ret) {
                             using namespace gr::message;
-                            this->emitMessage(this->msgOut,
-                                              { { key::Sender, this->unique_name }, { key::Kind, kind::Error }, { key::ErrorInfo, ret.error().message }, { key::Location, ret.error().srcLoc() } });
+                            this->emitErrorMessage("requested STOPPED", ret.error());
                         }
                         if (t->joinable()) {
                             t->join();
