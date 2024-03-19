@@ -329,6 +329,86 @@ struct UserBlock : public Block<UserBlock> {
 };
 ```
 
+#### Block Property Mechanics
+
+roperties offer a dynamic way to interact with blocks at runtime, enabling configuration, state querying, and notification 
+subscriptions. This mechanism leverages a message-passing system based on the Majordomo Protocol (MDP) pattern, 
+ensuring structured communication across blocks, the scheduler, and interfaces.
+The implementation aligns with the OpenCMW [command structure](https://github.com/fair-acc/opencmw-cpp/blob/main/docs/Majordomo_protocol_comparison.pdf) 
+a harmonised adaptation of ZeroMQ's [RFC7](https://rfc.zeromq.org/spec/7/) and [RFC18](https://rfc.zeromq.org/spec/18/).
+
+**Registering New Properties:**
+To add new properties, define them with unique names and associate them with callback functions within the `propertyCallbacks` map: 
+```cpp
+// in your block definition
+using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
+std::map<std::string, PropertyCallback>         propertyCallbacks {
+            { "<my property name>", &Block::propertyCallbackMyHandler },
+    // [..]
+};
+```
+
+These callbacks handle various commands (`SET`, `GET`, `SUBSCRIBE`, `UNSUBSCRIBE`, etc.) targeting the property:
+```cpp
+struct MyBlock : public Block<MyBlock> {
+    inline static const char* kMyCustomProperty = "<my property name>";
+    
+    std::optional<Message> MyBlock::propertyCallbackMyCustom(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(kMyCustomProperty  == propertyName); // internal check that the property-name to callback is correct
+        
+        switch (message.cmd) {
+          case Set: // handle property setting
+            break;
+          case Get: // handle property querying
+            return Message{/* Populate reply message */};
+          case Subscribe: // handle subscription
+            break;
+         case Unsubscribe: // handle unsubscription
+           break;
+         default: throw gr::exception(fmt::format("unsupported command {} for property {}", message.cmd, propertyName));
+     }
+     return std::nullopt; // no reply needed for Set, Subscribe, Unsubscribe
+    }
+    
+    start() {
+        propertyCallbacks.emplace(kMyCustomProperty, &MyBlock::propertyCallbackMyCustom);
+    }
+};
+```
+
+**Interacting with Properties:**
+
+Interact with properties using messages to set values, query states, or manage subscriptions. Note that property actions 
+are asynchronous to maintain real-time processing consistency and thread safety. FFor instance, changing settings are 
+staged and applied adjacent to the `process[One, Bulk](...)` executions to maintain state consistency.
+
+**Sending Messages to Blocks:**
+Use the `sendMessage<Command>(...)` function on a `MsgOut` port that is connected to the scheduler or block to interact 
+with properties:
+
+```cpp
+// to send a message
+sendMessage<Set>(toBlock /* MsgOut port */, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, { { "factor", 42 } } /* data  */);
+// and to read one message:
+auto returnReplyMsg = [](gr::MsgPortIn &fromBlock) {
+    ConsumableSpan auto span = fromBlock.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
+    Message             msg  = span[0];
+    expect(span.consume(span.size()));
+    return msg;
+};
+```
+
+The `serviceName` can be either 
+  * blank (`""`) broadcasting the message to all blocks,
+  * the block's `unique_name` to target a specific block, or
+  * a user-defined block `name` to target an individual or groups of blocks (in case several blocks share the same name). 
+
+**Subscribing to Property Changes:**
+Users can subscribe to block property changes, receiving notifications whenever the property's state changes. 
+This is done by sending a `Subscribe` (or `Unsubscribe` to register) targeted at the specific block and property together
+with an optional `clientRequestID` that is mirrored by the services/properties to indicate who initiated the command.
+
 #### Collection of Ideas and known Scheduling Algorithms
 
 0. Busy-Looping: executing list of tasks as long as any block in the graph has input data that needs to be processed or

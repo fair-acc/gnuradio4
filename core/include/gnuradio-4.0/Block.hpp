@@ -330,6 +330,52 @@ inline static const char *kResetDefaults = "ResetDefaults"; ///< retrieve and re
  * };
  * @endcode
  *
+ * Properties System:
+ * Properties offer a standardized way to manage runtime configuration and state. This system is built upon a message-passing model, allowing blocks
+ * to dynamically adjust their behavior, respond to queries, and notify about state changes. Defined under the `block::property` namespace,
+ * these properties leverage the Majordomo Protocol (MDP) pattern for structured and efficient communication.
+ *
+ * Predefined properties include:
+ * - `kHeartbeat`: Monitors and reports the block's operational state.
+ * - `kEcho`: Responds to messages by echoing them back, aiding in communication testing.
+ * - `kLifeCycleState`: Manages and reports the block's lifecycle state.
+ * - `kSetting` & `kStagedSetting`: Handle real-time and non-real-time configuration adjustments.
+ * - `kStoreDefaults` & `kResetDefaults`: Facilitate storing and reverting to default settings.
+ *
+ * These properties can be interacted with through messages, supporting operations like setting values, querying states, and subscribing to updates.
+ * This model provides a flexible interface for blocks to adapt their processing based on runtime conditions and external inputs.
+ *
+ * Implementing a Property:
+ * Blocks can implement custom properties by registering them in the `propertyCallbacks` map within the `start()` method.
+ * This allows the block to handle `SET`, `GET`, `SUBSCRIBE`, and `UNSUBSCRIBE` commands targeted at the property, enabling dynamic interaction with the block's functionality and configuration.
+ *
+ * @code
+ * struct MyBlock : public Block<MyBlock> {
+ *     static inline const char* kMyCustomProperty = "MyCustomProperty";
+ *     std::optional<Message> propertyCallbackMyCustom(std::string_view propertyName, Message message) {
+ *         using enum gr::message::Command;
+ *         assert(kMyCustomProperty  == propertyName); // internal check that the property-name to callback is correct
+ *
+ *         switch (message.cmd) {
+ *           case Set: // handle property setting
+ *             break;
+ *           case Get: // handle property querying
+ *             return Message{ populate reply message };
+ *           case Subscribe: // handle subscription
+ *             break;
+ *           case Unsubscribe: // handle unsubscription
+ *             break;
+ *           default: throw gr::exception(fmt::format("unsupported command {} for property {}", message.cmd, propertyName));
+ *         }
+ *       return std::nullopt; // no reply needed for Set, Subscribe, Unsubscribe
+ *     }
+ *
+ *     void start() override {
+ *         propertyCallbacks.emplace(kMyCustomProperty, &MyBlock::propertyCallbackMyCustom);
+ *     }
+ * };
+ * @endcode
+ *
  * @tparam Derived the user-defined block CRTP: https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */

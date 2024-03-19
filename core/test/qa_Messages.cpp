@@ -294,13 +294,13 @@ const boost::ut::suite MessagesTests = [] {
             "set - state - error cases"_test = [&] {
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {} /* no data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
-                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should not receive a reply";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error (missing set data)";
                 expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
                 expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
 
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, { { "MisSpelledStateKey", "INITIALISED" } } /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
-                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error";
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error (unknown key)";
                 expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
                 expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
 
