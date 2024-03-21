@@ -10,7 +10,6 @@ on:
 jobs:
   build:
     name: "${{ matrix.configurations.name }} | ${{ matrix.meson-build-type }}"
-    environment: configure coverage
     runs-on: ${{ matrix.configurations.os }}
     strategy:
       fail-fast: false
