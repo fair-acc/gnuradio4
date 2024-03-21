@@ -130,7 +130,7 @@ you can set the `backPressure` property to false.
             const auto offset = (outIndex < 0) ? 0 : outOffsets[static_cast<std::size_t>(outIndex)];
             std::copy_n(inputSpan.begin(), inputAvailable, std::next(outputSpan.begin(), offset));
             if (outIndex >= 0) {
-                outOffsets[static_cast<std::size_t>(outIndex)] += inputAvailable;
+                outOffsets[static_cast<std::size_t>(outIndex)] += static_cast<int>(inputAvailable);
             }
             outputSpan.publish(inputAvailable);
         };
@@ -141,7 +141,7 @@ you can set the `backPressure` property to false.
             auto                available = inputSpan.size();
 
             for (const auto outIndex : outIndices) {
-                const auto remainingSize = outs[static_cast<std::size_t>(outIndex)].size() - outOffsets[static_cast<std::size_t>(outIndex)];
+                const auto remainingSize = outs[static_cast<std::size_t>(outIndex)].size() - static_cast<std::size_t>(outOffsets[static_cast<std::size_t>(outIndex)]);
                 if (available > remainingSize) {
                     available = remainingSize;
                 }
@@ -158,7 +158,7 @@ you can set the `backPressure` property to false.
             }
 
             for (const auto outIndex : outIndices) {
-                copyToOutput(available, inputSpan, outs[outIndex], outIndex);
+                copyToOutput(available, inputSpan, outs[outIndex], static_cast<int>(outIndex));
             }
 
             if (_selectedSrc == inIndex) {
@@ -192,7 +192,7 @@ you can set the `backPressure` property to false.
 };
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure)
 auto registerSelector = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 

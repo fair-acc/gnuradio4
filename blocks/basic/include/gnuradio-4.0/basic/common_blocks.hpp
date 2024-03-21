@@ -91,7 +91,8 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
         }
         outSpan.publish(available);
         for (auto &inSpan : inSpans) {
-            inSpan.consume(available);
+            [[maybe_unused]] bool success = inSpan.consume(available);
+            assert(success && "Check that consume was successful");
         }
 
         return gr::work::Status::OK;

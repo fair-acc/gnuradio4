@@ -54,7 +54,7 @@ public:
             auto &port   = out;
             auto &writer = port.streamWriter();
             if (n_samples_produced == 0) {
-                port.publishTag({ { "N_SAMPLES_MAX", _n_samples_max } }, _n_tag_offset); // shorter version
+                port.publishTag({ { "N_SAMPLES_MAX", _n_samples_max } }, static_cast<gr::Tag::signed_index_type>(_n_tag_offset)); // shorter version
             }
 
             if constexpr (use_bulk_operation) {

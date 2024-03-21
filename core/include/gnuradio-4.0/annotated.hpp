@@ -119,9 +119,9 @@ template<std::uint64_t stride = 0U, bool isConst = false>
 struct Stride {
     static_assert(stride >= 0U, "Stride must be >= 0");
 
-    static constexpr std::uint64_t kStride  = stride;
-    static constexpr bool          kIsConst = isConst;
-    static constexpr bool          kEnabled = !isConst || (stride > 0U);
+    static constexpr gr::Size_t kStride  = stride;
+    static constexpr bool       kIsConst = isConst;
+    static constexpr bool       kEnabled = !isConst || (stride > 0U);
 };
 
 template<typename T>

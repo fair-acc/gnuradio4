@@ -9,7 +9,6 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
-#include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -78,7 +77,8 @@ execute_selector_test(TestParams params) {
             std::ranges::sort(sinks[i]->samples);
             std::ranges::sort(params.outValues[i]);
         }
-        expect(std::ranges::equal(sinks[i]->samples, params.outValues[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
+        expect(std::ranges::equal(sinks[i]->samples, params.outValues[i]))
+                << fmt::format("sinks[{}]->samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->samples, params.outValues[i]);
     }
 }
 

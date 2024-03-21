@@ -924,7 +924,7 @@ designFilter(const Type filterType, FilterParameters params, const Design filter
         std::vector<FilterCoefficients<T>> sections;
         while (!digitalPoleZeros.poles.empty()) {
             // extract and remove poles from the front
-            const std::size_t            numPoles = static_cast<T>(std::abs(digitalPoleZeros.poles.front().imag()) > epsilon) ? std::min(maxSectionSize, digitalPoleZeros.poles.size()) : 1UZ;
+            const std::size_t            numPoles = static_cast<T>(std::abs(digitalPoleZeros.poles.front().imag())) > static_cast<T>(epsilon) ? std::min(maxSectionSize, digitalPoleZeros.poles.size()) : 1UZ;
             std::vector<std::complex<T>> sectionPoles(digitalPoleZeros.poles.begin(), digitalPoleZeros.poles.begin() + static_cast<ptrdiff_t>(numPoles));
             digitalPoleZeros.poles.erase(digitalPoleZeros.poles.begin(), digitalPoleZeros.poles.begin() + static_cast<ptrdiff_t>(numPoles));
 
