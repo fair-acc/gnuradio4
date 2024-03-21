@@ -37,9 +37,9 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 
     constexpr void
     processOne(const T &input) noexcept {
-        in.max_samples = 2 * sample_rate / 25;
+        in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
         const float Ts = 1.0f / sample_rate;
-        _historyBufferX.push_back(_historyBufferX[1] + Ts);
+        _historyBufferX.push_back(_historyBufferX[1] + static_cast<T>(Ts));
         _historyBufferY.push_back(input);
 
         if (this->input_tags_present()) { // received tag
@@ -71,7 +71,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         auto adjustRange = [](T min, T max) {
             min            = std::min(min, T(0));
             max            = std::max(max, T(0));
-            const T margin = (max - min) * T(0.2);
+            const T margin = (max - min) * static_cast<T>(0.2);
             return std::pair<double, double>{ min - margin, max + margin };
         };
 

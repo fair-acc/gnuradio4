@@ -278,8 +278,8 @@ public:
         if (axis_min_y == axis_max_y) {
             constexpr double padding = 0.05;
             const auto [minY, maxY]  = std::ranges::minmax_element(yValues);
-            axis_min_y               = *minY - padding * (*maxY - *minY);
-            axis_max_y               = *maxY + padding * (*maxY - *minY);
+            axis_min_y               = static_cast<double>(*minY) - padding * static_cast<double>(*maxY - *minY);
+            axis_max_y               = static_cast<double>(*maxY) + padding * static_cast<double>(*maxY - *minY);
             if (axis_min_y == axis_max_y) {
                 axis_max_y += 1.0; // safe fall back for y-range
             }
@@ -317,7 +317,7 @@ public:
 #else
         for (const auto &[x, y] : std::ranges::views::zip(xValues, yValues)) {
 #endif
-            if (x < axis_min_x || x >= axis_max_x || y < axis_min_y || y >= axis_max_y) {
+            if (static_cast<double>(x) < axis_min_x || static_cast<double>(x) >= axis_max_x || static_cast<double>(y) < axis_min_y || static_cast<double>(y) >= axis_max_y) {
                 continue;
             }
 

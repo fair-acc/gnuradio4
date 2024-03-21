@@ -12,7 +12,7 @@ const boost::ut::suite DynamicBlocktests = [] {
     using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
         const gr::Size_t nInputs           = 5;
-        const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
+        // const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
         const gr::Size_t nSamples          = 5;
 
         gr::Graph graph;

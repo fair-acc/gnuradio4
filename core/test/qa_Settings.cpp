@@ -1,4 +1,3 @@
-#include <stdexcept>
 #include <string>
 
 #include <boost/ut.hpp>
@@ -11,7 +10,6 @@
 #ifndef __EMSCRIPTEN__
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #endif
-#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -226,10 +224,10 @@ struct Sink : public Block<Sink<T>> {
 };
 } // namespace gr::setting_test
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Source, out, n_samples_produced, n_samples_max, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::TestBlock, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate);
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Sink, in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Source, out, n_samples_produced, n_samples_max, sample_rate)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::TestBlock, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting)
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Sink, in, n_samples_consumed, n_samples_max, last_tag_position, sample_rate)
 
 const boost::ut::suite SettingsTests = [] {
     using namespace boost::ut;
@@ -302,11 +300,11 @@ const boost::ut::suite SettingsTests = [] {
 
         auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
         gr::scheduler::Simple sched{ std::move(testGraph), thread_pool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(block1.n_samples_consumed, n_samples)) << "block1 did not consume enough input samples";
-        expect(eq(block2.n_samples_consumed, n_samples)) << "block2 did not consume enough input samples";
+        expect(eq(static_cast<gr::Size_t>(block1.n_samples_consumed), n_samples)) << "block1 did not consume enough input samples";
+        expect(eq(static_cast<gr::Size_t>(block2.n_samples_consumed), n_samples)) << "block2 did not consume enough input samples";
         expect(eq(sink.n_samples_consumed, n_samples)) << "sink did not consume enough input samples";
 
         for (auto &fwd : src.settings().autoUpdateParameters()) {
@@ -440,8 +438,8 @@ const boost::ut::suite SettingsTests = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         auto                &src       = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
-        auto                &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", std::uint32_t(2) } });
-        auto                &block2    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", std::uint32_t(5) } });
+        auto                &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", gr::Size_t(2) } });
+        auto                &block2    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", gr::Size_t(5) } });
         auto                &sink      = testGraph.emplaceBlock<Sink<float>>();
 
         // check denominator
@@ -454,7 +452,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         gr::scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
 
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
         expect(eq(sink.n_samples_consumed, n_samples / (2 * 5))) << "did not consume enough input samples";
@@ -506,7 +504,7 @@ const boost::ut::suite AnnotationTests = [] {
     using namespace std::literals;
 
     "basic node annotations"_test = [] {
-        Graph             testGraph;
+        Graph testGraph;
         TestBlock<float> &block = testGraph.emplaceBlock<TestBlock<float>>();
         expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlock<float>::Description::value)) != std::string_view::npos);
         expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlock<float>::Description::value))) << "type-erased block description";
@@ -544,7 +542,7 @@ const boost::ut::suite AnnotationTests = [] {
 
         expect(block.settings().set({ { "sample_rate", -1.0f } }).empty()) << "successful set returns empty map";
         expect(!block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
-        ; // should print out a warning -> TODO: replace with pmt error message on msgOut port
+        // should print out a warning -> TODO: replace with pmt error message on msgOut port
     };
 };
 

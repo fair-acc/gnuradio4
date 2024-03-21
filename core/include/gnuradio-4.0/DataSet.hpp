@@ -118,14 +118,14 @@ struct Tensor {
     using pmt_map            = std::map<std::string, pmtv::pmt>;
     std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
-    std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout;  // row-major, column-major, “special”
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
 
-    std::vector<T> signal_values; // size = \PI_i extents[i]
-    std::vector<T> signal_errors; // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<T> signal_values{}; // size = \PI_i extents[i]
+    std::vector<T> signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
 
     // meta data
-    std::vector<pmt_map> meta_information;
+    std::vector<pmt_map> meta_information{};
 };
 
 static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
@@ -138,8 +138,8 @@ struct Packet {
     using pmt_map    = std::map<std::string, pmtv::pmt>;
 
     std::int64_t         timestamp = 0; // UTC timestamp [ns]
-    std::vector<T>       signal_values; // size = \PI_i extents[i
-    std::vector<pmt_map> meta_information;
+    std::vector<T>       signal_values{}; // size = \PI_i extents[i
+    std::vector<pmt_map> meta_information{};
 };
 
 static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");

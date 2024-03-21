@@ -380,8 +380,8 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr:
 
 template<typename T>
 struct AsyncBlock : gr::Block<AsyncBlock<T>> {
-    gr::PortIn<T, gr::Async>  in;
-    gr::PortOut<T, gr::Async> out;
+    gr::PortIn<T, gr::Async>  in{};
+    gr::PortOut<T, gr::Async> out{};
 
     gr::work::Status
     processBulk(const gr::ConsumableSpan auto &inSpan, gr::PublishableSpan auto &outSpan) {
