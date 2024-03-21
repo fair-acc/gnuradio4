@@ -1,3 +1,4 @@
+#include <utility>
 #include <vector>
 
 #include <boost/ut.hpp>
@@ -13,6 +14,37 @@
 // clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
 template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
+#endif
+
+#if !DISABLE_SIMD
+namespace gr::test {
+struct copy : public Block<copy> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+public:
+    template<meta::t_or_simd<float> V>
+    [[nodiscard]] constexpr V
+    processOne(const V &a) const noexcept {
+        return a;
+    }
+};
+} // namespace gr::test
+
+ENABLE_REFLECTION(gr::test::copy, in, out);
+
+namespace gr::test {
+static_assert(traits::block::stream_input_port_types<copy>::size() == 1);
+static_assert(std::same_as<traits::block::stream_return_type<copy>, float>);
+static_assert(traits::block::can_processOne_scalar<copy>);
+static_assert(traits::block::can_processOne_simd<copy>);
+static_assert(traits::block::can_processOne_scalar_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
+static_assert(traits::block::can_processOne_simd_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
+static_assert(SourceBlockLike<copy>);
+static_assert(SinkBlockLike<copy>);
+static_assert(SourceBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
+static_assert(SinkBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
+} // namespace gr::test
 #endif
 
 template<typename T>
