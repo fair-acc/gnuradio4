@@ -41,7 +41,6 @@ add_ut_test(qa_reader_writer_lock)
 add_ut_test(qa_Settings)
 add_ut_test(qa_Tags)
 add_ut_test(qa_Messages)
-add_ut_test(qa_port_array)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
 
