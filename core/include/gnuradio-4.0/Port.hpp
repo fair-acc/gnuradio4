@@ -335,6 +335,7 @@ public:
 
     [[nodiscard]] constexpr bool
     isConnected() const noexcept {
+        // TODO: check if this is correct for output ports, since there _connected is always false, return `readerCount > 0?`?
         return _connected;
     }
 
@@ -955,7 +956,7 @@ template<typename T>
 concept TagPredicate = requires(const T &t, const Tag &tag, Tag::signed_index_type readPosition) {
     { t(tag, readPosition) } -> std::convertible_to<bool>;
 };
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition || tag.index < 0; };
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition; };
 inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept {
     auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
     if (eosTagIter != tag.map.end() && eosTagIter->second == true) {

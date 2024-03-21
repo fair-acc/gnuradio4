@@ -137,6 +137,22 @@ using is_stride = std::bool_constant<IsStride<T>>;
 static_assert(is_stride<Stride<10, true>>::value);
 static_assert(!is_stride<int>::value);
 
+enum class IncompleteFinalUpdateEnum { DROP, PULL_FORWARD, PUSH_BACKWARD };
+
+template<IncompleteFinalUpdateEnum updatePolicy>
+struct IncompleteFinalUpdatePolicy {
+    static constexpr IncompleteFinalUpdateEnum kIncompleteFinalUpdatePolicy = updatePolicy;
+};
+template<typename T>
+concept IsIncompleteFinalUpdatePolicy = requires {
+    T::kIncompleteFinalUpdatePolicy;
+} && std::is_base_of_v<IncompleteFinalUpdatePolicy<T::kIncompleteFinalUpdatePolicy>, T>;
+
+template<typename T>
+using is_incompleteFinalUpdatePolicy = std::bool_constant<IsIncompleteFinalUpdatePolicy<T>>;
+
+static_assert(is_incompleteFinalUpdatePolicy<IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>::value);
+
 enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
 
 /**
