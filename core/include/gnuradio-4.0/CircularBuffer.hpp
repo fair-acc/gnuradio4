@@ -606,6 +606,11 @@ class CircularBuffer
         return policy;
     }
 
+    [[nodiscard]] constexpr bool
+     isConsumed() const noexcept {
+         return _parent->_isRangeConsumed;
+     }
+
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
     [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
@@ -626,7 +631,7 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
-        if (_parent->_isRangeConsumed) {
+        if (isConsumed()) {
             fmt::println("An error occurred: The method CircularBuffer::buffer_reader::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
             std::abort();
         }
@@ -635,7 +640,7 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
-        if (_parent->_isRangeConsumed) {
+        if (isConsumed()) {
             return false;
         }
         _parent->_isRangeConsumed = true;
