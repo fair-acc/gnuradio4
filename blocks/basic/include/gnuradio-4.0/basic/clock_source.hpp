@@ -69,6 +69,7 @@ public:
         if (verbose_console) {
             fmt::println("started {}", this->name);
         }
+        nextTimePoint = ClockSourceType::now();
     }
 
     void
