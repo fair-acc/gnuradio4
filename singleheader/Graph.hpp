@@ -9704,9 +9704,9 @@ template<std::uint64_t stride = 0U, bool isConst = false>
 struct Stride {
     static_assert(stride >= 0U, "Stride must be >= 0");
 
-    static constexpr std::uint64_t kStride  = stride;
-    static constexpr bool          kIsConst = isConst;
-    static constexpr bool          kEnabled = !isConst || (stride > 0U);
+    static constexpr gr::Size_t kStride  = stride;
+    static constexpr bool       kIsConst = isConst;
+    static constexpr bool       kEnabled = !isConst || (stride > 0U);
 };
 
 template<typename T>
@@ -11152,7 +11152,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
         // the 2nd double mapped memory call mmap may fail and/or return an unsuitable return address which is unavoidable
         // this workaround retries to get a more favourable allocation up to three times before it throws the regular exception
-        for (int retry_attempt=0; retry_attempt < 3; retry_attempt++) {
+        for (int retry_attempt = 0; retry_attempt < 3; retry_attempt++) {
             try {
                 return do_allocate_internal(required_size, alignment);
             } catch (std::system_error& e) { // explicitly caught for retry
@@ -11447,7 +11447,7 @@ class CircularBuffer
     [[nodiscard]] constexpr T* data() const noexcept { return _parent->_internalSpan.data(); }
     T& operator [](std::size_t i) const noexcept  {return _parent->_internalSpan[i]; }
     T& operator [](std::size_t i) noexcept { return _parent->_internalSpan[i]; }
-    operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
+    explicit(false) operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
     operator std::span<T>&() noexcept { return _parent->_internalSpan; }
 
     constexpr void publish(std::size_t nSlotsToPublish) noexcept {
@@ -11680,6 +11680,11 @@ class CircularBuffer
         return policy;
     }
 
+    [[nodiscard]] constexpr bool
+     isConsumed() const noexcept {
+         return _parent->_isRangeConsumed;
+     }
+
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
     [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
@@ -11700,7 +11705,7 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
-        if (_parent->_isRangeConsumed) {
+        if (isConsumed()) {
             fmt::println("An error occurred: The method CircularBuffer::buffer_reader::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
             std::abort();
         }
@@ -11709,7 +11714,7 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
-        if (_parent->_isRangeConsumed) {
+        if (isConsumed()) {
             return false;
         }
         _parent->_isRangeConsumed = true;
@@ -13904,14 +13909,14 @@ struct Tensor {
     using pmt_map            = std::map<std::string, pmtv::pmt>;
     std::int64_t timestamp   = 0; // UTC timestamp [ns]
 
-    std::vector<std::int32_t> extents; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout;  // row-major, column-major, “special”
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
 
-    std::vector<T> signal_values; // size = \PI_i extents[i]
-    std::vector<T> signal_errors; // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<T> signal_values{}; // size = \PI_i extents[i]
+    std::vector<T> signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
 
     // meta data
-    std::vector<pmt_map> meta_information;
+    std::vector<pmt_map> meta_information{};
 };
 
 static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
@@ -13924,8 +13929,8 @@ struct Packet {
     using pmt_map    = std::map<std::string, pmtv::pmt>;
 
     std::int64_t         timestamp = 0; // UTC timestamp [ns]
-    std::vector<T>       signal_values; // size = \PI_i extents[i
-    std::vector<pmt_map> meta_information;
+    std::vector<T>       signal_values{}; // size = \PI_i extents[i
+    std::vector<pmt_map> meta_information{};
 };
 
 static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
@@ -22324,46 +22329,6 @@ merge(A &&a, B &&b) {
                   "Port types do not match");
     return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
-
-#if !DISABLE_SIMD
-namespace test { // TODO: move to dedicated tests
-
-struct copy : public Block<copy> {
-    PortIn<float>  in;
-    PortOut<float> out;
-
-public:
-    template<meta::t_or_simd<float> V>
-    [[nodiscard]] constexpr V
-    processOne(const V &a) const noexcept {
-        return a;
-    }
-};
-
-} // namespace test
-#endif
-} // namespace gr
-
-#if !DISABLE_SIMD
-ENABLE_REFLECTION(gr::test::copy, in, out);
-#endif
-
-namespace gr {
-
-#if !DISABLE_SIMD
-namespace test {
-static_assert(traits::block::stream_input_port_types<copy>::size() == 1);
-static_assert(std::same_as<traits::block::stream_return_type<copy>, float>);
-static_assert(traits::block::can_processOne_scalar<copy>);
-static_assert(traits::block::can_processOne_simd<copy>);
-static_assert(traits::block::can_processOne_scalar_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-static_assert(traits::block::can_processOne_simd_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-static_assert(SourceBlockLike<copy>);
-static_assert(SinkBlockLike<copy>);
-static_assert(SourceBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-static_assert(SinkBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-} // namespace test
-#endif
 
 /*******************************************************************************************************/
 /**************************** end of SIMD-Merged Graph Implementation **********************************/

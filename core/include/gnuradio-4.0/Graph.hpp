@@ -1202,46 +1202,6 @@ merge(A &&a, B &&b) {
     return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
 }
 
-#if !DISABLE_SIMD
-namespace test { // TODO: move to dedicated tests
-
-struct copy : public Block<copy> {
-    PortIn<float>  in;
-    PortOut<float> out;
-
-public:
-    template<meta::t_or_simd<float> V>
-    [[nodiscard]] constexpr V
-    processOne(const V &a) const noexcept {
-        return a;
-    }
-};
-
-} // namespace test
-#endif
-} // namespace gr
-
-#if !DISABLE_SIMD
-ENABLE_REFLECTION(gr::test::copy, in, out);
-#endif
-
-namespace gr {
-
-#if !DISABLE_SIMD
-namespace test {
-static_assert(traits::block::stream_input_port_types<copy>::size() == 1);
-static_assert(std::same_as<traits::block::stream_return_type<copy>, float>);
-static_assert(traits::block::can_processOne_scalar<copy>);
-static_assert(traits::block::can_processOne_simd<copy>);
-static_assert(traits::block::can_processOne_scalar_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-static_assert(traits::block::can_processOne_simd_with_offset<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-static_assert(SourceBlockLike<copy>);
-static_assert(SinkBlockLike<copy>);
-static_assert(SourceBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-static_assert(SinkBlockLike<decltype(mergeByIndex<0, 0>(copy(), copy()))>);
-} // namespace test
-#endif
-
 /*******************************************************************************************************/
 /**************************** end of SIMD-Merged Graph Implementation **********************************/
 /*******************************************************************************************************/

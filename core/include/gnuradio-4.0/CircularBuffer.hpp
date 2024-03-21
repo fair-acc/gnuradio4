@@ -78,7 +78,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
         // the 2nd double mapped memory call mmap may fail and/or return an unsuitable return address which is unavoidable
         // this workaround retries to get a more favourable allocation up to three times before it throws the regular exception
-        for (int retry_attempt=0; retry_attempt < 3; retry_attempt++) {
+        for (int retry_attempt = 0; retry_attempt < 3; retry_attempt++) {
             try {
                 return do_allocate_internal(required_size, alignment);
             } catch (std::system_error& e) { // explicitly caught for retry
@@ -373,7 +373,7 @@ class CircularBuffer
     [[nodiscard]] constexpr T* data() const noexcept { return _parent->_internalSpan.data(); }
     T& operator [](std::size_t i) const noexcept  {return _parent->_internalSpan[i]; }
     T& operator [](std::size_t i) noexcept { return _parent->_internalSpan[i]; }
-    operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
+    explicit(false) operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
     operator std::span<T>&() noexcept { return _parent->_internalSpan; }
 
     constexpr void publish(std::size_t nSlotsToPublish) noexcept {
@@ -606,6 +606,11 @@ class CircularBuffer
         return policy;
     }
 
+    [[nodiscard]] constexpr bool
+     isConsumed() const noexcept {
+         return _parent->_isRangeConsumed;
+     }
+
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
     [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
@@ -626,7 +631,7 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
-        if (_parent->_isRangeConsumed) {
+        if (isConsumed()) {
             fmt::println("An error occurred: The method CircularBuffer::buffer_reader::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
             std::abort();
         }
@@ -635,7 +640,7 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
-        if (_parent->_isRangeConsumed) {
+        if (isConsumed()) {
             return false;
         }
         _parent->_isRangeConsumed = true;
