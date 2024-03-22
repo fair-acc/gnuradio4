@@ -712,7 +712,10 @@ public:
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
             if (numerator != 1ULL || denominator != 1ULL) {
-                throw std::runtime_error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+                auto e = gr::Error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+                requestStop();
+                return;
             }
         }
 
@@ -720,45 +723,61 @@ public:
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
             if (stride != 0ULL) {
-                throw std::runtime_error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
+                auto e = gr::Error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+                requestStop();
+                return;
             }
         }
 
         const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         if (minSyncIn > maxSyncIn) {
-            throw std::invalid_argument(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
+            auto e = gr::Error(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            requestStop();
+            return;
         }
         if (minSyncOut > maxSyncOut) {
-            throw std::invalid_argument(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
+            auto e = gr::Error(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            requestStop();
+            return;
         }
         if (denominator > maxSyncIn) {
-            throw std::invalid_argument(fmt::format("resampling denominator ({}) is larger then max samples for input ports ({})", denominator, maxSyncIn));
+            auto e = gr::Error(fmt::format("resampling denominator ({}) is larger then max samples for input ports ({})", denominator, maxSyncIn));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            requestStop();
+            return;
         }
         if (numerator > maxSyncOut) {
-            throw std::invalid_argument(fmt::format("resampling numerator ({}) is larger then max samples for output ports ({})", numerator, maxSyncOut));
+            auto e = gr::Error(fmt::format("resampling numerator ({}) is larger then max samples for output ports ({})", numerator, maxSyncOut));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            requestStop();
+            return;
         }
     }
 
     void
-    publishWriters(std::size_t nSamples, auto &publishableSpanTuple) noexcept {
+    publishSamples(std::size_t nSamples, auto &publishableSpanTuple) noexcept {
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
                     [nSamples]<typename OutputRange>(auto, OutputRange &outputRange) {
                         auto processOneRange = [nSamples]<typename Out>(Out &out) {
                             if constexpr (Out::isMultiThreadedStrategy()) {
                                 if (!out.isFullyPublished()) {
-                                    fmt::print(stderr, "Block::publishWriters - did not publish all samples for MultiThreadedStrategy\n");
+                                    fmt::print(stderr, "Block::publish - did not publish all samples for MultiThreadedStrategy\n");
                                     std::abort();
                                 }
                             }
                             if (!out.isPublished()) {
-                                if constexpr (Out::spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                                    fmt::print(stderr, "Block::publishWriters - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(SpanReleasePolicy::Terminate));
+                                using enum gr::SpanReleasePolicy;
+                                if constexpr (Out::spanReleasePolicy() == Terminate) {
+                                    fmt::print(stderr, "Block::publish - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                     std::abort();
-                                } else if constexpr (Out::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                                } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
                                     out.publish(nSamples);
-                                } else if constexpr (Out::spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
+                                } else if constexpr (Out::spanReleasePolicy() == ProcessNone) {
                                     out.publish(0U);
                                 }
                             }
@@ -783,12 +802,13 @@ public:
                     [nSamples, &success]<typename InputRange>(auto, InputRange &inputRange) {
                         auto processOneRange = [nSamples, &success]<typename In>(In &in) {
                             if (!in.isConsumed()) {
-                                if constexpr (In::spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                                    fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(SpanReleasePolicy::Terminate));
+                                using enum gr::SpanReleasePolicy;
+                                if constexpr (In::spanReleasePolicy() == Terminate) {
+                                    fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                     std::abort();
-                                } else if constexpr (In::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                                } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
                                     success = success && in.consume(nSamples);
-                                } else if constexpr (In::spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
+                                } else if constexpr (In::spanReleasePolicy() == ProcessNone) {
                                     success = success && in.consume(0U);
                                 }
                             }
@@ -904,18 +924,19 @@ public:
         return meta::tuple_transform(
                 [sync_samples]<typename PortOrCollection>(PortOrCollection &output_port_or_collection) noexcept {
                     auto process_single_port = [&sync_samples]<typename Port>(Port &&port) {
+                        using enum gr::SpanReleasePolicy;
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                             if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                                return std::forward<Port>(port).streamReader().template get<SpanReleasePolicy::ProcessAll>(sync_samples);
+                                return std::forward<Port>(port).streamReader().template get<ProcessAll>(sync_samples);
                             } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                                return std::forward<Port>(port).streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(sync_samples);
+                                return std::forward<Port>(port).streamWriter().template reserve<ProcessAll>(sync_samples);
                             }
                         } else {
                             // for the Async port get/reserve all available samples
                             if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                                return std::forward<Port>(port).streamReader().template get<SpanReleasePolicy::ProcessNone>(port.streamReader().available());
+                                return std::forward<Port>(port).streamReader().template get<ProcessNone>(port.streamReader().available());
                             } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                                return std::forward<Port>(port).streamWriter().template reserve<SpanReleasePolicy::ProcessNone>(port.streamWriter().available());
+                                return std::forward<Port>(port).streamWriter().template reserve<ProcessNone>(port.streamWriter().available());
                             }
                         }
                     };
@@ -1140,19 +1161,16 @@ protected:
     /***
      * Aggregate the amount of samples that can be consumed/produced from a range of ports.
      * @param ports a typelist of input or output ports
-     * @return a tuple representing the amount of available data on the ports
-     *   - minSync: the minimum amount of samples that the block needs for processing on the sync ports
-     *   - maxSync: the maximum amount of that can be consumed on all sync ports
-     *   - maxAvailable: the maximum amount of that are available on all sync ports
-     *   - hasAsync: true if there is at least one async input/output that has available samples/remaining capacity
+     * @return an anonymous struct representing the amount of available data on the ports
      */
+    template<typename P>
     auto
-    getPortLimits(auto &&ports) {
-        std::size_t minSync               = 0UL;
-        std::size_t maxSync               = std::numeric_limits<std::size_t>::max();
-        std::size_t maxAvailable          = std::numeric_limits<std::size_t>::max();
-        bool        hasAsync              = false;
-        auto        adjust_for_input_port = [this, &minSync, &maxSync, &maxAvailable, &hasAsync]<PortLike Port>(Port &port) {
+    getPortLimits(P &&ports) {
+        std::size_t minSync             = 0UL;
+        std::size_t maxSync             = std::numeric_limits<std::size_t>::max();
+        std::size_t maxAvailable        = std::numeric_limits<std::size_t>::max();
+        bool        hasAsync            = false;
+        auto        adjustForInputPort  = [this, &minSync, &maxSync, &maxAvailable, &hasAsync]<PortLike Port>(Port &port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -1170,21 +1188,26 @@ protected:
                 }
             }
         };
-        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, std::forward<decltype(ports)>(ports));
-        return std::tuple{minSync, maxSync, maxAvailable, hasAsync};
+        for_each_port([&adjustForInputPort](PortLike auto &port) { adjustForInputPort(port); }, std::forward<P>(ports));
+        struct {
+            std::size_t minSync;      // the minimum amount of samples that the block needs for processing on the sync ports
+            std::size_t maxSync;      // the maximum amount of that can be consumed on all sync ports
+            std::size_t maxAvailable; // the maximum amount of that are available on all sync ports
+            bool hasAsync;            // true if there is at least one async input/output that has available samples/remaining capacity
+        } result{minSync, maxSync, maxAvailable, hasAsync};
+        return result;
     }
 
     /***
      * Check the input ports for available samples
-     * @return tuple [nextTag, nextEosTag]
      */
     auto
-    getTagPositions() {
-        bool        hasTag                = false;
-        std::size_t nextTag               = std::numeric_limits<std::size_t>::max();
-        std::size_t nextEosTag            = std::numeric_limits<std::size_t>::max();
-        bool        asyncEoS              = false;
-        auto        adjust_for_input_port = [this, &hasTag, &nextTag, &nextEosTag, &asyncEoS]<PortLike Port>(Port &port) {
+    getNextTagAndEosPosition() {
+        bool        hasTag             = false;
+        std::size_t nextTag            = std::numeric_limits<std::size_t>::max();
+        std::size_t nextEosTag         = std::numeric_limits<std::size_t>::max();
+        bool        asyncEoS           = false;
+        auto        adjustForInputPort = [this, &hasTag, &nextTag, &nextEosTag, &asyncEoS]<PortLike Port>(Port &port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
@@ -1192,7 +1215,7 @@ protected:
                     nextTag                               = std::min(nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
                     nextEosTag                            = std::min(nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
                     const gr::ConsumableSpan auto tagData = port.tagReader().get(port.tagReader().available());
-                    hasTag |= !tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty();
+                    hasTag =  hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
                         asyncEoS = true;
@@ -1200,8 +1223,15 @@ protected:
                 }
             }
         };
-        for_each_port([&adjust_for_input_port](PortLike auto &port) { adjust_for_input_port(port); }, inputPorts<PortType::STREAM>(&self()));
-        return std::tuple{hasTag, nextTag, nextEosTag, asyncEoS};
+        for_each_port([&adjustForInputPort](PortLike auto &port) { adjustForInputPort(port); }, inputPorts<PortType::STREAM>(&self()));
+
+        struct {
+            bool hasTag;
+            std::size_t nextTag;
+            std::size_t nextEosTag;
+            bool asyncEoS;
+        } result{hasTag, nextTag, nextEosTag, asyncEoS};
+        return result;
     }
 
     /***
@@ -1210,68 +1240,65 @@ protected:
      * @return inputSamples to skip before the chunk
      */
     std::size_t
-    inputSamplesToSkipBeforeNextChunk(std::size_t available) {
-        std::size_t inputSamplesToSkipBefore = 0UZ;
+    inputSamplesToSkipBeforeNextChunk(std::size_t availableSamples) {
         if constexpr (StrideControl::kEnabled) {                    // check if stride was removed at compile time
-            if (stride.value != 0 && stride.value != denominator) { // check if stride is disabled at runtime
-                if (strideCounter != 0) {                           // drop samples
-                    if (strideCounter >= static_cast<gr::Size_t>(available)) {
-                        inputSamplesToSkipBefore = available;
-                        strideCounter -= static_cast<gr::Size_t>(available);
-                    } else {
-                        inputSamplesToSkipBefore = strideCounter;
-                        strideCounter            = 0;
-                    }
-                }
+            const bool isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            std::size_t toSkip = 0;
+            if (isStrideActiveAndNotDefault && strideCounter > 0) {
+                toSkip = std::min(static_cast<std::size_t>(strideCounter), availableSamples);
+                strideCounter -= static_cast<gr::Size_t>(toSkip);
             }
+            return toSkip;
         }
-        return inputSamplesToSkipBefore;
+        return 0Z;
     }
 
     /***
-     * skip leftover stride
+     * calculate how many samples to skip after processing
      * @return inputSamples to skip before the chunk
      */
     std::size_t
-    inputSamplesToSkipAfterThisChunk(std::size_t remaining) {
-        // skip stride at the end
-        std::size_t inputSamplesToSkipAfter = 0UZ;
+    inputSamplesToSkipAfterChunk(std::size_t remainingSamples) {
         if constexpr (StrideControl::kEnabled) {
-            if (stride.value != 0 && stride.value != denominator) {
-                if (strideCounter == 0 && remaining > 0) {
-                    inputSamplesToSkipAfter = std::min(static_cast<std::size_t>(stride.value), remaining);
-                    strideCounter           = stride.value - static_cast<gr::Size_t>(inputSamplesToSkipAfter);
-                }
+            const bool isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            std::size_t toSkip = 0;
+            if (isStrideActiveAndNotDefault && strideCounter == 0 && remainingSamples > 0) {
+                toSkip = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
+                strideCounter = stride.value - static_cast<gr::Size_t>(toSkip);
             }
+            return toSkip;
         }
-        return inputSamplesToSkipAfter;
+        return 0UZ;
     }
 
     auto
-    decimate(std::size_t minSyncIn, std::size_t maxSyncIn, std::size_t minSyncOut, std::size_t maxSyncOut) {
-        if constexpr (Resampling::kEnabled) {
-            if (denominator != 1UL || numerator != 1UL) {
-                std::size_t nResamplingChunks;
-                if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
-                    if (stride.value != 0 && stride.value != denominator) {
-                        nResamplingChunks = denominator <= maxSyncIn && numerator <= maxSyncOut ? 1 : 0;
-                    } else {
-                        nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
-                    }
-                } else {
-                    nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
-                }
-                if (nResamplingChunks * denominator < minSyncIn || nResamplingChunks * numerator < minSyncOut) {
-                    return std::tuple{0UZ, 0UZ};
-                }
-                return std::tuple{static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator)};
-            } else {
-                std::size_t n = std::min(maxSyncIn, maxSyncOut);
-                return std::tuple{n, n};
-            }
-        } else { // no resampling
+    computeResampling(std::size_t minSyncIn, std::size_t maxSyncIn, std::size_t minSyncOut, std::size_t maxSyncOut) {
+        struct ResamplingResult {
+            std::size_t decimatedIn;
+            std::size_t decimatedOut;
+        };
+        if constexpr (!Resampling::kEnabled) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return std::tuple{n, n};
+            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
+        }
+        if (denominator == 1UL && numerator == 1UL) { // no resampling
+            std::size_t n = std::min(maxSyncIn, maxSyncOut);
+            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
+        }
+        std::size_t nResamplingChunks;
+        if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
+            if (stride.value != 0 && stride.value != denominator) {
+                nResamplingChunks = denominator <= maxSyncIn && numerator <= maxSyncOut ? 1 : 0;
+            } else {
+                nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
+            }
+        } else {
+            nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
+        }
+        if (nResamplingChunks * denominator < minSyncIn || nResamplingChunks * numerator < minSyncOut) {
+            return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+        } else {
+            return ResamplingResult{static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator)};
         }
     }
 
@@ -1292,25 +1319,26 @@ protected:
         return std::numeric_limits<std::size_t>::max();
     }
 
+    template<typename TIn, typename TOut>
     work::Status
-    invokeProcessBulk(auto &inputSpans, auto &writersTuple) {
+    invokeProcessBulk(TIn &inputSpans, TOut &outputSpans) {
         // cannot use std::apply because it requires tuple_cat(inputSpans, writersTuple). The latter doesn't work because writersTuple isn't copyable.
         return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
-            return self().processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(writersTuple)...);
-        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputSpans)>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(writersTuple)>>>());
+            return self().processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(outputSpans)...);
+        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<TIn>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<TOut>>>());
     }
 
     work::Status
-    invokeProcessOneSimd(auto &inputSpans, auto &writersTuple, auto width, std::size_t processed) {
+    invokeProcessOneSimd(auto &inputSpans, auto &outputSpans, auto width, std::size_t nSamplesToProcess) {
         std::size_t i = 0;
-        for (; i + width <= processed; i += width) {
+        for (; i + width <= nSamplesToProcess; i += width) {
             const auto &results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto &...input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
-            meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writersTuple, results);
+            meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
         }
         simd_epilogue(width, [&](auto w) {
-            if (i + w <= processed) {
+            if (i + w <= nSamplesToProcess) {
                 const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto &&...input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
-                meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, writersTuple, results);
+                meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
                 i += w;
             }
         });
@@ -1318,18 +1346,24 @@ protected:
     }
 
     work::Status
-    invokeProcessOnePure(auto &inputSpans, auto &writersTuple, std::size_t processed) {
-        for (std::size_t i = 0; i < processed; ++i) {
+    invokeProcessOnePure(auto &inputSpans, auto &outputSpans, std::size_t nSamplesToProcess) {
+        for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
-            meta::tuple_for_each([i]<typename R>(auto &output_range, R &&result) { output_range[i] = std::forward<R>(result); }, writersTuple, results);
+            meta::tuple_for_each([i]<typename R>(auto &output_range, R &&result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
         return work::Status::OK;
     }
 
     auto
-    invokeProcessOneNonConst(auto &inputSpans, auto &writersTuple, std::size_t processed) {
+    invokeProcessOneNonConst(auto &inputSpans, auto &outputSpans, std::size_t nSamplesToProcess) {
+        using enum work::Status;
+        struct ProcessOneResult {
+            work::Status status;
+            std::size_t processedIn;
+            std::size_t processedOut;
+        };
         std::size_t nOutSamplesBeforeRequestedStop = 0;
-        for (std::size_t i = 0; i < processed; ++i) {
+        for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
                     [i]<typename R>(auto &output_range, R &&result) {
@@ -1341,7 +1375,7 @@ protected:
                             output_range[i] = std::forward<R>(result);
                         }
                     },
-                    writersTuple, results);
+                    outputSpans, results);
             nOutSamplesBeforeRequestedStop++;
             // the block implementer can set `_outputTagsChanged` to true in `processOne` to prematurely leave the loop and apply his changes
             if (_outputTagsChanged || lifecycle::isShuttingDown(this->state())) [[unlikely]] { // emitted tag and/or requested to stop
@@ -1349,9 +1383,9 @@ protected:
             }
         }
         if (nOutSamplesBeforeRequestedStop > 0) {
-            return std::tuple{work::Status::OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop};
+            return ProcessOneResult{OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop};
         }
-        return std::tuple{work::Status::OK, processed, processed};
+        return ProcessOneResult{OK, nSamplesToProcess, nSamplesToProcess};
     }
 
     void
@@ -1392,9 +1426,9 @@ protected:
      *   - settings
      *      - apply and reset cached/merged tag
      *   - get available samples count
-     *     - M: samples to consume on SYNC ports
-     *     - N: samples to produce on SYNC ports
-     *     - available samples for each ASYNC port
+     *     - syncIn: min/max/available samples to consume on SYNC ports
+     *     - syncOut: min/max/available samples to produce on SYNC ports
+     *     - check whether there are available samples for any ASYNC port
      *     - limit to requestedWork
      *     - correctly consider Resampling and Stride
      *     - deprecated: available_samples limits the amount of work to produce for source blocks
@@ -1407,7 +1441,7 @@ protected:
      */
     work::Result
     workInternal(std::size_t requested_work) {
-        using gr::work::Status;
+        using enum gr::work::Status;
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
 
@@ -1427,14 +1461,14 @@ protected:
         }
 
         // evaluate number of available and processable samples
-        const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn]     = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
-        auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getTagPositions();
-        auto       maxChunk                                                   = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto inputSkipBefore                                            = inputSamplesToSkipBeforeNextChunk(std::min({ maxSyncAvailableIn, nextTag, nextEosTag }));
-        const auto availableToProcess          = std::min({ maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore) });
-        const auto availableToPublish          = std::min({ maxSyncOut, maxSyncAvailableOut });
-        const auto [decimatedIn, decimatedOut] = decimate(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
+        const auto inPortLimits       = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        const auto outPortLimits      = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+        auto       tagPositions       = getNextTagAndEosPosition();
+        auto       maxChunk           = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
+        const auto inputSkipBefore    = inputSamplesToSkipBeforeNextChunk(std::min({ inPortLimits.maxAvailable, tagPositions.nextTag, tagPositions.nextEosTag }));
+        const auto availableToProcess = std::min({ inPortLimits.maxSync, maxChunk, (inPortLimits.maxAvailable - inputSkipBefore), (tagPositions.nextTag - inputSkipBefore), (tagPositions.nextEosTag - inputSkipBefore) });
+        const auto availableToPublish = std::min({ outPortLimits.maxSync, outPortLimits.maxAvailable });
+        const auto [resampledIn, resampledOut] = computeResampling(inPortLimits.minSync, availableToProcess, outPortLimits.minSync, availableToPublish);
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
             updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
@@ -1442,8 +1476,10 @@ protected:
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
-        if (asyncEoS || (decimatedIn == 0 && decimatedOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
-            if (asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
+        if (tagPositions.asyncEoS || (resampledIn == 0 && resampledOut == 0 && !inPortLimits.hasAsync && !outPortLimits.hasAsync)) {
+            if (tagPositions.asyncEoS || (tagPositions.nextEosTag - inputSkipBefore <= inPortLimits.minSync)
+                    || (tagPositions.nextEosTag - inputSkipBefore <= denominator)
+                    || (tagPositions.nextEosTag - inputSkipBefore) / denominator <= outPortLimits.minSync / numerator) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                     emitErrorMessage("workInternal(): EOS tag arrived -> REQUESTED_STOP", e.error());
                 }
@@ -1453,16 +1489,16 @@ protected:
                 this->setAndNotifyState(lifecycle::State::STOPPED);
                 return { requested_work, 0UZ, work::Status::DONE };
             }
-            if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
+            if (tagPositions.nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                     emitErrorMessage("workInternal(): REQUESTED_STOP", e.error());
                 }
                 updateInputAndOutputTags();
                 applyChangedSettings();
                 forwardTags();
-                return { requested_work, 0UZ, work::Status::DONE };
+                return { requested_work, 0UZ, DONE };
             }
-            return { requested_work, 0UZ, decimatedOut == 0 ? Status::INSUFFICIENT_OUTPUT_ITEMS : Status::INSUFFICIENT_INPUT_ITEMS };
+            return {requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
         }
         // process stream tags
         updateInputAndOutputTags();
@@ -1470,66 +1506,74 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) &&hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && tagPositions.hasTag;
 
         // call the block implementation's work function
-        const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : decimatedIn);
-        auto         writersTuple = prepareStreams(outputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : decimatedOut);
+        const auto   inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledIn);
+        auto         outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledOut);
         work::Status ret;
-        std::size_t  processed    = limitByFirstTag ? 1 : decimatedIn;
-        std::size_t  processedOut = limitByFirstTag ? 1 : decimatedOut;
+        std::size_t  processedIn  = limitByFirstTag ? 1 : resampledIn;
+        std::size_t  processedOut = limitByFirstTag ? 1 : resampledOut;
         if constexpr (HasProcessBulkFunction<Derived>) {
-            ret = invokeProcessBulk(inputSpans, writersTuple); // todo: evaluate how many where really produced...
+            ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
         } else if constexpr (HasProcessOneFunction<Derived>) {
-            if (decimatedOut != decimatedIn) {
-                throw std::logic_error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", decimatedIn, decimatedOut));
-            }
-            using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
-            using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
+            if (processedIn != processedOut) {
+                auto e = gr::Error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
+                emitErrorMessage("Block::workInternal:", e);
+                requestStop();
+                processedIn = 0;
+                processedOut = 0;
+            } else {
+                using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
+                using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
 
-            constexpr auto                                 input_types_simd_size = meta::simdize_size_v<input_simd_types>;
-            constexpr std::size_t                          max_simd_double_size  = stdx::simd_abi::max_fixed_size<double>;
-            constexpr std::size_t                          simd_size             = input_types_simd_size == 0 ? max_simd_double_size : std::min(max_simd_double_size, input_types_simd_size * 4);
-            std::integral_constant<std::size_t, simd_size> width{};
+                constexpr auto                                 input_types_simd_size = meta::simdize_size_v<input_simd_types>;
+                constexpr std::size_t                          max_simd_double_size  = stdx::simd_abi::max_fixed_size<double>;
+                constexpr std::size_t                          simd_size             = input_types_simd_size == 0 ? max_simd_double_size : std::min(max_simd_double_size, input_types_simd_size * 4);
+                std::integral_constant<std::size_t, simd_size> width{};
 
-            if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived &d) {
-                                                                                  { d.processOne_simd(simd_size) };
-                                                                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
-                ret = invokeProcessOneSimd(inputSpans, writersTuple, width, processed);
-            } else {                                                 // Non-SIMD loop
-                if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
-                    ret = invokeProcessOnePure(inputSpans, writersTuple);
-                } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
-                    std::tie(ret, processed, processedOut) = invokeProcessOneNonConst(inputSpans, writersTuple, processed);
+                if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived &d) {
+                    { d.processOne_simd(simd_size) };
+                }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
+                    ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn);
+                } else {                                                 // Non-SIMD loop
+                    if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                        ret = invokeProcessOnePure(inputSpans, outputSpans);
+                    } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
+                        const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
+                        ret = result.status;
+                        processedIn = result.processedIn;
+                        processedOut = result.processedOut;
+                    }
                 }
             }
         } else { // block does not define any valid processing function
             static_assert(gr::meta::always_false<gr::traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
         }
         forwardTags();
-        if (lifecycle::isShuttingDown(this->state()) || nextEosTag <= processed + 1) {
+        if (lifecycle::isShuttingDown(this->state()) || tagPositions.nextEosTag <= processedIn + 1) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                 emitErrorMessage("isShuttingDown -> STOPPED", e.error());
             }
-            updateInputAndOutputTags(processed);
+            updateInputAndOutputTags(processedIn);
             applyChangedSettings();
             ret       = work::Status::DONE;
-            processed = 0UZ;
+            processedIn = 0UZ;
         }
         // publish/consume
-        publishWriters(processedOut, writersTuple);
-        const auto inputSamplesToSkipAfter = decimatedIn > 0 ? inputSamplesToSkipAfterThisChunk(maxSyncAvailableIn - inputSkipBefore) : 0UZ;
-        bool       success                 = false;
-        if (inputSamplesToSkipAfter > 0 && inputSamplesToSkipAfter <= decimatedIn) {
+        publishSamples(processedOut, outputSpans);
+        const auto inputSamplesToSkipAfter = resampledIn > 0 ? inputSamplesToSkipAfterChunk(inPortLimits.maxAvailable - inputSkipBefore) : 0UZ;
+        bool       success;
+        if (inputSamplesToSkipAfter > 0 && inputSamplesToSkipAfter <= resampledIn) {
             updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
             success = consumeReaders(inputSamplesToSkipAfter, inputSpans);
         } else if (inputSamplesToSkipAfter > 0) {
             updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
-            success                          = consumeReaders(decimatedIn, inputSpans);
-            const auto inputSpansForSkipping = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSamplesToSkipAfter - decimatedIn); // only way to consume is via the ConsumableSpan now
-            consumeReaders(inputSamplesToSkipAfter - decimatedIn, inputSpansForSkipping);
+            success                          = consumeReaders(resampledIn, inputSpans);
+            const auto inputSpansForSkipping = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSamplesToSkipAfter - resampledIn); // only way to consume is via the ConsumableSpan now
+            consumeReaders(inputSamplesToSkipAfter - resampledIn, inputSpansForSkipping);
         } else {
-            success = consumeReaders(processed, inputSpans);
+            success = consumeReaders(processedIn, inputSpans);
         }
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (ret == work::Status::DONE) {
@@ -1537,7 +1581,7 @@ protected:
             publishTag({ { gr::tag::END_OF_STREAM, true } }, 1);
             ret = work::Status::DONE;
         }
-        return { requested_work, processed, success ? ret : work::Status::ERROR };
+        return {requested_work, processedIn, success ? ret : work::Status::ERROR };
     } // end: work_return_t workInternal() noexcept { ..}
 
 public:

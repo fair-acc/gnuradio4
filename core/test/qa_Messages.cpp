@@ -2,7 +2,6 @@
 
 #include "gnuradio-4.0/Block.hpp"
 #include "gnuradio-4.0/Message.hpp"
-#include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -34,7 +33,7 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
     settingsChanged(const property_map & /* oldSettings */, const property_map &newSettings) {
         if (newSettings.contains("factor")) {
             this->notifyListeners("Settings", { { "factor", newSettings.at("factor") } });
-            ; // notifies only subscribed listeners
+            // notifies only subscribed listeners
             // alt: sendMessage<message::Command::Notify>(this->msgOut, this->unique_name /* serviceName */, "Settings", { { "factor", newSettings.at("factor") } }); // notifies all
         }
     }
