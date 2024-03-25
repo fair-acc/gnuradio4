@@ -28,15 +28,26 @@ inline constexpr std::size_t hardware_constructive_interference_size = 64;
 
 namespace gr {
 
+/***
+ * Controls automatic propagation of stream tags on sync ports.
+ *       ```
+ *     ┌───────┐      ┌───────┐     ┌───────┐      ┌───────┐
+ *    ┌┤       ├┐    ┌┤       ├┐   ┌┤       ├┐    ┌┤       ├┐
+ *    ││       ││    ││ ────► ││   ││ ────► ││    ││       ││
+ *    └┤       ├┘    └┤  \ /  ├┘   └┤       ├┘    └┤work(){├┘
+ *     │       │      │   X   │     │       │      │ get();│
+ *    ┌┤       ├┐    ┌┤  / \  ├┐   ┌┤       ├┐    ┌┤ pub();├┐
+ *    ││       ││    ││ ────► ││   ││ ────► ││    ││}      ││
+ *    └┤       ├┘    └┤       ├┘   └┤       ├┘    └┤       ├┘
+ *     └───────┘      └───────┘     └───────┘      └───────┘
+ *       `DONT`      `ALL_TO_ALL   `ONE_TO_ONE`   `TPP_CUSTOM`
+ * ```
+ */
 enum class TagPropagationPolicy {
-    TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The
-                       block itself is free to insert tags. */
-    TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The
-                       scheduler takes care of that. */
-    TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires
-                       same number of in- and outputs */
-    TPP_CUSTOM = 3      /*!< Like TPP_DONT, but signals the block it should implement
-                       application-specific forwarding behaviour. */
+    TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
+    TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The scheduler takes care of that. */
+    TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires same number of in- and outputs */
+    TPP_CUSTOM = 3      /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
 };
 
 using property_map = pmtv::map_t;

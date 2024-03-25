@@ -170,7 +170,7 @@ private:
                 print_tag(tags[next_tag], fmt::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, n_samples_produced));
             }
             out.publishTag(tags[next_tag].map, static_cast<Tag::signed_index_type>(offset)); // indices > 0 write tags in the future ... handle with care
-            this->_output_tags_changed = true;
+            this->_outputTagsChanged = true;
             next_tag++;
             return true;
         }

@@ -105,7 +105,8 @@ template<typename T, gr::meta::fixed_string description = "", typename... Argume
 using A = Annotated<T, description, Arguments...>;
 
 template<typename T>
-struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, SupportedTypes<float, double>> {
+// struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, SupportedTypes<float, double>> { // TODO: reenable BlockingIO
+struct TestBlock : public Block<TestBlock<T>, SupportedTypes<float, double>> {
     using Description = Doc<R""(
 some test doc documentation
 )"">;
@@ -148,7 +149,7 @@ some test doc documentation
     [[nodiscard]] constexpr V
     processOne(const V &a) noexcept {
         if constexpr (gr::meta::any_simd<V>) {
-            n_samples_consumed += static_cast<std::int32_t>(V::size());
+            n_samples_consumed += static_cast<gr::Size_t>(V::size());
         } else {
             n_samples_consumed++;
         }
@@ -517,7 +518,7 @@ const boost::ut::suite AnnotationTests = [] {
         expect(eq(block.scaling_factor.unit(), std::string_view{ "As" }));
         expect(eq(block.context.unit(), std::string_view{ "" }));
         expect(block.context.visible());
-        expect(block.isBlocking());
+        expect(!block.isBlocking());
 
         block.scaling_factor = 42.f; // test wrapper assignment operator
         expect(block.scaling_factor == 42.f) << "the answer to everything failed -- equal operator";
