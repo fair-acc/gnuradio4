@@ -106,10 +106,10 @@ template<typename PortOrCollection>
 using type = std::remove_pointer_t<decltype(type_helper<PortOrCollection>())>;
 
 template<typename... Ports>
-struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MinSamples... })> {};
+struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::Required::kMinSamples... })> {};
 
 template<typename... Ports>
-struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::RequiredSamples::MaxSamples... })> {};
+struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::Required::kMaxSamples... })> {};
 
 template<typename Type>
 constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_for<PortType::ANY>::is_port_or_collection<Type>();
