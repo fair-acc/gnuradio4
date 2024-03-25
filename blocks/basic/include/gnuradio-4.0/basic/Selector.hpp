@@ -106,7 +106,7 @@ you can set the `backPressure` property to false.
 
     template<gr::ConsumableSpan TInSpan, gr::PublishableSpan TOutSpan>
     gr::work::Status
-    processBulk(const ConsumableSpan auto &selectSpan, const std::vector<TInSpan> &ins, PublishableSpan auto &monOut, std::vector<TOutSpan> &outs) {
+    processBulk(const ConsumableSpan auto &selectSpan, const std::span<TInSpan> &ins, PublishableSpan auto &monOut, std::span<TOutSpan> &outs) {
         if (_internalMapping.empty()) {
             if (back_pressure) {
                 std::for_each(ins.begin(), ins.end(), [](auto &input) { std::ignore = input.consume(0UZ); });

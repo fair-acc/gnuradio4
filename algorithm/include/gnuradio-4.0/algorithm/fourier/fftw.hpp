@@ -1,6 +1,8 @@
 #ifndef GNURADIO_ALGORITHM_FFTW_HPP
 #define GNURADIO_ALGORITHM_FFTW_HPP
 
+#include <mutex>
+
 #include <fftw3.h>
 
 #include "window.hpp"
@@ -144,7 +146,9 @@ public:
 
         static_assert(sizeof(TOutput) == sizeof(OutAlgoDataType), "Sizes of TOutput type and OutAlgoDataType are not equal.");
 #pragma GCC diagnostic push
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
+#endif
         // Switch off warning: ‘void* memcpy(void*, const void*, size_t)’ copying an object of non-trivial type ‘class std::complex<float>’ from an array of ‘float [2]’
         std::memcpy(out.data(), fftwOut.get(), sizeof(TOutput) * getOutputSize());
 #pragma GCC diagnostic pop

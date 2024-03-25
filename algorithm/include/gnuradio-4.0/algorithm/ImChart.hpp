@@ -269,8 +269,8 @@ public:
         _n_datasets++;
         if (axis_min_x == axis_max_x) {
             const auto [minX, maxX] = std::ranges::minmax_element(xValues);
-            axis_min_x              = *minX;
-            axis_max_x              = *maxX;
+            axis_min_x              = static_cast<double>(*minX);
+            axis_max_x              = static_cast<double>(*maxX);
             if (axis_min_x == axis_max_x) {
                 axis_max_x += 1.0; // safe fall back for x-range
             }

@@ -251,7 +251,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
     std::array<gr::PortOut<T>, 6> outputs{};
 
     gr::work::Status
-    processBulk(const std::vector<std::span<const T>> &, std::vector<std::span<T>> &)
+    processBulk(const std::span<std::span<const T>> &, std::span<std::span<T>> &)
         requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN)
     {
         return gr::work::Status::OK;
@@ -266,7 +266,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
     template<gr::ConsumableSpan TInput>
     gr::work::Status
-    processBulk(const std::vector<TInput> &, std::vector<std::span<T>> &)
+    processBulk(const std::span<TInput> &, std::span<std::span<T>> &)
         requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_SPAN)
     {
         return gr::work::Status::OK;
@@ -274,7 +274,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
     template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
     gr::work::Status
-    processBulk(const std::vector<TInput> &, std::vector<TOutput> &)
+    processBulk(const std::span<TInput> &, std::span<TOutput> &)
         requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE)
     {
         return gr::work::Status::OK;
@@ -290,7 +290,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
     template<gr::PublishableSpan TOutput>
     gr::work::Status
-    processBulk(const std::vector<std::span<const T>> &, std::vector<TOutput> &)
+    processBulk(const std::span<std::span<const T>> &, std::span<TOutput> &)
         requires(processVariant == ProcessBulkVectorVariant::SPAN_PUBLISHABLE)
     {
         return gr::work::Status::OK;
@@ -300,10 +300,10 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVectorVariant processVariant), (BlockSignaturesProcessBulkVector<T, processVariant>), inputs, outputs);
 
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN2>>);      // TODO: fix the signature is required to work
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN2>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_SPAN>>); // combinations are not supported yet
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2>>); // TODO: fix the signature is required to work
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_PUBLISHABLE>>);        // combinations are not supported yet
 
 struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
@@ -443,7 +443,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
 
     template<typename TInSpan, typename TOutSpan>
     gr::work::Status
-    processBulk(const std::vector<TInSpan> &ins, const std::vector<TOutSpan> &outs) {
+    processBulk(const std::span<TInSpan> &ins, const std::span<TOutSpan> &outs) {
         for (std::size_t channelIndex = 0; channelIndex < ins.size(); ++channelIndex) {
             gr::ConsumableSpan auto  inputSpan  = ins[channelIndex];
             gr::PublishableSpan auto outputSpan = outs[channelIndex];
@@ -758,7 +758,7 @@ const boost::ut::suite _stride_tests = [] {
         expect(sched.runAndWait().has_value());
 
         std::vector<std::vector<double>> expected_values{ { 0., 0., 0., 0., 0. }, { 1., 1., 1., 1., 1. }, { 2., 2., 2., 2., 2. }, { 3., 3., 3., 3., 3. } };
-        for (std::size_t i = 0; i < sinks.size(); i++) {
+        for (std::size_t i = 0UZ; i < sinks.size(); i++) {
             expect(sinks[i]->n_samples_produced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
             expect(std::ranges::equal(sinks[i]->samples, expected_values[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
         }

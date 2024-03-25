@@ -3,11 +3,15 @@
 
 #include <charconv>
 
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #pragma GCC diagnostic ignored "-Wshadow"
+#endif
 #include <yaml-cpp/yaml.h>
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
 
 #include "Graph.hpp"
 #include "PluginLoader.hpp"

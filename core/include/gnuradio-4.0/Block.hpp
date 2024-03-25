@@ -1172,7 +1172,7 @@ protected:
             std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
             bool hasAsync = false;                                              // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
-        auto        adjustForInputPort  = [this, &result]<PortLike Port>(Port &port) {
+        auto        adjustForInputPort  = [&result]<PortLike Port>(Port &port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -1205,7 +1205,7 @@ protected:
             std::size_t nextEosTag = std::numeric_limits<std::size_t>::max();
             bool asyncEoS = false;
         } result;
-        auto        adjustForInputPort = [this, &result]<PortLike Port>(Port &port) {
+        auto        adjustForInputPort = [&result]<PortLike Port>(Port &port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
@@ -1311,13 +1311,32 @@ protected:
     }
 
     template<typename TIn, typename TOut>
-    work::Status
-    invokeProcessBulk(TIn &inputSpans, TOut &outputSpans) {
-        // cannot use std::apply because it requires tuple_cat(inputSpans, writersTuple). The latter doesn't work because writersTuple isn't copyable.
+    gr::work::Status invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
+        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) {
+            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
+        }, inputReaderTuple);
+
+        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args)  {
+            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
+        }, outputReaderTuple);
+
+        auto refToSpan = []<typename T, typename U>(T&& original, U&& temporary) -> decltype(auto) {
+            if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
+                return std::forward<U>(temporary);
+            } else {
+                return std::forward<T>(original);
+            }
+        };
+
         return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
-            return self().processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(outputSpans)...);
-        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<TIn>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<TOut>>>());
+            return self().processBulk(
+                    refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
+                    refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...
+            );
+        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(),
+               std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
     }
+
 
     work::Status
     invokeProcessOneSimd(auto &inputSpans, auto &outputSpans, auto width, std::size_t nSamplesToProcess) {
