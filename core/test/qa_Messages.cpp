@@ -25,8 +25,8 @@ namespace gr::testing {
 
 template<typename T>
 struct TestBlock : public gr::Block<TestBlock<T>> {
-    gr::PortIn<T>  in;
-    gr::PortOut<T> out;
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
     T              factor = static_cast<T>(1.0f);
 
     void

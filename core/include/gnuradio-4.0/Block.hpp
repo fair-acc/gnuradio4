@@ -766,14 +766,14 @@ public:
                         auto processOneRange = [nSamples]<typename Out>(Out &out) {
                             if constexpr (Out::isMultiThreadedStrategy()) {
                                 if (!out.isFullyPublished()) {
-                                    fmt::print(stderr, "Block::publish - did not publish all samples for MultiThreadedStrategy\n");
+                                    fmt::print(stderr, "Block::publishSamples - did not publish all samples for MultiThreadedStrategy\n");
                                     std::abort();
                                 }
                             }
                             if (!out.isPublished()) {
                                 using enum gr::SpanReleasePolicy;
                                 if constexpr (Out::spanReleasePolicy() == Terminate) {
-                                    fmt::print(stderr, "Block::publish - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
+                                    fmt::print(stderr, "Block::publishSamples - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                     std::abort();
                                 } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
                                     out.publish(nSamples);
@@ -1166,11 +1166,13 @@ protected:
     template<typename P>
     auto
     getPortLimits(P &&ports) {
-        std::size_t minSync             = 0UL;
-        std::size_t maxSync             = std::numeric_limits<std::size_t>::max();
-        std::size_t maxAvailable        = std::numeric_limits<std::size_t>::max();
-        bool        hasAsync            = false;
-        auto        adjustForInputPort  = [this, &minSync, &maxSync, &maxAvailable, &hasAsync]<PortLike Port>(Port &port) {
+        struct {
+            std::size_t minSync = 0UL;                                          // the minimum amount of samples that the block needs for processing on the sync ports
+            std::size_t maxSync = std::numeric_limits<std::size_t>::max();      // the maximum amount of that can be consumed on all sync ports
+            std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
+            bool hasAsync = false;                                              // true if there is at least one async input/output that has available samples/remaining capacity
+        } result;
+        auto        adjustForInputPort  = [this, &result]<PortLike Port>(Port &port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -1179,22 +1181,16 @@ protected:
                 }
             }();
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                minSync      = std::max(minSync, port.min_samples);
-                maxSync      = std::min(maxSync, port.max_samples);
-                maxAvailable = std::min(maxAvailable, available);
+                result.minSync      = std::max(result.minSync, port.min_samples);
+                result.maxSync      = std::min(result.maxSync, port.max_samples);
+                result.maxAvailable = std::min(result.maxAvailable, available);
             } else {                                 // async port
                 if (available >= port.min_samples) { // ensure that process function is called if at least one async port has data available
-                    hasAsync = true;
+                    result.hasAsync = true;
                 }
             }
         };
         for_each_port([&adjustForInputPort](PortLike auto &port) { adjustForInputPort(port); }, std::forward<P>(ports));
-        struct {
-            std::size_t minSync;      // the minimum amount of samples that the block needs for processing on the sync ports
-            std::size_t maxSync;      // the maximum amount of that can be consumed on all sync ports
-            std::size_t maxAvailable; // the maximum amount of that are available on all sync ports
-            bool hasAsync;            // true if there is at least one async input/output that has available samples/remaining capacity
-        } result{minSync, maxSync, maxAvailable, hasAsync};
         return result;
     }
 
@@ -1203,34 +1199,29 @@ protected:
      */
     auto
     getNextTagAndEosPosition() {
-        bool        hasTag             = false;
-        std::size_t nextTag            = std::numeric_limits<std::size_t>::max();
-        std::size_t nextEosTag         = std::numeric_limits<std::size_t>::max();
-        bool        asyncEoS           = false;
-        auto        adjustForInputPort = [this, &hasTag, &nextTag, &nextEosTag, &asyncEoS]<PortLike Port>(Port &port) {
+        struct {
+            bool hasTag = false;
+            std::size_t nextTag = std::numeric_limits<std::size_t>::max();
+            std::size_t nextEosTag = std::numeric_limits<std::size_t>::max();
+            bool asyncEoS = false;
+        } result;
+        auto        adjustForInputPort = [this, &result]<PortLike Port>(Port &port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
                     // nextTag limits the size of the chunk except if this would violate port constraints
-                    nextTag                               = std::min(nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
-                    nextEosTag                            = std::min(nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
+                    result.nextTag                        = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
+                    result.nextEosTag                     = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
                     const gr::ConsumableSpan auto tagData = port.tagReader().get(port.tagReader().available());
-                    hasTag =  hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
+                    result.hasTag =  result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
-                        asyncEoS = true;
+                        result.asyncEoS = true;
                     }
                 }
             }
         };
         for_each_port([&adjustForInputPort](PortLike auto &port) { adjustForInputPort(port); }, inputPorts<PortType::STREAM>(&self()));
-
-        struct {
-            bool hasTag;
-            std::size_t nextTag;
-            std::size_t nextEosTag;
-            bool asyncEoS;
-        } result{hasTag, nextTag, nextEosTag, asyncEoS};
         return result;
     }
 
@@ -1461,14 +1452,14 @@ protected:
         }
 
         // evaluate number of available and processable samples
-        const auto inPortLimits       = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        const auto outPortLimits      = getPortLimits(outputPorts<PortType::STREAM>(&self()));
-        auto       tagPositions       = getNextTagAndEosPosition();
-        auto       maxChunk           = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto inputSkipBefore    = inputSamplesToSkipBeforeNextChunk(std::min({ inPortLimits.maxAvailable, tagPositions.nextTag, tagPositions.nextEosTag }));
-        const auto availableToProcess = std::min({ inPortLimits.maxSync, maxChunk, (inPortLimits.maxAvailable - inputSkipBefore), (tagPositions.nextTag - inputSkipBefore), (tagPositions.nextEosTag - inputSkipBefore) });
-        const auto availableToPublish = std::min({ outPortLimits.maxSync, outPortLimits.maxAvailable });
-        const auto [resampledIn, resampledOut] = computeResampling(inPortLimits.minSync, availableToProcess, outPortLimits.minSync, availableToPublish);
+        const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn]     = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+        auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
+        auto       maxChunk                                                   = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
+        const auto inputSkipBefore                                            = inputSamplesToSkipBeforeNextChunk(std::min({ maxSyncAvailableIn, nextTag, nextEosTag }));
+        const auto availableToProcess          = std::min({ maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore) });
+        const auto availableToPublish          = std::min({ maxSyncOut, maxSyncAvailableOut });
+        const auto [resampledIn, resampledOut] = computeResampling(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
             updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
@@ -1476,10 +1467,8 @@ protected:
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
-        if (tagPositions.asyncEoS || (resampledIn == 0 && resampledOut == 0 && !inPortLimits.hasAsync && !outPortLimits.hasAsync)) {
-            if (tagPositions.asyncEoS || (tagPositions.nextEosTag - inputSkipBefore <= inPortLimits.minSync)
-                    || (tagPositions.nextEosTag - inputSkipBefore <= denominator)
-                    || (tagPositions.nextEosTag - inputSkipBefore) / denominator <= outPortLimits.minSync / numerator) {
+        if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
+            if (asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                     emitErrorMessage("workInternal(): EOS tag arrived -> REQUESTED_STOP", e.error());
                 }
@@ -1489,7 +1478,7 @@ protected:
                 this->setAndNotifyState(lifecycle::State::STOPPED);
                 return { requested_work, 0UZ, work::Status::DONE };
             }
-            if (tagPositions.nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
+            if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
                 if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                     emitErrorMessage("workInternal(): REQUESTED_STOP", e.error());
                 }
@@ -1506,7 +1495,7 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && tagPositions.hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
 
         // call the block implementation's work function
         const auto   inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledIn);
@@ -1551,7 +1540,7 @@ protected:
             static_assert(gr::meta::always_false<gr::traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
         }
         forwardTags();
-        if (lifecycle::isShuttingDown(this->state()) || tagPositions.nextEosTag <= processedIn + 1) {
+        if (lifecycle::isShuttingDown(this->state()) || nextEosTag <= processedIn + 1) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                 emitErrorMessage("isShuttingDown -> STOPPED", e.error());
             }
@@ -1562,7 +1551,7 @@ protected:
         }
         // publish/consume
         publishSamples(processedOut, outputSpans);
-        const auto inputSamplesToSkipAfter = resampledIn > 0 ? inputSamplesToSkipAfterChunk(inPortLimits.maxAvailable - inputSkipBefore) : 0UZ;
+        const auto inputSamplesToSkipAfter = resampledIn > 0 ? inputSamplesToSkipAfterChunk(maxSyncAvailableIn - inputSkipBefore) : 0UZ;
         bool       success;
         if (inputSamplesToSkipAfter > 0 && inputSamplesToSkipAfter <= resampledIn) {
             updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
@@ -1581,7 +1570,7 @@ protected:
             publishTag({ { gr::tag::END_OF_STREAM, true } }, 1);
             ret = work::Status::DONE;
         }
-        return {requested_work, processedIn, success ? ret : work::Status::ERROR };
+        return { requested_work, processedIn, success ? ret : work::Status::ERROR };
     } // end: work_return_t workInternal() noexcept { ..}
 
 public:
