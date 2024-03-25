@@ -252,7 +252,7 @@ public:
 private:
     void
     applyFunctionSettings(const property_map &properties) {
-        auto getProperty = [&properties]<typename U>(const property_map &m, function_generator::ParameterType paramType, U &&) -> std::optional<U> {
+        auto getProperty = []<typename U>(const property_map &m, function_generator::ParameterType paramType, U &&) -> std::optional<U> {
             const auto it = m.find(function_generator::toString(paramType));
             if (it == m.end()) {
                 return std::nullopt;

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <numeric>
 #include <ranges>
 #include <string>

@@ -72,8 +72,8 @@ const boost::ut::suite BasicConceptsTests = [] {
                 expect(eq(reader.available(), std::size_t{ 0 }));
                 expect(eq(reader.position(), std::make_signed_t<std::size_t>{ -1 }));
                 gr::ConsumableSpan auto data = reader.get(std::size_t{ 0 });
-                expect(nothrow([&reader, &data] { expect(eq(data.size(), std::size_t{ 0 })); })) << typeName << "throws";
-                expect(nothrow([&reader, &data] { expect(data.consume(std::size_t{ 0 })); }));
+                expect(nothrow([&data] { expect(eq(data.size(), std::size_t{ 0 })); })) << typeName << "throws";
+                expect(nothrow([&data] { expect(data.consume(std::size_t{ 0 })); }));
 
                 expect(writer.available() >= buffer.size());
                 expect(nothrow([&writer] { writer.publish([](const std::span<int32_t> &) { /* noop */ }, 0); }));
@@ -167,7 +167,7 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
         std::vector<int32_t, Allocator> vec(size, doubleMappedAllocator);
         expect(eq(vec.size(), size));
         std::iota(vec.begin(), vec.end(), 1);
-        for (std::size_t i = 0U; i < vec.size(); ++i) {
+        for (std::size_t i = 0UZ; i < vec.size(); ++i) {
             expect(eq(vec[i], static_cast<std::int32_t>(i + 1)));
             // to note: can safely read beyond size for this special vector
             expect(eq(vec[size + i], vec[i])); // identical to mirrored copy
@@ -620,7 +620,7 @@ const boost::ut::suite NonPowerTwoTests = [] {
         BufferReader auto reader = buffer.new_reader();
 
         const auto genSamples = [&buffer, &writer] {
-            for (std::size_t i = 0; i < buffer.size() - 10; i++) { // write-only worker (source) mock-up
+            for (std::size_t i = 0UZ; i < buffer.size() - 10UZ; i++) { // write-only worker (source) mock-up
                 auto lambda = [](auto vectors) {
                     static int offset = 0;
                     for (auto &vector : vectors) {

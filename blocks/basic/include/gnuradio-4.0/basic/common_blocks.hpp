@@ -5,6 +5,7 @@
 #include <cstdlib> // std::size_t
 #include <list>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -78,7 +79,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
 
     template<gr::ConsumableSpan TInput>
     gr::work::Status
-    processBulk(const std::vector<TInput> &inSpans, gr::PublishableSpan auto &outSpan) {
+    processBulk(const std::span<TInput> &inSpans, gr::PublishableSpan auto &outSpan) {
         std::size_t minSizeIn = std::ranges::min_element(inSpans, [](const auto &lhs, const auto &rhs) { return lhs.size() < rhs.size(); })->size();
         std::size_t available = std::min(outSpan.size(), minSizeIn);
 
@@ -87,7 +88,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
         }
 
         for (std::size_t i = 0; i < available; i++) {
-            outSpan[i] = std::accumulate(inSpans.cbegin(), inSpans.cend(), 0, [i](T sum, auto span) { return sum + span[i]; });
+            outSpan[i] = std::accumulate(inSpans.begin(), inSpans.end(), 0, [i](T sum, auto span) { return sum + span[i]; });
         }
         outSpan.publish(available);
         for (auto &inSpan : inSpans) {
@@ -100,6 +101,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (MultiAdder<T>), inputs, out, n_inputs);
+static_assert(gr::HasProcessBulkFunction<MultiAdder<float>>);
 
 auto registerMultiply = gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry());
 auto registerCounter  = gr::registerBlock<builtin_counter, double, float>(gr::globalBlockRegistry());
