@@ -9574,7 +9574,9 @@ is_const_member_function(T) noexcept {
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
+#include <any>
 #include <complex>
+#include <set>
 #include <span>
 #include <variant>
 
@@ -11456,7 +11458,9 @@ class CircularBuffer
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _parent->_internalSpan.size(); };
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
     [[nodiscard]] constexpr bool empty() const noexcept { return _parent->_internalSpan.empty(); }
+    [[nodiscard]] constexpr iterator cbegin() const noexcept { return _parent->_internalSpan.cbegin(); }
     [[nodiscard]] constexpr iterator begin() const noexcept { return _parent->_internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator cend() const noexcept { return _parent->_internalSpan.cend(); }
     [[nodiscard]] constexpr iterator end() const noexcept { return _parent->_internalSpan.end(); }
     [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _parent->_internalSpan.rbegin(); }
     [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _parent->_internalSpan.rend(); }
@@ -11704,7 +11708,9 @@ class CircularBuffer
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
     [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
     [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
+    [[nodiscard]] constexpr iterator cbegin() const noexcept { return _internalSpan.cbegin(); }
     [[nodiscard]] constexpr iterator begin() const noexcept { return _internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator cend() const noexcept { return _internalSpan.cend(); }
     [[nodiscard]] constexpr iterator end() const noexcept { return _internalSpan.end(); }
     [[nodiscard]] constexpr const T& front() const noexcept { return _internalSpan.front(); }
     [[nodiscard]] constexpr const T& back() const noexcept { return _internalSpan.back(); }
@@ -14733,12 +14739,6 @@ namespace gr {
 
 using gr::meta::fixed_string;
 
-#ifndef PMT_SUPPORTED_TYPE // // #### default supported types -- TODO: to be replaced by pmt::pmtv declaration
-#define PMT_SUPPORTED_TYPE
-// Only DataSet<double> and DataSet<float> are added => consider to support more Dataset<T>
-using supported_type = std::variant<uint8_t, uint32_t, int8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, DataSet<float>, DataSet<double>, pmtv::map_t /*, ...*/>;
-#endif
-
 enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
 
 enum class ConnectionResult { SUCCESS, FAILED };
@@ -14774,9 +14774,9 @@ static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
 
 template<class T>
-concept PortLike = requires(T t, const std::size_t n_items, const supported_type &newDefault) { // dynamic definitions
+concept PortLike = requires(T t, const std::size_t n_items, const std::any &newDefault) { // dynamic definitions
     typename T::value_type;
-    { t.defaultValue() } -> std::same_as<supported_type>;
+    { t.defaultValue() } -> std::same_as<std::any>;
     { t.setDefaultValue(newDefault) } -> std::same_as<bool>;
     { t.name } -> std::convertible_to<std::string_view>;
     { t.priority } -> std::convertible_to<std::int32_t>;
@@ -14879,6 +14879,99 @@ static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
 
+struct PortMetaInfo {
+    using description = Doc<R"*(@brief Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
+
+**Some example usages:**
+  * prevents to accidentally connect ports with incompatible sampling rates, quantity- and unit-types.
+  * used to condition graphs/charts (notably the min/max range),
+  * detect saturation/LNA non-linearities,
+  * detect computation errors
+  * ...
+
+Follows the ISO 80000-1:2022 Quantities and Units conventions:
+  * https://www.iso.org/standard/76921.html
+  * https://en.wikipedia.org/wiki/ISO/IEC_80000
+  * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
+)*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
+
+    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
+    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
+    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
+    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
+    Annotated<float, "signal min,", Doc<"minimum expected signal value">>                                            signal_min = std::numeric_limits<float>::lowest();
+    Annotated<float, "signal max,", Doc<"maximum expected signal value">>                                            signal_max = std::numeric_limits<float>::max();
+
+    // controls automatic (if set) or manual update of above parameters
+    std::set<std::string, std::less<>> auto_update{ "sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max" };
+
+    PortMetaInfo() noexcept(true) : PortMetaInfo({}) {}
+
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{ initMetaInfo.begin(), initMetaInfo.end() }) {}
+
+    explicit PortMetaInfo(const property_map &metaInfo) noexcept(true) { update<true>(metaInfo); }
+
+    void
+    reset() {
+        auto_update = { "sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max" };
+    }
+
+    template<bool isNoexcept = false>
+    void
+    update(const property_map &metaInfo) noexcept(isNoexcept) {
+        if (metaInfo.empty()) {
+            return;
+        }
+
+        auto updateValue = [&metaInfo](const std::string &key, auto &member) {
+            if (!metaInfo.contains(key)) {
+                return;
+            }
+            const auto &value = metaInfo.at(key);
+            using T           = std::decay_t<decltype(member.value)>;
+            if (std::holds_alternative<T>(value)) {
+                member = std::get<T>(value);
+            } else {
+                throw gr::exception("invalid-argument: incorrect type for " + key);
+            }
+        };
+
+        for (const auto &key : auto_update) {
+            if (key == "sample_rate") {
+                updateValue(key, sample_rate);
+            } else if (key == "signal_name") {
+                updateValue(key, signal_name);
+            } else if (key == "signal_quantity") {
+                updateValue(key, signal_quantity);
+            } else if (key == "signal_unit") {
+                updateValue(key, signal_unit);
+            } else if (key == "signal_min") {
+                updateValue(key, signal_min);
+            } else if (key == "signal_max") {
+                updateValue(key, signal_max);
+            }
+        }
+    }
+
+    [[nodiscard]] property_map
+    get() const noexcept {
+        property_map metaInfo;
+        metaInfo["sample_rate"]     = sample_rate;
+        metaInfo["signal_name"]     = signal_name;
+        metaInfo["signal_quantity"] = signal_quantity;
+        metaInfo["signal_unit"]     = signal_unit;
+        metaInfo["signal_min"]      = signal_min;
+        metaInfo["signal_max"]      = signal_max;
+
+        return metaInfo;
+    }
+};
+
+}
+ENABLE_REFLECTION(gr::PortMetaInfo, sample_rate, signal_name, signal_quantity,signal_unit, signal_min, signal_max)
+
+namespace gr {
+
 /**
  * @brief Annotation for making a port asynchronous in a signal flow-graph block.
  *
@@ -14905,7 +14998,7 @@ struct Async {};
  *         ───────────────────┐                                       ┌─────────────────┤  <node/block definition>
  *             output-port    │                                       │    input-port   │  ...
  *          stream-buffer<T>  │>───────┬─────────────────┬───────────>│                 │
- *          tag-buffer<Tag> │      tag#0             tag#1          │                 │
+ *          tag-buffer<Tag>   │      tag#0             tag#1          │                 │
  *                            │                                       │                 │
  *         ───────────────────┘                                       └─────────────────┤
  *
@@ -14961,6 +15054,9 @@ struct Port {
     //
     std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> min_samples = Required::kMinSamples;
     std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> max_samples = Required::kMaxSamples;
+
+    // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
+    PortMetaInfo metaInfo{};
 
 private:
     bool      _connected    = false;
@@ -15087,15 +15183,15 @@ public:
         return portName;
     }
 
-    [[nodiscard]] supported_type
+    [[nodiscard]] std::any
     defaultValue() const noexcept {
         return default_value;
     }
 
-    bool
-    setDefaultValue(const supported_type &newDefault) noexcept {
-        if (std::holds_alternative<T>(newDefault)) {
-            default_value = std::get<T>(newDefault);
+    [[nodiscard]] bool
+    setDefaultValue(const std::any &newDefault) {
+        if (newDefault.type() == typeid(T)) {
+            default_value = std::any_cast<T>(newDefault);
             return true;
         }
         return false;
@@ -15419,12 +15515,12 @@ private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
         virtual ~model() = default;
 
-        [[nodiscard]] virtual supported_type
+        [[nodiscard]] virtual std::any
         defaultValue() const noexcept
                 = 0;
 
         [[nodiscard]] virtual bool
-        setDefaultValue(const supported_type &val) noexcept
+        setDefaultValue(const std::any &val) noexcept
                 = 0;
 
         [[nodiscard]] virtual PortType
@@ -15518,13 +15614,13 @@ private:
 
         ~wrapper() override = default;
 
-        [[nodiscard]] supported_type
+        [[nodiscard]] std::any
         defaultValue() const noexcept override {
             return _value.defaultValue();
         }
 
         [[nodiscard]] bool
-        setDefaultValue(const supported_type &val) noexcept override {
+        setDefaultValue(const std::any &val) noexcept override {
             return _value.setDefaultValue(val);
         }
 
@@ -15611,13 +15707,13 @@ public:
     explicit constexpr DynamicPort(T &&arg, owned_value_tag) noexcept
         : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
 
-    [[nodiscard]] supported_type
+    [[nodiscard]] std::any
     defaultValue() const noexcept {
         return _accessor->defaultValue();
     }
 
     [[nodiscard]] bool
-    setDefaultValue(const supported_type &val) noexcept {
+    setDefaultValue(const std::any &val) noexcept {
         return _accessor->setDefaultValue(val);
     }
 
@@ -15713,6 +15809,7 @@ samples_to_eos_tag(const PortLike auto &port, Tag::signed_index_type offset = 0)
 }
 
 } // namespace gr
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)
 
 #endif // include guard
 
@@ -16213,15 +16310,15 @@ port_to_processBulk_argument_helper() {
                   }) {
         if constexpr (Port::value_type::kIsInput) {
             if constexpr (isVectorOfSpansReturned) {
-                return static_cast<std::vector<std::span<const typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<std::span<const typename Port::value_type::value_type>> *>(nullptr);
             } else {
-                return static_cast<std::vector<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
             if constexpr (isVectorOfSpansReturned) {
-                return static_cast<std::vector<std::span<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<std::span<typename Port::value_type::value_type>> *>(nullptr);
             } else {
-                return static_cast<std::vector<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
             }
         }
 
@@ -20178,7 +20275,7 @@ protected:
             std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
             bool hasAsync = false;                                              // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
-        auto        adjustForInputPort  = [this, &result]<PortLike Port>(Port &port) {
+        auto        adjustForInputPort  = [&result]<PortLike Port>(Port &port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -20211,7 +20308,7 @@ protected:
             std::size_t nextEosTag = std::numeric_limits<std::size_t>::max();
             bool asyncEoS = false;
         } result;
-        auto        adjustForInputPort = [this, &result]<PortLike Port>(Port &port) {
+        auto        adjustForInputPort = [&result]<PortLike Port>(Port &port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
@@ -20317,13 +20414,32 @@ protected:
     }
 
     template<typename TIn, typename TOut>
-    work::Status
-    invokeProcessBulk(TIn &inputSpans, TOut &outputSpans) {
-        // cannot use std::apply because it requires tuple_cat(inputSpans, writersTuple). The latter doesn't work because writersTuple isn't copyable.
+    gr::work::Status invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
+        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) {
+            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
+        }, inputReaderTuple);
+
+        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args)  {
+            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
+        }, outputReaderTuple);
+
+        auto refToSpan = []<typename T, typename U>(T&& original, U&& temporary) -> decltype(auto) {
+            if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
+                return std::forward<U>(temporary);
+            } else {
+                return std::forward<T>(original);
+            }
+        };
+
         return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
-            return self().processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(outputSpans)...);
-        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<TIn>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<TOut>>>());
+            return self().processBulk(
+                    refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
+                    refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...
+            );
+        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(),
+               std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
     }
+
 
     work::Status
     invokeProcessOneSimd(auto &inputSpans, auto &outputSpans, auto width, std::size_t nSamplesToProcess) {

@@ -251,7 +251,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
     std::array<gr::PortOut<T>, 6> outputs{};
 
     gr::work::Status
-    processBulk(const std::vector<std::span<const T>> &, std::vector<std::span<T>> &)
+    processBulk(const std::span<std::span<const T>> &, std::span<std::span<T>> &)
         requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN)
     {
         return gr::work::Status::OK;
@@ -266,7 +266,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
     template<gr::ConsumableSpan TInput>
     gr::work::Status
-    processBulk(const std::vector<TInput> &, std::vector<std::span<T>> &)
+    processBulk(const std::span<TInput> &, std::span<std::span<T>> &)
         requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_SPAN)
     {
         return gr::work::Status::OK;
@@ -274,7 +274,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
     template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
     gr::work::Status
-    processBulk(const std::vector<TInput> &, std::vector<TOutput> &)
+    processBulk(const std::span<TInput> &, std::span<TOutput> &)
         requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE)
     {
         return gr::work::Status::OK;
@@ -290,7 +290,7 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
     template<gr::PublishableSpan TOutput>
     gr::work::Status
-    processBulk(const std::vector<std::span<const T>> &, std::vector<TOutput> &)
+    processBulk(const std::span<std::span<const T>> &, std::span<TOutput> &)
         requires(processVariant == ProcessBulkVectorVariant::SPAN_PUBLISHABLE)
     {
         return gr::work::Status::OK;
@@ -300,11 +300,11 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVectorVariant processVariant), (BlockSignaturesProcessBulkVector<T, processVariant>), inputs, outputs);
 
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN2>>);      // TODO: fix the signature is required to work
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN2>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_SPAN>>); // combinations are not supported yet
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2>>); // TODO: fix the signature is required to work
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_PUBLISHABLE>>);        // combinations are not supported yet
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_PUBLISHABLE>>); // combinations are not supported yet
 
 struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
     std::tuple<int> tuple; // this type is not supported and should cause the checkBlockContracts<T>() to throw
@@ -443,7 +443,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
 
     template<typename TInSpan, typename TOutSpan>
     gr::work::Status
-    processBulk(const std::vector<TInSpan> &ins, const std::vector<TOutSpan> &outs) {
+    processBulk(const std::span<TInSpan> &ins, const std::span<TOutSpan> &outs) {
         for (std::size_t channelIndex = 0; channelIndex < ins.size(); ++channelIndex) {
             gr::ConsumableSpan auto  inputSpan  = ins[channelIndex];
             gr::PublishableSpan auto outputSpan = outs[channelIndex];
@@ -758,7 +758,7 @@ const boost::ut::suite _stride_tests = [] {
         expect(sched.runAndWait().has_value());
 
         std::vector<std::vector<double>> expected_values{ { 0., 0., 0., 0., 0. }, { 1., 1., 1., 1., 1. }, { 2., 2., 2., 2., 2. }, { 3., 3., 3., 3., 3. } };
-        for (std::size_t i = 0; i < sinks.size(); i++) {
+        for (std::size_t i = 0UZ; i < sinks.size(); i++) {
             expect(sinks[i]->n_samples_produced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
             expect(std::ranges::equal(sinks[i]->samples, expected_values[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
         }
@@ -786,6 +786,62 @@ const boost::ut::suite _drawableAnnotations = [] {
         expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
         expect(eq(std::get<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+    };
+};
+
+const boost::ut::suite _portMetaInfoTests = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+    using namespace gr;
+
+    "constructor test"_test = [] {
+        // Test the initializer list constructor
+        PortMetaInfo portMetaInfo({ { "sample_rate", 48000.f }, //
+                                    { "signal_name", "TestSignal" },
+                                    { "signal_quantity", "voltage" },
+                                    { "signal_unit", "V" },
+                                    { "signal_min", -1.f },
+                                    { "signal_max", 1.f } });
+
+        expect(eq(48000.f, portMetaInfo.sample_rate.value));
+        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
+        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
+        expect(eq("V"s, portMetaInfo.signal_unit.value));
+        expect(eq(-1.f, portMetaInfo.signal_min.value));
+        expect(eq(+1.f, portMetaInfo.signal_max.value));
+    };
+
+    "reset test"_test = [] {
+        PortMetaInfo portMetaInfo;
+        portMetaInfo.auto_update.clear();
+        expect(portMetaInfo.auto_update.empty());
+
+        portMetaInfo.reset();
+
+        expect(portMetaInfo.auto_update.contains("sample_rate"));
+        expect(portMetaInfo.auto_update.contains("signal_name"));
+        expect(portMetaInfo.auto_update.contains("signal_quantity"));
+        expect(portMetaInfo.auto_update.contains("signal_unit"));
+        expect(portMetaInfo.auto_update.contains("signal_min"));
+        expect(portMetaInfo.auto_update.contains("signal_max"));
+        expect(eq(portMetaInfo.auto_update.size(), 6UZ));
+    };
+
+    "update test"_test = [] {
+        PortMetaInfo portMetaInfo;
+        property_map updateProps{ { "sample_rate", 96000.f }, { "signal_name", "UpdatedSignal" } };
+        portMetaInfo.update(updateProps);
+
+        expect(eq(96000.f, portMetaInfo.sample_rate));
+        expect(eq("UpdatedSignal"s, portMetaInfo.signal_name));
+    };
+
+    "get test"_test = [] {
+        PortMetaInfo portMetaInfo({ { "sample_rate", 48000.f }, { "signal_name", "TestSignal" } });
+        const auto   props = portMetaInfo.get();
+
+        expect(eq(48000.f, std::get<float>(props.at("sample_rate"))));
+        expect(eq("TestSignal"s, std::get<std::string>(props.at("signal_name"))));
     };
 };
 

@@ -163,7 +163,7 @@ public:
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
     processOne(const V &a) const noexcept {
-        return a + addend;
+        return a + static_cast<T>(addend);
     }
 };
 

@@ -377,15 +377,15 @@ port_to_processBulk_argument_helper() {
                   }) {
         if constexpr (Port::value_type::kIsInput) {
             if constexpr (isVectorOfSpansReturned) {
-                return static_cast<std::vector<std::span<const typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<std::span<const typename Port::value_type::value_type>> *>(nullptr);
             } else {
-                return static_cast<std::vector<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
             if constexpr (isVectorOfSpansReturned) {
-                return static_cast<std::vector<std::span<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<std::span<typename Port::value_type::value_type>> *>(nullptr);
             } else {
-                return static_cast<std::vector<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
             }
         }
 
