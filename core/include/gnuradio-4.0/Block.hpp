@@ -1418,8 +1418,9 @@ protected:
 
     void
     notifyListeners(std::string_view endpoint, property_map message) noexcept {
-        if (!propertySubscriptions[std::string(endpoint)].empty()) {
-            for (const auto &clientID : propertySubscriptions[std::string(endpoint)]) {
+        const auto it = propertySubscriptions.find(std::string(endpoint));
+        if (it != propertySubscriptions.end()) {
+            for (const auto &clientID : it->second) {
                 emitMessage(endpoint, message, clientID);
             }
         }
