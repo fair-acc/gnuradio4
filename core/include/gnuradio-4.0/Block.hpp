@@ -1063,6 +1063,16 @@ protected:
         } else if (message.cmd == Get) {
             message.data = { { "state", std::string(magic_enum::enum_name(this->state())) } };
             return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
+                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            }
+            return std::nullopt;
         }
 
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));

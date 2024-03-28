@@ -137,6 +137,7 @@ public:
     std::expected<void, std::string>
     runAndWait() {
         [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_base.runAndWait");
+        base_t::processScheduledMessages(); // make sure initial subscriptions are processed
         if (this->state() == lifecycle::State::IDLE) {
             if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
@@ -209,6 +210,7 @@ protected:
     void
     init() {
         [[maybe_unused]] const auto pe     = _profiler_handler.startCompleteEvent("scheduler_base.init");
+        base_t::processScheduledMessages(); // make sure initial subscriptions are processed
         const auto                  result = _graph.performConnections();
         if (!result) {
             this->emitErrorMessage("init()", gr::Error("Failed to connect blocks in graph"));

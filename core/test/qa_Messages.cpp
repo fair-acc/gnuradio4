@@ -560,6 +560,55 @@ const boost::ut::suite MessagesTests = [] {
 
         fmt::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink.n_samples_produced);
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::multiThreaded>>{};
+
+    "Subscribe to scheduler lifecycle messages"_test = []<typename SchedulerPolicy> {
+        using namespace gr::testing;
+
+        gr::Graph flow;
+
+        auto &source  = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TestSource" }, { "n_samples_max", gr::Size_t(100) } });
+        auto &process = flow.emplaceBlock<TestBlock<float>>({ { "name", "UnitTestBlock" } });
+        auto &sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TestSink" }, { "log_samples", false } });
+
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+
+        gr::MsgPortIn  fromScheduler;
+        gr::MsgPortOut toScheduler;
+        auto           scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+        sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
+
+        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
+
+        std::vector<std::string> receivedStates;
+
+        bool seenStopped = false;
+        auto lastSeen    = std::chrono::steady_clock::now();
+        while (!seenStopped && std::chrono::steady_clock::now() - lastSeen < 1s) {
+            if (fromScheduler.streamReader().available() == 0) {
+                std::this_thread::sleep_for(10ms);
+                continue;
+            }
+            const Message msg = returnReplyMsg(fromScheduler);
+            expect(msg.cmd == Command::Notify);
+            expect(msg.endpoint == block::property::kLifeCycleState);
+            expect(msg.data.has_value());
+            expect(msg.data.value().contains("state"));
+            const auto state = std::get<std::string>(msg.data.value().at("state"));
+            receivedStates.push_back(state);
+            lastSeen = std::chrono::steady_clock::now();
+            if (state == magic_enum::enum_name(lifecycle::State::STOPPED)) {
+                seenStopped = true;
+            }
+        }
+
+        auto name = [](lifecycle::State s) { return std::string(magic_enum::enum_name(s)); };
+        expect(eq(receivedStates, std::vector{ name(lifecycle::State::INITIALISED), name(lifecycle::State::RUNNING), name(lifecycle::State::REQUESTED_STOP), name(lifecycle::State::STOPPED) }));
+
+        schedulerThread.join();
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::multiThreaded>>{};
 };
 
 inline Error
