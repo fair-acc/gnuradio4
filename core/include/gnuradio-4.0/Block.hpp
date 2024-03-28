@@ -1012,9 +1012,7 @@ protected:
             }
             return std::nullopt;
         } else if (message.cmd == Unsubscribe) {
-            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
-                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            }
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
 
@@ -1069,9 +1067,7 @@ protected:
             }
             return std::nullopt;
         } else if (message.cmd == Unsubscribe) {
-            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
-                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            }
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
 
@@ -1100,9 +1096,7 @@ protected:
             }
             return std::nullopt;
         } else if (message.cmd == Unsubscribe) {
-            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
-                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            }
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
 
