@@ -1559,7 +1559,7 @@ protected:
             static_assert(gr::meta::always_false<gr::traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
         }
         forwardTags();
-        if (lifecycle::isShuttingDown(this->state()) || nextEosTag <= processedIn + 1) {
+        if (lifecycle::isShuttingDown(this->state())) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
                 emitErrorMessage("isShuttingDown -> STOPPED", e.error());
             }
@@ -1586,8 +1586,7 @@ protected:
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (ret == work::Status::DONE) {
             this->setAndNotifyState(lifecycle::State::STOPPED);
-            publishTag({ { gr::tag::END_OF_STREAM, true } }, 1);
-            ret = work::Status::DONE;
+            publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
         }
         return { requested_work, processedIn, success ? ret : work::Status::ERROR };
     } // end: work_return_t workInternal() noexcept { ..}
