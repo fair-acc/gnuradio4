@@ -41,6 +41,7 @@ protected:
 
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
     MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
+    std::vector<gr::Message>         _pendingMessagesToChildren;
 
 public:
     [[nodiscard]] static constexpr auto
@@ -78,20 +79,29 @@ public:
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", gr::Error(fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName())));
+            } else {
+                _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::copy(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
             }
 
             auto buffer = _fromChildMessagePort.buffer();
             block.msgOut->setBuffer(buffer.streamBuffer, buffer.tagBuffer);
         });
+        _pendingMessagesToChildren.clear();
     }
 
     void
     processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> messages) {
         base_t::processMessages(port, messages); // filters messages and calls own property handler
+        const auto portsConnected = this->state() != lifecycle::State::IDLE;
         for (const gr::Message &msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
-                _toChildMessagePort.streamWriter().publish([&](auto &out) { out[0] = std::move(msg); }, 1UZ);
+                // if not yet connected, keep messages to children in cache and forward when connecting
+                if (portsConnected) {
+                    _toChildMessagePort.streamWriter().publish([&](auto &out) { out[0] = std::move(msg); }, 1UZ);
+                } else {
+                    _pendingMessagesToChildren.push_back(msg);
+                }
             }
         }
     }

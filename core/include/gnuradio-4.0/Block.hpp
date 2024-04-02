@@ -1131,7 +1131,6 @@ protected:
             message.data = self().settings().stagedParameters();
             return message;
         } else if (message.cmd == Subscribe) {
-            fmt::println("subscribing to staged settings: {}", message.clientRequestID);
             if (!message.clientRequestID.empty()) {
                 propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
             }
@@ -1705,7 +1704,7 @@ public:
             }
 
             if (callback == nullptr) {
-                return; // did not find matching property callback
+                continue; // did not find matching property callback
             }
 
             std::optional<Message> retMessage;
@@ -1723,7 +1722,7 @@ public:
             }
 
             if (!retMessage.has_value()) {
-                return; // function does not produce any return message
+                continue; // function does not produce any return message
             }
 
             retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)

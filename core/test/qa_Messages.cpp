@@ -2,6 +2,7 @@
 
 #include "gnuradio-4.0/Block.hpp"
 #include "gnuradio-4.0/Message.hpp"
+#include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -607,6 +608,55 @@ const boost::ut::suite MessagesTests = [] {
         auto name = [](lifecycle::State s) { return std::string(magic_enum::enum_name(s)); };
         expect(eq(receivedStates, std::vector{ name(lifecycle::State::INITIALISED), name(lifecycle::State::RUNNING), name(lifecycle::State::REQUESTED_STOP), name(lifecycle::State::STOPPED) }));
 
+        schedulerThread.join();
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::multiThreaded>>{};
+
+    "Settings handling via scheduler"_test = []<typename SchedulerPolicy> {
+        // ensure settings can be modified and setting change updates can be subscribed to when connected via the scheduler
+        using namespace gr::basic;
+        using namespace gr::testing;
+
+        gr::Graph flow;
+
+        auto &source    = flow.emplaceBlock<ClockSource<float>>({ { "n_samples_max", gr::Size_t(0) } });
+        auto &testBlock = flow.emplaceBlock<TestBlock<float>>({ { "factor", 42.f } });
+        auto &sink      = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "log_samples", false } });
+
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(testBlock)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(testBlock).to<"in">(sink)));
+
+        auto scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+
+        gr::MsgPortIn  fromScheduler;
+        gr::MsgPortOut toScheduler;
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+        sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
+
+        auto client = std::thread([&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
+            sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, { { "factor", 43.0f } });
+            bool seenUpdate = false;
+            const auto startTime  = std::chrono::steady_clock::now();
+            while (!seenUpdate && std::chrono::steady_clock::now() - startTime < 2s) {
+                while (fromScheduler.streamReader().available() == 0) {
+                    std::this_thread::sleep_for(10ms);
+                }
+                const Message msg = returnReplyMsg(fromScheduler);
+                if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
+                    expect(msg.data.has_value());
+                    expect(msg.data.value().contains("factor"));
+                    const auto factor = std::get<float>(msg.data.value().at("factor"));
+                    expect(eq(factor, 43.0f));
+                    seenUpdate = true;
+                }
+            }
+            expect(seenUpdate);
+            sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } });
+        });
+
+        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
+
+        client.join();
         schedulerThread.join();
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::multiThreaded>>{};
 };
