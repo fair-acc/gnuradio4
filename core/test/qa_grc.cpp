@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <ranges>
@@ -16,7 +15,7 @@
 #include <boost/ut.hpp>
 
 #if defined(__clang__) && __clang_major__ >= 16
-// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
+// for clang there seems to be some static initialisation problem which leads to segfaults in gr::registerBlock
 template<>
 auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
 #endif
