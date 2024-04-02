@@ -32,12 +32,6 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
 } // namespace gr::testing
 
-#if defined(__clang__) && __clang_major__ >= 15
-// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template<>
-auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
-#endif
-
 const boost::ut::suite TagTests = [] {
     using namespace boost::ut;
     using namespace gr;

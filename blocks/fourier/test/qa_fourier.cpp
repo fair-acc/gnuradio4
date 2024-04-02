@@ -15,12 +15,6 @@
 
 #include <gnuradio-4.0/fourier/fft.hpp>
 
-#if defined(__clang__) && __clang_major__ >= 16
-// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template<>
-auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
-#endif
-
 template<typename T>
 std::vector<T>
 generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {

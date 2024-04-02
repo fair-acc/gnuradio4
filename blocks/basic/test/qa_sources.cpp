@@ -11,12 +11,6 @@
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#if defined(__clang__) && __clang_major__ >= 15
-// clang 16 does not like ut's default reporter_junit due to some issues with stream buffers and output redirection
-template<>
-auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
-#endif
-
 template<typename T>
 constexpr void
 addTimeTagEntry(gr::basic::ClockSource<T> &clockSource, std::uint64_t timeInNanoseconds, const std::string &value) {
