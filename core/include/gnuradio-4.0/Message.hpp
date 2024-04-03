@@ -206,7 +206,7 @@ struct fmt::formatter<gr::message::Command> {
     }
 };
 
-std::ostream &
+inline std::ostream &
 operator<<(std::ostream &os, const gr::message::Command &command) {
     return os << magic_enum::enum_name(command);
 }
@@ -228,7 +228,7 @@ struct fmt::formatter<gr::Message> {
     }
 };
 
-std::ostream &
+inline std::ostream &
 operator<<(std::ostream &os, const gr::Message &msg) {
     return os << fmt::format("{}", msg);
 }
