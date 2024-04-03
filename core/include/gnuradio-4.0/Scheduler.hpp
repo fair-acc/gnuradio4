@@ -79,13 +79,13 @@ public:
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", gr::Error(fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName())));
-            } else {
-                _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::copy(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
             }
 
             auto buffer = _fromChildMessagePort.buffer();
             block.msgOut->setBuffer(buffer.streamBuffer, buffer.tagBuffer);
         });
+
+        _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::copy(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
         _pendingMessagesToChildren.clear();
     }
 
