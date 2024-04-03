@@ -85,6 +85,7 @@ public:
             block.msgOut->setBuffer(buffer.streamBuffer, buffer.tagBuffer);
         });
 
+        // Forward any messages to children that were received before the scheduler was initialised
         _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::copy(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
         _pendingMessagesToChildren.clear();
     }
@@ -96,10 +97,10 @@ public:
         for (const gr::Message &msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
-                // if not yet connected, keep messages to children in cache and forward when connecting
                 if (portsConnected) {
                     _toChildMessagePort.streamWriter().publish([&](auto &out) { out[0] = std::move(msg); }, 1UZ);
                 } else {
+                    // if not yet connected, keep messages to children in cache and forward when connecting
                     _pendingMessagesToChildren.push_back(msg);
                 }
             }
