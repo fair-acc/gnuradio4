@@ -41,6 +41,8 @@ protected:
 
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
     MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
+    std::vector<gr::Message>         _pendingMessagesToChildren;
+    bool                             _messagePortsConnected = false;
 
 public:
     [[nodiscard]] static constexpr auto
@@ -83,6 +85,11 @@ public:
             auto buffer = _fromChildMessagePort.buffer();
             block.msgOut->setBuffer(buffer.streamBuffer, buffer.tagBuffer);
         });
+
+        // Forward any messages to children that were received before the scheduler was initialised
+        _messagePortsConnected = true;
+        _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::move(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
+        _pendingMessagesToChildren.clear();
     }
 
     void
@@ -91,7 +98,12 @@ public:
         for (const gr::Message &msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
-                _toChildMessagePort.streamWriter().publish([&](auto &out) { out[0] = std::move(msg); }, 1UZ);
+                if (_messagePortsConnected) {
+                    _toChildMessagePort.streamWriter().publish([&](auto &out) { out[0] = std::move(msg); }, 1UZ);
+                } else {
+                    // if not yet connected, keep messages to children in cache and forward when connecting
+                    _pendingMessagesToChildren.push_back(msg);
+                }
             }
         }
     }
@@ -137,6 +149,7 @@ public:
     std::expected<void, std::string>
     runAndWait() {
         [[maybe_unused]] const auto pe = this->_profiler_handler.startCompleteEvent("scheduler_base.runAndWait");
+        base_t::processScheduledMessages(); // make sure initial subscriptions are processed
         if (this->state() == lifecycle::State::IDLE) {
             if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
@@ -209,6 +222,7 @@ protected:
     void
     init() {
         [[maybe_unused]] const auto pe     = _profiler_handler.startCompleteEvent("scheduler_base.init");
+        base_t::processScheduledMessages(); // make sure initial subscriptions are processed
         const auto                  result = _graph.performConnections();
         if (!result) {
             this->emitErrorMessage("init()", gr::Error("Failed to connect blocks in graph"));
