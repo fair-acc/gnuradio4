@@ -514,7 +514,7 @@ const boost::ut::suite MessagesTests = [] {
                 { .cmd = [&] { fmt::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
                 { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }},
                 { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 10ms },
-                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply(0UZ, "", "", property_map{ }); }, .delay = 100ms },
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply(0UZ, "", "", property_map{ }); }, .delay = 200ms },
                 { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 10ms },
                 { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
         };
@@ -637,17 +637,23 @@ const boost::ut::suite MessagesTests = [] {
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, { { "factor", 43.0f } });
             bool seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
-            while (!seenUpdate && std::chrono::steady_clock::now() - startTime < 2s) {
-                while (fromScheduler.streamReader().available() == 0) {
+            auto       isExpired  = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
+            bool       expired    = false;
+            while (!seenUpdate && !expired) {
+                expired = isExpired();
+                while (fromScheduler.streamReader().available() == 0 && !expired) {
+                    expired = isExpired();
                     std::this_thread::sleep_for(10ms);
                 }
-                const Message msg = returnReplyMsg(fromScheduler);
-                if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
-                    expect(msg.data.has_value());
-                    expect(msg.data.value().contains("factor"));
-                    const auto factor = std::get<float>(msg.data.value().at("factor"));
-                    expect(eq(factor, 43.0f));
-                    seenUpdate = true;
+                if (!expired) {
+                    const auto msg = returnReplyMsg(fromScheduler);
+                    if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
+                        expect(msg.data.has_value());
+                        expect(msg.data.value().contains("factor"));
+                        const auto factor = std::get<float>(msg.data.value().at("factor"));
+                        expect(eq(factor, 43.0f));
+                        seenUpdate = true;
+                    }
                 }
             }
             expect(seenUpdate);

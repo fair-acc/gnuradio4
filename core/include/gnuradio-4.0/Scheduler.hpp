@@ -86,7 +86,7 @@ public:
         });
 
         // Forward any messages to children that were received before the scheduler was initialised
-        _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::copy(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
+        _toChildMessagePort.streamWriter().publish([&](auto &out) { std::ranges::move(_pendingMessagesToChildren, out.begin()); }, _pendingMessagesToChildren.size());
         _pendingMessagesToChildren.clear();
     }
 
