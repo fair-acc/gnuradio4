@@ -1012,9 +1012,7 @@ protected:
             }
             return std::nullopt;
         } else if (message.cmd == Unsubscribe) {
-            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
-                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            }
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
 
@@ -1063,6 +1061,14 @@ protected:
         } else if (message.cmd == Get) {
             message.data = { { "state", std::string(magic_enum::enum_name(this->state())) } };
             return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            return std::nullopt;
         }
 
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
@@ -1090,9 +1096,7 @@ protected:
             }
             return std::nullopt;
         } else if (message.cmd == Unsubscribe) {
-            if (propertySubscriptions[std::string(propertyName)].contains(message.clientRequestID)) {
-                propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            }
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
 
@@ -1126,6 +1130,14 @@ protected:
         } else if (message.cmd == Get) {
             message.data = self().settings().stagedParameters();
             return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            return std::nullopt;
         }
 
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
@@ -1405,8 +1417,9 @@ protected:
 
     void
     notifyListeners(std::string_view endpoint, property_map message) noexcept {
-        if (!propertySubscriptions[std::string(endpoint)].empty()) {
-            for (const auto &clientID : propertySubscriptions[std::string(endpoint)]) {
+        const auto it = propertySubscriptions.find(std::string(endpoint));
+        if (it != propertySubscriptions.end()) {
+            for (const auto &clientID : it->second) {
                 emitMessage(endpoint, message, clientID);
             }
         }
@@ -1691,7 +1704,7 @@ public:
             }
 
             if (callback == nullptr) {
-                return; // did not find matching property callback
+                continue; // did not find matching property callback
             }
 
             std::optional<Message> retMessage;
@@ -1709,7 +1722,7 @@ public:
             }
 
             if (!retMessage.has_value()) {
-                return; // function does not produce any return message
+                continue; // function does not produce any return message
             }
 
             retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
