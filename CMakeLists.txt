@@ -123,7 +123,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         ut
         GIT_REPOSITORY https://github.com/boost-ext/ut.git
-        GIT_TAG v2.0.0 # latest tag as of 2023-10-18
+        GIT_TAG v2.0.1 # latest tag as of 2023-12-18
 )
 
 FetchContent_Declare(
