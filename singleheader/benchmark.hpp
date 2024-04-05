@@ -36,6 +36,12 @@ export import std;
 #endif
 
 #include <version>
+#if defined(_MSC_VER)
+  #pragma push_macro("min")
+  #pragma push_macro("max")
+  #undef min
+  #undef max
+#endif
 // Before libc++ 17 had experimental support for format and it required a
 // special build flag. Currently libc++ has not implemented all C++20 chrono
 // improvements. Therefore doesn't define __cpp_lib_format, instead query the
@@ -68,7 +74,7 @@ export import std;
 #elif not defined(__cpp_static_assert)
 #error "[Boost::ext].UT requires support for static assert";
 #else
-#define BOOST_UT_VERSION 2'0'0
+#define BOOST_UT_VERSION 2'0'1
 
 #if defined(__has_builtin) and defined(__GNUC__) and (__GNUC__ < 10) and \
     not defined(__clang__)
@@ -120,7 +126,7 @@ struct _unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct {
 };
 
 BOOST_UT_EXPORT
-namespace boost::inline ext::ut::inline v2_0_0 {
+namespace boost::inline ext::ut::inline v2_0_1 {
 namespace utility {
 template <class>
 class function;
@@ -484,7 +490,7 @@ constexpr auto is_valid(...) -> bool {
 }
 
 template <class T>
-inline constexpr auto is_container_v =
+inline constexpr auto is_range_v =
     is_valid<T>([](auto t) -> decltype(t.begin(), t.end(), void()) {});
 
 template <class T>
@@ -1362,7 +1368,7 @@ class printer {
 
   template <class T,
             type_traits::requires_t<not type_traits::has_user_print<T> and
-                                    type_traits::is_container_v<T>> = 0>
+                                    type_traits::is_range_v<T>> = 0>
   auto& operator<<(T&& t) {
     *this << '{';
     auto first = true;
@@ -2623,12 +2629,12 @@ namespace operators {
   return detail::neq_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_container_v<T>> = 0>
+template <class T, type_traits::requires_t<type_traits::is_range_v<T>> = 0>
 [[nodiscard]] constexpr auto operator==(T&& lhs, T&& rhs) {
   return detail::eq_{static_cast<T&&>(lhs), static_cast<T&&>(rhs)};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_container_v<T>> = 0>
+template <class T, type_traits::requires_t<type_traits::is_range_v<T>> = 0>
 [[nodiscard]] constexpr auto operator!=(T&& lhs, T&& rhs) {
   return detail::neq_{static_cast<T&&>(lhs), static_cast<T&&>(rhs)};
 }
@@ -2721,23 +2727,24 @@ template <class Test>
 }
 
 template <class F, class T,
-          type_traits::requires_t<type_traits::is_container_v<T>> = 0>
+          type_traits::requires_t<type_traits::is_range_v<T>> = 0>
 [[nodiscard]] constexpr auto operator|(const F& f, const T& t) {
   return [f, t](const auto name) {
     for (const auto& arg : t) {
-      detail::on<F>(events::test<F, typename T::value_type>{.type = "test",
-                                                            .name = name,
-                                                            .tag = {},
-                                                            .location = {},
-                                                            .arg = arg,
-                                                            .run = f});
+      detail::on<F>(events::test<F, decltype(arg)>{
+              .type = "test",
+              .name = name,
+              .tag = {},
+              .location = {},
+              .arg = arg,
+              .run = f});
     }
   };
 }
 
 template <
     class F, template <class...> class T, class... Ts,
-    type_traits::requires_t<not type_traits::is_container_v<T<Ts...>>> = 0>
+    type_traits::requires_t<not type_traits::is_range_v<T<Ts...>>> = 0>
 [[nodiscard]] constexpr auto operator|(const F& f, const T<Ts...>& t) {
   return [f, t](const auto name) {
     apply(
@@ -3286,7 +3293,7 @@ using operators::operator not;
 using operators::operator|;
 using operators::operator/;
 using operators::operator>>;
-}  // namespace boost::inline ext::ut::inline v2_0_0
+}  // namespace boost::inline ext::ut::inline v2_0_1
 
 #if (defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)) && \
     !defined(__EMSCRIPTEN__)
@@ -3297,6 +3304,11 @@ __attribute__((constructor)) inline void cmd_line_args(int argc,
 }
 #else
 // For MSVC, largc/largv are initialized with __argc/__argv
+#endif
+
+#if defined(_MSC_VER)
+  #pragma pop_macro("min")
+  #pragma pop_macro("max")
 #endif
 
 #endif
