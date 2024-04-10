@@ -1,35 +1,76 @@
-name: CMake
+name: main CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
-  release:
-    types: [ created ]
-
-env:
-  REFERENCE_CONFIG: 'Ubuntu gcc13' # configuration used for coverage etc
 
 jobs:
+  buildAndPublishDocker:
+    name: "Update the docker container if it is modified"
+    runs-on: "ubuntu-latest"
+    outputs:
+      container: ${{ steps.docker-label.outputs.label }}
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check if dockerfile was modified
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+             docker:
+               - 'docker/Dockerfile'
+
+      - name: Set up Docker Label
+        id: docker-label
+        run: |
+          if [ ${{ steps.changes.outputs.docker && github.event_name != 'push' }} = "true" ]; then
+            echo "label=ghcr.io/fair-acc/gr4-build-container:$GITHUB_HEAD_REF" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=ghcr.io/fair-acc/gr4-build-container:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.changes.outputs.docker
+        uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: steps.changes.outputs.docker
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        if: steps.changes.outputs.docker
+        with:
+          context: "{{defaultContext}}:docker"
+          push: true
+          tags: ${{ steps.docker-label.outputs.label }}
+
   build:
-    name: "${{ matrix.configurations.name }} | ${{ matrix.cmake-build-type }}"
-    runs-on: ${{ matrix.configurations.os }}
+    name: "${{ matrix.compiler.cc }} | ${{ matrix.cmake-build-type }}"
+    needs: buildAndPublishDocker
+    runs-on: "ubuntu-latest"
+    container:
+      image: "${{ needs.buildAndPublishDocker.outputs.container }}"
     strategy:
       fail-fast: false
       matrix:
-        configurations:
-          - name: Ubuntu gcc13
-            os: ubuntu-22.04
-            compiler: gcc13
-          - name: Ubuntu Latest clang17
-            os: ubuntu-22.04
-            compiler: clang17
-          - name: Ubuntu Latest emscripten
-            os: ubuntu-22.04
-            compiler: emscripten
+        compiler:
+          - cc: gcc-14
+            cxx: g++-14
+          - cc: clang-18,
+            cxx: clang++-18
+            cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-17"
+          - cmake_wrapper: emcmake
+            cc: emcc
+            cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}"
         cmake-build-type: [ Release, Debug ]
-    env:
-      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory
 
     steps:
       - uses: actions/checkout@v4
@@ -42,92 +83,41 @@ jobs:
           cache-name: cache-fetchContent-cache
         with:
           path: ${{runner.workspace}}/build/_deps
-          key: ${{ runner.os }}-${{ matrix.configurations.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          key: ${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
 
-      - name: Install gcovr
+      - name: Configure
+        if: matrix.compiler.cmake_wrapper == null
         shell: bash
-        if: matrix.configurations.name == env.REFERENCE_CONFIG && matrix.cmake-build-type == 'Debug'
+        env:
+          CC: "${{ matrix.compiler.cc }}"
+          CXX: "${{ matrix.compiler.cxx }}"
+          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          python3 -m pip install gcovr --user --no-warn-script-location
-          gcovr --version
-
-      - name: Install gcc-13
-        if: matrix.configurations.compiler == 'gcc13'
-        run: |
-          sudo apt-get install -y gcc-13 g++-13 gcovr
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 110 --slave /usr/bin/g++ g++ /usr/bin/g++-13 --slave /usr/bin/gcov gcov /usr/bin/gcov-13
-
-      - name: Install clang-17
-        if: matrix.configurations.compiler == 'clang17'
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
-          sudo add-apt-repository 'deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main'
-          sudo apt update
-          sudo apt upgrade -y # update clang14 to fix packaging conflicts
-          sudo apt install -y clang-17 libc++-17-dev libc++abi-17-dev
-          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-17 110
-
-      - name: Install emscripten
-        if: matrix.configurations.compiler == 'emscripten'
-        shell: bash
-        run: |
-          cd
-          git clone --depth=1 https://github.com/emscripten-core/emsdk.git
-          cd emsdk
-          # Download and install emscripten.
-          ./emsdk install 3.1.44 # (latest = 3.1.47 -> 21/10/2023)
-          # Make "active" for the current user. (writes .emscripten file)
-          ./emsdk activate 3.1.44
-
-      - name: Install sonar-scanner and build-wrapper
-        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
-        uses: SonarSource/sonarcloud-github-c-cpp@v2
-
-      - name: Configure CMake Clang
-        if: matrix.configurations.compiler == 'clang17'
-        shell: bash
-        run: |
-          export CC=clang-17
-          export CXX=clang++-17
-          cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DCMAKE_LINKER=/usr/bin/clang-17          
-
-      - name: Configure CMake GCC
-        if: matrix.configurations.compiler == 'gcc13'
-        shell: bash
-        run: |          
-          cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.cmake-build-type == 'Debug'}}
+          cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.cmake-build-type == 'Debug' && matrix.compiler.cc == 'gcc-14' }} ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure CMake Emscripten
-        if: matrix.configurations.compiler == 'emscripten'
+        if: matrix.compiler.cmake_wrapper == 'emcmake'
         shell: bash
         run: |
           export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk for threading support
-          source ~/emsdk/emsdk_env.sh
-          emcmake cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}
-          npm install -g xhr2 # needed for emscripten fetch
+          $EMSDK_HOME/emsdk activate $EMSDK_VERSION
+          source $EMSDK_HOME/emsdk_env.sh
+          ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} ${{ matrix.compiler.cmake_flags }}
 
       - name: Build
-        if: matrix.configurations.compiler != 'gcc13' || matrix.cmake-build-type != 'Debug'
         shell: bash
         run: |
-          test -f ~/emsdk/emsdk_env.sh && source ~/emsdk/emsdk_env.sh
+          test -f $EMSDK_HOME/emsdk_env.sh && source $EMSDK_HOME/emsdk_env.sh
           cmake --build ../build
 
-      - name: Build with Coverage and SonarCube
-        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
-        shell: bash
-        run: build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build ../build
-
       - name: execute tests
-        if: matrix.configurations.compiler != 'gcc13' || matrix.cmake-build-type != 'Debug'
+        if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: ctest --output-on-failure
-        env:
-          NODE_PATH: /usr/local/lib/node_modules
 
       - name: execute tests with coverage
-        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
+        if: matrix.compiler.cc == 'gcc-14' && matrix.cmake-build-type == 'Debug'
         env:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
         working-directory: ${{runner.workspace}}/build
@@ -135,24 +125,22 @@ jobs:
         run: cmake --build . --target coverage
 
       - name: execute native main binary
-        if: matrix.configurations.compiler != 'emscripten'
+        if: matrix.compiler.cmake_wrapper == null
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: ./core/src/main
 
       - name: execute wasm main binary with nodejs
-        if: matrix.configurations.compiler == 'emscripten'
+        if: matrix.compiler.cmake_wrapper != null
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        run: |
-          node --experimental-wasm-threads ./core/src/main.js
+        run: node --experimental-wasm-threads ./core/src/main.js
 
       - name: Run sonar-scanner
-        if: matrix.configurations.compiler == 'gcc13' && matrix.cmake-build-type == 'Debug'
+        if: matrix.compiler.cc == 'gcc-14' && matrix.cmake-build-type == 'Debug'
         shell: bash
         env:
+          SONAR_HOST_URL: https://sonarcloud.io
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          sonar-scanner --define sonar.cfamily.build-wrapper-output="${{ env.BUILD_WRAPPER_OUT_DIR }}"
-        # Consult https://docs.sonarcloud.io/advanced-setup/ci-based-analysis/sonarscanner-cli/ for more information and options
+        run: sonar-scanner
