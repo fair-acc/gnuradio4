@@ -82,17 +82,17 @@ endif()
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
-    target_compile_options(gnuradio-options INTERFACE
-            -fwasm-exceptions
-            -pthread
+    add_compile_options(
+        -fwasm-exceptions
+        -pthread
     )
-    target_link_options(gnuradio-options INTERFACE
-            "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-            -fwasm-exceptions
-            -pthread
-            "SHELL:-s PTHREAD_POOL_SIZE=30"
-            "SHELL:-s FETCH=1"
-            "SHELL:-s ASSERTIONS=1"
+    add_link_options(
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        -fwasm-exceptions
+        -pthread
+        "SHELL:-s PTHREAD_POOL_SIZE=30"
+        "SHELL:-s FETCH=1"
+        "SHELL:-s ASSERTIONS=1"
     )
 endif ()
 
