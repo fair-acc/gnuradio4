@@ -11,13 +11,14 @@
 #include <utility>
 #include <vector>
 
+#include "BlockRegistry.hpp"
+#include "Graph.hpp"
+
+#ifndef __EMSCRIPTEN__
 #include <dlfcn.h>
 
-#include "Graph.hpp"
 #include "plugin.hpp"
-
-using plugin_create_function_t  = void (*)(gr_plugin_base **);
-using plugin_destroy_function_t = void (*)(gr_plugin_base *);
+#endif
 
 namespace gr {
 
@@ -26,6 +27,9 @@ using namespace std::string_view_literals;
 
 #ifndef __EMSCRIPTEN__
 // Plugins are not supported on WASM
+
+using plugin_create_function_t  = void (*)(gr_plugin_base **);
+using plugin_destroy_function_t = void (*)(gr_plugin_base *);
 
 class PluginHandler {
 private:
@@ -224,7 +228,7 @@ public:
 
     std::unique_ptr<gr::BlockModel>
     instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
-        return _registry->createBlock(name, type, params));
+        return _registry->createBlock(name, type, params);
     }
 
     template<typename Graph, typename... InstantiateArgs>

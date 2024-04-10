@@ -43,6 +43,7 @@ add_ut_test(qa_Tags)
 add_ut_test(qa_Messages)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
+add_ut_test(qa_grc)
 
 if (NOT EMSCRIPTEN)
     add_subdirectory(plugins)
@@ -54,7 +55,4 @@ if (NOT EMSCRIPTEN)
 
     add_app_test(app_plugins_test app_plugins_test.cpp)
     target_link_libraries(app_plugins_test PRIVATE yaml-cpp::yaml-cpp ut)
-
-    add_app_test(qa_grc qa_grc.cpp)
-    target_link_libraries(qa_grc PRIVATE yaml-cpp::yaml-cpp ut)
 endif ()
