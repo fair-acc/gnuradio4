@@ -3,6 +3,7 @@
 
 #include <complex>
 #include <cstdint>
+#include <cxxabi.h>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -11,18 +12,13 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <typeinfo>
 #include <unordered_map>
 
 #include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
 #include <vir/simd.h>
 
 #include "typelist.hpp"
-
-#ifndef __EMSCRIPTEN__
-#include <cxxabi.h>
-#include <iostream>
-#include <typeinfo>
-#endif
 
 #ifndef DISABLE_SIMD
 #define DISABLE_SIMD 0
@@ -166,7 +162,6 @@ static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("
 template<typename T>
 [[nodiscard]] std::string
 type_name() noexcept {
-#if !defined(__EMSCRIPTEN__)
     std::string type_name = typeid(T).name();
     int         status;
     char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
@@ -178,9 +173,6 @@ type_name() noexcept {
         free(demangled_name);
         return typeid(T).name();
     }
-#else
-    return typeid(T).name(); // TODO: to be replaced by refl-cpp
-#endif
 }
 
 template<fixed_string val>
