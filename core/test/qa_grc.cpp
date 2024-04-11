@@ -107,17 +107,17 @@ const boost::ut::suite GrcTests = [] {
         auto graph              = gr::load_grc(context.loader, graph_source);
         auto graph_saved_source = gr::save_grc(graph);
 
-        auto checkAndPrintMissingLines = [](const std::string& first, const std::string& second) -> bool {
-            std::istringstream ssSecond(second);
+        auto checkAndPrintMissingLines = [](const std::string &first, const std::string &second) -> bool {
+            std::istringstream              ssSecond(second);
             std::unordered_set<std::string> linesSecond;
-            std::string line;
+            std::string                     line;
             while (std::getline(ssSecond, line)) {
                 linesSecond.insert(line);
             }
 
             std::istringstream ssFirst(first);
-            bool allLinesFound = true;
-            size_t lineNumber = 0;
+            bool               allLinesFound = true;
+            size_t             lineNumber    = 0;
             while (std::getline(ssFirst, line)) {
                 ++lineNumber;
                 if (!linesSecond.contains(line)) {
@@ -134,7 +134,7 @@ const boost::ut::suite GrcTests = [] {
         expect(checkAndPrintMissingLines(graph_source, graph_saved_source));
 
         gr::scheduler::Simple scheduler(std::move(graph));
-        scheduler.runAndWait();
+        expect(scheduler.runAndWait().has_value());
     };
 
     "Save and load"_test = [] {

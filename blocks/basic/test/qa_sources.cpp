@@ -58,7 +58,7 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink2)));
 
         scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         if (verbose) {
             fmt::println("finished ClockSource sched.runAndWait() w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
         }
@@ -164,7 +164,7 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(signalGen).to<"in">(sink)));
 
         scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
 
         expect(eq(n_samples, static_cast<std::uint32_t>(sink.n_samples_produced))) << "Number of samples does not match";
     };
@@ -221,7 +221,7 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
 
         scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
 
         std::vector<double> xValues(N);
@@ -296,7 +296,7 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
 
         scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
 
         std::vector<double> xValues(N);

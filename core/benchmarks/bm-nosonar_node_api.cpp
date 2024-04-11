@@ -479,7 +479,7 @@ invoke_work(auto &sched) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    sched.runAndWait();
+    expect(sched.runAndWait().has_value());
     expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
 }
@@ -605,7 +605,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.runAndWait();
+            expect(sched.runAndWait().has_value());
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -636,7 +636,7 @@ inline const boost::ut::suite _simd_tests = [] {
         "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.runAndWait();
+            expect(sched.runAndWait().has_value());
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -701,7 +701,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
             gr::scheduler::Simple sched{ std::move(testGraph) };
-            sched.runAndWait();
+            expect(sched.runAndWait().has_value());
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
@@ -727,7 +727,7 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{ test_name }.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             test::n_samples_produced = 0LU;
             test::n_samples_consumed = 0LU;
-            sched.runAndWait();
+            expect(sched.runAndWait().has_value());
             expect(eq(test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
         };
