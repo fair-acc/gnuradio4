@@ -140,22 +140,23 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using Scheduler      = gr::scheduler::Simple<>;
         auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         gr::Graph flow1;
-        auto     &source1 = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", static_cast<gr::Size_t>(1024) }, { "mark_tag", false } });
-        auto     &fftBlock = flow1.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
+        auto &source1 = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", static_cast<gr::Size_t>(1024) }, { "mark_tag", false } });
+        auto &fftBlock = flow1.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
         expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
         auto sched1 = Scheduler(std::move(flow1), threadPool);
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
             gr::Graph flow2;
-            auto     &source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", static_cast<gr::Size_t>(1024) }, { "mark_tag", false } });
-            auto     &fft2    = flow2.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
+            auto     &source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(
+                    { { "n_samples_max", static_cast<gr::Size_t>(1024) }, { "mark_tag", false } });
+            auto &fft2 = flow2.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
             expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
             auto sched2 = Scheduler(std::move(flow2), threadPool);
-            sched2.runAndWait();
+            expect(sched2.runAndWait().has_value());
             expect(eq(source2.n_samples_produced, source2.n_samples_max));
         }
-        sched1.runAndWait();
+        expect(sched1.runAndWait().has_value());
         expect(eq(source1.n_samples_produced, source1.n_samples_max));
     };
 

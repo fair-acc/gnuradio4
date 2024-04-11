@@ -93,7 +93,7 @@ const boost::ut::suite HttpBlocktests = [] {
         // make a request
         source.trigger();
         httpBlock.processScheduledMessages();
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(std::get<std::string>(sink.value.at("raw-data")), "Hello world!"sv));
 
 #ifndef __EMSCRIPTEN__
@@ -122,7 +122,7 @@ const boost::ut::suite HttpBlocktests = [] {
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(std::get<int>(sink.value.at("status")), 404));
 
 #ifndef __EMSCRIPTEN__
@@ -151,7 +151,7 @@ const boost::ut::suite HttpBlocktests = [] {
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(std::get<std::string>(sink.value.at("raw-data")), "OK"sv));
 
 #ifndef __EMSCRIPTEN__
@@ -192,7 +192,7 @@ const boost::ut::suite HttpBlocktests = [] {
 
         auto sched    = gr::scheduler::Simple<>(std::move(graph));
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(std::get<std::string>(sink.value.at("raw-data")), "event"sv));
 
 #ifndef __EMSCRIPTEN__

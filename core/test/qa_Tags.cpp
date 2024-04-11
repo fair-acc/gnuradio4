@@ -137,7 +137,7 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkOne)));
 
         scheduler::Simple sched{ std::move(testGraph) };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
 
         // settings forwarding
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";

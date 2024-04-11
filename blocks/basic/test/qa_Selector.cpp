@@ -64,7 +64,7 @@ execute_selector_test(TestParams params) {
     expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
 
     gr::scheduler::Simple sched{ std::move(graph) };
-    sched.runAndWait();
+    expect(sched.runAndWait().has_value());
 
     if (!params.backPressure) {
         for (const auto &input : selector->inputs) {
