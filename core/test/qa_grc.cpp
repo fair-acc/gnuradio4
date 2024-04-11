@@ -49,7 +49,7 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB, bool_setting, string_setting, bool_vector, string_vector, double_vector, int16_vector);
 
 struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths = {}) : loader(registry, std::move(paths)) {}
+    explicit TestContext(std::vector<std::filesystem::path> paths) : loader(registry, std::move(paths)) {}
 
     gr::BlockRegistry registry;
     gr::PluginLoader  loader;
@@ -102,11 +102,14 @@ checkAndPrintMissingLines(const std::string &first, const std::string &second) {
     return allLinesFound;
 };
 
-auto makeContext = [] {
-    TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
-    gr::registerBlock<builtin_counter, double>(ctx.loader.registry());
-    gr::registerBlock<ArraySource, double>(ctx.loader.registry());
-    gr::registerBlock<ArraySink, double>(ctx.loader.registry());
+auto getContext = [] {
+    static auto ctx = [] {
+        auto context = std::make_shared<TestContext>(std::vector<std::filesystem::path>{ TESTS_BINARY_PATH "/plugins" });
+        gr::registerBlock<builtin_counter, double>(context->loader.registry());
+        gr::registerBlock<ArraySource, double>(context->loader.registry());
+        gr::registerBlock<ArraySink, double>(context->loader.registry());
+        return context;
+    }();
     return ctx;
 };
 
@@ -141,9 +144,9 @@ const boost::ut::suite GrcTests = [] {
     "Basic graph loading and storing"_test = [] {
         try {
             using namespace gr;
-            auto       context            = makeContext();
+            const auto context            = getContext();
             const auto graph_source       = std::string(test_grc);
-            auto       graph              = gr::load_grc(context.loader, graph_source);
+            auto       graph              = gr::load_grc(context->loader, graph_source);
             auto       graph_saved_source = gr::save_grc(graph);
             expect(checkAndPrintMissingLines(graph_source, graph_saved_source));
         } catch (const std::string &e) {
@@ -157,7 +160,7 @@ const boost::ut::suite GrcTests = [] {
         try {
             using namespace gr;
 
-            constexpr std::string_view plugins_test_grc   = R"(
+            constexpr std::string_view plugins_test_grc = R"(
 blocks:
   - name: main_source
     id: good::fixed_source
@@ -178,10 +181,11 @@ connections:
   - [multiplier, 0, counter, 0]
   - [counter, 0, sink, 0]
 )";
-            auto                       context            = makeContext();
-            const auto                 graph_source       = std::string(plugins_test_grc);
-            auto                       graph              = gr::load_grc(context.loader, graph_source);
-            auto                       graph_saved_source = gr::save_grc(graph);
+
+            const auto context            = getContext();
+            const auto graph_source       = std::string(plugins_test_grc);
+            auto       graph              = gr::load_grc(context->loader, graph_source);
+            auto       graph_saved_source = gr::save_grc(graph);
 
             expect(checkAndPrintMissingLines(graph_source, graph_saved_source));
 
@@ -201,10 +205,11 @@ connections:
         const auto graph_source = std::string(test_grc);
 
         try {
-            auto context            = makeContext();
-            auto graph_1            = gr::load_grc(context.loader, graph_source);
+            const auto context = getContext();
+
+            auto graph_1            = gr::load_grc(context->loader, graph_source);
             auto graph_saved_source = gr::save_grc(graph_1);
-            auto graph_2            = gr::load_grc(context.loader, graph_saved_source);
+            auto graph_2            = gr::load_grc(context->loader, graph_saved_source);
             expect(eq(collectBlocks(graph_1), collectBlocks(graph_2)));
             expect(eq(collectEdges(graph_1), collectEdges(graph_2)));
         } catch (const std::string &e) {
@@ -217,11 +222,11 @@ connections:
         try {
             using namespace gr;
 
-            auto      context = makeContext();
-            gr::Graph graph_1;
-            auto     &arraySink    = graph_1.emplaceBlock<ArraySink<double>>();
-            auto     &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
-            auto     &arraySource1 = graph_1.emplaceBlock<ArraySource<double>>();
+            const auto context = getContext();
+            gr::Graph  graph_1;
+            auto      &arraySink    = graph_1.emplaceBlock<ArraySink<double>>();
+            auto      &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
+            auto      &arraySource1 = graph_1.emplaceBlock<ArraySource<double>>();
 
             expect(eq(ConnectionResult::SUCCESS, graph_1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink)));
             expect(eq(ConnectionResult::SUCCESS, graph_1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink)));
@@ -231,7 +236,7 @@ connections:
             expect(graph_1.performConnections());
 
             const auto graph_1_saved = gr::save_grc(graph_1);
-            const auto graph_2       = gr::load_grc(context.loader, graph_1_saved);
+            const auto graph_2       = gr::load_grc(context->loader, graph_1_saved);
 
             expect(eq(collectBlocks(graph_1), collectBlocks(graph_2)));
             expect(eq(collectEdges(graph_1), collectEdges(graph_2)));
@@ -245,7 +250,7 @@ connections:
         try {
             using namespace gr;
 
-            auto       context = makeContext();
+            const auto context = getContext();
             gr::Graph  graph_1;
             const auto expectedString       = std::string("abc");
             const bool expectedBool         = true;
@@ -261,7 +266,7 @@ connections:
                                                                                         { "int16_vector", expectedInt16Vector } });
 
             const auto graph_1_saved = gr::save_grc(graph_1);
-            const auto graph_2       = gr::load_grc(context.loader, graph_1_saved);
+            const auto graph_2       = gr::load_grc(context->loader, graph_1_saved);
             graph_2.forEachBlock([&](const auto &node) {
                 const auto settings = node.settings().get();
                 expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
