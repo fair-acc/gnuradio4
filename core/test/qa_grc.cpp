@@ -78,33 +78,6 @@ collectEdges(const gr::Graph &graph) {
     return result;
 };
 
-} // namespace
-
-using namespace boost::ut;
-
-namespace gr::qa_grc_test {
-
-constexpr std::string_view test_grc = R"(
-blocks:
-  - name: ArraySink<double>
-    id: ArraySink
-    parameters:
-      name: ArraySink<double>
-  - name: ArraySource<double>
-    id: ArraySource
-    parameters:
-      name: ArraySource<double>
-  - name: ArraySource<double>
-    id: ArraySource
-    parameters:
-      name: ArraySource<double>
-connections:
-  - [ArraySource<double>, [0, 0], ArraySink<double>, [1, 1]]
-  - [ArraySource<double>, [0, 1], ArraySink<double>, [1, 0]]
-  - [ArraySource<double>, [1, 0], ArraySink<double>, [0, 0]]
-  - [ArraySource<double>, [1, 1], ArraySink<double>, [0, 1]]
-)";
-
 bool
 checkAndPrintMissingLines(const std::string &first, const std::string &second) {
     std::istringstream              ssSecond(second);
@@ -133,6 +106,33 @@ checkAndPrintMissingLines(const std::string &first, const std::string &second) {
 
     return allLinesFound;
 };
+
+} // namespace
+
+using namespace boost::ut;
+
+namespace gr::qa_grc_test {
+
+constexpr std::string_view test_grc = R"(
+blocks:
+  - name: ArraySink<double>
+    id: ArraySink
+    parameters:
+      name: ArraySink<double>
+  - name: ArraySource<double>
+    id: ArraySource
+    parameters:
+      name: ArraySource<double>
+  - name: ArraySource<double>
+    id: ArraySource
+    parameters:
+      name: ArraySource<double>
+connections:
+  - [ArraySource<double>, [0, 0], ArraySink<double>, [1, 1]]
+  - [ArraySource<double>, [0, 1], ArraySink<double>, [1, 0]]
+  - [ArraySource<double>, [1, 0], ArraySink<double>, [0, 0]]
+  - [ArraySource<double>, [1, 1], ArraySink<double>, [0, 1]]
+)";
 
 const boost::ut::suite GrcTests = [] {
     static TestContext context = [] {
