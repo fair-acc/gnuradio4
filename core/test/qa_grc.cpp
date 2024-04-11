@@ -59,7 +59,7 @@ collectBlocks(const gr::Graph &graph) {
     std::set<std::string> result;
     graph.forEachBlock([&](const auto &node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
     return result;
-};
+}
 
 auto
 collectEdges(const gr::Graph &graph) {
@@ -69,7 +69,7 @@ collectEdges(const gr::Graph &graph) {
                                   edge.destinationPortDefinition().topLevel, edge.destinationPortDefinition().subIndex));
     });
     return result;
-};
+}
 
 bool
 checkAndPrintMissingLines(const std::string &first, const std::string &second) {
@@ -98,9 +98,10 @@ checkAndPrintMissingLines(const std::string &first, const std::string &second) {
     }
 
     return allLinesFound;
-};
+}
 
-auto getContext = [] {
+auto
+getContext() {
     static auto ctx = [] {
         auto context = std::make_shared<TestContext>(std::vector<std::filesystem::path>{ TESTS_BINARY_PATH "/plugins" });
         gr::registerBlock<builtin_counter, double>(context->loader.registry());
