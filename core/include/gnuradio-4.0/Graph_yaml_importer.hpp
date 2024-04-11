@@ -137,7 +137,7 @@ load_grc(PluginLoader &loader, const std::string &yaml_source) {
                         }
 
                         if (it->second.index() == variant_type_list::index_of<std::vector<T>>()) {
-#ifdef __clang__
+#if (defined __clang__) && (!defined __EMSCRIPTEN__)
                             if constexpr (std::is_same_v<T, bool>) {
                                 // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>
                                 // see https://en.cppreference.com/w/cpp/container/vector_bool for details
