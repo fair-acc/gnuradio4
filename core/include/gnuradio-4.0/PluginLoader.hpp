@@ -169,6 +169,11 @@ public:
         }
     }
 
+    BlockRegistry &
+    registry() {
+        return *_registry;
+    }
+
     const auto &
     plugins() const {
         return _handlers;
@@ -220,6 +225,11 @@ private:
 
 public:
     PluginLoader(BlockRegistry &registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
+
+    BlockRegistry &
+    registry() {
+        return *_registry;
+    }
 
     auto
     knownBlocks() const {

@@ -14,12 +14,6 @@
 
 #include <boost/ut.hpp>
 
-#if defined(__clang__) && __clang_major__ >= 16
-// for clang there seems to be some static initialisation problem which leads to segfaults in gr::registerBlock
-template<>
-auto boost::ut::cfg<boost::ut::override> = boost::ut::runner<boost::ut::reporter<>>{};
-#endif
-
 template<typename T>
 struct ArraySource : public gr::Block<ArraySource<T>> {
     std::array<gr::PortOut<T>, 2> outA;
@@ -55,9 +49,10 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB, bool_setting, string_setting, bool_vector, string_vector, double_vector, int16_vector);
 
 struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths = {}) : loader(gr::globalBlockRegistry(), std::move(paths)) {}
+    explicit TestContext(std::vector<std::filesystem::path> paths = {}) : loader(registry, std::move(paths)) {}
 
-    gr::PluginLoader loader;
+    gr::BlockRegistry registry;
+    gr::PluginLoader  loader;
 };
 
 namespace {
@@ -107,6 +102,14 @@ checkAndPrintMissingLines(const std::string &first, const std::string &second) {
     return allLinesFound;
 };
 
+auto makeContext = [] {
+    TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
+    gr::registerBlock<builtin_counter, double>(ctx.loader.registry());
+    gr::registerBlock<ArraySource, double>(ctx.loader.registry());
+    gr::registerBlock<ArraySink, double>(ctx.loader.registry());
+    return ctx;
+};
+
 } // namespace
 
 using namespace boost::ut;
@@ -135,16 +138,10 @@ connections:
 )";
 
 const boost::ut::suite GrcTests = [] {
-    static TestContext context = [] {
-        TestContext ctx({ TESTS_BINARY_PATH "/plugins" });
-        gr::registerBlock<ArraySource, double>(gr::globalBlockRegistry());
-        gr::registerBlock<ArraySink, double>(gr::globalBlockRegistry());
-        return ctx;
-    }();
-
     "Basic graph loading and storing"_test = [] {
         try {
             using namespace gr;
+            auto       context            = makeContext();
             const auto graph_source       = std::string(test_grc);
             auto       graph              = gr::load_grc(context.loader, graph_source);
             auto       graph_saved_source = gr::save_grc(graph);
@@ -181,6 +178,7 @@ connections:
   - [multiplier, 0, counter, 0]
   - [counter, 0, sink, 0]
 )";
+            auto                       context            = makeContext();
             const auto                 graph_source       = std::string(plugins_test_grc);
             auto                       graph              = gr::load_grc(context.loader, graph_source);
             auto                       graph_saved_source = gr::save_grc(graph);
@@ -203,6 +201,7 @@ connections:
         const auto graph_source = std::string(test_grc);
 
         try {
+            auto context            = makeContext();
             auto graph_1            = gr::load_grc(context.loader, graph_source);
             auto graph_saved_source = gr::save_grc(graph_1);
             auto graph_2            = gr::load_grc(context.loader, graph_saved_source);
@@ -218,6 +217,7 @@ connections:
         try {
             using namespace gr;
 
+            auto      context = makeContext();
             gr::Graph graph_1;
             auto     &arraySink    = graph_1.emplaceBlock<ArraySink<double>>();
             auto     &arraySource0 = graph_1.emplaceBlock<ArraySource<double>>();
@@ -245,6 +245,7 @@ connections:
         try {
             using namespace gr;
 
+            auto       context = makeContext();
             gr::Graph  graph_1;
             const auto expectedString       = std::string("abc");
             const bool expectedBool         = true;
