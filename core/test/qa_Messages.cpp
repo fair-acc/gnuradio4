@@ -548,9 +548,7 @@ const boost::ut::suite MessagesTests = [] {
                 }
             }
         });
-
-        scheduler.runAndWait();
-
+        expect(scheduler.runAndWait().has_value());
         testWorker.join();
 
         fmt::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink.n_samples_produced);
@@ -629,7 +627,7 @@ const boost::ut::suite MessagesTests = [] {
 
         auto client = std::thread([&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, { { "factor", 43.0f } });
-            bool seenUpdate = false;
+            bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
             auto       isExpired  = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
             bool       expired    = false;

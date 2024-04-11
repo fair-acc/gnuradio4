@@ -11,9 +11,9 @@ const boost::ut::suite DynamicBlocktests = [] {
     using namespace boost::ut;
     using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
-        const gr::Size_t nInputs           = 5;
+        const gr::Size_t nInputs = 5;
         // const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
-        const gr::Size_t nSamples          = 5;
+        const gr::Size_t nSamples = 5;
 
         gr::Graph graph;
 
@@ -31,7 +31,7 @@ const boost::ut::suite DynamicBlocktests = [] {
 
         gr::scheduler::Simple sched(std::move(graph));
 
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
 
         expect(eq(sink.samples, std::vector<double>{ 0., 5., 10., 15., 20 })) << "sinks samples does not match to expected values";
 

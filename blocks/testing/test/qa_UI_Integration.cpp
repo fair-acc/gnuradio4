@@ -103,7 +103,7 @@ const boost::ut::suite TagTests = [] {
             std::this_thread::sleep_for(std::chrono::seconds(2)); // wait for another 2 seconds before closing down
             fmt::println("finished UI thread");
         });
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
         uiLoop.join();
     };

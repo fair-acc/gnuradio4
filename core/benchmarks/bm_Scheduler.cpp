@@ -101,7 +101,7 @@ exec_bm(auto &scheduler, const std::string &test_case) {
     using namespace benchmark;
     test::n_samples_produced = 0LU;
     test::n_samples_consumed = 0LU;
-    scheduler.runAndWait();
+    expect(scheduler.runAndWait().has_value());
     expect(eq(test::n_samples_produced, N_SAMPLES)) << fmt::format("did not produce enough output samples for {}", test_case);
     expect(ge(test::n_samples_consumed, N_SAMPLES)) << fmt::format("did not consume enough input samples for {}", test_case);
 }

@@ -312,7 +312,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
@@ -322,7 +322,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 8u);
         expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out" });
@@ -332,7 +332,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphParallel(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 14u);
         expect(boost::ut::that % t == TraceVectorType{ "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb", "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb" });
@@ -342,7 +342,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphParallel(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 14u);
         expect(boost::ut::that % t
@@ -369,7 +369,7 @@ const boost::ut::suite SchedulerTests = [] {
         // construct an example graph and get an adjacency list for it
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphScaledSum(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == TraceVectorType{ "s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out" });
@@ -379,7 +379,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphScaledSum(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == TraceVectorType{ "s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out" });
@@ -389,7 +389,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphLinear(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(that % t.size() >= 8u);
     };
@@ -402,7 +402,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(sched.jobs().size() == 2u);
         checkBlockNames(sched.jobs()[0], { "s1", "mult2" });
         checkBlockNames(sched.jobs()[1], { "mult1", "out" });
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 8u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
     };
@@ -411,7 +411,7 @@ const boost::ut::suite SchedulerTests = [] {
         using scheduler               = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphParallel(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 14u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
     };
@@ -424,7 +424,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(sched.jobs().size() == 2u);
         checkBlockNames(sched.jobs()[0], { "s1", "mult1b", "mult2b", "outb" });
         checkBlockNames(sched.jobs()[1], { "mult1a", "mult2a", "outa" });
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 14u);
     };
@@ -434,7 +434,7 @@ const boost::ut::suite SchedulerTests = [] {
         // construct an example graph and get an adjacency list for it
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{ getGraphScaledSum(trace), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 10u);
     };
@@ -447,7 +447,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(sched.jobs().size() == 2u);
         checkBlockNames(sched.jobs()[0], { "s1", "mult", "out" });
         checkBlockNames(sched.jobs()[1], { "s2", "add" });
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 10u);
     };
@@ -461,7 +461,7 @@ const boost::ut::suite SchedulerTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(lifecycleSource).to<"in">(lifecycleBlock)));
 
         auto sched = scheduler{ std::move(flow), threadPool };
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
 
         expect(eq(lifecycleSource.n_samples_produced, lifecycleSource.n_samples_max)) << "Source n_samples_produced != n_samples_max";
