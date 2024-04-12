@@ -432,21 +432,21 @@ public:
 
             const auto readData = reader.get(nProcess);
             if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
-                const auto tags         = tag_reader.get(tag_reader.available());
+                const auto tags         = tag_reader.get();
                 const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto &tag) { return tag.index < until; });
                 auto       relevantTags = std::vector<Tag>(tags.begin(), it);
                 for (auto &t : relevantTags) {
                     t.index -= static_cast<int64_t>(samples_read);
                 }
                 fnc(readData, std::span<const Tag>(relevantTags));
-                std::ignore = tag_reader.consume(relevantTags.size());
+                std::ignore = tags.consume(relevantTags.size());
             } else {
-                const auto tags = tag_reader.get(tag_reader.available());
-                std::ignore     = tag_reader.consume(tags.size());
+                const auto tags = tag_reader.get();
+                std::ignore     = tags.consume(tags.size());
                 fnc(readData);
             }
 
-            std::ignore = reader.consume(nProcess);
+            std::ignore = readData.consume(nProcess);
             samples_read += nProcess;
             return true;
         }
@@ -469,7 +469,7 @@ public:
 
             const auto readData = reader.get(nProcess);
             fnc(readData);
-            std::ignore = reader.consume(nProcess);
+            std::ignore = readData.consume(nProcess);
             return true;
         }
     };
@@ -651,9 +651,9 @@ private:
         static constexpr auto callbackTakesTags = std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>
                                                || std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T> &>;
 
-        const DataSink<T> &parent_sink;
-        bool               block           = false;
-        std::size_t        samples_written = 0;
+        const DataSink<T>              &parent_sink;
+        bool                            block           = false;
+        std::size_t                     samples_written = 0;
         std::optional<detail::Metadata> _pendingMetadata;
 
         // callback-only
@@ -663,7 +663,7 @@ private:
 
         // polling-only
         std::weak_ptr<Poller> polling_handler = {};
-        Callback callback;
+        Callback              callback;
 
         template<typename CallbackFW>
         explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW &&c, const DataSink<T> &parent) : parent_sink(parent), buffer(maxChunkSize), callback{ std::forward<CallbackFW>(c) } {}

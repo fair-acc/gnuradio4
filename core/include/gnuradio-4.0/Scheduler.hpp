@@ -124,7 +124,7 @@ public:
             return;
         }
 
-        const auto &messagesFromChildren = fromChildReader.get(fromChildReader.available());
+        const auto &messagesFromChildren = fromChildReader.get();
 
         if (this->msgOut.buffer().streamBuffer.n_readers() == 0) {
             // nobody is listening on messages -> convert errors to exceptions
