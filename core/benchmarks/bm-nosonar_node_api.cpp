@@ -203,10 +203,10 @@ public:
             return { requested_work, 0UL, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS };
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
+        const auto        input        = reader.get();
 
         writer.publish( //
-                [&reader, n_to_publish, this](std::span<T> output) {
-                    const auto input = reader.get(reader.available());
+                [&input, n_to_publish, this](std::span<T> output) {
                     // #### N.B. later high-level user-function starts here
 
                     using namespace vir::stdx;
@@ -248,7 +248,7 @@ public:
                 },
                 n_to_publish);
 
-        if (!reader.consume(n_to_publish)) {
+        if (!input.consume(n_to_publish)) {
             return { requested_work, n_to_publish, gr::work::Status::ERROR };
         }
         return { requested_work, n_to_publish, gr::work::Status::OK };
@@ -294,22 +294,22 @@ public:
             return { requested_work, 0UL, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS };
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
+        const auto        input        = reader.get();
 
         if constexpr (use_memcopy) {
             // fmt::print("n_to_publish {} - {} {}\n", n_to_publish, use_bulk_operation, use_memcopy);
             writer.publish( //
-                    [&reader, n_to_publish](std::span<T> output) { std::memcpy(output.data(), reader.get(reader.available()).data(), n_to_publish * sizeof(T)); }, n_to_publish);
+                    [&reader, n_to_publish](std::span<T> output) { std::memcpy(output.data(), reader.get().data(), n_to_publish * sizeof(T)); }, n_to_publish);
         } else {
             writer.publish( //
-                    [&reader, n_to_publish](std::span<T> output) {
-                        const auto input = reader.get();
+                    [&input, n_to_publish](std::span<T> output) {
                         for (std::size_t i = 0; i < n_to_publish; i++) {
                             output[i] = input[i];
                         }
                     },
                     n_to_publish);
         }
-        if (!reader.consume(n_to_publish)) {
+        if (!input.consume(n_to_publish)) {
             return { requested_work, 0UL, gr::work::Status::ERROR };
         }
         return { requested_work, 0UL, gr::work::Status::OK };
