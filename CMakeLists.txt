@@ -82,17 +82,17 @@ endif()
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
-    target_compile_options(gnuradio-options INTERFACE
-            -fwasm-exceptions
-            -pthread
+    add_compile_options(
+        -fwasm-exceptions
+        -pthread
     )
-    target_link_options(gnuradio-options INTERFACE
-            "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-            -fwasm-exceptions
-            -pthread
-            "SHELL:-s PTHREAD_POOL_SIZE=30"
-            "SHELL:-s FETCH=1"
-            "SHELL:-s ASSERTIONS=1"
+    add_link_options(
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        -fwasm-exceptions
+        -pthread
+        "SHELL:-s PTHREAD_POOL_SIZE=30"
+        "SHELL:-s FETCH=1"
+        "SHELL:-s ASSERTIONS=1"
     )
 endif ()
 
@@ -127,9 +127,11 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-        yaml-cpp
-        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-        GIT_TAG yaml-cpp-0.7.0
+    yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG 0.8.0
+    PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/yaml-cpp/0001-Avoid-static-reference-to-temporary.patch
+    UPDATE_DISCONNECTED 1
 )
 
 FetchContent_Declare(

@@ -7,9 +7,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#ifndef __EMSCRIPTEN__
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
-#endif
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -627,7 +625,6 @@ const boost::ut::suite TransactionTests = [] {
         expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 42.f));
     };
 
-#ifndef __EMSCRIPTEN__
     // TODO enable this when load_grc works in emscripten (not relying on plugins here)
     "Property auto-forwarding with GRC-loaded graph"_test = [&] {
         constexpr std::string_view grc = R"(
@@ -659,7 +656,6 @@ connections:
             expect(false);
         }
     };
-#endif
 };
 
 int
