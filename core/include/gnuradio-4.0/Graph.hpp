@@ -749,7 +749,7 @@ public:
             = delete;
     Graph &
     operator=(Graph &&)
-            = default;
+            = delete;
 
     /**
      * @return a list of all blocks contained in this graph
