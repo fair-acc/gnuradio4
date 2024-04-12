@@ -127,9 +127,11 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-        yaml-cpp
-        GIT_REPOSITORY https://github.com/frankosterfeld/yaml-cpp.git
-        GIT_TAG 0.8.0-patched
+    yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG 0.8.0
+    PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/yaml-cpp/0001-Avoid-static-reference-to-temporary.patch
+    UPDATE_DISCONNECTED 1
 )
 
 FetchContent_Declare(
