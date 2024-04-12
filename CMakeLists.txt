@@ -129,7 +129,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         yaml-cpp
         GIT_REPOSITORY https://github.com/frankosterfeld/yaml-cpp.git
-        GIT_TAG fix/wasm-issue
+        GIT_TAG 0.8.0-patched
 )
 
 FetchContent_Declare(
