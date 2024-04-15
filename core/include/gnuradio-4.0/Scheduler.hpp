@@ -28,7 +28,6 @@ constexpr std::chrono::milliseconds kMessagePollInterval{ 10 };
 template<typename Derived, ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase : public Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
-    using base_t = Block<Derived>;
 
 protected:
     gr::Graph                              _graph;
@@ -45,6 +44,8 @@ protected:
     bool                             _messagePortsConnected = false;
 
 public:
+    using base_t = Block<Derived>;
+
     [[nodiscard]] static constexpr auto
     executionPolicy() {
         return execution;
@@ -221,9 +222,9 @@ protected:
 
     void
     init() {
-        [[maybe_unused]] const auto pe     = _profiler_handler.startCompleteEvent("scheduler_base.init");
+        [[maybe_unused]] const auto pe = _profiler_handler.startCompleteEvent("scheduler_base.init");
         base_t::processScheduledMessages(); // make sure initial subscriptions are processed
-        const auto                  result = _graph.performConnections();
+        const auto result = _graph.performConnections();
         if (!result) {
             this->emitErrorMessage("init()", gr::Error("Failed to connect blocks in graph"));
         }
@@ -352,9 +353,10 @@ class Simple : public SchedulerBase<Simple<execution, TProfiler>, execution, TPr
     friend class lifecycle::StateMachine<Simple<execution, TProfiler>>;
     friend class SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
-    using base_t = SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
 
 public:
+    using base_t = SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
+
     explicit Simple(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND),
                     const profiling::Options &profiling_options = {})
         : base_t(std::move(graph), thread_pool, profiling_options) {}
@@ -427,10 +429,11 @@ class BreadthFirst : public SchedulerBase<BreadthFirst<execution, TProfiler>, ex
     friend class lifecycle::StateMachine<BreadthFirst<execution, TProfiler>>;
     friend class SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
-    using base_t = SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
     std::vector<BlockModel *> _blocklist;
 
 public:
+    using base_t = SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
+
     explicit BreadthFirst(gr::Graph &&graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND),
                           const profiling::Options &profiling_options = {})
         : base_t(std::move(graph), thread_pool, profiling_options) {}
