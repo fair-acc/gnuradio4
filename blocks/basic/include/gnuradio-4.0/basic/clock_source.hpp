@@ -249,13 +249,14 @@ private:
     }
 };
 
+template<typename T>
+using DefaultClockSource = ClockSource<T, true, std::chrono::system_clock, true>;
 } // namespace gr::basic
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size, sample_rate,
                                     verbose_console);
 
-namespace gr::basic {
-static_assert(gr::HasProcessBulkFunction<ClockSource<float>>);
-} // namespace gr::basic
+auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, float, double>(gr::globalBlockRegistry());
+static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<float>>);
 
 #endif // GNURADIO_CLOCK_SOURCE_HPP
