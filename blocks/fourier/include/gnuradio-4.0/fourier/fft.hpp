@@ -225,9 +225,14 @@ On the choice of window (mathematically aka. apodisation) functions
     }
 };
 
+template<typename T>
+using DefaultFFT = FFT<T, typename OutputDataSet<T>::type, gr::algorithm::FFT>;
+
 } // namespace gr::blocks::fft
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename U, template<typename, typename> typename FourierAlgoImpl), (gr::blocks::fft::FFT<T, U, FourierAlgoImpl>), //
                                     in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+
+auto registerFFT = gr::registerBlock<gr::blocks::fft::DefaultFFT, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_FFT_HPP
