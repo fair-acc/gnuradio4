@@ -17,6 +17,11 @@ jobs:
       packages: write
 
     steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+
       - name: Check if dockerfile was modified
         id: changes
         uses: dorny/paths-filter@v3
