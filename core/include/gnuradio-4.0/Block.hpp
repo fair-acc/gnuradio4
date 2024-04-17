@@ -455,7 +455,7 @@ public:
         property_map ret;
         if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
             property_map info;
-            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategorgy)));
+            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategory)));
             info.insert_or_assign("Toolkit"s, std::string(DrawableControl::kToolkit));
 
             ret.insert_or_assign("Drawable"s, info);
