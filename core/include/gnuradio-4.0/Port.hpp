@@ -247,8 +247,8 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     }
 };
 
-}
-ENABLE_REFLECTION(gr::PortMetaInfo, sample_rate, signal_name, signal_quantity,signal_unit, signal_min, signal_max)
+} // namespace gr
+ENABLE_REFLECTION(gr::PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max)
 
 namespace gr {
 
@@ -608,12 +608,12 @@ public:
     /**
      * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
      */
-    inline constexpr std::span<const Tag>
+    inline constexpr ConsumableSpan auto
     getTags(Tag::signed_index_type untilOffset = 0) noexcept
         requires(kIsInput)
     {
         const auto  readPos           = streamReader().position();
-        const auto  tags              = tagReader().get(tagReader().available()); // N.B. returns all old/available/pending tags
+        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
         std::size_t nTagsProcessed    = 0UZ;
         bool        properTagDistance = false;
 
@@ -629,7 +629,7 @@ public:
                 break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
             }
         }
-        return tags.first(nTagsProcessed);
+        return tagReader().get(nTagsProcessed);
     }
 
     inline const Tag
@@ -652,7 +652,7 @@ public:
         const auto tags  = getTags(untilOffset);
         _cachedTag.index = readPos;
         std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag &tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
-        std::ignore = tagReader().consume(tags.size());
+        std::ignore = tags.consume(tags.size());
 
         return _cachedTag;
     }
@@ -1062,8 +1062,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag
 
 inline constexpr std::optional<std::size_t>
 nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
-    const auto                    available = port.tagReader().available();
-    const gr::ConsumableSpan auto tagData   = port.tagReader().get(available);
+    const gr::ConsumableSpan auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
@@ -1071,6 +1070,7 @@ nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate aut
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position, or if the tag has a special 'index = -1'
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto &tag) { return predicate(tag, readPosition + readOffset); });
+    std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
         return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::signed_index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
@@ -1089,6 +1089,8 @@ samples_to_eos_tag(const PortLike auto &port, Tag::signed_index_type offset = 0)
 }
 
 } // namespace gr
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes),
+                                    (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples,
+                                    max_samples, metaInfo)
 
 #endif // include guard

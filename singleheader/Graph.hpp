@@ -11365,7 +11365,7 @@ class CircularBuffer
     template<typename U = T>
     class buffer_writer;
 
-    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class PublishableOutputRange {
         buffer_writer<U>* _parent = nullptr;
 
@@ -11406,6 +11406,7 @@ class CircularBuffer
             _parent->_rangesCounter++;
     #endif
         }
+       return *this;
     }
 
     ~PublishableOutputRange() {
@@ -11540,7 +11541,7 @@ class CircularBuffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        template<SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+        template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto reserve(std::size_t nSlotsToClaim) noexcept -> PublishableOutputRange<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isRangePublished = false;
@@ -11645,7 +11646,7 @@ class CircularBuffer
     template<typename U = T>
     class buffer_reader;
 
-    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class ConsumableInputRange {
         const buffer_reader<U>* _parent = nullptr;
         std::span<const T>      _internalSpan{};
@@ -11657,35 +11658,49 @@ class CircularBuffer
     using reverse_iterator = typename std::span<const T>::reverse_iterator;
     using pointer = typename std::span<const T>::reverse_iterator;
 
-    explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) {};
+
+    explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) {
+        _parent->_rangesCounter++;
+    }
+
     explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept :
-        _parent(parent), _internalSpan({ &_parent->_buffer->_data.data()[index], nRequested }) { }
+        _parent(parent), _internalSpan({ &_parent->_buffer->_data.data()[index], nRequested }) {
+        _parent->_rangesCounter++;
+    }
 
     ConsumableInputRange(const ConsumableInputRange& other)
         : _parent(other._parent),
           _internalSpan(other._internalSpan) {
+        _parent->_rangesCounter++;
     }
 
     ConsumableInputRange& operator=(const ConsumableInputRange& other) {
         if (this != &other) {
             _parent = other._parent;
             _internalSpan = other._internalSpan;
+            _parent->_rangesCounter++;
         }
         return *this;
     }
 
-    ConsumableInputRange(ConsumableInputRange&& other) noexcept
-        : _parent(std::exchange(other._parent, nullptr))
-        , _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {
-    }
-    ConsumableInputRange& operator=(ConsumableInputRange&& other) noexcept {
-        if (this != &other) {
-            std::swap(_parent, other._parent);
-            std::swap(_internalSpan, other._internalSpan);
+    ~ConsumableInputRange() {
+        _parent->_rangesCounter--;
+
+        if (_parent->_rangesCounter == 0) {
+            if (_parent->isConsumeRequested()) {
+                std::ignore = performConsume(_parent->_nSamplesToConsume);
+            } else {
+                if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
+                     assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
+                     std::abort();
+                 } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                     std::ignore = performConsume(_parent->_nSamplesFirstGet);
+                 } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone){
+                     std::ignore = performConsume(0UZ);
+                 }
+            }
         }
-        return *this;
     }
-    ~ConsumableInputRange() = default;
 
     [[nodiscard]] constexpr static SpanReleasePolicy
     spanReleasePolicy() noexcept {
@@ -11693,8 +11708,8 @@ class CircularBuffer
     }
 
     [[nodiscard]] constexpr bool
-     isConsumed() const noexcept {
-         return _parent->_isRangeConsumed;
+     isConsumeRequested() const noexcept {
+         return _parent->isConsumeRequested();
      }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
@@ -11719,25 +11734,37 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
-        if (isConsumed()) {
-            fmt::println("An error occurred: The method CircularBuffer::buffer_reader::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
-            std::abort();
+         if (isConsumeRequested()) {
+            assert(false && "An error occurred: The method CircularBuffer::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
         }
         return tryConsume<strict_check>(nSamples);
     }
 
     template <bool strict_check = true>
     [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
-        if (isConsumed()) {
+        if (isConsumeRequested()) {
             return false;
         }
-        _parent->_isRangeConsumed = true;
+        if constexpr (strict_check) {
+            if (nSamples > _parent->available()) {
+                return false;
+            }
+        }
+        _parent->_nSamplesToConsume = nSamples;
+        return true;
+    }
+
+    private:
+    template <bool strict_check = true>
+    [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
+        _parent->_nSamplesFirstGet = std::numeric_limits<std::size_t>::max();
+        _parent->_nSamplesToConsume = std::numeric_limits<std::size_t>::max();
         if constexpr (strict_check) {
             if (nSamples <= 0) {
                 return true;
             }
 
-            if (nSamples > std::min(_internalSpan.size(), _parent->available())) {
+            if (nSamples > _parent->available()) {
                 return false;
             }
         }
@@ -11761,7 +11788,12 @@ class CircularBuffer
         mutable signed_index_type    _readIndexCached;
         BufferTypeLocal              _buffer; // controls buffer life-cycle, the rest are cache optimisations
         std::size_t                  _size; // pre-condition: std::has_single_bit(_size)
-        mutable bool                 _isRangeConsumed {true}; // controls if consume() was invoked, doesn't have to be atomic because this reader is accessed (by design) always by the same thread.
+        mutable std::size_t          _nSamplesFirstGet {std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
+        mutable std::size_t          _rangesCounter {0UZ}; // reference counter for number of ConsumableSpanRanges
+
+        // Samples are now consumed in a delayed manner. When the consume() method is called, the actual consumption does not happen immediately.
+        // Instead, the real consume() operation is invoked in the destructor, when the last ConsumableInputRange is destroyed.
+        mutable std::size_t          _nSamplesToConsume {std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
 
         std::size_t
         buffer_index() const noexcept {
@@ -11781,13 +11813,17 @@ class CircularBuffer
             , _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value()))
             , _buffer(other._buffer)
             , _size(_buffer->_size)
-            , _isRangeConsumed(std::move(other._isRangeConsumed)) {
+            , _nSamplesFirstGet(std::move(other._nSamplesFirstGet))
+            , _rangesCounter(std::move(other._rangesCounter))
+            , _nSamplesToConsume(std::move(other._nSamplesToConsume)){
         }
         buffer_reader& operator=(buffer_reader tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);
-            std::swap(_isRangeConsumed, tmp._isRangeConsumed);
+            std::swap(_nSamplesFirstGet, tmp._nSamplesFirstGet);
+            std::swap(_rangesCounter, tmp._rangesCounter);
+            std::swap(_nSamplesToConsume, tmp._nSamplesToConsume);
             _size = _buffer->_size;
             return *this;
         };
@@ -11795,36 +11831,29 @@ class CircularBuffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] constexpr bool isConsumed() const noexcept {
-            return _isRangeConsumed;
+        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept {
+            return _nSamplesToConsume != std::numeric_limits<std::size_t>::max();
         }
 
-        template<SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
-        [[nodiscard]] constexpr auto get(const std::size_t nRequested) const noexcept -> ConsumableInputRange<U, policy> {
-            _isRangeConsumed = false;
-            return ConsumableInputRange<U, policy>(this, buffer_index(), nRequested);
-        }
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr bool consume(const std::size_t nSamples = 1) noexcept {
-            if (isConsumed()) {
-                fmt::println("An error occurred: The method CircularBuffer::buffer_reader::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
-                std::abort();
+        template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
+            if (isConsumeRequested()) {
+                assert(false && "An error occurred: The method CircularBuffer::buffer_reader::get() was invoked after consume() methods was explicitly invoked.");
             }
 
-            if constexpr (strict_check) {
-                if (nSamples <= 0) {
-                    _isRangeConsumed = true;
-                    return true;
-                }
-                if (nSamples > available()) {
-                    _isRangeConsumed = true;
-                    return false;
-                }
+            std::size_t nSamples { nRequested };
+            if (nSamples == std::numeric_limits<std::size_t>::max()) {
+                nSamples = available();
+            } else {
+                assert(nSamples <= available() && "Number of required samples is more than number of available samples.");
             }
-            _readIndexCached = _readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
-            _isRangeConsumed = true;
-            return true;
+
+           if (_nSamplesFirstGet == std::numeric_limits<std::size_t>::max() ) {
+                _nSamplesFirstGet = nSamples;
+            } else {
+                nSamples = std::min(nSamples, _nSamplesFirstGet);
+            }
+            return ConsumableInputRange<U, policy>(this, buffer_index(), nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
@@ -14959,8 +14988,8 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     }
 };
 
-}
-ENABLE_REFLECTION(gr::PortMetaInfo, sample_rate, signal_name, signal_quantity,signal_unit, signal_min, signal_max)
+} // namespace gr
+ENABLE_REFLECTION(gr::PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max)
 
 namespace gr {
 
@@ -15320,12 +15349,12 @@ public:
     /**
      * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
      */
-    inline constexpr std::span<const Tag>
+    inline constexpr ConsumableSpan auto
     getTags(Tag::signed_index_type untilOffset = 0) noexcept
         requires(kIsInput)
     {
         const auto  readPos           = streamReader().position();
-        const auto  tags              = tagReader().get(tagReader().available()); // N.B. returns all old/available/pending tags
+        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
         std::size_t nTagsProcessed    = 0UZ;
         bool        properTagDistance = false;
 
@@ -15341,7 +15370,7 @@ public:
                 break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
             }
         }
-        return tags.first(nTagsProcessed);
+        return tagReader().get(nTagsProcessed);
     }
 
     inline const Tag
@@ -15364,7 +15393,7 @@ public:
         const auto tags  = getTags(untilOffset);
         _cachedTag.index = readPos;
         std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag &tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
-        std::ignore = tagReader().consume(tags.size());
+        std::ignore = tags.consume(tags.size());
 
         return _cachedTag;
     }
@@ -15774,8 +15803,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag
 
 inline constexpr std::optional<std::size_t>
 nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
-    const auto                    available = port.tagReader().available();
-    const gr::ConsumableSpan auto tagData   = port.tagReader().get(available);
+    const gr::ConsumableSpan auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
@@ -15783,6 +15811,7 @@ nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate aut
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position, or if the tag has a special 'index = -1'
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto &tag) { return predicate(tag, readPosition + readOffset); });
+    std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
         return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::signed_index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
@@ -15801,7 +15830,9 @@ samples_to_eos_tag(const PortLike auto &port, Tag::signed_index_type offset = 0)
 }
 
 } // namespace gr
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes),
+                                    (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples,
+                                    max_samples, metaInfo)
 
 #endif // include guard
 
@@ -19896,7 +19927,7 @@ public:
             meta::tuple_for_each_enumerate(
                     [nSamples, &success]<typename InputRange>(auto, InputRange &inputRange) {
                         auto processOneRange = [nSamples, &success]<typename In>(In &in) {
-                            if (!in.isConsumed()) {
+                            if (!in.isConsumeRequested()) {
                                 using enum gr::SpanReleasePolicy;
                                 if constexpr (In::spanReleasePolicy() == Terminate) {
                                     fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
@@ -20274,12 +20305,13 @@ protected:
     auto
     getPortLimits(P &&ports) {
         struct {
-            std::size_t minSync = 0UL;                                          // the minimum amount of samples that the block needs for processing on the sync ports
-            std::size_t maxSync = std::numeric_limits<std::size_t>::max();      // the maximum amount of that can be consumed on all sync ports
+            std::size_t minSync      = 0UL;                                     // the minimum amount of samples that the block needs for processing on the sync ports
+            std::size_t maxSync      = std::numeric_limits<std::size_t>::max(); // the maximum amount of that can be consumed on all sync ports
             std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
-            bool hasAsync = false;                                              // true if there is at least one async input/output that has available samples/remaining capacity
+            bool        hasAsync     = false;                                   // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
-        auto        adjustForInputPort  = [&result]<PortLike Port>(Port &port) {
+
+        auto adjustForInputPort = [&result]<PortLike Port>(Port &port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -20307,20 +20339,21 @@ protected:
     auto
     getNextTagAndEosPosition() {
         struct {
-            bool hasTag = false;
-            std::size_t nextTag = std::numeric_limits<std::size_t>::max();
+            bool        hasTag     = false;
+            std::size_t nextTag    = std::numeric_limits<std::size_t>::max();
             std::size_t nextEosTag = std::numeric_limits<std::size_t>::max();
-            bool asyncEoS = false;
+            bool        asyncEoS   = false;
         } result;
-        auto        adjustForInputPort = [&result]<PortLike Port>(Port &port) {
+
+        auto adjustForInputPort = [&result]<PortLike Port>(Port &port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
                     // nextTag limits the size of the chunk except if this would violate port constraints
                     result.nextTag                        = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
                     result.nextEosTag                     = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
-                    const gr::ConsumableSpan auto tagData = port.tagReader().get(port.tagReader().available());
-                    result.hasTag =  result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
+                    const gr::ConsumableSpan auto tagData = port.tagReader().get();
+                    result.hasTag                         = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
                         result.asyncEoS = true;
@@ -20339,9 +20372,9 @@ protected:
      */
     std::size_t
     inputSamplesToSkipBeforeNextChunk(std::size_t availableSamples) {
-        if constexpr (StrideControl::kEnabled) {                    // check if stride was removed at compile time
-            const bool isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
-            std::size_t toSkip = 0;
+        if constexpr (StrideControl::kEnabled) { // check if stride was removed at compile time
+            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter > 0) {
                 toSkip = std::min(static_cast<std::size_t>(strideCounter), availableSamples);
                 strideCounter -= static_cast<gr::Size_t>(toSkip);
@@ -20352,16 +20385,16 @@ protected:
     }
 
     /***
-     * calculate how many samples to skip after processing
-     * @return inputSamples to skip before the chunk
+     * calculate how many samples to consume taking into account stride
+     * @return number of samples to consume or 0 if stride is disabled
      */
     std::size_t
-    inputSamplesToSkipAfterChunk(std::size_t remainingSamples) {
+    inputSamplesToConsumeAdjustedWithStride(std::size_t remainingSamples) {
         if constexpr (StrideControl::kEnabled) {
-            const bool isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
-            std::size_t toSkip = 0;
+            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter == 0 && remainingSamples > 0) {
-                toSkip = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
+                toSkip        = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
                 strideCounter = stride.value - static_cast<gr::Size_t>(toSkip);
             }
             return toSkip;
@@ -20375,13 +20408,14 @@ protected:
             std::size_t decimatedIn;
             std::size_t decimatedOut;
         };
+
         if constexpr (!Resampling::kEnabled) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
+            return ResamplingResult{ .decimatedIn = n, .decimatedOut = n };
         }
         if (denominator == 1UL && numerator == 1UL) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
+            return ResamplingResult{ .decimatedIn = n, .decimatedOut = n };
         }
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
@@ -20394,9 +20428,9 @@ protected:
             nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
         }
         if (nResamplingChunks * denominator < minSyncIn || nResamplingChunks * numerator < minSyncOut) {
-            return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+            return ResamplingResult{ .decimatedIn = 0UZ, .decimatedOut = 0UZ };
         } else {
-            return ResamplingResult{static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator)};
+            return ResamplingResult{ static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator) };
         }
     }
 
@@ -20418,16 +20452,21 @@ protected:
     }
 
     template<typename TIn, typename TOut>
-    gr::work::Status invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) {
-            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
-        }, inputReaderTuple);
+    gr::work::Status
+    invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
+        auto tempInputSpanStorage = std::apply(
+                []<typename... PortReader>(PortReader &...args) {
+                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
+                },
+                inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args)  {
-            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
-        }, outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply(
+                []<typename... PortReader>(PortReader &...args) {
+                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
+                },
+                outputReaderTuple);
 
-        auto refToSpan = []<typename T, typename U>(T&& original, U&& temporary) -> decltype(auto) {
+        auto refToSpan = []<typename T, typename U>(T &&original, U &&temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
                 return std::forward<U>(temporary);
             } else {
@@ -20436,14 +20475,11 @@ protected:
         };
 
         return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
-            return self().processBulk(
-                    refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
-                    refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...
-            );
+            return self().processBulk(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
+                                      refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...);
         }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(),
                std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
     }
-
 
     work::Status
     invokeProcessOneSimd(auto &inputSpans, auto &outputSpans, auto width, std::size_t nSamplesToProcess) {
@@ -20474,11 +20510,13 @@ protected:
     auto
     invokeProcessOneNonConst(auto &inputSpans, auto &outputSpans, std::size_t nSamplesToProcess) {
         using enum work::Status;
+
         struct ProcessOneResult {
             work::Status status;
-            std::size_t processedIn;
-            std::size_t processedOut;
+            std::size_t  processedIn;
+            std::size_t  processedOut;
         };
+
         std::size_t nOutSamplesBeforeRequestedStop = 0;
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
@@ -20500,9 +20538,9 @@ protected:
             }
         }
         if (nOutSamplesBeforeRequestedStop > 0) {
-            return ProcessOneResult{OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop};
+            return ProcessOneResult{ OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop };
         }
-        return ProcessOneResult{OK, nSamplesToProcess, nSamplesToProcess};
+        return ProcessOneResult{ OK, nSamplesToProcess, nSamplesToProcess };
     }
 
     void
@@ -20614,7 +20652,7 @@ protected:
                 forwardTags();
                 return { requested_work, 0UZ, DONE };
             }
-            return {requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
+            return { requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
         }
         // process stream tags
         updateInputAndOutputTags();
@@ -20622,14 +20660,14 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) &&hasTag;
 
         // call the block implementation's work function
-        const auto   inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledIn);
-        auto         outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledOut);
         work::Status ret;
         std::size_t  processedIn  = limitByFirstTag ? 1 : resampledIn;
         std::size_t  processedOut = limitByFirstTag ? 1 : resampledOut;
+        const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+        auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
         if constexpr (HasProcessBulkFunction<Derived>) {
             ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
         } else if constexpr (HasProcessOneFunction<Derived>) {
@@ -20637,7 +20675,7 @@ protected:
                 auto e = gr::Error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
                 emitErrorMessage("Block::workInternal:", e);
                 requestStop();
-                processedIn = 0;
+                processedIn  = 0;
                 processedOut = 0;
             } else {
                 using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
@@ -20649,17 +20687,17 @@ protected:
                 std::integral_constant<std::size_t, simd_size> width{};
 
                 if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived &d) {
-                    { d.processOne_simd(simd_size) };
-                }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
+                                                                                      { d.processOne_simd(simd_size) };
+                                                                                  }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
                     ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn);
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
                         ret = invokeProcessOnePure(inputSpans, outputSpans);
                     } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
                         const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                        ret = result.status;
-                        processedIn = result.processedIn;
-                        processedOut = result.processedOut;
+                        ret               = result.status;
+                        processedIn       = result.processedIn;
+                        processedOut      = result.processedOut;
                     }
                 }
             }
@@ -20673,21 +20711,16 @@ protected:
             }
             updateInputAndOutputTags(processedIn);
             applyChangedSettings();
-            ret       = work::Status::DONE;
+            ret         = work::Status::DONE;
             processedIn = 0UZ;
         }
         // publish/consume
         publishSamples(processedOut, outputSpans);
-        const auto inputSamplesToSkipAfter = resampledIn > 0 ? inputSamplesToSkipAfterChunk(maxSyncAvailableIn - inputSkipBefore) : 0UZ;
+        const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
         bool       success;
-        if (inputSamplesToSkipAfter > 0 && inputSamplesToSkipAfter <= resampledIn) {
-            updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
-            success = consumeReaders(inputSamplesToSkipAfter, inputSpans);
-        } else if (inputSamplesToSkipAfter > 0) {
-            updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
-            success                          = consumeReaders(resampledIn, inputSpans);
-            const auto inputSpansForSkipping = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSamplesToSkipAfter - resampledIn); // only way to consume is via the ConsumableSpan now
-            consumeReaders(inputSamplesToSkipAfter - resampledIn, inputSpansForSkipping);
+        if (inputSamplesToConsume > 0) {
+            updateInputAndOutputTags(inputSamplesToConsume); // apply all tags in the skipped data range
+            success = consumeReaders(inputSamplesToConsume, inputSpans);
         } else {
             success = consumeReaders(processedIn, inputSpans);
         }

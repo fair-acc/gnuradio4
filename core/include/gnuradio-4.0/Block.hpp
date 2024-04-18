@@ -801,7 +801,7 @@ public:
             meta::tuple_for_each_enumerate(
                     [nSamples, &success]<typename InputRange>(auto, InputRange &inputRange) {
                         auto processOneRange = [nSamples, &success]<typename In>(In &in) {
-                            if (!in.isConsumed()) {
+                            if (!in.isConsumeRequested()) {
                                 using enum gr::SpanReleasePolicy;
                                 if constexpr (In::spanReleasePolicy() == Terminate) {
                                     fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
@@ -1179,12 +1179,13 @@ protected:
     auto
     getPortLimits(P &&ports) {
         struct {
-            std::size_t minSync = 0UL;                                          // the minimum amount of samples that the block needs for processing on the sync ports
-            std::size_t maxSync = std::numeric_limits<std::size_t>::max();      // the maximum amount of that can be consumed on all sync ports
+            std::size_t minSync      = 0UL;                                     // the minimum amount of samples that the block needs for processing on the sync ports
+            std::size_t maxSync      = std::numeric_limits<std::size_t>::max(); // the maximum amount of that can be consumed on all sync ports
             std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
-            bool hasAsync = false;                                              // true if there is at least one async input/output that has available samples/remaining capacity
+            bool        hasAsync     = false;                                   // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
-        auto        adjustForInputPort  = [&result]<PortLike Port>(Port &port) {
+
+        auto adjustForInputPort = [&result]<PortLike Port>(Port &port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -1212,20 +1213,21 @@ protected:
     auto
     getNextTagAndEosPosition() {
         struct {
-            bool hasTag = false;
-            std::size_t nextTag = std::numeric_limits<std::size_t>::max();
+            bool        hasTag     = false;
+            std::size_t nextTag    = std::numeric_limits<std::size_t>::max();
             std::size_t nextEosTag = std::numeric_limits<std::size_t>::max();
-            bool asyncEoS = false;
+            bool        asyncEoS   = false;
         } result;
-        auto        adjustForInputPort = [&result]<PortLike Port>(Port &port) {
+
+        auto adjustForInputPort = [&result]<PortLike Port>(Port &port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
                     // nextTag limits the size of the chunk except if this would violate port constraints
                     result.nextTag                        = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
                     result.nextEosTag                     = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
-                    const gr::ConsumableSpan auto tagData = port.tagReader().get(port.tagReader().available());
-                    result.hasTag =  result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
+                    const gr::ConsumableSpan auto tagData = port.tagReader().get();
+                    result.hasTag                         = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
                         result.asyncEoS = true;
@@ -1244,9 +1246,9 @@ protected:
      */
     std::size_t
     inputSamplesToSkipBeforeNextChunk(std::size_t availableSamples) {
-        if constexpr (StrideControl::kEnabled) {                    // check if stride was removed at compile time
-            const bool isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
-            std::size_t toSkip = 0;
+        if constexpr (StrideControl::kEnabled) { // check if stride was removed at compile time
+            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter > 0) {
                 toSkip = std::min(static_cast<std::size_t>(strideCounter), availableSamples);
                 strideCounter -= static_cast<gr::Size_t>(toSkip);
@@ -1257,16 +1259,16 @@ protected:
     }
 
     /***
-     * calculate how many samples to skip after processing
-     * @return inputSamples to skip before the chunk
+     * calculate how many samples to consume taking into account stride
+     * @return number of samples to consume or 0 if stride is disabled
      */
     std::size_t
-    inputSamplesToSkipAfterChunk(std::size_t remainingSamples) {
+    inputSamplesToConsumeAdjustedWithStride(std::size_t remainingSamples) {
         if constexpr (StrideControl::kEnabled) {
-            const bool isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
-            std::size_t toSkip = 0;
+            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter == 0 && remainingSamples > 0) {
-                toSkip = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
+                toSkip        = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
                 strideCounter = stride.value - static_cast<gr::Size_t>(toSkip);
             }
             return toSkip;
@@ -1280,13 +1282,14 @@ protected:
             std::size_t decimatedIn;
             std::size_t decimatedOut;
         };
+
         if constexpr (!Resampling::kEnabled) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
+            return ResamplingResult{ .decimatedIn = n, .decimatedOut = n };
         }
         if (denominator == 1UL && numerator == 1UL) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
+            return ResamplingResult{ .decimatedIn = n, .decimatedOut = n };
         }
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
@@ -1299,9 +1302,9 @@ protected:
             nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
         }
         if (nResamplingChunks * denominator < minSyncIn || nResamplingChunks * numerator < minSyncOut) {
-            return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+            return ResamplingResult{ .decimatedIn = 0UZ, .decimatedOut = 0UZ };
         } else {
-            return ResamplingResult{static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator)};
+            return ResamplingResult{ static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator) };
         }
     }
 
@@ -1323,16 +1326,21 @@ protected:
     }
 
     template<typename TIn, typename TOut>
-    gr::work::Status invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) {
-            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
-        }, inputReaderTuple);
+    gr::work::Status
+    invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
+        auto tempInputSpanStorage = std::apply(
+                []<typename... PortReader>(PortReader &...args) {
+                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
+                },
+                inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args)  {
-            return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...};
-        }, outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply(
+                []<typename... PortReader>(PortReader &...args) {
+                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
+                },
+                outputReaderTuple);
 
-        auto refToSpan = []<typename T, typename U>(T&& original, U&& temporary) -> decltype(auto) {
+        auto refToSpan = []<typename T, typename U>(T &&original, U &&temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
                 return std::forward<U>(temporary);
             } else {
@@ -1341,14 +1349,11 @@ protected:
         };
 
         return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
-            return self().processBulk(
-                    refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
-                    refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...
-            );
+            return self().processBulk(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
+                                      refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...);
         }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(),
                std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
     }
-
 
     work::Status
     invokeProcessOneSimd(auto &inputSpans, auto &outputSpans, auto width, std::size_t nSamplesToProcess) {
@@ -1379,11 +1384,13 @@ protected:
     auto
     invokeProcessOneNonConst(auto &inputSpans, auto &outputSpans, std::size_t nSamplesToProcess) {
         using enum work::Status;
+
         struct ProcessOneResult {
             work::Status status;
-            std::size_t processedIn;
-            std::size_t processedOut;
+            std::size_t  processedIn;
+            std::size_t  processedOut;
         };
+
         std::size_t nOutSamplesBeforeRequestedStop = 0;
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
@@ -1405,9 +1412,9 @@ protected:
             }
         }
         if (nOutSamplesBeforeRequestedStop > 0) {
-            return ProcessOneResult{OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop};
+            return ProcessOneResult{ OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop };
         }
-        return ProcessOneResult{OK, nSamplesToProcess, nSamplesToProcess};
+        return ProcessOneResult{ OK, nSamplesToProcess, nSamplesToProcess };
     }
 
     void
@@ -1519,7 +1526,7 @@ protected:
                 forwardTags();
                 return { requested_work, 0UZ, DONE };
             }
-            return {requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
+            return { requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
         }
         // process stream tags
         updateInputAndOutputTags();
@@ -1527,14 +1534,14 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) &&hasTag;
 
         // call the block implementation's work function
-        const auto   inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledIn);
-        auto         outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), limitByFirstTag ? 1 : resampledOut);
         work::Status ret;
         std::size_t  processedIn  = limitByFirstTag ? 1 : resampledIn;
         std::size_t  processedOut = limitByFirstTag ? 1 : resampledOut;
+        const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+        auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
         if constexpr (HasProcessBulkFunction<Derived>) {
             ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
         } else if constexpr (HasProcessOneFunction<Derived>) {
@@ -1542,7 +1549,7 @@ protected:
                 auto e = gr::Error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
                 emitErrorMessage("Block::workInternal:", e);
                 requestStop();
-                processedIn = 0;
+                processedIn  = 0;
                 processedOut = 0;
             } else {
                 using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
@@ -1554,17 +1561,17 @@ protected:
                 std::integral_constant<std::size_t, simd_size> width{};
 
                 if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived &d) {
-                    { d.processOne_simd(simd_size) };
-                }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
+                                                                                      { d.processOne_simd(simd_size) };
+                                                                                  }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
                     ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn);
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
                         ret = invokeProcessOnePure(inputSpans, outputSpans);
                     } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
                         const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                        ret = result.status;
-                        processedIn = result.processedIn;
-                        processedOut = result.processedOut;
+                        ret               = result.status;
+                        processedIn       = result.processedIn;
+                        processedOut      = result.processedOut;
                     }
                 }
             }
@@ -1578,21 +1585,16 @@ protected:
             }
             updateInputAndOutputTags(processedIn);
             applyChangedSettings();
-            ret       = work::Status::DONE;
+            ret         = work::Status::DONE;
             processedIn = 0UZ;
         }
         // publish/consume
         publishSamples(processedOut, outputSpans);
-        const auto inputSamplesToSkipAfter = resampledIn > 0 ? inputSamplesToSkipAfterChunk(maxSyncAvailableIn - inputSkipBefore) : 0UZ;
+        const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
         bool       success;
-        if (inputSamplesToSkipAfter > 0 && inputSamplesToSkipAfter <= resampledIn) {
-            updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
-            success = consumeReaders(inputSamplesToSkipAfter, inputSpans);
-        } else if (inputSamplesToSkipAfter > 0) {
-            updateInputAndOutputTags(inputSamplesToSkipAfter); // apply all tags in the skipped data range
-            success                          = consumeReaders(resampledIn, inputSpans);
-            const auto inputSpansForSkipping = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSamplesToSkipAfter - resampledIn); // only way to consume is via the ConsumableSpan now
-            consumeReaders(inputSamplesToSkipAfter - resampledIn, inputSpansForSkipping);
+        if (inputSamplesToConsume > 0) {
+            updateInputAndOutputTags(inputSamplesToConsume); // apply all tags in the skipped data range
+            success = consumeReaders(inputSamplesToConsume, inputSpans);
         } else {
             success = consumeReaders(processedIn, inputSpans);
         }

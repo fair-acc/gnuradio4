@@ -281,7 +281,7 @@ class CircularBuffer
     template<typename U = T>
     class buffer_writer;
 
-    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class PublishableOutputRange {
         buffer_writer<U>* _parent = nullptr;
 
@@ -322,6 +322,7 @@ class CircularBuffer
             _parent->_rangesCounter++;
     #endif
         }
+       return *this;
     }
 
     ~PublishableOutputRange() {
@@ -456,7 +457,7 @@ class CircularBuffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        template<SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+        template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto reserve(std::size_t nSlotsToClaim) noexcept -> PublishableOutputRange<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isRangePublished = false;
@@ -561,7 +562,7 @@ class CircularBuffer
     template<typename U = T>
     class buffer_reader;
 
-    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
+    template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class ConsumableInputRange {
         const buffer_reader<U>* _parent = nullptr;
         std::span<const T>      _internalSpan{};
@@ -573,35 +574,49 @@ class CircularBuffer
     using reverse_iterator = typename std::span<const T>::reverse_iterator;
     using pointer = typename std::span<const T>::reverse_iterator;
 
-    explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) {};
+
+    explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) {
+        _parent->_rangesCounter++;
+    }
+
     explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept :
-        _parent(parent), _internalSpan({ &_parent->_buffer->_data.data()[index], nRequested }) { }
+        _parent(parent), _internalSpan({ &_parent->_buffer->_data.data()[index], nRequested }) {
+        _parent->_rangesCounter++;
+    }
 
     ConsumableInputRange(const ConsumableInputRange& other)
         : _parent(other._parent),
           _internalSpan(other._internalSpan) {
+        _parent->_rangesCounter++;
     }
 
     ConsumableInputRange& operator=(const ConsumableInputRange& other) {
         if (this != &other) {
             _parent = other._parent;
             _internalSpan = other._internalSpan;
+            _parent->_rangesCounter++;
         }
         return *this;
     }
 
-    ConsumableInputRange(ConsumableInputRange&& other) noexcept
-        : _parent(std::exchange(other._parent, nullptr))
-        , _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {
-    }
-    ConsumableInputRange& operator=(ConsumableInputRange&& other) noexcept {
-        if (this != &other) {
-            std::swap(_parent, other._parent);
-            std::swap(_internalSpan, other._internalSpan);
+    ~ConsumableInputRange() {
+        _parent->_rangesCounter--;
+
+        if (_parent->_rangesCounter == 0) {
+            if (_parent->isConsumeRequested()) {
+                std::ignore = performConsume(_parent->_nSamplesToConsume);
+            } else {
+                if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
+                     assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
+                     std::abort();
+                 } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                     std::ignore = performConsume(_parent->_nSamplesFirstGet);
+                 } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone){
+                     std::ignore = performConsume(0UZ);
+                 }
+            }
         }
-        return *this;
     }
-    ~ConsumableInputRange() = default;
 
     [[nodiscard]] constexpr static SpanReleasePolicy
     spanReleasePolicy() noexcept {
@@ -609,8 +624,8 @@ class CircularBuffer
     }
 
     [[nodiscard]] constexpr bool
-     isConsumed() const noexcept {
-         return _parent->_isRangeConsumed;
+     isConsumeRequested() const noexcept {
+         return _parent->isConsumeRequested();
      }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
@@ -635,25 +650,37 @@ class CircularBuffer
 
     template <bool strict_check = true>
     [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
-        if (isConsumed()) {
-            fmt::println("An error occurred: The method CircularBuffer::buffer_reader::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
-            std::abort();
+         if (isConsumeRequested()) {
+            assert(false && "An error occurred: The method CircularBuffer::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
         }
         return tryConsume<strict_check>(nSamples);
     }
 
     template <bool strict_check = true>
     [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
-        if (isConsumed()) {
+        if (isConsumeRequested()) {
             return false;
         }
-        _parent->_isRangeConsumed = true;
+        if constexpr (strict_check) {
+            if (nSamples > _parent->available()) {
+                return false;
+            }
+        }
+        _parent->_nSamplesToConsume = nSamples;
+        return true;
+    }
+
+    private:
+    template <bool strict_check = true>
+    [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
+        _parent->_nSamplesFirstGet = std::numeric_limits<std::size_t>::max();
+        _parent->_nSamplesToConsume = std::numeric_limits<std::size_t>::max();
         if constexpr (strict_check) {
             if (nSamples <= 0) {
                 return true;
             }
 
-            if (nSamples > std::min(_internalSpan.size(), _parent->available())) {
+            if (nSamples > _parent->available()) {
                 return false;
             }
         }
@@ -677,7 +704,12 @@ class CircularBuffer
         mutable signed_index_type    _readIndexCached;
         BufferTypeLocal              _buffer; // controls buffer life-cycle, the rest are cache optimisations
         std::size_t                  _size; // pre-condition: std::has_single_bit(_size)
-        mutable bool                 _isRangeConsumed {true}; // controls if consume() was invoked, doesn't have to be atomic because this reader is accessed (by design) always by the same thread.
+        mutable std::size_t          _nSamplesFirstGet {std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
+        mutable std::size_t          _rangesCounter {0UZ}; // reference counter for number of ConsumableSpanRanges
+
+        // Samples are now consumed in a delayed manner. When the consume() method is called, the actual consumption does not happen immediately.
+        // Instead, the real consume() operation is invoked in the destructor, when the last ConsumableInputRange is destroyed.
+        mutable std::size_t          _nSamplesToConsume {std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
 
         std::size_t
         buffer_index() const noexcept {
@@ -697,13 +729,17 @@ class CircularBuffer
             , _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value()))
             , _buffer(other._buffer)
             , _size(_buffer->_size)
-            , _isRangeConsumed(std::move(other._isRangeConsumed)) {
+            , _nSamplesFirstGet(std::move(other._nSamplesFirstGet))
+            , _rangesCounter(std::move(other._rangesCounter))
+            , _nSamplesToConsume(std::move(other._nSamplesToConsume)){
         }
         buffer_reader& operator=(buffer_reader tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);
-            std::swap(_isRangeConsumed, tmp._isRangeConsumed);
+            std::swap(_nSamplesFirstGet, tmp._nSamplesFirstGet);
+            std::swap(_rangesCounter, tmp._rangesCounter);
+            std::swap(_nSamplesToConsume, tmp._nSamplesToConsume);
             _size = _buffer->_size;
             return *this;
         };
@@ -711,36 +747,29 @@ class CircularBuffer
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] constexpr bool isConsumed() const noexcept {
-            return _isRangeConsumed;
+        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept {
+            return _nSamplesToConsume != std::numeric_limits<std::size_t>::max();
         }
 
-        template<SpanReleasePolicy policy = SpanReleasePolicy::Terminate>
-        [[nodiscard]] constexpr auto get(const std::size_t nRequested) const noexcept -> ConsumableInputRange<U, policy> {
-            _isRangeConsumed = false;
-            return ConsumableInputRange<U, policy>(this, buffer_index(), nRequested);
-        }
-
-        template <bool strict_check = true>
-        [[nodiscard]] constexpr bool consume(const std::size_t nSamples = 1) noexcept {
-            if (isConsumed()) {
-                fmt::println("An error occurred: The method CircularBuffer::buffer_reader::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
-                std::abort();
+        template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
+            if (isConsumeRequested()) {
+                assert(false && "An error occurred: The method CircularBuffer::buffer_reader::get() was invoked after consume() methods was explicitly invoked.");
             }
 
-            if constexpr (strict_check) {
-                if (nSamples <= 0) {
-                    _isRangeConsumed = true;
-                    return true;
-                }
-                if (nSamples > available()) {
-                    _isRangeConsumed = true;
-                    return false;
-                }
+            std::size_t nSamples { nRequested };
+            if (nSamples == std::numeric_limits<std::size_t>::max()) {
+                nSamples = available();
+            } else {
+                assert(nSamples <= available() && "Number of required samples is more than number of available samples.");
             }
-            _readIndexCached = _readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
-            _isRangeConsumed = true;
-            return true;
+
+           if (_nSamplesFirstGet == std::numeric_limits<std::size_t>::max() ) {
+                _nSamplesFirstGet = nSamples;
+            } else {
+                nSamples = std::min(nSamples, _nSamplesFirstGet);
+            }
+            return ConsumableInputRange<U, policy>(this, buffer_index(), nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
