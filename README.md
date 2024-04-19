@@ -1,19 +1,33 @@
+<p align="center">
+<img src="https://github.com/gnuradio/gnuradio/blob/main/docs/gnuradio.png" width="75%" />
+</p>
+
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
 ![CMake](https://github.com/fair-acc/graph-prototype/workflows/CMake/badge.svg)
-# GNURadio 4.0 prototype
-A small proof-of-concept for evaluating efficient [directed graph](https://en.wikipedia.org/wiki/Directed_graph)-based algorithms, notably required block 
-('nodes' in graph-theory) structures, scheduling interfaces, and partial compile-time merging of
-[directed acyclic](https://en.wikipedia.org/wiki/Directed_acyclic_graph) as well as 
-[cyclic graphs](https://en.wikipedia.org/wiki/Feedback_arc_set) (aka. feedback loops).  
 
-The expressed goal is to guide the low-level API design and functionality for the upcoming
-[GNU Radio 4.0](https://github.com/gnuradio/gnuradio/tree/dev-4.0) release.
+# GNU Radio 4.0 prototype
 
-A [single header version](https://raw.githubusercontent.com/fair-acc/graph-prototype/single-header/singleheader/Graph.hpp)
-is provided in the `singleheader/`subdirectory of the single-header branch.
-If you want to locally regenerate the single header file, just follow
-the [CI step](https://github.com/fair-acc/graph-prototype/blob/main/.github/workflows/single-header.yml#L38-L41).
-It can be used on [compiler-explorer](https://compiler-explorer.com/z/EG7Eb9K83) with `-std=c++23 -O3` compiler options.
+> [!IMPORTANT]
+> This is the repository containing the prototype of GNU Radio 4.0.
+> It is currently in a beta state and not ready for production use.
+> The main organization and repository can be found [here](https://github.com/gnuradio/gnuradio)
+
+GNU Radio is a free & open-source signal processing runtime and signal processing
+software development toolkit. Originally developed for use with software-defined
+radios and for simulating wireless communications, it's robust capabilities have
+led to adoption in hobbyist, academic, and commercial environments. GNU Radio has
+found use in software-defined radio, digital communications, nuclear physics, high-
+energy particle physics, astrophysics, radio astronomy and more!
+
+## Helpful Links
+
+* [GNU Radio Website](https://gnuradio.org)
+* [GNU Radio Wiki](https://wiki.gnuradio.org/)
+* [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/graph-prototype/issues)
+* [View the GNU Radio Mailing List Archive](https://lists.gnu.org/archive/html/discuss-gnuradio/)
+* [Subscribe to the GNU Radio Mailing List](https://lists.gnu.org/mailman/listinfo/discuss-gnuradio)
+* [GNU Radio Chatroom on Matrix](https://chat.gnuradio.org/)
+* [Contributors and Affiliated Organizations](https://github.com/gnuradio/gnuradio/blob/main/CONTRIBUTORS.md)
 
 ## Copyright & License
 Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
