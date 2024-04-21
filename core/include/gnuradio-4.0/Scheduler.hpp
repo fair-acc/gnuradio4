@@ -80,7 +80,7 @@ public:
     connectBlockMessagePorts() {
         _graph.forEachBlock([this](auto &block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                this->emitErrorMessage("connectBlockMessagePorts()", gr::Error(fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName())));
+                this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()));
             }
 
             auto buffer = _fromChildMessagePort.buffer();
@@ -138,7 +138,7 @@ public:
 
         this->msgOut.streamWriter().publish([&](auto &output) { std::ranges::copy(messagesFromChildren, output.begin()); }, messagesFromChildren.size());
         if (!messagesFromChildren.consume(messagesFromChildren.size())) {
-            this->emitErrorMessage("process child return messages", gr::Error("Failed to consume messages from child message port"));
+            this->emitErrorMessage("process child return messages", "Failed to consume messages from child message port");
         }
     }
 
@@ -226,7 +226,7 @@ protected:
         base_t::processScheduledMessages(); // make sure initial subscriptions are processed
         const auto result = _graph.performConnections();
         if (!result) {
-            this->emitErrorMessage("init()", gr::Error("Failed to connect blocks in graph"));
+            this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
         connectBlockMessagePorts();
     }
@@ -237,18 +237,12 @@ private:
         _stop_requested = true;
         waitJobsDone();
         _graph.forEachBlock([this](auto &block) {
-            if (auto e = block.changeState(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitErrorMessage("stop() -> LifecycleState", e.error());
-            }
+            this->emitErrorMessageIfAny("stop() -> LifecycleState", block.changeState(lifecycle::State::REQUESTED_STOP));
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                if (auto e = block.changeState(lifecycle::State::STOPPED); !e) {
-                    this->emitErrorMessage("stop() -> LifecycleState", e.error());
-                }
+                this->emitErrorMessageIfAny("stop() -> LifecycleState", block.changeState(lifecycle::State::STOPPED));
             }
         });
-        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-            this->emitErrorMessage("stop() -> LifecycleState", e.error());
-        }
+        this->emitErrorMessageIfAny("stop() -> LifecycleState", this->changeStateTo(lifecycle::State::STOPPED));
     }
 
     void
@@ -256,27 +250,17 @@ private:
         _stop_requested = true;
         waitJobsDone();
         _graph.forEachBlock([this](auto &block) {
-            if (auto e = block.changeState(lifecycle::State::REQUESTED_PAUSE); !e) {
-                this->emitErrorMessage("pause() -> LifecycleState", e.error());
-            }
+            this->emitErrorMessageIfAny("pause() -> LifecycleState", block.changeState(lifecycle::State::REQUESTED_PAUSE));
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                if (auto e = block.changeState(lifecycle::State::PAUSED); !e) {
-                    this->emitErrorMessage("pause() -> LifecycleState", e.error());
-                }
+                this->emitErrorMessageIfAny("pause() -> LifecycleState", block.changeState(lifecycle::State::PAUSED));
             }
         });
-        if (auto e = this->changeStateTo(lifecycle::State::PAUSED); !e) {
-            this->emitErrorMessage("pause() -> LifecycleState", e.error());
-        }
+        this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(lifecycle::State::PAUSED));
     }
 
     void
     reset() {
-        _graph.forEachBlock([this](auto &block) {
-            if (auto e = block.changeState(lifecycle::INITIALISED); !e) {
-                this->emitErrorMessage("reset() -> LifecycleState", e.error());
-            }
-        });
+        _graph.forEachBlock([this](auto &block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block.changeState(lifecycle::INITIALISED)); });
 
         // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
         // clear buffers
@@ -288,11 +272,7 @@ private:
     void
     resume() {
         _stop_requested = false;
-        _graph.forEachBlock([this](auto &block) {
-            if (auto e = block.changeState(lifecycle::RUNNING); !e) {
-                this->emitErrorMessage("resume() -> LifecycleState", e.error());
-            }
-        });
+        _graph.forEachBlock([this](auto &block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
         if (executionPolicy() == ExecutionPolicy::multiThreaded) {
             this->runOnPool(_job_lists, [this](auto &job) { return this->workOnce(job); });
         }
@@ -301,11 +281,7 @@ private:
     void
     start() {
         _stop_requested = false;
-        _graph.forEachBlock([this](auto &block) {
-            if (auto e = block.changeState(lifecycle::RUNNING); !e) {
-                this->emitErrorMessage("start() -> LifecycleState", e.error());
-            }
-        });
+        _graph.forEachBlock([this](auto &block) { this->emitErrorMessageIfAny("start() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
         if constexpr (executionPolicy() == singleThreaded) {
             static_cast<Derived *>(this)->runSingleThreaded();
         } else {
@@ -393,13 +369,9 @@ private:
             if (this->state() == lifecycle::State::RUNNING) {
                 result = this->workOnce(blocklist);
                 if (result.status == work::Status::DONE) {
-                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (DONE)", e.error());
-                    }
+                    this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState (DONE)", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                 } else if (result.status == work::Status::ERROR) {
-                    if (auto e = this->changeStateTo(lifecycle::State::ERROR); !e) {
-                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (ERROR)", e.error());
-                    }
+                    this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState (ERROR)", this->changeStateTo(lifecycle::State::ERROR));
                 }
             } else {
                 std::this_thread::sleep_for(kMessagePollInterval);
@@ -408,14 +380,10 @@ private:
         } while (this->state() != lifecycle::State::ERROR && lifecycle::isActive(this->state()));
 
         if (this->state() == lifecycle::State::RUNNING) {
-            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
-            }
+            this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
         if (this->state() == lifecycle::State::REQUESTED_STOP) {
-            if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
-            }
+            this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState", this->changeStateTo(lifecycle::State::STOPPED));
         }
     }
 };
@@ -505,13 +473,9 @@ private:
             if (this->state() == lifecycle::State::RUNNING) {
                 result = this->workOnce(blocklist);
                 if (result.status == work::Status::DONE) {
-                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (DONE)", e.error());
-                    }
+                    this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState (DONE)", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                 } else if (result.status == work::Status::ERROR) {
-                    if (auto e = this->changeStateTo(lifecycle::State::ERROR); !e) {
-                        this->emitErrorMessage("runSingleThreaded() -> LifecycleState (ERROR)", e.error());
-                    }
+                    this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState (ERROR)", this->changeStateTo(lifecycle::State::ERROR));
                 }
             } else {
                 std::this_thread::sleep_for(kMessagePollInterval);
@@ -519,14 +483,10 @@ private:
             }
         } while (this->state() != lifecycle::State::ERROR && lifecycle::isActive(this->state()));
         if (this->state() == lifecycle::State::RUNNING) {
-            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
-            }
+            this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
         if (this->state() == lifecycle::State::REQUESTED_STOP) {
-            if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                this->emitErrorMessage("runSingleThreaded() -> LifecycleState", e.error());
-            }
+            this->emitErrorMessageIfAny("runSingleThreaded() -> LifecycleState", this->changeStateTo(lifecycle::State::STOPPED));
         }
     }
 };
