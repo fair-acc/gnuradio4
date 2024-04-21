@@ -523,15 +523,27 @@ namespace detail {
 template<typename T>
 struct is_const_member_function : std::false_type {};
 
-template<typename T, typename U, typename... args>
-struct is_const_member_function<U (T::*)(args...) const> : std::true_type {};
+template<typename T, typename TReturn, typename... Args>
+struct is_const_member_function<TReturn (T::*)(Args...) const> : std::true_type {};
+
+template<typename T, typename TReturn, typename... Args>
+struct is_const_member_function<TReturn (T::*)(Args...) const noexcept> : std::true_type {};
+
+template<typename T>
+struct is_noexcept_member_function : std::false_type {};
+
+template<typename T, typename TReturn, typename... Args>
+struct is_noexcept_member_function<TReturn (T::*)(Args...) noexcept> : std::true_type {};
+
+template<typename T, typename TReturn, typename... Args>
+struct is_noexcept_member_function<TReturn (T::*)(Args...) const noexcept> : std::true_type {};
 } // namespace detail
 
 template<typename T>
-inline constexpr bool
-is_const_member_function(T) noexcept {
-    return std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
-}
+concept IsConstMemberFunction = std::is_member_function_pointer_v<T> && detail::is_const_member_function<T>::value;
+
+template<typename T>
+concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detail::is_noexcept_member_function<T>::value;
 
 } // namespace meta
 } // namespace gr
