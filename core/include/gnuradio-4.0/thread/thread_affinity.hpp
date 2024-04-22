@@ -1,6 +1,8 @@
 #ifndef THREADAFFINITY_HPP
 #define THREADAFFINITY_HPP
 
+#include <fmt/core.h>
+
 #include <algorithm>
 #include <fmt/core.h>
 #include <fmt/format.h>
