@@ -4,6 +4,7 @@
 #include <execution>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 
