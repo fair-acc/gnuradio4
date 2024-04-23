@@ -15,6 +15,7 @@
 #include <fmt/ranges.h>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
