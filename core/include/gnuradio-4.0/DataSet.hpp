@@ -108,8 +108,8 @@ static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
 static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
 
 // public type definitions to allow simple reflection
-using DataSet_float  = DataSet<double>;
-using DataSet_double = DataSet<float>;
+using DataSet_double = DataSet<double>;
+using DataSet_float  = DataSet<float>;
 
 template<typename T>
 struct Tensor {
