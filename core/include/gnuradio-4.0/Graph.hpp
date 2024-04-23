@@ -274,6 +274,10 @@ public:
     processScheduledMessages()
             = 0;
 
+    virtual UICategory uiCategory() const {
+        return UICategory::None;
+    }
+
     [[nodiscard]] virtual void *
     raw() = 0;
 };
@@ -418,6 +422,10 @@ public:
             return blockRef().draw();
         }
         return work::Status::ERROR;
+    }
+
+    UICategory uiCategory() const override {
+        return T::DrawableControl::kCategory;
     }
 
     void
