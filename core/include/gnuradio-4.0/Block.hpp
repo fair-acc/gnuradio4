@@ -514,9 +514,9 @@ protected:
         } else { // function not declared with 'noexcept' -> may throw
             try {
                 return std::forward<TFunction>(func)(std::forward<Args>(args)...);
-            } catch (gr::exception e) {
+            } catch (const gr::exception &e) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error(std::move(e))));
-            } catch (std::exception e) {
+            } catch (const std::exception &e) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error(e, location)));
             } catch (...) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error("unknown error", location)));
