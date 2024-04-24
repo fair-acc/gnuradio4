@@ -67,4 +67,4 @@ RUN apt-get update -y \
     && chown -R root:users $EMSDK_HOME && chmod -R 777 $EMSDK_HOME
 
 USER user
-ENTRYPOINT ["bash"]
+ENTRYPOINT ["/bin/bash", "-l", "-c"]
