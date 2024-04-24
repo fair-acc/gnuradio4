@@ -18448,7 +18448,7 @@ struct SettingsBase {
      * to dependent/child blocks.
      */
     [[nodiscard]] virtual ApplyStagedParametersResult
-    applyStagedParameters() noexcept
+    applyStagedParameters()
             = 0;
 
     /**
@@ -18714,7 +18714,7 @@ public:
      *  - appliedParameters -- map with peoperties that were successfully set
      */
     [[nodiscard]] ApplyStagedParametersResult
-    applyStagedParameters() noexcept override {
+    applyStagedParameters() override {
         ApplyStagedParametersResult result;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
