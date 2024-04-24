@@ -9734,10 +9734,9 @@ template<IncompleteFinalUpdateEnum updatePolicy>
 struct IncompleteFinalUpdatePolicy {
     static constexpr IncompleteFinalUpdateEnum kIncompleteFinalUpdatePolicy = updatePolicy;
 };
+
 template<typename T>
-concept IsIncompleteFinalUpdatePolicy = requires {
-    T::kIncompleteFinalUpdatePolicy;
-} && std::is_base_of_v<IncompleteFinalUpdatePolicy<T::kIncompleteFinalUpdatePolicy>, T>;
+concept IsIncompleteFinalUpdatePolicy = requires { T::kIncompleteFinalUpdatePolicy; } && std::is_base_of_v<IncompleteFinalUpdatePolicy<T::kIncompleteFinalUpdatePolicy>, T>;
 
 template<typename T>
 using is_incompleteFinalUpdatePolicy = std::bool_constant<IsIncompleteFinalUpdatePolicy<T>>;
@@ -9754,8 +9753,8 @@ enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
  */
 template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
 struct Drawable {
-    static constexpr UICategory             kCategory  = category_;
-    static constexpr gr::meta::fixed_string kToolkit   = toolkit_;
+    static constexpr UICategory             kCategory = category_;
+    static constexpr gr::meta::fixed_string kToolkit  = toolkit_;
 };
 
 template<typename T>
@@ -21541,6 +21540,10 @@ public:
     processScheduledMessages()
             = 0;
 
+    virtual UICategory uiCategory() const {
+        return UICategory::None;
+    }
+
     [[nodiscard]] virtual void *
     raw() = 0;
 };
@@ -21685,6 +21688,10 @@ public:
             return blockRef().draw();
         }
         return work::Status::ERROR;
+    }
+
+    UICategory uiCategory() const override {
+        return T::DrawableControl::kCategory;
     }
 
     void
