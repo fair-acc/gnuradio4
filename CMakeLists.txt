@@ -111,7 +111,7 @@ include(FetchContent)
 FetchContent_Declare(
         fmt
         GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-        GIT_TAG 10.1.1
+        GIT_TAG 10.2.1
 )
 
 FetchContent_Declare(
@@ -143,7 +143,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     cpp-httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.15.1
+    GIT_TAG v0.15.3
 )
 
 FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd cpp-httplib)

@@ -4,6 +4,7 @@
 #include <complex>
 #include <expected>
 #include <fmt/format.h>
+#include <fmt/std.h>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <source_location>
@@ -128,22 +129,6 @@ struct fmt::formatter<std::vector<bool>> {
         }
         fmt::format_to(ctx.out(), "]");
         return ctx.out();
-    }
-};
-
-template<>
-struct fmt::formatter<std::source_location> {
-    constexpr auto
-    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-        return ctx.begin();
-    }
-
-    // Formats the source_location, using 'f' for file and 'l' for line
-    template<typename FormatContext>
-    auto
-    format(const std::source_location &loc, FormatContext &ctx) const -> decltype(ctx.out()) {
-        // Example format: "file:line"
-        return fmt::format_to(ctx.out(), "{}:{}", loc.file_name(), loc.line());
     }
 };
 
