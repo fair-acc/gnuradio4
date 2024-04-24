@@ -99,7 +99,7 @@ struct alignas(hardware_constructive_interference_size) Tag {
     get(const std::string &key) const noexcept {
         try {
             return map.at(key);
-        } catch (std::out_of_range &e) {
+        } catch (const std::out_of_range &e) {
             return std::nullopt;
         }
     }
@@ -108,7 +108,7 @@ struct alignas(hardware_constructive_interference_size) Tag {
     get(const std::string &key) noexcept {
         try {
             return map.at(key);
-        } catch (std::out_of_range &) {
+        } catch (const std::out_of_range &) {
             return std::nullopt;
         }
     }
