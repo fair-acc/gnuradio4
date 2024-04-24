@@ -127,9 +127,16 @@ this_block = PythonBlockWrapper(capsule))p",
     void
     settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
         if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
+
             fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"),
                        new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"),
                        new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+            if (std::any_of(inputs.begin(), inputs.end(), [](const auto &port) { return port.isConnected(); })) {
+                throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
+            }
+            if (std::any_of(outputs.begin(), outputs.end(), [](const auto &port) { return port.isConnected(); })) {
+                throw gr::exception("Number of output ports cannot be changed after Graph initialization.");
+            }
             inputs.resize(n_inputs);
             outputs.resize(n_outputs);
         }
