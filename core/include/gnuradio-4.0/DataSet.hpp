@@ -107,10 +107,6 @@ static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept confo
 static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
 static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
 
-// public type definitions to allow simple reflection
-using DataSet_float  = DataSet<double>;
-using DataSet_double = DataSet<float>;
-
 template<typename T>
 struct Tensor {
     using value_type         = T;
@@ -137,7 +133,7 @@ struct Packet {
     using value_type = T;
     using pmt_map    = std::map<std::string, pmtv::pmt>;
 
-    std::int64_t         timestamp = 0; // UTC timestamp [ns]
+    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
     std::vector<T>       signal_values{}; // size = \PI_i extents[i
     std::vector<pmt_map> meta_information{};
 };
@@ -148,8 +144,6 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 
 } // namespace gr
 
-ENABLE_REFLECTION(gr::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
-                  timing_events)
-ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
-                  timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
+                               timing_events)
 #endif // GNURADIO_DATASET_HPP

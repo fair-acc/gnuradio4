@@ -163,15 +163,15 @@ enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
  */
 template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
 struct Drawable {
-    static constexpr UICategory             kCategorgy = category_;
+    static constexpr UICategory             kCategory  = category_;
     static constexpr gr::meta::fixed_string kToolkit   = toolkit_;
 };
 
 template<typename T>
 concept IsDrawable = requires {
-    T::kCategorgy;
+    T::kCategory;
     T::kToolkit;
-} && std::is_base_of_v<Drawable<T::kCategorgy, T::kToolkit>, T>;
+} && std::is_base_of_v<Drawable<T::kCategory, T::kToolkit>, T>;
 
 template<typename T>
 using is_drawable = std::bool_constant<IsDrawable<T>>;

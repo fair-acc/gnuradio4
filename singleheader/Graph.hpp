@@ -9754,15 +9754,15 @@ enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
  */
 template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
 struct Drawable {
-    static constexpr UICategory             kCategorgy = category_;
+    static constexpr UICategory             kCategory  = category_;
     static constexpr gr::meta::fixed_string kToolkit   = toolkit_;
 };
 
 template<typename T>
 concept IsDrawable = requires {
-    T::kCategorgy;
+    T::kCategory;
     T::kToolkit;
-} && std::is_base_of_v<Drawable<T::kCategorgy, T::kToolkit>, T>;
+} && std::is_base_of_v<Drawable<T::kCategory, T::kToolkit>, T>;
 
 template<typename T>
 using is_drawable = std::bool_constant<IsDrawable<T>>;
@@ -13964,10 +13964,6 @@ static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept confo
 static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
 static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
 
-// public type definitions to allow simple reflection
-using DataSet_float  = DataSet<double>;
-using DataSet_double = DataSet<float>;
-
 template<typename T>
 struct Tensor {
     using value_type         = T;
@@ -13994,7 +13990,7 @@ struct Packet {
     using value_type = T;
     using pmt_map    = std::map<std::string, pmtv::pmt>;
 
-    std::int64_t         timestamp = 0; // UTC timestamp [ns]
+    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
     std::vector<T>       signal_values{}; // size = \PI_i extents[i
     std::vector<pmt_map> meta_information{};
 };
@@ -14005,10 +14001,8 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 
 } // namespace gr
 
-ENABLE_REFLECTION(gr::DataSet_double, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
-                  timing_events)
-ENABLE_REFLECTION(gr::DataSet_float, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
-                  timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
+                               timing_events)
 #endif // GNURADIO_DATASET_HPP
 
 // #include "Message.hpp"
@@ -19587,7 +19581,7 @@ public:
         property_map ret;
         if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
             property_map info;
-            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategorgy)));
+            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategory)));
             info.insert_or_assign("Toolkit"s, std::string(DrawableControl::kToolkit));
 
             ret.insert_or_assign("Drawable"s, info);
