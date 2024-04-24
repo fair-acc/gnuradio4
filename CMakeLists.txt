@@ -193,6 +193,35 @@ target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include ${PROJE
 target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
 
+
+## check for CPython and Numpy dependencies
+set(PYTHON_FORCE_INCLUDE OFF)
+if(PYTHON_FORCE_INCLUDE)
+    find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter Development NumPy)
+else()
+    find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
+endif()
+
+set(PYTHON_AVAILABLE OFF)
+if(Python3_FOUND)
+    execute_process(
+            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNumPy.py"
+            RESULT_VARIABLE NUMPY_NOT_FOUND
+            OUTPUT_VARIABLE NUMPY_INCLUDE_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    # If NumPy is found, set PYTHON_AVAILABLE to ON
+    if(NOT NUMPY_NOT_FOUND)
+        set(PYTHON_AVAILABLE ON)
+        include_directories(${Python3_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
+        add_definitions(-DPYTHON_AVAILABLE)
+        message(STATUS "Using Python Include Dirs: ${Python3_INCLUDE_DIRS} and ${NUMPY_INCLUDE_DIR}")
+    else()
+        message(STATUS "Python and Numpy Include headers not found!!")
+    endif()
+endif()
+
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 
 option(ENABLE_TESTING "Enable Test Builds"  ${GR_TOPLEVEL_PROJECT})
