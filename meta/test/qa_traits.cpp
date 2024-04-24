@@ -48,10 +48,22 @@ test() {
     // do nothing
 }
 
-static_assert(!is_const_member_function(&MyClass::nonConstFunc));
-static_assert(is_const_member_function(&MyClass::constFunc));
-static_assert(is_const_member_function(&MyClass::constFunc2));
-static_assert(!is_const_member_function(&test));
+static_assert(!IsConstMemberFunction<decltype(&MyClass::nonConstFunc)>);
+static_assert(IsConstMemberFunction<decltype(&MyClass::constFunc)>);
+static_assert(IsConstMemberFunction<decltype(&MyClass::constFunc2)>);
+static_assert(!IsConstMemberFunction<decltype(&test)>);
+
+struct Test {
+    void func(int, double) noexcept {}
+    void funcNotNoexcept(bool) {}
+    void constFunc(int) const noexcept {}
+    void constFuncNotNoexcept(float, int) const {}
+};
+
+static_assert(IsNoexceptMemberFunction<decltype(&Test::func)>);
+static_assert(!IsNoexceptMemberFunction<decltype(&Test::funcNotNoexcept)>);
+static_assert(IsNoexceptMemberFunction<decltype(&Test::constFunc)>);
+static_assert(!IsNoexceptMemberFunction<decltype(&Test::constFuncNotNoexcept)>);
 
 } // namespace gr::meta
 

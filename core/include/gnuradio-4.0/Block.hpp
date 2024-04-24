@@ -202,13 +202,19 @@ template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
 
 template<typename Derived>
-concept HasConstProcessOneFunction = traits::block::can_processOne<Derived> && gr::meta::is_const_member_function(&Derived::processOne);
+concept HasConstProcessOneFunction = traits::block::can_processOne<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processOne)>;
+
+template<typename Derived>
+concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processOne)>;
 
 template<typename Derived>
 concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 
 template<typename Derived>
-concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processBulk)>;
+
+template<typename Derived>
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
 inline void
@@ -472,14 +478,14 @@ public:
     MsgPortOutNamed<"__Builtin"> msgOut;
 
     using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
-    std::map<std::string, PropertyCallback>         propertyCallbacks{
-                { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
-                { block::property::kEcho, &Block::propertyCallbackEcho },                     //
-                { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
-                { block::property::kSetting, &Block::propertyCallbackSettings },              //
-                { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
-                { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
-                { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
+    std::map<std::string, PropertyCallback> propertyCallbacks{
+        { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
+        { block::property::kEcho, &Block::propertyCallbackEcho },                     //
+        { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
+        { block::property::kSetting, &Block::propertyCallbackSettings },              //
+        { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
+        { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
+        { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -498,6 +504,24 @@ protected:
     [[nodiscard]] constexpr const auto &
     self() const noexcept {
         return *static_cast<const Derived *>(this);
+    }
+
+    template<typename TFunction, typename... Args>
+    [[maybe_unused]] constexpr inline auto
+    invokeUserProvidedFunction(std::string_view callingSite, TFunction &&func, Args &&...args, const std::source_location &location = std::source_location::current()) noexcept {
+        if constexpr (noexcept(func(std::forward<Args>(args)...))) { // function declared as 'noexcept' skip exception handling
+            return std::forward<TFunction>(func)(std::forward<Args>(args)...);
+        } else { // function not declared with 'noexcept' -> may throw
+            try {
+                return std::forward<TFunction>(func)(std::forward<Args>(args)...);
+            } catch (gr::exception e) {
+                emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error(std::move(e))));
+            } catch (std::exception e) {
+                emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error(e, location)));
+            } catch (...) {
+                emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error("unknown error", location)));
+            }
+        }
     }
 
 public:
@@ -539,9 +563,7 @@ public:
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
-            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                emitErrorMessage("~Block()", e.error());
-            }
+            emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
         if (isBlocking()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -552,9 +574,7 @@ public:
             this->waitOnState(actualState);
         }
 
-        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-            emitErrorMessage("~Block()", e.error());
-        }
+        emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::STOPPED));
     }
 
     void
@@ -589,19 +609,19 @@ public:
 
         // Handle settings
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
-        if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
-            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                publishTag(applyResult.forwardParameters);
+        invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
+            if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
+                if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                    publishTag(applyResult.forwardParameters);
+                }
+                notifyListeners(block::property::kSetting, settings().get());
             }
-            notifyListeners(block::property::kSetting, settings().get());
-        }
-        checkParametersAndThrowIfNeeded();
+        });
+        checkBlockParameterConsistency();
 
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
-        if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
-            emitErrorMessage("init(..) -> INITIALISED", e.error());
-        }
+        emitErrorMessageIfAny("init(..) -> INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
     }
 
     template<gr::meta::array_or_vector_type Container>
@@ -702,7 +722,7 @@ public:
     outputPort(Self *self) noexcept;
 
     constexpr void
-    checkParametersAndThrowIfNeeded() {
+    checkBlockParameterConsistency() {
         constexpr bool kIsSourceBlock = traits::block::stream_input_port_types<Derived>::size == 0;
         constexpr bool kIsSinkBlock   = traits::block::stream_output_port_types<Derived>::size == 0;
 
@@ -712,8 +732,8 @@ public:
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
             if (numerator != 1ULL || denominator != 1ULL) {
-                auto e = gr::Error(fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:",
+                                 fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
                 requestStop();
                 return;
             }
@@ -723,8 +743,7 @@ public:
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
             if (stride != 0ULL) {
-                auto e = gr::Error(fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
                 requestStop();
                 return;
             }
@@ -733,26 +752,22 @@ public:
         const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         if (minSyncIn > maxSyncIn) {
-            auto e = gr::Error(fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
             requestStop();
             return;
         }
         if (minSyncOut > maxSyncOut) {
-            auto e = gr::Error(fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
             requestStop();
             return;
         }
         if (denominator > maxSyncIn) {
-            auto e = gr::Error(fmt::format("resampling denominator ({}) is larger then max samples for input ports ({})", denominator, maxSyncIn));
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling denominator ({}) is larger then max samples for input ports ({})", denominator, maxSyncIn));
             requestStop();
             return;
         }
         if (numerator > maxSyncOut) {
-            auto e = gr::Error(fmt::format("resampling numerator ({}) is larger then max samples for output ports ({})", numerator, maxSyncOut));
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", e);
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling numerator ({}) is larger then max samples for output ports ({})", numerator, maxSyncOut));
             requestStop();
             return;
         }
@@ -902,9 +917,12 @@ public:
 
     void
     applyChangedSettings() {
-        if (settings().changed()) {
+        if (!settings().changed()) {
+            return;
+        }
+        invokeUserProvidedFunction("applyChangedSettings()", [this] noexcept(false) {
             auto applyResult = settings().applyStagedParameters();
-            checkParametersAndThrowIfNeeded();
+            checkBlockParameterConsistency();
 
             if (!applyResult.forwardParameters.empty()) {
                 publishTag(applyResult.forwardParameters, 0);
@@ -916,7 +934,7 @@ public:
                 notifyListeners(block::property::kStagedSetting, applyResult.appliedParameters);
             }
             notifyListeners(block::property::kSetting, settings().get());
-        }
+        });
     }
 
     constexpr static auto
@@ -964,9 +982,7 @@ public:
 
     constexpr void
     requestStop() noexcept {
-        if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-            emitErrorMessage("requestStop()", e.error());
-        }
+        emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
     }
 
     constexpr void
@@ -1328,17 +1344,13 @@ protected:
     template<typename TIn, typename TOut>
     gr::work::Status
     invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply(
-                []<typename... PortReader>(PortReader &...args) {
-                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
-                },
-                inputReaderTuple);
+        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(
+                                                       PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
+                                               inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply(
-                []<typename... PortReader>(PortReader &...args) {
-                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
-                },
-                outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(
+                                                        PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
+                                                outputReaderTuple);
 
         auto refToSpan = []<typename T, typename U>(T &&original, U &&temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
@@ -1433,8 +1445,20 @@ protected:
     }
 
     void
+    emitErrorMessage(std::string_view endpoint, std::string_view errorMsg, std::string_view clientRequestID = "", std::source_location location = std::source_location::current()) noexcept {
+        emitErrorMessageIfAny(endpoint, std::unexpected(Error(errorMsg, location)), clientRequestID);
+    }
+
+    void
     emitErrorMessage(std::string_view endpoint, Error e, std::string_view clientRequestID = "") noexcept {
-        sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(e), clientRequestID);
+        emitErrorMessageIfAny(endpoint, std::unexpected(e), clientRequestID);
+    }
+
+    inline void
+    emitErrorMessageIfAny(std::string_view endpoint, std::expected<void, Error> e, std::string_view clientRequestID = "") noexcept {
+        if (!e.has_value()) [[unlikely]] {
+            sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(e.error()), clientRequestID);
+        }
     }
 
     /**
@@ -1479,10 +1503,7 @@ protected:
 
         if constexpr (!blockingIO) { // N.B. no other thread/constraint to consider before shutting down
             if (this->state() == lifecycle::State::REQUESTED_STOP) {
-                if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                    using namespace gr::message;
-                    emitErrorMessage("workInternal(): REQUESTED_STOP -> STOPPED", e.error());
-                }
+                emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
             }
         }
 
@@ -1508,9 +1529,7 @@ protected:
         // return if there is no work to be performed // todo: add eos policy
         if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
             if (asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
-                if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                    emitErrorMessage("workInternal(): EOS tag arrived -> REQUESTED_STOP", e.error());
-                }
+                emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                 publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
                 updateInputAndOutputTags();
                 forwardTags();
@@ -1518,9 +1537,7 @@ protected:
                 return { requested_work, 0UZ, work::Status::DONE };
             }
             if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
-                if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                    emitErrorMessage("workInternal(): REQUESTED_STOP", e.error());
-                }
+                emitErrorMessageIfAny("workInternal(): REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                 updateInputAndOutputTags();
                 applyChangedSettings();
                 forwardTags();
@@ -1534,7 +1551,7 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) &&hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
 
         // call the block implementation's work function
         work::Status ret;
@@ -1543,11 +1560,12 @@ protected:
         const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
         if constexpr (HasProcessBulkFunction<Derived>) {
-            ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
+            invokeUserProvidedFunction("invokeProcessBulk", [&ret, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) {
+                ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
+            });
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
-                auto e = gr::Error(fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
-                emitErrorMessage("Block::workInternal:", e);
+                emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
                 requestStop();
                 processedIn  = 0;
                 processedOut = 0;
@@ -1563,10 +1581,13 @@ protected:
                 if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived &d) {
                                                                                       { d.processOne_simd(simd_size) };
                                                                                   }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
-                    ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn);
+                    invokeUserProvidedFunction("invokeProcessOneSimd", [&ret, &inputSpans, &outputSpans, &width, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) {
+                        ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn);
+                    });
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
-                        ret = invokeProcessOnePure(inputSpans, outputSpans);
+                        invokeUserProvidedFunction("invokeProcessOnePure",
+                                                   [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
                     } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
                         const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
                         ret               = result.status;
@@ -1580,9 +1601,7 @@ protected:
         }
         forwardTags();
         if (lifecycle::isShuttingDown(this->state())) {
-            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                emitErrorMessage("isShuttingDown -> STOPPED", e.error());
-            }
+            emitErrorMessageIfAny("isShuttingDown -> STOPPED", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
             updateInputAndOutputTags(processedIn);
             applyChangedSettings();
             ret         = work::Status::DONE;
@@ -1646,17 +1665,13 @@ public:
                             for (std::size_t testState = 0UZ; testState < 10UZ; ++testState) {
                                 if (invokeWork() == work::Status::DONE) {
                                     actualThreadState = lifecycle::State::REQUESTED_STOP;
-                                    if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                                        emitErrorMessage("REQUESTED_STOP -> REQUESTED_STOP", e.error());
-                                    }
+                                    emitErrorMessageIfAny("REQUESTED_STOP -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                                     break;
                                 }
                             }
                             actualThreadState = this->state();
                         }
-                        if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
-                            emitErrorMessage("-> STOPPED", e.error());
-                        }
+                        emitErrorMessageIfAny("-> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
                         ioThreadRunning.store(false);
                     });
                 } else { // use user-provided ioThreadPool

@@ -154,6 +154,9 @@ protected:
         try {
             (static_cast<TDerived *>(this)->*method)();
             return {};
+        } catch (const gr::exception &e) {
+            setAndNotifyState(State::ERROR);
+            return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime });
         } catch (const std::exception &e) {
             setAndNotifyState(State::ERROR);
             return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location });
