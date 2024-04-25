@@ -81,9 +81,9 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         for (int retry_attempt = 0; retry_attempt < 3; retry_attempt++) {
             try {
                 return do_allocate_internal(required_size, alignment);
-            } catch (std::system_error& e) { // explicitly caught for retry
+            } catch (const std::system_error& e) { // explicitly caught for retry
                 fmt::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
-            } catch (std::invalid_argument& e) { // explicitly caught for retry
+            } catch (const std::invalid_argument& e) { // explicitly caught for retry
                 fmt::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
             }
         }

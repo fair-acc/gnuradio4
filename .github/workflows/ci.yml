@@ -34,7 +34,7 @@ jobs:
         id: docker-label
         run: |
           if [ ${{ steps.changes.outputs.docker == 'true' && github.event_name != 'push' }} = "true" ]; then
-            echo "label=ghcr.io/fair-acc/gr4-build-container:$GITHUB_HEAD_REF" >> "$GITHUB_OUTPUT"
+            echo "label=ghcr.io/fair-acc/gr4-build-container:${GITHUB_HEAD_REF/\//-}" >> "$GITHUB_OUTPUT"
           else
             echo "label=ghcr.io/fair-acc/gr4-build-container:latest" >> "$GITHUB_OUTPUT"
           fi
