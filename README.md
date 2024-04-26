@@ -1,5 +1,5 @@
 <p align="center">
-<img src="https://github.com/fair-acc/graph-prototype/blob/main/docs/logo.png" width="75%" />
+<img src="docs/logo.png" width="65%" />
 </p>
 
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
