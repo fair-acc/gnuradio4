@@ -57,6 +57,8 @@ elseif(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS}")
 elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
+    # 'EMBEDDED is used to disable/minimise code features for embedded systems (e.g. code-size, console printouts, etc.)
+    add_compile_definitions(EMBEDDED)
 endif()
 # Replace ; with space
 string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
@@ -66,6 +68,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's lib
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-fdiagnostics-color=always)
+endif()
+
+# Include What You Use tooling: https://github.com/include-what-you-use/include-what-you-use
+find_program(INCLUDE_WHAT_YOU_USE_TOOL_PATH NAMES include-what-you-use iwyu)
+if(INCLUDE_WHAT_YOU_USE_TOOL_PATH)
+    message(" using 'Include What You Use' path: (${INCLUDE_WHAT_YOU_USE_TOOL_PATH})")
+    set_property(GLOBAL PROPERTY CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${INCLUDE_WHAT_YOU_USE_TOOL_PATH})
 endif()
 
 # Mainly for FMT
