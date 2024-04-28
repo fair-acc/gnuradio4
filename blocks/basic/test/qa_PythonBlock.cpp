@@ -136,7 +136,7 @@ def process_bulk(ins, outs):
 
         bool throws = false;
         try {
-            myBlock.applyChangedSettings(); // needed for unit-test only when executed outside a Scheduler/Graph
+            std::ignore = myBlock.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
         } catch (const std::exception &ex) {
             throws = true;
             fmt::println("myBlock.processBulk(...) - correctly threw SyntaxError exception:\n {}", ex.what());

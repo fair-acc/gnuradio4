@@ -5,6 +5,8 @@
 
 #include <pmtv/pmt.hpp>
 
+#include <pmtv/format.hpp>
+
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "reflection.hpp"
