@@ -43,17 +43,19 @@ energy particle physics, astrophysics, radio astronomy and more!
 - **Bridging R&D and Industrial Use**: Aims to bridge the gap between academics using GNU Radio for research, hobbyists using it for prototyping and safe operational use by research organizations and industry.
 - [**More on architecture and design**](https://github.com/fair-acc/graph-prototype/tree/main/core)
 
-## Copyright & License
-Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
-Unless otherwise noted: [SPDX-License-Identifier: LGPL-3.0-or-later](https://spdx.org/licenses/LGPL-3.0-or-later.html)
+## License and Copyright
+Any code contributions going into GNU Radio will become part of an LGPL-licensed, open source repository, and copyright assignment remains with the author or organization supporting the work.
 
-### Contributors
- * [GNU Radio Project](https://gnuradio.org)
+Unless otherwise noted: [SPDX-License-Identifier: LGPL-3.0-or-later](https://spdx.org/licenses/LGPL-3.0-or-later.html)
+Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
+
+## Acknowledgements
+The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology. 
+We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
+
  * Ivan Čukić <ivan.cukic@kdab.com>
  * Matthias Kretz <M.Kretz@GSI.de>
  * Alexander Krimm, <A.Krimm@GSI.de> 
+ * Semen Lebedev, <S.Lebedev@GSI.de>
+ * Frank Osterfeld, <Frank.Osterfeld@kdab.com>
  * Ralph J. Steinhagen, <R.Steinhagen@GSI.de>
-
-### Acknowledgements
-...
-
