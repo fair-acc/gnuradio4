@@ -321,9 +321,8 @@ const boost::ut::suite DataSinkTests = [] {
 
             auto             lg = std::lock_guard{ m2 };
             std::vector<Tag> adjusted;
-            std::transform(tags.begin(), tags.end(), std::back_inserter(adjusted), [samplesSeen2](const auto &tag) {
-                return Tag{ static_cast<Tag::signed_index_type>(samplesSeen2) + tag.index, tag.map };
-            });
+            std::transform(tags.begin(), tags.end(), std::back_inserter(adjusted),
+                                       [samplesSeen2](const auto &tag) { return Tag{ static_cast<Tag::signed_index_type>(samplesSeen2) + tag.index, tag.map }; });
             receivedTags.insert(receivedTags.end(), adjusted.begin(), adjusted.end());
             samplesSeen2 += buffer.size();
             chunksSeen2++;
@@ -461,7 +460,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(metadataTags.size(), 1UZ));
         expect(eq(metadataTags[0].index, 0));
         const auto metadata = latestMetadata(metadataTags);
-        expect(eq(metadata.signal_name.value_or("<unset>"), "test source"s));
+        expect(eq(metadata.signal_name.value_or("<unset>"), "test signal"s));
         expect(eq(metadata.signal_unit.value_or("<unset>"), "test unit"s));
         expect(eq(metadata.signal_min.value_or(-1234567.f), -42.f));
         expect(eq(metadata.signal_max.value_or(-1234567.f), 42.f));
@@ -906,5 +905,4 @@ const boost::ut::suite DataSinkTests = [] {
 };
 
 int
-main() { /* tests are statically executed */
-}
+main() { /* tests are statically executed */ }
