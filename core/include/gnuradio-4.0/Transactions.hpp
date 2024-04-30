@@ -66,56 +66,37 @@ public:
         }
 
         if constexpr (refl::is_reflectable<TBlock>()) {
-            meta::tuple_for_each(
-                    [this](auto &&default_tag) {
-                        auto iterate_over_member = [&](auto member) {
-                            using RawType = std::remove_cvref_t<decltype(member(*_block))>;
-                            using Type    = unwrap_if_wrapped_t<RawType>;
-                            if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
-                                auto matchesIgnoringPrefix = [](std::string_view str, std::string_view prefix, std::string_view target) {
-                                    if (str.starts_with(prefix)) {
-                                        str.remove_prefix(prefix.size());
-                                    }
-                                    return str == target;
-                                };
-                                if (matchesIgnoringPrefix(default_tag.shortKey(), std::string_view(GR_TAG_PREFIX), get_display_name(member))) {
-                                    _auto_forward.emplace(get_display_name(member));
-                                }
-                                _auto_update.emplace(get_display_name(member));
-                            }
-                        };
-                        if constexpr (detail::HasBaseType<TBlock>) {
-                            refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, iterate_over_member);
-                        }
-                        refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
-                    },
-                    gr::tag::DEFAULT_TAGS);
-
-            // handle meta-information for UI and other non-processing-related purposes
-            auto iterate_over_member = [&]<typename Member>(Member member) {
-                using RawType = std::remove_cvref_t<decltype(member(*_block))>;
-                // disable clang format because v16 cannot handle in-line requires clauses with return types nicely yet
-                // clang-format off
-                if constexpr (requires(TBlock t) { t.metaInformation; }) {
-                    static_assert(std::is_same_v<unwrap_if_wrapped_t<decltype(_block->metaInformation)>, property_map>);
-                    if constexpr (requires(TBlock t) { t.description; }) {
-                        static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(TBlock::description)>>, std::string_view>);
-                        _block->metaInformation.value["description"] = std::string(_block->description);
-                    }
-
-                    if constexpr (AnnotatedType<RawType>) {
-                        _block->metaInformation.value[fmt::format("{}::description", get_display_name(member))] = std::string(RawType::description());
-                        _block->metaInformation.value[fmt::format("{}::documentation", get_display_name(member))] = std::string(RawType::documentation());
-                        _block->metaInformation.value[fmt::format("{}::unit", get_display_name(member))] = std::string(RawType::unit());
-                        _block->metaInformation.value[fmt::format("{}::visible", get_display_name(member))] = RawType::visible();
-                    }
-                }
-                // clang-format on
+            constexpr bool hasMetaInfo = requires(TBlock t) {
+                {
+                    unwrap_if_wrapped_t<decltype(t.meta_information)> {}
+                } -> std::same_as<property_map>;
             };
-            if constexpr (detail::HasBaseType<TBlock>) {
-                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, iterate_over_member);
-            }
-            refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
+
+            auto iterate_over_member = [&](auto member) {
+                using RawType         = std::remove_cvref_t<decltype(member(*_block))>;
+                using Type            = unwrap_if_wrapped_t<RawType>;
+                const auto memberName = std::string(get_display_name(member));
+
+                if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
+                    _block->meta_information.value[memberName + "::description"]   = std::string(RawType::description());
+                    _block->meta_information.value[memberName + "::documentation"] = std::string(RawType::documentation());
+                    _block->meta_information.value[memberName + "::unit"]          = std::string(RawType::unit());
+                    _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
+                }
+
+                // detect whether field has one of the DEFAULT_TAGS signature
+                if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
+                    meta::tuple_for_each(
+                            [&memberName, this](auto &&default_tag) {
+                                if (default_tag.shortKey() == memberName) {
+                                    _auto_forward.emplace(memberName);
+                                }
+                            },
+                            gr::tag::DEFAULT_TAGS);
+                    _auto_update.emplace(memberName);
+                }
+            };
+            processMembers<TBlock>(iterate_over_member);
         }
     }
 
@@ -163,26 +144,31 @@ public:
         property_map ret;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
-            for (const auto &[localKey, localValue] : parameters) {
-                const auto &key                 = localKey;
-                const auto &value               = localValue;
-                bool        is_set              = false;
-                auto        iterate_over_member = [&, this](auto member) {
+            for (const auto &[key, value] : parameters) {
+                bool is_set              = false;
+                auto iterate_over_member = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
-                        if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
+                        const auto fieldName = std::string_view(get_display_name(member));
+                        if (fieldName == key && std::holds_alternative<Type>(value)) {
                             if (_auto_update.contains(key)) {
                                 _auto_update.erase(key);
                             }
+                            //_staged.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
                             is_set = true;
                         }
+                        if (fieldName == key && !std::holds_alternative<Type>(value)) {
+                            throw std::invalid_argument([&key, &value] { // lazy evaluation
+                                const std::size_t actual_index   = value.index();
+                                const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
+                                return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>",
+                                                   required_index, gr::meta::type_name<Type>());
+                            }());
+                        }
                     }
                 };
-                if constexpr (detail::HasBaseType<TBlock>) {
-                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, iterate_over_member);
-                }
-                refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
+                processMembers<TBlock>(iterate_over_member);
                 if (!is_set) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
@@ -222,22 +208,17 @@ public:
     void
     autoUpdate(const property_map &parameters, SettingsCtx = {}) override {
         if constexpr (refl::is_reflectable<TBlock>()) {
-            for (const auto &[localKey, localValue] : parameters) {
-                const auto &key                 = localKey;
-                const auto &value               = localValue;
-                auto        iterate_over_member = [&](auto member) {
+            for (const auto &[key, value] : parameters) {
+                auto iterate_over_member = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
-                    if constexpr (!std::is_const_v<Type> && is_writable(member) && (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || gr::meta::vector_type<Type>) ) {
-                        if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                    if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
+                        if (_auto_update.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             _staged.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
                         }
                     }
                 };
-                if constexpr (detail::HasBaseType<TBlock>) {
-                    refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, iterate_over_member);
-                }
-                refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
+                processMembers<TBlock>(iterate_over_member);
             }
         }
     }
@@ -407,10 +388,7 @@ public:
                     _active.insert_or_assign(get_display_name_const(member).str(), member(*_block));
                 }
             };
-            if constexpr (detail::HasBaseType<TBlock>) {
-                refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, iterate_over_member);
-            }
-            refl::util::for_each(refl::reflect<TBlock>().members, iterate_over_member);
+            processMembers<TBlock>(iterate_over_member);
         }
     }
 
