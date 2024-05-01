@@ -44,6 +44,16 @@ class BufferSkeleton {
             return BufferSkeleton(_buffer);
         };
 
+        [[nodiscard]] constexpr std::size_t
+        nSamplesConsumed() const noexcept {
+            return 0UZ;
+        };
+
+        [[nodiscard]] constexpr bool
+        isConsumeRequested() const noexcept {
+            return false;
+        }
+
         template<bool strict_check = true>
         [[nodiscard]] std::span<const U>
         get(const std::size_t /* n_requested = 0*/) const noexcept(!strict_check) {
@@ -83,19 +93,22 @@ class BufferSkeleton {
             return BufferSkeleton(_buffer);
         };
 
+        [[nodiscard]] constexpr std::size_t
+        nSamplesPublished() const noexcept {
+            return 0UZ;
+        };
+
         [[nodiscard]] constexpr auto
         reserve(std::size_t n) noexcept -> std::span<U> {
             return { &_buffer->_data[0], n };
         }
 
         constexpr void
-        publish(std::pair<std::size_t, std::make_signed<std::size_t>>, std::size_t) const { /* empty */
-        }
+        publish(std::pair<std::size_t, std::make_signed<std::size_t>>, std::size_t) const { /* empty */ }
 
         template<typename... Args, WriterCallback<U, Args...> Translator>
         void
-        publish(Translator && /* translator */, std::size_t /* n_slots_to_claim = 1 */, Args &&.../* args */) const noexcept { /* empty */
-        }                                                                                                                      // blocks until elements are available
+        publish(Translator && /* translator */, std::size_t /* n_slots_to_claim = 1 */, Args &&.../* args */) const noexcept { /* empty */ } // blocks until elements are available
 
         template<typename... Args, WriterCallback<U, Args...> Translator>
         [[nodiscard]] bool

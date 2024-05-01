@@ -78,6 +78,8 @@ concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
     { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.available() }      -> std::same_as<std::size_t>;
     { t.buffer() };
+    { t.nSamplesConsumed()}   -> std::same_as<std::size_t>;
+    { t.isConsumeRequested()} -> std::same_as<bool>;
 };
 
 template<class Fn, typename T, typename ...Args>
@@ -92,6 +94,7 @@ concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::s
     { t.reserve(n_items) };// TODO: reserve() returns CircularBuffer::buffer_writer::PublishableOutputRange
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
+    { t.nSamplesPublished()} -> std::same_as<std::size_t>;
 };
 
 template<class T, typename ...Args>

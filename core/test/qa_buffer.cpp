@@ -179,10 +179,13 @@ writeVaryingChunkSizes(Writer &writer) {
         constexpr auto kChunkSizes = std::array{ 1UZ, 2UZ, 3UZ, 5UZ, 7UZ, 42UZ };
         const auto     chunkSize   = std::min(kChunkSizes[iWrite % kChunkSizes.size()], N - pos);
         auto           out         = writer.reserve(chunkSize);
+        boost::ut::expect(boost::ut::eq(writer.nSamplesPublished(), 0UZ));
         for (auto i = 0UZ; i < out.size(); i++) {
             out[i] = { { 0, static_cast<int>(pos + i) } };
         }
+
         out.publish(out.size());
+        boost::ut::expect(boost::ut::eq(writer.nSamplesPublished(), out.size()));
         pos += chunkSize;
         ++iWrite;
     }
@@ -313,16 +316,19 @@ const boost::ut::suite CircularBufferTests = [] {
                 {
                     auto inSpan = reader.get(2);
                     expect(eq(inSpan.size(), 2UZ));
+                    expect(eq(reader.nSamplesConsumed(), 0UZ));
                     {
                         // Subsequent calls to get(), without calling consume() again, will return maximum of _nSamplesFirstGet (2)
                         auto inSpan2 = reader.get(3);
                         expect(eq(inSpan2.size(), 2UZ));
-
+                        expect(eq(reader.nSamplesConsumed(), 0UZ));
                         {
                             auto inSpan3 = reader.get(1);
                             expect(eq(inSpan3.size(), 1UZ));
+                            expect(eq(reader.nSamplesConsumed(), 0UZ));
                         }
                     }
+                    expect(eq(reader.nSamplesConsumed(), 0UZ));
                     expect(not inSpan.isConsumeRequested());
 
                     // full buffer: fill buffer need to fail/return 'false'
@@ -330,7 +336,9 @@ const boost::ut::suite CircularBufferTests = [] {
 
                     expect(inSpan.consume(0UZ));
                     expect(inSpan.isConsumeRequested());
+                    expect(eq(reader.nSamplesConsumed(), 0UZ));
                 }
+                expect(eq(reader.nSamplesConsumed(), 0UZ));
                 expect(not reader.isConsumeRequested());
                 expect(eq(reader.available(), buffer.size()));
 
@@ -349,14 +357,18 @@ const boost::ut::suite CircularBufferTests = [] {
                     expect(eq(inSpan5.size(), 3UZ));
                     expect(not inSpan5.isConsumeRequested());
                 }
+                expect(eq(reader.nSamplesConsumed(), 0UZ));
                 expect(not reader.isConsumeRequested());
                 expect(eq(reader.available(), buffer.size()));
 
+                std::size_t inSpan6Size{ 0UZ };
                 {
                     auto inSpan6 = reader.get<SpanReleasePolicy::ProcessAll>();
+                    inSpan6Size  = inSpan6.size();
                     expect(eq(inSpan6.size(), reader.available()));
                     expect(not inSpan6.isConsumeRequested());
                 }
+                expect(eq(reader.nSamplesConsumed(), inSpan6Size));
                 expect(not reader.isConsumeRequested());
                 expect(eq(reader.available(), 0UZ));
 
@@ -367,12 +379,16 @@ const boost::ut::suite CircularBufferTests = [] {
                 for (const int _blockSize : { 1, 2, 3, 5, 7, 42 }) {
                     auto blockSize = static_cast<std::size_t>(_blockSize);
                     for (std::size_t i = 0; i < buffer.size(); i++) {
+                        if (i != 0) {
+                            expect(eq(reader.nSamplesConsumed(), blockSize));
+                        }
                         expect(writer.try_publish([&counter](auto &writable) { std::iota(writable.begin(), writable.end(), counter += writable.size()); }, blockSize));
                         gr::ConsumableSpan auto readable = reader.get(blockSize);
                         expect(eq(readable.size(), blockSize));
                         expect(eq(readable.front(), static_cast<int>(counter)));
                         expect(eq(readable.back(), static_cast<int>(counter + blockSize - 1)));
                         expect(readable.consume(blockSize));
+                        expect(eq(reader.nSamplesConsumed(), 0UZ));
                     }
                 }
 
@@ -380,10 +396,12 @@ const boost::ut::suite CircularBufferTests = [] {
                 for (int k = 0; k < 3; k++) {
                     // case 0: write fully reserved data
                     auto data = writer.reserve(4);
+                    expect(eq(writer.nSamplesPublished(), 0UZ));
                     for (std::size_t i = 0; i < data.size(); i++) {
                         data[i] = static_cast<int>(i + 1);
                     }
                     data.publish(4);
+                    expect(eq(writer.nSamplesPublished(), 4UZ));
                     gr::ConsumableSpan auto read_data = reader.get();
                     expect(eq(read_data.size(), 4UZ));
                     for (std::size_t i = 0; i < data.size(); i++) {
@@ -395,10 +413,12 @@ const boost::ut::suite CircularBufferTests = [] {
                     // case 1: reserve more than actually written
                     const auto cursor_initial = buffer.cursor_sequence().value();
                     auto       data           = writer.reserve(4);
+                    expect(eq(writer.nSamplesPublished(), 0UZ));
                     for (std::size_t i = 0; i < data.size(); i++) {
                         data[i] = static_cast<int>(i + 1);
                     }
                     data.publish(2);
+                    expect(eq(writer.nSamplesPublished(), 2UZ));
                     const auto cursor_after = buffer.cursor_sequence().value();
                     expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
                     gr::ConsumableSpan auto read_data = reader.get();
@@ -410,14 +430,16 @@ const boost::ut::suite CircularBufferTests = [] {
                 }
                 for (int k = 0; k < 3; k++) {
                     // case 2: reserve using RAII token
-                    const auto         cursor_initial = buffer.cursor_sequence().value();
-                    auto               data           = writer.reserve(4);
-                    std::span<int32_t> span           = data; // tests conversion operator
+                    const auto cursor_initial = buffer.cursor_sequence().value();
+                    auto       data           = writer.reserve(4);
+                    expect(eq(writer.nSamplesPublished(), 0UZ));
+                    std::span<int32_t> span = data; // tests conversion operator
                     for (std::size_t i = 0; i < data.size(); i++) {
                         data[i] = static_cast<int>(i + 1);
                         expect(eq(data[i], span[i]));
                     }
                     data.publish(2);
+                    expect(eq(writer.nSamplesPublished(), 2UZ));
                     const auto cursor_after = buffer.cursor_sequence().value();
                     expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
                     gr::ConsumableSpan auto read_data = reader.get();
@@ -816,5 +838,4 @@ const boost::ut::suite HistoryBufferTest = [] {
 };
 
 int
-main() { /* not needed for UT */
-}
+main() { /* not needed for UT */ }
