@@ -8,9 +8,8 @@
 # GNU Radio 4.0 prototype
 
 > [!IMPORTANT]
-> This is the repository containing the prototype of GNU Radio 4.0.
-> It is currently in a beta state and not ready for production use.
-> The main organization and repository can be found [here](https://github.com/gnuradio/gnuradio)
+> This is the GNU Radio 4.0 (GR4) prototype and is currently in a beta state. For production use, 
+> please use the GNU Radio 3.X (GR3) version found [here](https://github.com/gnuradio/gnuradio).
 > Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/graph-prototype/issues), 
 > and bug reports for GNU Radio 3.X should be submitted [here](https://github.com/gnuradio/gnuradio/issues)
 
@@ -33,7 +32,7 @@ energy particle physics, astrophysics, radio astronomy and more!
 
 ## What's New in GNU Radio 4.0?
 
-- **Seamless Transition by Maintaining GR3 Paradigms**: User-defined blocks and flow-graphs accessible graphically, via Python, and using C++.
+- **Smooth Transition with Updated GR3 Paradigms**: User-defined blocks and flow-graphs continue to be accessible graphically, through Python, and using C++. Notable simplifications and streamlining have been made to the underlying low-level architecture and design, as described [here](https://github.com/fair-acc/graph-prototype/tree/main/core).
 - **Enhanced Data Types**: Support for fundamental data types (i.e. ints, floats, complex numbers) as well as more complex, structured, and user-defined custom types.
 - **Simplified Block Development**: Modern C++ and computing standards enable rapid development.
 - **High-Performance Signal-Processing**: Significant performance boosts from lock-free buffers, compile-time optimisations, and built-in SIMD & SYCL support.
@@ -41,15 +40,20 @@ energy particle physics, astrophysics, radio astronomy and more!
 - **Recursive Directed Graphs**: Support for basic feedback loops.
 - **Broadened Hardware Support**: Ready for CPUs, MCUs, GPUs, and aspirationally FPGAs.
 - **Bridging R&D and Industrial Use**: Aims to bridge the gap between academics using GNU Radio for research, hobbyists using it for prototyping and safe operational use by research organizations and industry.
-- [**More on architecture and design**](https://github.com/fair-acc/graph-prototype/tree/main/core)
 
 ## License and Copyright
-Any code contributions going into GNU Radio will become part of an LGPL-licensed, open source repository, and copyright assignment remains with the author or organization supporting the work.
 
-Unless otherwise noted: [SPDX-License-Identifier: LGPL-3.0-or-later](https://spdx.org/licenses/LGPL-3.0-or-later.html)
-Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
+Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-or-later
+All code contributions to GNU Radio will be integrated into a library under the LGPL, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
+For details on how to contribute, please consult: CONTRIBUTING.md
+
+Copyright (C) 2001-September 2020 GNU Radio Project -- managed by Free Software Foundation, Inc.
+Copyright (C) September 2020-2024 GNU Radio Project -- managed by SETI Institute
+Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany
+
 
 ## Acknowledgements
+
 The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology. 
 We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
 
