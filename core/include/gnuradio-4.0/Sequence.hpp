@@ -26,7 +26,7 @@ using std::hardware_destructive_interference_size;
 inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
+static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event

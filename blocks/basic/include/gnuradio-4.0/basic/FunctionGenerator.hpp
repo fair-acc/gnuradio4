@@ -201,9 +201,7 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
 
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) {
-        fmt::println("settingsChanged:\n");
         if (new_settings.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
-            fmt::println("settingsChanged:\nnew: {}\n", new_settings);
             const auto funcSettings = bestMatch(trigger_meta_info);
             if (funcSettings.has_value()) {
                 applyFunctionSettings(funcSettings.value());

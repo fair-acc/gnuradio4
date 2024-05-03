@@ -284,7 +284,10 @@ private:
     void
     start() {
         _stop_requested = false;
-        _graph.forEachBlock([this](auto &block) { this->emitErrorMessageIfAny("start() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
+        _graph.forEachBlock([this](auto &block) {
+            this->emitErrorMessageIfAny("start() -> LifecycleState", block.changeState(lifecycle::RUNNING));
+            for_each_port([](auto &port) {port.publishPendingTags(); }, outputPorts<PortType::STREAM>(this));
+        });
         if constexpr (executionPolicy() == singleThreaded) {
             static_cast<Derived *>(this)->runSingleThreaded();
         } else {

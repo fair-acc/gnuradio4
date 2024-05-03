@@ -67,8 +67,8 @@ const boost::ut::suite TagTests = [] {
         expect(eq(static_cast<gr::Size_t>(sink2.n_samples_produced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2.n_samples_produced, n_samples);
 
         // TODO: last decimator/interpolator + stride addition seems to break the limiting the input samples to the min of available vs. n_samples-until next tags
-        // expect(equal_tag_lists(src.tags, sink1.tags)) << "sink1 (USE_PROCESS_ONE) did not receive the required tags";
-        // expect(equal_tag_lists(src.tags, sink2.tags)) << "sink2 (USE_PROCESS_BULK) did not receive the required tags";
+        // expect(equal_tag_lists(src.tags, sink1._tags)) << "sink1 (USE_PROCESS_ONE) did not receive the required tags";
+        // expect(equal_tag_lists(src.tags, sink2._tags)) << "sink2 (USE_PROCESS_BULK) did not receive the required tags";
         if (verbose) {
             fmt::println("finished ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T>-provided thread" : "user-provided thread");
         }
@@ -185,6 +185,13 @@ const boost::ut::suite TagTests = [] {
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
+        expect(eq(sink._tags.size(), clockSrc.tags.size())) << [&]() {
+          std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
+          for (const auto &tag : sink._tags) {
+              ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+          }
+          return ret;
+        }();
 
         std::vector<double> xValues(N);
         std::vector<double> yValues(sink.samples.begin(), sink.samples.end());
@@ -260,6 +267,13 @@ const boost::ut::suite TagTests = [] {
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
+        expect(eq(sink._tags.size(), 9UZ)) << [&]() {
+          std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
+          for (const auto &tag : sink._tags) {
+              ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+          }
+          return ret;
+        }();
 
         std::vector<double> xValues(N);
         std::vector<double> yValues(sink.samples.begin(), sink.samples.end());

@@ -27,7 +27,7 @@ struct fmt::formatter<gr::Tag> {
 
     template<typename FormatContext>
     constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", tag.index);
+        return fmt::format_to(ctx.out(), "{} -> {}", tag.index, tag.map);
     }
 };
 
@@ -344,7 +344,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(samplesSeen2, static_cast<std::size_t>(kSamples)));
         const auto& [metadataTags, nonMetadataTags] = extractMetadataTags(receivedTags);
         expect(eq(nonMetadataTags.size(), srcTags.size()));
-        expect(eq(indexesMatch(nonMetadataTags, srcTags), true)) << fmt::format("{} != {}", formatList(receivedTags), formatList(srcTags));
+        expect(indexesMatch(nonMetadataTags, srcTags)) << fmt::format("{} != {}", formatList(receivedTags), formatList(srcTags));
         const auto metadata = latestMetadata(metadataTags);
         expect(eq(metadata.signal_name.value_or("<unset>"), "test source"s));
         expect(eq(metadata.signal_unit.value_or("<unset>"), "test unit"s));
