@@ -264,6 +264,12 @@ namespace gr {
  */
 struct Async {};
 
+template<typename T>
+concept ConsumablePortSpan = ConsumableSpan<T> && requires(T span) {
+    requires ConsumableSpan<std::remove_cvref_t<decltype(span.tags)>>;
+    { *span.tags.begin() } -> std::same_as<const gr::Tag&>;
+};
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -313,12 +319,13 @@ struct Port {
     static constexpr fixed_string  Name       = portName;
 
     // dependent types
-    using ReaderType    = decltype(std::declval<BufferType>().new_reader());
-    using WriterType    = decltype(std::declval<BufferType>().new_writer());
-    using IoType        = std::conditional_t<kIsInput, ReaderType, WriterType>;
-    using TagReaderType = decltype(std::declval<TagBufferType>().new_reader());
-    using TagWriterType = decltype(std::declval<TagBufferType>().new_writer());
-    using TagIoType     = std::conditional_t<kIsInput, TagReaderType, TagWriterType>;
+    using ReaderType        = decltype(std::declval<BufferType>().new_reader());
+    using WriterType        = decltype(std::declval<BufferType>().new_writer());
+    using IoType            = std::conditional_t<kIsInput, ReaderType, WriterType>;
+    using TagReaderType     = decltype(std::declval<TagBufferType>().new_reader());
+    using TagWriterType     = decltype(std::declval<TagBufferType>().new_writer());
+    using TagIoType         = std::conditional_t<kIsInput, TagReaderType, TagWriterType>;
+    using TagReaderSpanType = decltype(std::declval<TagReaderType>().get());
 
     // public properties
     constexpr static bool kIsSynch      = !std::disjunction_v<std::is_same<Async, Attributes>...>;
@@ -334,10 +341,46 @@ struct Port {
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
     PortMetaInfo metaInfo{};
 
+    template<SpanReleasePolicy spanReleasePolicy>
+    using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
+
+    template<SpanReleasePolicy spanReleasePolicy>
+    struct ConsumablePortInputRange : public ReaderSpanType<spanReleasePolicy> {
+        TagReaderSpanType      tags;
+        Tag::signed_index_type streamIndex;
+
+        ConsumablePortInputRange(std::size_t nSamples, ReaderType& streamReader, TagReaderSpanType _tags, Tag::signed_index_type _currentStreamOffset) : ReaderSpanType<spanReleasePolicy>(streamReader.template get<spanReleasePolicy>(nSamples)), tags(_tags), streamIndex{_currentStreamOffset} {};
+
+        ~ConsumablePortInputRange() {
+            if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
+                if (tags.isConsumeRequested()) {                           // the user has already manually consumed tags
+                    return;
+                }
+                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::getConsumeRequested() == 0) || this->empty()) {
+                    return; // no samples to be consumed -> do not consume any tags
+                }
+                std::size_t tagsToConsume = 0;
+                for (auto& t : tags) {
+                    if (t.index <= streamIndex) {
+                        tagsToConsume++;
+                    } else {
+                        break;
+                    }
+                }
+                bool result = tags.tryConsume(tagsToConsume);
+            }
+        }
+    };
+
+    static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
+
+    std::span<const Tag>   tags;        // Range of tags for the currently processed stream range; only used in input ports
+    Tag::signed_index_type streamIndex; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
+
 private:
     IoType    _ioHandler    = newIoHandler();
     TagIoType _tagIoHandler = newTagIoHandler();
-    Tag       _cachedTag{};
+    Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
     [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (kIsInput) {
@@ -544,6 +587,23 @@ public:
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
     }
 
+    template<SpanReleasePolicy spanReleasePolicy>
+    ConsumablePortInputRange<spanReleasePolicy> get(std::size_t nSamples)
+    requires(kIsInput)
+    {
+        auto taggedStream = ConsumablePortInputRange<spanReleasePolicy>(nSamples, streamReader(), getTags(static_cast<gr::Tag::signed_index_type>(nSamples)), streamReader().position());
+        tags              = std::span(taggedStream.tags.data(), taggedStream.tags.size());
+        streamIndex       = streamReader().position();
+        return taggedStream;
+    }
+
+    template<SpanReleasePolicy TSpanReleasePolicy>
+    auto reserve(std::size_t n_samples)
+    requires(kIsOutput)
+    {
+        return streamWriter().template reserve<TSpanReleasePolicy>(n_samples);
+    }
+
     /**
      * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
      */
@@ -551,13 +611,13 @@ public:
     requires(kIsInput)
     {
         const auto  readPos           = streamReader().position();
-        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
+        const auto  inputTags         = tagReader().get(); // N.B. returns all old/available/pending tags
         std::size_t nTagsProcessed    = 0UZ;
         bool        properTagDistance = false;
 
-        for (const Tag& tag : tags) {
+        for (const Tag& tag : inputTags) {
             const auto relativeTagPosition = (tag.index - readPos); // w.r.t. present stream reader position
-            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition <= untilOffset;
+            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition < untilOffset;
             if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
                 nTagsProcessed++;
                 if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
@@ -570,14 +630,8 @@ public:
         return tagReader().get(nTagsProcessed);
     }
 
-    inline const Tag getTag(Tag::signed_index_type untilOffset = 0)
-    requires(kIsInput)
-    {
-        const auto readPos = streamReader().position();
-        if (_cachedTag.index == readPos && readPos >= 0) {
-            return _cachedTag;
-        }
-        _cachedTag.reset();
+    inline const Tag getMergedTag() {
+        Tag result{};
 
         auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
             assert(&sourceMap != &destinationMap);
@@ -586,12 +640,14 @@ public:
             }
         };
 
-        const auto tags  = getTags(untilOffset);
-        _cachedTag.index = readPos;
-        std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag& tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
-        std::ignore = tags.consume(tags.size());
+        result.index = -1;
+        std::ranges::for_each(tags, [&mergeSrcMapInto, &result, this](const Tag& tag) {
+            if (tag.index <= streamIndex) {
+                mergeSrcMapInto(tag.map, result.map);
+            }
+        });
 
-        return _cachedTag;
+        return result;
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
@@ -612,10 +668,12 @@ public:
         if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
             return false;
         }
-        auto outTags     = tagWriter().reserve(1UZ);
-        outTags[0].index = _cachedTag.index;
-        outTags[0].map   = _cachedTag.map;
-        outTags.publish(1UZ);
+        {
+            auto outTags     = tagWriter().reserve(1UZ);
+            outTags[0].index = _cachedTag.index;
+            outTags[0].map   = _cachedTag.map;
+            outTags.publish(1UZ);
+        }
 
         _cachedTag.reset();
         return true;
@@ -623,10 +681,12 @@ public:
 
 private:
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::signed_index_type tagOffset) noexcept {
+    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::signed_index_type tagOffset) noexcept
+    requires(kIsOutput)
+    {
         const auto newTagIndex = tagOffset < 0 ? tagOffset : streamWriter().position() + tagOffset;
 
-        if (tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
+        if (isConnected() && tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
             publishPendingTags();
         }
         _cachedTag.index = newTagIndex;
@@ -640,7 +700,7 @@ private:
             }
         }
 
-        if (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM)) { // force tag publishing for explicitly published tags or EOS
+        if (isConnected() && (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM))) { // force tag publishing for explicitly published tags or EOS
             publishPendingTags();
         }
     }

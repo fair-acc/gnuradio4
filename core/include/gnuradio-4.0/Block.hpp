@@ -568,7 +568,7 @@ public:
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
                 if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                    publishTag(applyResult.forwardParameters);
+                    publishTag(applyResult.forwardParameters, 0);
                 }
                 notifyListeners(block::property::kSetting, settings().get());
             }
@@ -712,14 +712,12 @@ public:
                     auto processOneRange = [nSamples]<typename Out>(Out& out) {
                         if constexpr (Out::isMultiThreadedStrategy()) {
                             if (!out.isFullyPublished()) {
-                                fmt::print(stderr, "Block::publishSamples - did not publish all samples for MultiThreadedStrategy\n");
                                 std::abort();
                             }
                         }
                         if (!out.isPublished()) {
                             using enum gr::SpanReleasePolicy;
                             if constexpr (Out::spanReleasePolicy() == Terminate) {
-                                fmt::print(stderr, "Block::publishSamples - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                 std::abort();
                             } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
                                 out.publish(nSamples);
@@ -749,7 +747,6 @@ public:
                         if (!in.isConsumeRequested()) {
                             using enum gr::SpanReleasePolicy;
                             if constexpr (In::spanReleasePolicy() == Terminate) {
-                                fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                 std::abort();
                             } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
                                 success = success && in.consume(nSamples);
@@ -801,6 +798,12 @@ public:
 
     constexpr void forwardTags() noexcept {
         if (input_tags_present()) {
+            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                for_each_port([this](PortLike auto& outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
+            }
+            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
+                requestStop();
+            }
             // clear temporary cached input tags after processing - won't be needed after this
             _mergedInputTag.map.clear();
         }
@@ -817,7 +820,7 @@ public:
      */
     constexpr void updateInputAndOutputTags(std::size_t untilOffset = 0) noexcept {
         for_each_port(
-            [untilOffset, this]<typename Port>(Port& input_port) noexcept {
+            [untilOffset, this]<PortLike TPort>(TPort& input_port) noexcept {
                 auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                     assert(&sourceMap != &destinationMap);
                     for (const auto& [key, value] : sourceMap) {
@@ -825,16 +828,12 @@ public:
                     }
                 };
 
-                const Tag mergedPortTags = input_port.getTag(static_cast<gr::Tag::signed_index_type>(untilOffset));
-                mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
+                mergeSrcMapInto(input_port.getMergedTag().map, _mergedInputTag.map);
             },
             inputPorts<PortType::STREAM>(&self()));
 
         if (!mergedInputTag().map.empty()) {
             settings().autoUpdate(mergedInputTag()); // apply tags as new settings if matching
-            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                for_each_port([this](PortLike auto& outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
-            }
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
                 requestStop();
             }
@@ -850,7 +849,9 @@ public:
             checkBlockParameterConsistency();
 
             if (!applyResult.forwardParameters.empty()) {
-                publishTag(applyResult.forwardParameters, 0);
+                for (auto& [key, value] : applyResult.forwardParameters) {
+                    _mergedInputTag.insert_or_assign(key, value);
+                }
             }
 
             settings()._changed.store(false);
@@ -867,18 +868,18 @@ public:
             [sync_samples]<typename PortOrCollection>(PortOrCollection& output_port_or_collection) noexcept {
                 auto process_single_port = [&sync_samples]<typename Port>(Port&& port) {
                     using enum gr::SpanReleasePolicy;
-                    if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                        if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                            return std::forward<Port>(port).streamReader().template get<ProcessAll>(sync_samples);
-                        } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                            return std::forward<Port>(port).streamWriter().template reserve<ProcessAll>(sync_samples);
+                    if constexpr (std::remove_cvref_t<Port>::kIsInput) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                            return std::forward<Port>(port).template get<ProcessAll>(sync_samples);
+                        } else {
+                            // return std::forward<Port>(port).template get<ProcessNone>(std::max(port.min_samples, std::min(port.streamReader().available(), port.max_samples)));
+                            return std::forward<Port>(port).template get<ProcessNone>(port.streamReader().available());
                         }
-                    } else {
-                        // for the Async port get/reserve all available samples
-                        if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                            return std::forward<Port>(port).streamReader().template get<ProcessNone>(port.streamReader().available());
-                        } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                            return std::forward<Port>(port).streamWriter().template reserve<ProcessNone>(port.streamWriter().available());
+                    } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                            return std::forward<Port>(port).template reserve<ProcessAll>(sync_samples);
+                        } else {
+                            return std::forward<Port>(port).template reserve<ProcessNone>(port.streamWriter().available());
                         }
                     }
                 };
@@ -900,6 +901,11 @@ public:
 
     inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
         for_each_port([&tag_data, tagOffset](PortLike auto& outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
+    }
+
+    inline constexpr void publishEoS() noexcept {
+        const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, outPort.streamWriter().nSamplesPublished()); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -1216,10 +1222,16 @@ protected:
 
         if constexpr (!Resampling::kEnabled) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
+            if (n < minSyncIn) {
+                return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+            }
             return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
         }
         if (denominator == 1UL && numerator == 1UL) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
+            if (n < minSyncIn) {
+                return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+            }
             return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
         }
         std::size_t nResamplingChunks;
@@ -1255,7 +1267,17 @@ protected:
 
     template<typename TIn, typename TOut>
     gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, inputReaderTuple);
+        auto tempInputSpanStorage = std::apply(
+            []<typename... PortReader>(PortReader&... args) {
+                return std::tuple{([](auto& a) {
+                    if constexpr (gr::meta::array_or_vector_type<PortReader>) {
+                        return std::span{a.data(), a.size()};
+                    } else {
+                        return a;
+                    }
+                }(args))...};
+            },
+            inputReaderTuple);
 
         auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, outputReaderTuple);
 
@@ -1442,9 +1464,11 @@ protected:
         auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
         std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
         const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore)});
+        const auto  nextTagLimit                                              = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
+        const auto  ensureMinimalDecimation                                   = nextTagLimit >= denominator ? nextTagLimit : static_cast<long unsigned int>(denominator); // ensure to process at least one denominator (may shift tags)
+        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
         const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
-        const auto [resampledIn, resampledOut]                                = computeResampling(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
+        const auto [resampledIn, resampledOut]                                = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish);
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
             updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
@@ -1453,27 +1477,14 @@ protected:
         }
         // return if there is no work to be performed // todo: add eos policy
         if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
-            if (asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
+            if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state()) || asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
                 emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
-                updateInputAndOutputTags();
-                forwardTags();
+                publishEoS();
                 this->setAndNotifyState(lifecycle::State::STOPPED);
-                return {requested_work, 0UZ, work::Status::DONE};
-            }
-            if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
-                emitErrorMessageIfAny("workInternal(): REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                updateInputAndOutputTags();
-                applyChangedSettings();
-                forwardTags();
                 return {requested_work, 0UZ, work::Status::DONE};
             }
             return {requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS};
         }
-        // process stream tags
-        updateInputAndOutputTags();
-        applyChangedSettings();
-        // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
         const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
@@ -1484,10 +1495,44 @@ protected:
         std::size_t  processedOut = limitByFirstTag ? 1 : resampledOut;
         const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+
+        updateInputAndOutputTags();
+        applyChangedSettings();
+
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&ret, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) {
                 ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
             });
+            meta::tuple_for_each(
+                [&processedIn]<typename TIn>(TIn& in) {
+                    if constexpr (ConsumableSpan<TIn>) {
+                        if (in.isConsumeRequested()) {
+                            processedIn = std::min(processedIn, in.getConsumeRequested());
+                        }
+                    } else if constexpr (ConsumableSpan<typename TIn::value_type>) {
+                        for (auto& span : in) {
+                            if (span.isConsumeRequested()) {
+                                processedIn = std::min(processedIn, span.getConsumeRequested());
+                            }
+                        }
+                    }
+                },
+                inputSpans);
+            meta::tuple_for_each(
+                [&processedOut]<typename TOut>(TOut& out) {
+                    if constexpr (PublishableSpan<TOut>) {
+                        if (out.isPublished()) {
+                            processedOut = std::min(processedOut, out.samplesToPublish());
+                        }
+                    } else if constexpr (PublishableSpan<typename TOut::value_type>) {
+                        for (auto& span : out) {
+                            if (span.isPublished()) {
+                                processedOut = std::min(processedOut, span.samplesToPublish());
+                            }
+                        }
+                    }
+                },
+                outputSpans);
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
                 emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
@@ -1521,10 +1566,11 @@ protected:
         } else { // block does not define any valid processing function
             static_assert(gr::meta::always_false<gr::traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
         }
-        forwardTags();
+        if (processedIn > 0 && processedOut > 0) {
+            forwardTags();
+        }
         if (lifecycle::isShuttingDown(this->state())) {
             emitErrorMessageIfAny("isShuttingDown -> STOPPED", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-            updateInputAndOutputTags(processedIn);
             applyChangedSettings();
             ret         = work::Status::DONE;
             processedIn = 0UZ;
@@ -1534,7 +1580,6 @@ protected:
         const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
         bool       success;
         if (inputSamplesToConsume > 0) {
-            updateInputAndOutputTags(inputSamplesToConsume); // apply all tags in the skipped data range
             success = consumeReaders(inputSamplesToConsume, inputSpans);
         } else {
             success = consumeReaders(processedIn, inputSpans);
@@ -1542,8 +1587,9 @@ protected:
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (ret == work::Status::DONE) {
             this->setAndNotifyState(lifecycle::State::STOPPED);
-            publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
+            publishEoS();
         }
+        for_each_port([](PortLike auto& outPort) { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
         return {requested_work, processedIn, success ? ret : work::Status::ERROR};
     } // end: work_return_t workInternal() noexcept { ..}
 
@@ -1605,7 +1651,7 @@ public:
             if constexpr (!useIoThread) {
                 const bool blockIsActive = lifecycle::isActive(this->state());
                 if (!blockIsActive) {
-                    publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
+                    publishEoS();
                     ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
                 }
             }
@@ -1746,7 +1792,6 @@ inline void checkBlockContracts() {
     if constexpr (requires { &TDerived::work; }) {
         // N.B. implementing this is still allowed for workaround but should be discouraged as default API since this often leads to
         // important variants not being implemented such as lifecycle::State handling, Tag forwarding, etc.
-        fmt::println(stderr, "DEPRECATION WARNING: block {} implements a raw 'gr::work::Result work(std::size_t requested_work)' ", shortTypeName.template operator()<TDecayedBlock>());
         return;
     }
 

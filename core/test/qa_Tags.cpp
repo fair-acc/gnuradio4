@@ -11,6 +11,53 @@
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+template<>
+struct fmt::formatter<gr::Tag> {
+    template<typename ParseContext>
+    constexpr auto
+    parse(ParseContext &ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    constexpr auto
+    format(const gr::Tag &tag, FormatContext &ctx) const {
+        return fmt::format_to(ctx.out(), "  {}->{{ {} }}\n", tag.index, tag.map);
+    }
+};
+
+
+template<typename T>
+struct RealignTagsToChunks : gr::Block<RealignTagsToChunks<T>> {
+    using Description = gr::Doc<R""(A block that forwards samples and tags, moving tags onto the first sample of the current
+or next chunk, whichever is closer. Also adds an "offset" key to the tag map signifying how much it was moved.)"">;
+    //gr::PortIn<T, Doc<"In">, RequiredSamples<1024, 1024, true>> inPort;
+    gr::PortIn<T, gr::Doc<"In">, gr::RequiredSamples<24, 24, false>> inPort;
+    //gr::PortIn<T, Doc<"In">> inPort;
+    gr::PortOut<T> outPort;
+    double sampling_rate = 1.0;
+    constexpr static gr::TagPropagationPolicy tag_policy = gr::TagPropagationPolicy::TPP_DONT;
+
+    gr::work::Status processBulk(const gr::ConsumablePortSpan auto inSamples, gr::PublishableSpan auto &outSamples) {
+        std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
+        std::size_t tagsForwarded = 0;
+        for (gr::Tag tag : inSamples.tags) {
+            if (tag.index < (inPort.streamIndex + (static_cast<gr::Tag::signed_index_type>(inSamples.size()) + 1) / 2)) {
+                tag.insert_or_assign("offset", sampling_rate * (tag.index - inPort.streamIndex));
+                outPort.publishTag(tag.map, 0);
+                tagsForwarded++;
+            } else {
+                break;
+            }
+        }
+        inSamples.tags.consume(tagsForwarded);
+        return gr::work::Status::OK;
+    }
+};
+ENABLE_REFLECTION_FOR_TEMPLATE(RealignTagsToChunks, inPort, outPort);
+
+static_assert(gr::HasProcessBulkFunction<RealignTagsToChunks<float>>);
+
 namespace gr::testing {
 static_assert(HasProcessOneFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
 static_assert(not HasProcessBulkFunction<TagSource<int, ProcessFunction::USE_PROCESS_ONE>>);
@@ -165,6 +212,37 @@ const boost::ut::suite TagPropagation = [] {
     "TagSource<float, USE_PROCESS_BULK>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
 
     "TagSource<float, USE_PROCESS_ONE>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_ONE>(true); };
+
+    "CustomTagHandling"_test = []() {
+        gr::Size_t         n_samples = 1024;
+        Graph              testGraph;
+        const property_map srcParameter = { { "n_samples_max", n_samples }, { "name", "TagSource" }, { "signal_name", "tagStream" }, { "verbose_console", true } };
+        auto &src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
+        src._tags = {
+                { 0,    { { "key", "value@0"    }, { "key0", "value@0"    }} },       //
+                { 1,    { { "key", "value@1"    }, { "key1", "value@1"    }} },       //
+                { 100,  { { "key", "value@100"  }, { "key2", "value@100"  }} },   //
+                { 150,  { { "key", "value@150"  }, { "key3", "value@150"  }} },   //
+                { 1000, { { "key", "value@1000" }, { "key4", "value@1000" }} }, //
+                { 1001, { { "key", "value@1001" }, { "key5", "value@1001" }} }, //
+                { 1002, { { "key", "value@1002" }, { "key6", "value@1002" }} }, //
+                { 1023, { { "key", "value@1023" }, { "key7", "value@1023" }} }  //
+        };
+        expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
+        auto &realign = testGraph.emplaceBlock<RealignTagsToChunks<float>>();
+        auto &sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>( { { "name", "TagSinkN" }, { "n_samples_expected", n_samples }, { "verbose_console", true } });
+
+        // [ TagSource ] -> [ tag realign block ] -> [ TagSink ]
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"inPort">(realign)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outPort">(realign).to<"in">(sink)));
+
+        scheduler::Simple sched{ std::move(testGraph) };
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
+        expect(eq(sink.n_samples_produced, n_samples)) << "sinkOne did not consume enough input samples";
+        expect(eq(sink._tags.size(), 4));
+    };
 };
 
 const boost::ut::suite RepeatedTags = [] {
