@@ -17,7 +17,7 @@ We welcome all forms of contributions from the community. Please read the follow
 
 ### DCO Signing
 
-Any code contributions going into GNU Radio will become part of a GPL-licensed, open source repository. It is therefore imperative that code submissions belong to the authors, and that submitters have the authority to merge that code into the public GNU Radio codebase.
+Any code contributions going into GNU Radio will become part of a LGPL-licensed, open source repository. It is therefore imperative that code submissions belong to the authors, and that submitters have the authority to merge that code into the public GNU Radio codebase.
 
 For that purpose, we use the [Developer's Certificate of Origin](DCO.txt). It is the same document used by other projects. Signing the DCO states that there are no legal reasons to not merge your code.
 
