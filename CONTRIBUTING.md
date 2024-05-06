@@ -15,6 +15,14 @@ examples or if you cannot find anything that fits your use-case use GitHub's dis
 ## Contributing code and content
 We welcome all forms of contributions from the community. Please read the following guidelines to maximise the chances of your PR being merged.
 
+### DCO Signing
+
+Any code contributions going into GNU Radio will become part of a LGPL-licensed, open source repository. It is therefore imperative that code submissions belong to the authors, and that submitters have the authority to merge that code into the public GNU Radio codebase.
+
+For that purpose, we use the [Developer's Certificate of Origin](DCO.txt). It is the same document used by other projects. Signing the DCO states that there are no legal reasons to not merge your code.
+
+To sign the DCO, suffix your git commits with a "Signed-off-by" line. When using the command line, you can use `git commit -s` to automatically add this line. If there were multiple authors of the code, or other types of stakeholders, make sure that all are listed, each with a separate Signed-off-by line.
+
 ### Communication
  - Before starting work on a feature, check if there isn't already an examples in the 'samples' sub-module.
    If not, then please open an issue on GitHub describing the proposed feature. We want to make sure any feature work goes smoothly. 

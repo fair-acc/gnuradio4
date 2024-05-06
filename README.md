@@ -1,30 +1,66 @@
+<p align="center">
+<img src="docs/logo.png" width="65%" />
+</p>
+
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
 ![CMake](https://github.com/fair-acc/graph-prototype/workflows/CMake/badge.svg)
-# GNURadio 4.0 prototype
-A small proof-of-concept for evaluating efficient [directed graph](https://en.wikipedia.org/wiki/Directed_graph)-based algorithms, notably required block 
-('nodes' in graph-theory) structures, scheduling interfaces, and partial compile-time merging of
-[directed acyclic](https://en.wikipedia.org/wiki/Directed_acyclic_graph) as well as 
-[cyclic graphs](https://en.wikipedia.org/wiki/Feedback_arc_set) (aka. feedback loops).  
 
-The expressed goal is to guide the low-level API design and functionality for the upcoming
-[GNU Radio 4.0](https://github.com/gnuradio/gnuradio/tree/dev-4.0) release.
+# GNU Radio 4.0 prototype
 
-A [single header version](https://raw.githubusercontent.com/fair-acc/graph-prototype/single-header/singleheader/Graph.hpp)
-is provided in the `singleheader/`subdirectory of the single-header branch.
-If you want to locally regenerate the single header file, just follow
-the [CI step](https://github.com/fair-acc/graph-prototype/blob/main/.github/workflows/single-header.yml#L38-L41).
-It can be used on [compiler-explorer](https://compiler-explorer.com/z/EG7Eb9K83) with `-std=c++23 -O3` compiler options.
+> [!IMPORTANT]
+> This is the GNU Radio 4.0 (GR4) prototype and is currently in a beta state. For production use, 
+> please use the GNU Radio 3.X (GR3) version found [here](https://github.com/gnuradio/gnuradio).
+> Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/graph-prototype/issues), 
+> and bug reports for GNU Radio 3.X should be submitted [here](https://github.com/gnuradio/gnuradio/issues)
 
-## Copyright & License
-Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany<br/>
-Unless otherwise noted: [SPDX-License-Identifier: LGPL-3.0-or-later](https://spdx.org/licenses/LGPL-3.0-or-later.html)
+GNU Radio is a free & open-source signal processing runtime and signal processing
+software development toolkit. Originally developed for use with software-defined
+radios and for simulating wireless communications, it's robust capabilities have
+led to adoption in hobbyist, academic, and commercial environments. GNU Radio has
+found use in software-defined radio, digital communications, nuclear physics, high-
+energy particle physics, astrophysics, radio astronomy and more!
 
-### Contributors
+## Helpful Links
+
+* [GNU Radio Website](https://gnuradio.org)
+* [GNU Radio Wiki](https://wiki.gnuradio.org/)
+* [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/graph-prototype/issues)
+* [View the GNU Radio Mailing List Archive](https://lists.gnu.org/archive/html/discuss-gnuradio/)
+* [Subscribe to the GNU Radio Mailing List](https://lists.gnu.org/mailman/listinfo/discuss-gnuradio)
+* [GNU Radio Chatroom on Matrix](https://chat.gnuradio.org/)
+  * Specifically for discussions related to GNURadio 4.0 join the [#architecture channel](https://matrix.to/#/#architecture:gnuradio.org)
+* [Contributors and Affiliated Organizations](https://github.com/gnuradio/gnuradio/blob/main/CONTRIBUTORS.md)
+
+## What's New in GNU Radio 4.0?
+
+- **Smooth Transition with Updated GR3 Paradigms**: User-defined blocks and flow-graphs continue to be accessible graphically, through Python, and using C++. Notable simplifications and streamlining have been made to the underlying low-level architecture and design, as described [here](https://github.com/fair-acc/graph-prototype/tree/main/core).
+- **Enhanced Data Types**: Support for fundamental data types (i.e. ints, floats, complex numbers) as well as more complex, structured, and user-defined custom types.
+- **Simplified Block Development**: Modern C++ and computing standards enable rapid development.
+- **High-Performance Signal-Processing**: Significant performance boosts from lock-free buffers, compile-time optimisations, and built-in SIMD & SYCL support.
+- **Flexible Scheduling**: An updated scheduling method improves performance and enables user-defined schedulers to balance throughput, parallelism, and latency depending on the application.
+- **Recursive Directed Graphs**: Support for basic feedback loops.
+- **Broadened Hardware Support**: Ready for CPUs, MCUs, GPUs, and aspirationally FPGAs.
+- **Bridging R&D and Industrial Use**: Aims to bridge the gap between academics using GNU Radio for research, hobbyists using it for prototyping and safe operational use by research organizations and industry.
+
+## License and Copyright
+
+Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-or-later
+All code contributions to GNU Radio will be integrated into a library under the LGPL, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
+For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
+
+Copyright (C) 2001-September 2020 GNU Radio Project -- managed by Free Software Foundation, Inc.  
+Copyright (C) September 2020-2024 GNU Radio Project -- managed by SETI Institute  
+Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany
+
+
+## Acknowledgements
+
+The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology. 
+We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
+
  * Ivan Čukić <ivan.cukic@kdab.com>
  * Matthias Kretz <M.Kretz@GSI.de>
  * Alexander Krimm, <A.Krimm@GSI.de> 
+ * Semen Lebedev, <S.Lebedev@GSI.de>
+ * Frank Osterfeld, <Frank.Osterfeld@kdab.com>
  * Ralph J. Steinhagen, <R.Steinhagen@GSI.de>
-
-### Acknowledgements
-...
-
