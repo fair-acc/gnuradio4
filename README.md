@@ -1,4 +1,7 @@
 <p align="center">
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-)
+<!-- ALL-CONTRIBUTORS-BADGE:END -->
 <img src="docs/logo.png" width="65%" />
 </p>
 
@@ -64,3 +67,24 @@ We would like to recognize the following contributors for their roles in redesig
  * Semen Lebedev, <S.Lebedev@GSI.de>
  * Frank Osterfeld, <Frank.Osterfeld@kdab.com>
  * Ralph J. Steinhagen, <R.Steinhagen@GSI.de>
+## Contributors ✨
+
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/cafeclimber"><img src="https://avatars.githubusercontent.com/u/10188900?v=4?s=100" width="100px;" alt="Bailey Campbell"/><br /><sub><b>Bailey Campbell</b></sub></a><br /><a href="https://github.com/fair-acc/gnuradio4/commits?author=cafeclimber" title="Documentation">📖</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
