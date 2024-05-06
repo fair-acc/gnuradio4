@@ -1,0 +1,28 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "mattkretz",
+      "name": "Matthias Kretz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3306474?v=4",
+      "profile": "https://mattkretz.github.io/",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "skipCi": true,
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "projectName": "gnuradio4",
+  "projectOwner": "fair-acc"
+}
