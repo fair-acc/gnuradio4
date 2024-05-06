@@ -1,0 +1,28 @@
+{
+  "files": [
+    "README.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributors": [
+    {
+      "login": "frankosterfeld",
+      "name": "Frank Osterfeld",
+      "avatar_url": "https://avatars.githubusercontent.com/u/483854?v=4",
+      "profile": "https://github.com/frankosterfeld",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    }
+  ],
+  "contributorsPerLine": 7,
+  "skipCi": true,
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "projectName": "gnuradio4",
+  "projectOwner": "fair-acc"
+}
