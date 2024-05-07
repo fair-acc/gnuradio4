@@ -59,9 +59,20 @@ Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstad
 The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology. 
 We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
 
+## Contributors
+
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/cafeclimber"><img src="https://avatars.githubusercontent.com/u/10188900?v=4?s=100" width="100px;" alt="Bailey Campbell"/><br /><sub><b>Bailey Campbell</b></sub></a><br /><a href="https://github.com/fair-acc/gnuradio4/commits?author=cafeclimber" title="Documentation">📖</a></td>
+    </tr>
+  </tbody>
+</table>
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
