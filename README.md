@@ -6,14 +6,15 @@
 </p>
 
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
-![CMake](https://github.com/fair-acc/graph-prototype/workflows/CMake/badge.svg)
+![CMake](https://github.com/fair-acc/gnuradio4/workflows/CMake/badge.svg)
+[![All Contributors](https://img.shields.io/github/all-contributors/fair-acc/gnuradio4?color=ee8449&style=flat-square)](#contributors)
 
 # GNU Radio 4.0 prototype
 
 > [!IMPORTANT]
 > This is the GNU Radio 4.0 (GR4) prototype and is currently in a beta state. For production use, 
 > please use the GNU Radio 3.X (GR3) version found [here](https://github.com/gnuradio/gnuradio).
-> Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/graph-prototype/issues), 
+> Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/gnuradio4/issues), 
 > and bug reports for GNU Radio 3.X should be submitted [here](https://github.com/gnuradio/gnuradio/issues)
 
 GNU Radio is a free & open-source signal processing runtime and signal processing
@@ -27,7 +28,7 @@ energy particle physics, astrophysics, radio astronomy and more!
 
 * [GNU Radio Website](https://gnuradio.org)
 * [GNU Radio Wiki](https://wiki.gnuradio.org/)
-* [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/graph-prototype/issues)
+* [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/gnuradio4/issues)
 * [View the GNU Radio Mailing List Archive](https://lists.gnu.org/archive/html/discuss-gnuradio/)
 * [Subscribe to the GNU Radio Mailing List](https://lists.gnu.org/mailman/listinfo/discuss-gnuradio)
 * [GNU Radio Chatroom on Matrix](https://chat.gnuradio.org/)
@@ -36,7 +37,7 @@ energy particle physics, astrophysics, radio astronomy and more!
 
 ## What's New in GNU Radio 4.0?
 
-- **Smooth Transition with Updated GR3 Paradigms**: User-defined blocks and flow-graphs continue to be accessible graphically, through Python, and using C++. Notable simplifications and streamlining have been made to the underlying low-level architecture and design, as described [here](https://github.com/fair-acc/graph-prototype/tree/main/core).
+- **Smooth Transition with Updated GR3 Paradigms**: User-defined blocks and flow-graphs continue to be accessible graphically, through Python, and using C++. Notable simplifications and streamlining have been made to the underlying low-level architecture and design, as described [here](https://github.com/fair-acc/gnuradio4/tree/main/core).
 - **Enhanced Data Types**: Support for fundamental data types (i.e. ints, floats, complex numbers) as well as more complex, structured, and user-defined custom types.
 - **Simplified Block Development**: Modern C++ and computing standards enable rapid development.
 - **High-Performance Signal-Processing**: Significant performance boosts from lock-free buffers, compile-time optimisations, and built-in SIMD & SYCL support.
@@ -61,13 +62,7 @@ Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstad
 The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology. 
 We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
 
- * Ivan Čukić <ivan.cukic@kdab.com>
- * Matthias Kretz <M.Kretz@GSI.de>
- * Alexander Krimm, <A.Krimm@GSI.de> 
- * Semen Lebedev, <S.Lebedev@GSI.de>
- * Frank Osterfeld, <Frank.Osterfeld@kdab.com>
- * Ralph J. Steinhagen, <R.Steinhagen@GSI.de>
-## Contributors ✨
+## Contributors
 
 Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
 
@@ -86,5 +81,3 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <!-- prettier-ignore-end -->
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
-
-This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!

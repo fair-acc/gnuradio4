@@ -232,7 +232,7 @@ checker to your e-mails ... they are free and easy to use ... just use them.*
    - Provide usage examples to illustrate the library's simplified common core use alongside unit-tests that need to handle more complex and less common corner cases.
    - Accept both test-driven and example-driven development for API design.
 
-7. **Naming Convention**: Please read and follow the [naming guidelines](https://github.com/fair-acc/graph-prototype/blob/main/CORE_NAMING_GUIDELINE.md).
+7. **Naming Convention**: Please read and follow the [naming guidelines](https://github.com/fair-acc/gnuradio4/blob/main/CORE_NAMING_GUIDELINE.md).
 
 8. **Structs vs Classes**: strongly prioritise functional programming where possible to mitigate performance bottlenecks
    and race conditions, especially in multi-threaded environments.
