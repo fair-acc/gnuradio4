@@ -87,6 +87,17 @@
         "design",
         "review"
       ]
+    },
+    {
+      "login": "drslebedev",
+      "name": "drslebedev",
+      "avatar_url": "https://avatars.githubusercontent.com/u/25366186?v=4",
+      "profile": "https://github.com/drslebedev",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
     }
   ],
   "commitType": "docs",
