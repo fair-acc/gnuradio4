@@ -3,7 +3,9 @@
   "projectOwner": "fair-acc",
   "repoType": "github",
   "repoHost": "https://github.com",
-  "files": ["README.md"],
+  "files": [
+    "README.md"
+  ],
   "imageSize": 100,
   "commit": false,
   "contributorsPerLine": 7,
@@ -74,6 +76,19 @@
       "contributions": [
         "doc"
       ]
+    },
+    {
+      "login": "RalphSteinhagen",
+      "name": "Ralph J. Steinhagen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/46007894?v=4",
+      "profile": "https://github.com/RalphSteinhagen",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
     }
-  ]
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular"
 }
