@@ -3,8 +3,8 @@
 </p>
 
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
-![CMake](https://github.com/fair-acc/gnuradio4/workflows/CMake/badge.svg)
-[![All Contributors](https://img.shields.io/github/all-contributors/fair-acc/gnuradio4?color=ee8449&style=flat-square)](#contributors)
+![CMake](https://github.com/fair-acc/gnuradio4/workflows/CMake/badge.svg) <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors-) <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 # GNU Radio 4.0 prototype
 
