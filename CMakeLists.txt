@@ -483,6 +483,8 @@ if(ENABLE_TESTING AND (UNIX OR APPLE))
   message("Building Tests and benchmarks.")
 endif()
 
+add_subdirectory(devtools)
+
 add_subdirectory(bench) # custom ut addon for microbenchmarking
 
 add_subdirectory(core)
