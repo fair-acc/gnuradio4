@@ -474,6 +474,7 @@ if(Python3_FOUND AND NOT EMSCRIPTEN)
 endif()
 
 add_subdirectory(bench) # custom ut addon for microbenchmarking
+add_subdirectory(devtools) # name entity checking tool
 
 add_subdirectory(core)
 add_subdirectory(meta)

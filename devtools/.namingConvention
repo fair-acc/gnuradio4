@@ -1,0 +1,29 @@
+# .namingConvention definition
+# Syntax: <Entity Type>:<Regex Pattern>:[<Condition>]:[<Condition>]:...:<Description>
+# Entity Types: e.g. ClassTemplate, CXXMethod
+# add conditions: [public, protected, private], [const]
+Binding:^_?[a-z][a-z0-9_]*$:use snake_case for bindings.
+ClassTemplate:^[A-Z][a-z]+[A-Za-z0-9]*$:use CamelCase starting with an uppercase letter followed by a lowercase letter.
+CXXConstructor:^[A-Z][A-Za-z0-9]*$:Match class names exactly for constructors.
+CXXDestructor:^[A-Z][A-Za-z0-9]*$:Match class names with a leading tilde for destructors.
+CXXMethod:^[a-z][A-Za-z0-9]*$:use camelCase for method names.
+CXXRecord:^[A-Z][A-Za-z0-9]*$:use CamelCase for class definitions.
+Concept:^[A-Z][A-Za-z0-9]*$:use CamelCase for concept definitions.
+Decomposition:^_?[a-z][a-z0-9_]*$:use snake_case for decomposed variables.
+Enum:^[A-Z][A-Za-z0-9]*$:use CamelCase for enums.
+EnumConstant:^[A-Z][A-Z0-9_]*$:use UPPER_CASE for enum constants.
+Field:^_?[a-z][A-Za-z0-9]*$:private:use _camelCase for private fields.
+Field:^_?[a-z][A-Za-z0-9]*$:protected:use _camelCase for protected fields.
+Field:^_?[a-z][a-z0-9_]*$:public:use snake_case for public fields - this shall help mapping public interfaces to Python more recognisable.
+Function:^[a-z][A-Za-z0-9]*$:use camelCase for function names.
+FunctionTemplate:^[a-z][A-Za-z0-9]*$:use camelCase for template function names.
+Namespace:^[a-z][a-z0-9]*$:use lowercase for namespace names.
+NonTypeTemplateParm:^[a-z][A-Za-z0-9]*$:use camelCase for non-type template parameters.
+ParmVar:^_?[a-z][A-Za-z0-9]*$:use camelCase or snake_case for parameters, allowing leading underscores.
+TemplateTemplateParam:^T[A-Z]?[A-Za-z0-9]*$:Start template-template parameters with 'T', optionally followed by an uppercase letter.
+TemplateTypeParm:^T[A-Z]?[A-Za-z0-9]*$:Start template type parameters with 'T', optionally followed by an uppercase letter.
+TypeAlias:^[A-Z][A-Za-z0-9]*$:use CamelCase for type aliases.
+UsingEnum:^[A-Z][A-Za-z0-9]*$:use CamelCase for 'using' enums.
+Var:^k[A-Z][a-zA-Z0-9]*$:const:use kCamelCase for constant variables.
+Var:^[a-z][a-zA-Z0-9]*$:use camelCase for variables.
+VarTemplate:^[a-z][A-Za-z0-9]*$:use camelCase for template variables.
