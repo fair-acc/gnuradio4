@@ -255,7 +255,10 @@ public:
                 _type = magic_enum::enum_cast<gr::http::RequestType>(type, magic_enum::case_insensitive).value_or(_type);
             }
             // other setting changes are hot-swappable without restarting the Client
-            startThread();
+            if (_thread) {
+                stopThread();
+                startThread();
+            }
         }
     }
 

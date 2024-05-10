@@ -65,6 +65,7 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
     // signal data storage
     requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
     requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
     requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
     requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
@@ -92,11 +93,12 @@ struct DataSet {
     tensor_layout_type        layout{};  // row-major, column-major, “special”
 
     // signal data storage:
-    std::vector<std::string>    signal_names{};  // size = extents[0]
-    std::vector<std::string>    signal_units{};  // size = extents[0]
-    std::vector<T>              signal_values{}; // size = \PI_i extents[i]
-    std::vector<T>              signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
-    std::vector<std::vector<T>> signal_ranges{}; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+    std::vector<std::string>    signal_names{};      // size = extents[0]
+    std::vector<std::string>    signal_quantities{}; // size = extents[0]
+    std::vector<std::string>    signal_units{};      // size = extents[0]
+    std::vector<T>              signal_values{};     // size = \PI_i extents[i]
+    std::vector<T>              signal_errors{};     // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
     std::vector<pmt_map>          meta_information{};
@@ -144,6 +146,9 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 
 } // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
-                               timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges,
+                               meta_information, timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::Packet, timestamp, signal_values, meta_information)
+
 #endif // GNURADIO_DATASET_HPP

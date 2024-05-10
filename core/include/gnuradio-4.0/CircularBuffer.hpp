@@ -241,6 +241,7 @@ class CircularBuffer
         ClaimType                   _claimStrategy;
         // list of dependent reader indices
         DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
+        std::atomic<std::size_t>    _writer_count{0UZ};
 
         buffer_impl() = delete;
         buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _isMmapAllocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
@@ -429,7 +430,8 @@ class CircularBuffer
         buffer_writer() = delete;
         explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
             _buffer(std::move(buffer)), _isMmapAllocated(_buffer->_isMmapAllocated),
-            _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { };
+            _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+
         buffer_writer(buffer_writer&& other) noexcept
             : _buffer(std::move(other._buffer))
             , _isMmapAllocated(_buffer->_isMmapAllocated)
@@ -453,6 +455,12 @@ class CircularBuffer
             std::swap(_internalSpan, tmp._internalSpan);
 
             return *this;
+        }
+
+        ~buffer_writer() {
+            if (_buffer) {
+                _buffer.get()->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            }
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
@@ -813,7 +821,8 @@ public:
     [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] auto n_readers()              { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_read_indices->size(); }
     [[nodiscard]] const auto &claim_strategy()  { return _shared_buffer_ptr->_claimStrategy; }
     [[nodiscard]] const auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
     [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
