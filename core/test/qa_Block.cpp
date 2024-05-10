@@ -517,15 +517,18 @@ const boost::ut::suite _block_signature = [] {
 void
 interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
+    using namespace gr::testing;
     using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
-    auto     &source        = flow.emplaceBlock<gr::testing::TagSource<int, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
+    auto     &source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
     auto     &int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator } });
+    auto     &sink = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
     if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
     if (data.out_port_min >= 0) int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     auto sched = scheduler(std::move(flow), std::move(thread_pool));
     expect(sched.runAndWait().has_value());
 
@@ -537,19 +540,22 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
 void
 stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
+    using namespace gr::testing;
     using scheduler = gr::scheduler::Simple<>;
 
     const bool write_to_vector{ data.exp_in_vector.size() != 0 };
 
     gr::Graph flow;
-    auto     &source = flow.emplaceBlock<gr::testing::TagSource<int>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
-
+    auto     &source = flow.emplaceBlock<TagSource<int>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
     auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator }, { "stride", data.stride } });
+    auto     &sink = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
     int_dec_block.write_to_vector = write_to_vector;
     if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
     if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
+
     auto sched = scheduler(std::move(flow), std::move(thread_pool));
     expect(sched.runAndWait().has_value());
 

@@ -66,6 +66,7 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any &newD
     { t.direction() } -> std::same_as<PortDirection>;
     { t.domain() } -> std::same_as<std::string_view>;
     { t.resizeBuffer(n_items) } -> std::same_as<ConnectionResult>;
+    { t.isConnected() } -> std::same_as<bool>;
     { t.disconnect() } -> std::same_as<ConnectionResult>;
     { t.isSynchronous() } -> std::same_as<bool>;
     { t.isOptional() } -> std::same_as<bool>;
@@ -339,7 +340,6 @@ struct Port {
     PortMetaInfo metaInfo{};
 
 private:
-    bool      _connected    = false;
     IoType    _ioHandler    = newIoHandler();
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{};
@@ -415,7 +415,6 @@ public:
         , priority{ other.priority }
         , min_samples(other.min_samples)
         , max_samples(other.max_samples)
-        , _connected(other._connected)
         , _ioHandler(std::move(other._ioHandler))
         , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
@@ -427,8 +426,11 @@ public:
 
     [[nodiscard]] constexpr bool
     isConnected() const noexcept {
-        // TODO: check if this is correct for output ports, since there _connected is always false, return `readerCount > 0?`?
-        return _connected;
+        if constexpr (kIsInput) {
+            return _ioHandler.buffer().n_writers() > 0;
+        } else {
+            return _ioHandler.buffer().n_readers() > 0;
+        }
     }
 
     [[nodiscard]] constexpr static PortType
@@ -531,7 +533,6 @@ public:
         if constexpr (kIsInput) {
             _ioHandler    = streamBuffer.new_reader();
             _tagIoHandler = tagBuffer.new_reader();
-            _connected    = true;
         } else {
             _ioHandler    = streamBuffer.new_writer();
             _tagIoHandler = tagBuffer.new_writer();
@@ -588,12 +589,11 @@ public:
 
     [[nodiscard]] ConnectionResult
     disconnect() noexcept {
-        if (_connected == false) {
+        if (isConnected() == false) {
             return ConnectionResult::FAILED;
         }
         _ioHandler    = newIoHandler();
         _tagIoHandler = newTagIoHandler();
-        _connected    = false;
         return ConnectionResult::SUCCESS;
     }
 
@@ -827,6 +827,10 @@ private:
         resizeBuffer(std::size_t min_size) noexcept
                 = 0;
 
+        [[nodiscard]] virtual bool
+        isConnected() const noexcept
+                = 0;
+
         [[nodiscard]] virtual ConnectionResult
         disconnect() noexcept
                 = 0;
@@ -934,6 +938,11 @@ private:
             return _value.resizeBuffer(min_size);
         }
 
+        [[nodiscard]] bool
+        isConnected() const noexcept override {
+            return _value.isConnected();
+        }
+
         [[nodiscard]] ConnectionResult
         disconnect() noexcept override {
             return _value.disconnect();
@@ -1030,6 +1039,11 @@ public:
         return ConnectionResult::FAILED;
     }
 
+    [[nodiscard]] bool
+    isConnected() const noexcept {
+        return _accessor->isConnected();
+    }
+
     [[nodiscard]] ConnectionResult
     disconnect() noexcept {
         return _accessor->disconnect();
@@ -1093,4 +1107,4 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::
                                     (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples,
                                     max_samples, metaInfo)
 
-#endif // include guard
+#endif // GNURADIO_PORT_HPP
