@@ -46,10 +46,10 @@ namespace gr {
  * ```
  */
 enum class TagPropagationPolicy {
-    TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
+    TPP_DONT       = 0, /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
     TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The scheduler takes care of that. */
     TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires same number of in- and outputs */
-    TPP_CUSTOM = 3      /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
+    TPP_CUSTOM     = 3  /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
 };
 
 using property_map = pmtv::map_t;
@@ -246,8 +246,9 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block st
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE,    SIGNAL_NAME,       SIGNAL_UNIT, SIGNAL_MIN,     SIGNAL_MAX,     TRIGGER_NAME, TRIGGER_TIME,
-                                             TRIGGER_OFFSET, TRIGGER_META_INFO, CONTEXT,     RESET_DEFAULTS, STORE_DEFAULTS, END_OF_STREAM };
+inline constexpr std::array<std::string_view, 14> kDefaultTags = { "sample_rate",  "signal_name",    "signal_quantity",   "signal_unit", "signal_min",    "signal_max",    "trigger_name",
+                                                                   "trigger_time", "trigger_offset", "trigger_meta_info", "context",     "reset_default", "store_default", "end_of_stream" };
+
 } // namespace tag
 
 } // namespace gr

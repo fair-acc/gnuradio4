@@ -84,15 +84,11 @@ public:
                     _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
                 }
 
-                // detect whether field has one of the DEFAULT_TAGS signature
+                // detect whether field has one of the kDefaultTags signature
                 if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
-                    meta::tuple_for_each(
-                            [&memberName, this](auto &&default_tag) {
-                                if (default_tag.shortKey() == memberName) {
-                                    _auto_forward.emplace(memberName);
-                                }
-                            },
-                            gr::tag::DEFAULT_TAGS);
+                    if constexpr (std::ranges::find(gr::tag::kDefaultTags, std::string_view(get_display_name_const(member).c_str())) != gr::tag::kDefaultTags.cend()) {
+                        _auto_forward.emplace(memberName);
+                    }
                     _auto_update.emplace(memberName);
                 }
             };
