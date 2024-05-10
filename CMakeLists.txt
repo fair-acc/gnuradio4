@@ -14,6 +14,17 @@ if (NOT DEFINED GR_TOPLEVEL_PROJECT)
     endif ()
 endif ()
 
+# Use ccache if found and enabled
+find_program(CCACHE_PROGRAM ccache)
+option(USE_CCACHE "Use ccache if available" ON)
+if (CCACHE_PROGRAM AND USE_CCACHE)
+    message(STATUS "ccache found and will be used")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK "${CCACHE_PROGRAM}")
+else ()
+    message(STATUS "ccache will not be used")
+endif ()
+
 set(CMAKE_EXT_DEP_WARNING_GUARD "")
 if(DISABLE_EXTERNAL_DEPS_WARNINGS) # enable warnings for external dependencies
     set(CMAKE_EXT_DEP_WARNING_GUARD SYSTEM)
@@ -64,8 +75,8 @@ endif()
 string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-    add_compile_options(-stdlib=libc++ -fcolor-diagnostics)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+    add_compile_options(-stdlib=libc++ -fcolor-diagnostics -ftime-trace)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++ -ftime-trace")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-fdiagnostics-color=always)
 endif()
