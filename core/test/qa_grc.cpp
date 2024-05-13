@@ -14,8 +14,8 @@
 
 template<typename T>
 struct ArraySource : public gr::Block<ArraySource<T>> {
-    std::array<gr::PortOut<T>, 2> outA;
-    std::array<gr::PortOut<T>, 2> outB;
+    std::array<gr::PortOut<T>, 2> outA{};
+    std::array<gr::PortOut<T>, 2> outB{};
 
     template<typename PublishableSpan1, typename PublishableSpan2>
     gr::work::Status
@@ -30,7 +30,7 @@ template<typename T>
 struct ArraySink : public gr::Block<ArraySink<T>> {
     std::array<gr::PortIn<T>, 2>                                     inA;
     std::array<gr::PortIn<T>, 2>                                     inB;
-    gr::Annotated<bool, "bool setting">                              bool_setting = false;
+    gr::Annotated<bool, "bool setting">                              bool_setting{ false };
     gr::Annotated<std::string, "String setting">                     string_setting;
     gr::Annotated<std::vector<bool>, "Bool vector setting">          bool_vector;
     gr::Annotated<std::vector<std::string>, "String vector setting"> string_vector;
@@ -204,11 +204,10 @@ connections:
         const auto graph_source = std::string(test_grc);
 
         try {
-            const auto context = getContext();
-
-            auto graph_1            = gr::load_grc(context->loader, graph_source);
-            auto graph_saved_source = gr::save_grc(graph_1);
-            auto graph_2            = gr::load_grc(context->loader, graph_saved_source);
+            const auto context            = getContext();
+            auto       graph_1            = gr::load_grc(context->loader, graph_source);
+            auto       graph_saved_source = gr::save_grc(graph_1);
+            auto       graph_2            = gr::load_grc(context->loader, graph_saved_source);
             expect(eq(collectBlocks(graph_1), collectBlocks(graph_2)));
             expect(eq(collectEdges(graph_1), collectEdges(graph_2)));
         } catch (const std::string &e) {
@@ -288,5 +287,4 @@ connections:
 } // namespace gr::qa_grc_test
 
 int
-main() { /* tests are statically executed */
-}
+main() { /* tests are statically executed */ }
