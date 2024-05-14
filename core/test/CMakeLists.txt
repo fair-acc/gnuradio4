@@ -17,7 +17,7 @@ function(setup_test TEST_NAME)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") # limited to gcc due to a Ubuntu packaging bug of libc++, see https://github.com/llvm/llvm-project/issues/59432
         target_compile_options(${TEST_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
         target_link_options(${TEST_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
-    endif()
+    endif ()
 
     setup_test_no_asan(${TEST_NAME})
 endfunction()

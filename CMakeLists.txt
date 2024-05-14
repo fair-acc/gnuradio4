@@ -94,14 +94,23 @@ if (EMSCRIPTEN)
     add_compile_options(
         -fwasm-exceptions
         -pthread
+            -g
     )
     add_link_options(
-        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        -fwasm-exceptions
-        -pthread
-        "SHELL:-s PTHREAD_POOL_SIZE=30"
-        "SHELL:-s FETCH=1"
-        "SHELL:-s ASSERTIONS=1"
+            "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+            "SHELL:-s INITIAL_MEMORY=256MB"
+            "SHELL:-s MAXIMUM_MEMORY=1GB"
+            "SHELL:-s SAFE_HEAP=1"
+            "SHELL:-s ASSERTIONS=2"
+            "SHELL:-s STACK_OVERFLOW_CHECK=2"
+            "SHELL:-g"  # enable debugging information
+            "SHELL:-gsource-map"
+            "SHELL:--profiling-funcs"
+            "SHELL:--emit-symbol-map"
+            -fwasm-exceptions
+            -pthread
+            "SHELL:-s PTHREAD_POOL_SIZE=30"
+            "SHELL:-s FETCH=1"
     )
 endif ()
 
