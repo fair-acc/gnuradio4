@@ -176,6 +176,36 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         std::cout << std::endl;
     }
 
+    static int
+    open_perf_event(perf_event_attr &attr, int pid, int cpu, int group_fd, unsigned long flags) {
+        int fd = static_cast<int>(syscall(SYS_perf_event_open, &attr, pid, cpu, group_fd, flags));
+        if (fd == -1) {
+            print_access_right_msg("could not open SYS_perf_event_open");
+        }
+        return fd;
+    }
+
+    static void
+    enable_perf_event(int fd) {
+        if (fd != -1 && ioctl(fd, PERF_EVENT_IOC_ENABLE) == -1) {
+            print_access_right_msg("could not PERF_EVENT_IOC_ENABLE");
+        }
+    }
+
+    static void
+    disable_perf_event(int fd) {
+        if (fd != -1 && ioctl(fd, PERF_EVENT_IOC_DISABLE) == -1) {
+            print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
+        }
+    }
+
+    static void
+    close_perf_event(int fd) {
+        if (fd != -1) {
+            close(fd);
+        }
+    }
+
 public:
     PerformanceCounter() {
         constexpr static int PROCESS = 0; // 0: calling process
@@ -192,71 +222,63 @@ public:
 
         // cache prediction metric
         attr.config = PERF_COUNT_HW_CACHE_MISSES;
-        _fd_misses  = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
-        if (_fd_misses == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open -- misses");
+        if (_fd_misses = open_perf_event(attr, PROCESS, ANY_CPU, -1, FLAGS); _fd_misses == -1) {
             return;
         }
 
-        attr.config  = PERF_COUNT_HW_CACHE_REFERENCES;
-        _fd_accesses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
-        if (_fd_accesses == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open -- accesses");
+        attr.config = PERF_COUNT_HW_CACHE_REFERENCES;
+        if (_fd_accesses = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_accesses == -1) {
             return;
         }
 
         // branch prediction metric
-        attr.config       = PERF_COUNT_HW_BRANCH_MISSES;
-        _fd_branch_misses = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, -1, FLAGS));
-        if (_fd_branch_misses == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open -- branch misses");
+        attr.config = PERF_COUNT_HW_BRANCH_MISSES;
+        if (_fd_branch_misses = open_perf_event(attr, PROCESS, ANY_CPU, -1, FLAGS); _fd_branch_misses == -1) {
             return;
         }
 
         attr.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
-        _fd_branch  = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
-        if (_fd_branch == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open -- branch accesses");
+        if (_fd_branch = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_branch == -1) {
             return;
         }
 
         // instruction count metric
-        attr.config      = PERF_COUNT_HW_INSTRUCTIONS;
-        _fd_instructions = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
-        if (_fd_instructions == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open -- instruction count");
+        attr.config = PERF_COUNT_HW_INSTRUCTIONS;
+        if (_fd_instructions = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_instructions == -1) {
             return;
         }
 
         // ctx switch count metric
-        attr.type        = PERF_TYPE_SOFTWARE;
-        attr.config      = PERF_COUNT_SW_CONTEXT_SWITCHES;
-        _fd_ctx_switches = static_cast<int>(syscall(SYS_perf_event_open, &attr, PROCESS, ANY_CPU, _fd_misses, FLAGS));
-        if (_fd_ctx_switches == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open -- ctx switches");
+        attr.type   = PERF_TYPE_SOFTWARE;
+        attr.config = PERF_COUNT_SW_CONTEXT_SWITCHES;
+        if (_fd_ctx_switches = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_ctx_switches == -1) {
             return;
         }
 
-        if (ioctl(_fd_misses, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_accesses, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_branch_misses, PERF_EVENT_IOC_ENABLE) == -1
-            || ioctl(_fd_branch, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_instructions, PERF_EVENT_IOC_ENABLE) == -1 || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_ENABLE) == -1) {
-            print_access_right_msg("could not PERF_EVENT_IOC_ENABLE");
-            return;
-        }
+        // Enable events
+        enable_perf_event(_fd_misses);
+        enable_perf_event(_fd_accesses);
+        enable_perf_event(_fd_branch_misses);
+        enable_perf_event(_fd_branch);
+        enable_perf_event(_fd_instructions);
+        enable_perf_event(_fd_ctx_switches);
     }
 
     ~PerformanceCounter() {
-        if (_has_required_rights
-            && (ioctl(_fd_misses, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_accesses, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_branch_misses, PERF_EVENT_IOC_DISABLE) == -1
-                || ioctl(_fd_branch, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_instructions, PERF_EVENT_IOC_DISABLE) == -1 || ioctl(_fd_ctx_switches, PERF_EVENT_IOC_DISABLE) == -1)) {
-            print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
-            return;
+        if (_has_required_rights) {
+            disable_perf_event(_fd_misses);
+            disable_perf_event(_fd_accesses);
+            disable_perf_event(_fd_branch_misses);
+            disable_perf_event(_fd_branch);
+            disable_perf_event(_fd_instructions);
+            disable_perf_event(_fd_ctx_switches);
         }
-        close(_fd_misses);
-        close(_fd_accesses);
-        close(_fd_branch_misses);
-        close(_fd_branch);
-        close(_fd_instructions);
-        close(_fd_ctx_switches);
+        close_perf_event(_fd_misses);
+        close_perf_event(_fd_accesses);
+        close_perf_event(_fd_branch_misses);
+        close_perf_event(_fd_branch);
+        close_perf_event(_fd_instructions);
+        close_perf_event(_fd_ctx_switches);
     }
 
     PerformanceCounter(const PerformanceCounter &) = delete;
@@ -269,20 +291,15 @@ public:
         return _has_required_rights;
     }
 
-    /**
-     * @return Linux HW/CPU performance counter, best consumed as:
-     * @code auto [misses, accesses, branch_misses, branch_total, instructions, ctx_switches] =
-     * execMetrics.results();
-     */
     [[nodiscard]] auto
     results() const noexcept -> perf_metric {
         if (!_has_required_rights) {
             return {};
         }
         perf_metric           ret;
-        constexpr static auto read_metric = [](int metric_fd, auto &data) noexcept -> bool { return read(metric_fd, &data, sizeof(data)) != sizeof(data); };
-        if (read_metric(_fd_misses, ret.cache.misses) || read_metric(_fd_accesses, ret.cache.total) || read_metric(_fd_branch_misses, ret.branch.misses) || read_metric(_fd_branch, ret.branch.total)
-            || read_metric(_fd_instructions, ret.instructions) || read_metric(_fd_ctx_switches, ret.ctx_switches)) {
+        constexpr static auto read_metric = [](int metric_fd, auto &data) noexcept -> bool { return metric_fd != -1 && read(metric_fd, &data, sizeof(data)) == sizeof(data); };
+        if (!read_metric(_fd_misses, ret.cache.misses) || !read_metric(_fd_accesses, ret.cache.total) || !read_metric(_fd_branch_misses, ret.branch.misses)
+            || !read_metric(_fd_branch, ret.branch.total) || !read_metric(_fd_instructions, ret.instructions) || !read_metric(_fd_ctx_switches, ret.ctx_switches)) {
             return {};
         }
         using T          = decltype(ret.cache.ratio);
