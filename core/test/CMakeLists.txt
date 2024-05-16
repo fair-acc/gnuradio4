@@ -14,10 +14,8 @@ function(setup_test TEST_NAME)
         target_include_directories(${TEST_NAME} PRIVATE ${Python3_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
         target_link_libraries(${TEST_NAME} PRIVATE ${Python3_LIBRARIES})
     endif()
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU") # limited to gcc due to a Ubuntu packaging bug of libc++, see https://github.com/llvm/llvm-project/issues/59432
-        target_compile_options(${TEST_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
-        target_link_options(${TEST_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
-    endif()
+    target_compile_options(${TEST_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
+    target_link_options(${TEST_NAME} PRIVATE -fsanitize=address) # for testing consider enabling -D_GLIBCXX_DEBUG and -D_GLIBCXX_SANITIZE_VECTOR
 
     setup_test_no_asan(${TEST_NAME})
 endfunction()
