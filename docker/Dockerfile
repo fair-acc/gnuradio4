@@ -16,7 +16,7 @@ ENV JAVA_HOME=/opt/java/openjdk \
     LC_ALL=en_US.UTF-8 \
     CMAKE_MAKE_PROGRAM=ninja \
     EMSDK_HOME=/opt/emsdk \
-    EMSDK_VERSION=3.1.44
+    EMSDK_VERSION=3.1.52
 
 # Install compilers, package managers and build-tools
 # As we are using the the ubuntu prerelease llvm and cmake are fresh enough, readd these if the version is not sufficient anymore
