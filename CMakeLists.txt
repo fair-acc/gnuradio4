@@ -212,7 +212,7 @@ else()
 endif()
 
 set(PYTHON_AVAILABLE OFF)
-if(Python3_FOUND)
+if (Python3_FOUND AND NOT EMSCRIPTEN)
     execute_process(
             COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNumPy.py"
             RESULT_VARIABLE NUMPY_NOT_FOUND
