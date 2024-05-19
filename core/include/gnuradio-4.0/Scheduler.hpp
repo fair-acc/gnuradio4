@@ -217,6 +217,9 @@ protected:
                 something_happened = true;
             }
         }
+#ifdef __EMSCRIPTEN__
+        std::this_thread::sleep_for(std::chrono::microseconds(10u)); // workaround for incomplete std::atomic implementation (at least it seems for nodejs)
+#endif
         return { requestedWorkAllBlocks, performedWorkAllBlocks, something_happened ? work::Status::OK : work::Status::DONE };
     }
 
