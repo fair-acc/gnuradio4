@@ -422,9 +422,8 @@ public:
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
-            "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{ false };
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
@@ -434,7 +433,8 @@ public:
     A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator
             = Resampling::kDenominator;
     using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
+    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                               stride             = StrideControl::kStride;
+    A<bool, "disconnect on done", Doc<"if block has no downstream consumers, it declares itself 'DONE', and severs connections to upstream blocks.">> disconnect_on_done = true;
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
@@ -452,7 +452,9 @@ public:
             return "please add a public 'using Description = Doc<\"...\">' documentation annotation to your block definition";
         }
     }();
+#ifndef __EMSCRIPTEN__
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+#endif
 
     //
     static property_map
@@ -1423,10 +1425,41 @@ protected:
                 break;
             }
         }
-        if (nOutSamplesBeforeRequestedStop > 0) {
-            return ProcessOneResult{ OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop };
+        return ProcessOneResult{ lifecycle::isShuttingDown(this->state()) ? DONE : OK, nSamplesToProcess, std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop) };
+    }
+
+    [[nodiscard]] bool
+    hasNoDownStreamConnectedChildren() const noexcept {
+        std::size_t nMandatoryChildren          = 0UZ;
+        std::size_t nMandatoryConnectedChildren = 0UZ;
+        for_each_port(
+                [&nMandatoryChildren, &nMandatoryConnectedChildren]<PortLike Port>(const Port &outputPort) {
+                    if constexpr (!Port::isOptional()) {
+                        nMandatoryChildren++;
+                        if (outputPort.isConnected()) {
+                            nMandatoryConnectedChildren++;
+                        }
+                    }
+                },
+                outputPorts<PortType::STREAM>(&self()));
+        return nMandatoryChildren > 0UZ && nMandatoryConnectedChildren == 0UZ;
+    }
+
+    constexpr void
+    disconnectFromUpStreamParents() noexcept {
+        using TInputTypes = traits::block::stream_input_port_types<Derived>;
+        if constexpr (TInputTypes::size.value > 0UZ) {
+            if (!disconnect_on_done) {
+                return;
+            }
+            for_each_port(
+                    []<PortLike Port>(Port &inputPort) {
+                        if (inputPort.isConnected()) {
+                            std::ignore = inputPort.disconnect();
+                        }
+                    },
+                    inputPorts<PortType::STREAM>(&self()));
         }
-        return ProcessOneResult{ OK, nSamplesToProcess, nSamplesToProcess };
     }
 
     void
@@ -1507,7 +1540,15 @@ protected:
             }
         }
 
+        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
+        if constexpr (TOutputTypes::size.value > 0UZ) {
+            if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
+                this->requestStop(); // no dependent non-optional children, should stop processing
+            }
+        }
+
         if (this->state() == lifecycle::State::STOPPED) {
+            disconnectFromUpStreamParents();
             return { requested_work, 0UZ, work::Status::DONE };
         }
 
@@ -1541,7 +1582,7 @@ protected:
                 updateInputAndOutputTags();
                 applyChangedSettings();
                 forwardTags();
-                return { requested_work, 0UZ, DONE };
+                return { requested_work, 0UZ, work::Status::DONE };
             }
             return { requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
         }
@@ -1586,8 +1627,9 @@ protected:
                     });
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
-                        invokeUserProvidedFunction("invokeProcessOnePure",
-                                                   [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
+                        invokeUserProvidedFunction("invokeProcessOnePure", [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) {
+                            ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn);
+                        });
                     } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
                         const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
                         ret               = result.status;
@@ -1656,6 +1698,10 @@ public:
             bool expectedThreadState = false;
             if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
+                    if (!ioThreadPool) {
+                        emitErrorMessage("work(..)", "blockingIO with useIoThread - no ioThreadPool being set");
+                        return { requested_work, 0UZ, work::Status::ERROR };
+                    }
                     ioThreadPool->execute([this]() {
                         assert(lifecycle::isActive(this->state()));
 
@@ -1896,7 +1942,7 @@ template<typename Derived, typename... Arguments>
 inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{ 0UZ };
 } // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, unique_name, name, meta_information);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, disconnect_on_done, unique_name, name, meta_information);
 
 namespace gr {
 

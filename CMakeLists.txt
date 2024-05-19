@@ -94,14 +94,24 @@ if (EMSCRIPTEN)
     add_compile_options(
         -fwasm-exceptions
         -pthread
+            -g
     )
     add_link_options(
-        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        -fwasm-exceptions
-        -pthread
-        "SHELL:-s PTHREAD_POOL_SIZE=30"
-        "SHELL:-s FETCH=1"
-        "SHELL:-s ASSERTIONS=1"
+            "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+            "SHELL:-s ASSERTIONS=1"
+            "SHELL:-s INITIAL_MEMORY=256MB"
+            # "SHELL:-s SAFE_HEAP=1" # additional for debug
+            # "SHELL:-s ASSERTIONS=2" # additional for debug
+            # "SHELL:-s STACK_OVERFLOW_CHECK=2" # additional for debug
+            # "SHELL:-g" # additional for debug
+            # "SHELL:-gsource-map" # additional for debug
+            # "SHELL:--profiling-funcs" # additional for debug
+            # "SHELL:--emit-symbol-map" # additional for debug
+            -fwasm-exceptions
+            -pthread
+            "SHELL:-s PTHREAD_POOL_SIZE=60"
+            "SHELL:-s FETCH=1"
+            "SHELL:-s WASM=1" # output as web-assembly
     )
 endif ()
 
@@ -212,7 +222,7 @@ else()
 endif()
 
 set(PYTHON_AVAILABLE OFF)
-if(Python3_FOUND)
+if (Python3_FOUND AND NOT EMSCRIPTEN)
     execute_process(
             COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNumPy.py"
             RESULT_VARIABLE NUMPY_NOT_FOUND

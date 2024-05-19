@@ -11216,6 +11216,7 @@ class CircularBuffer
         ClaimType                   _claimStrategy;
         // list of dependent reader indices
         DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
+        std::atomic<std::size_t>    _writer_count{0UZ};
 
         buffer_impl() = delete;
         buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _isMmapAllocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
@@ -11404,7 +11405,8 @@ class CircularBuffer
         buffer_writer() = delete;
         explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
             _buffer(std::move(buffer)), _isMmapAllocated(_buffer->_isMmapAllocated),
-            _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { };
+            _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+
         buffer_writer(buffer_writer&& other) noexcept
             : _buffer(std::move(other._buffer))
             , _isMmapAllocated(_buffer->_isMmapAllocated)
@@ -11428,6 +11430,12 @@ class CircularBuffer
             std::swap(_internalSpan, tmp._internalSpan);
 
             return *this;
+        }
+
+        ~buffer_writer() {
+            if (_buffer) {
+                _buffer.get()->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            }
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
@@ -11788,7 +11796,8 @@ public:
     [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] auto n_readers()              { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_read_indices->size(); }
     [[nodiscard]] const auto &claim_strategy()  { return _shared_buffer_ptr->_claimStrategy; }
     [[nodiscard]] const auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
     [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
@@ -13933,6 +13942,7 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
     // signal data storage
     requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
     requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
     requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
     requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
@@ -13960,11 +13970,12 @@ struct DataSet {
     tensor_layout_type        layout{};  // row-major, column-major, “special”
 
     // signal data storage:
-    std::vector<std::string>    signal_names{};  // size = extents[0]
-    std::vector<std::string>    signal_units{};  // size = extents[0]
-    std::vector<T>              signal_values{}; // size = \PI_i extents[i]
-    std::vector<T>              signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
-    std::vector<std::vector<T>> signal_ranges{}; // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+    std::vector<std::string>    signal_names{};      // size = extents[0]
+    std::vector<std::string>    signal_quantities{}; // size = extents[0]
+    std::vector<std::string>    signal_units{};      // size = extents[0]
+    std::vector<T>              signal_values{};     // size = \PI_i extents[i]
+    std::vector<T>              signal_errors{};     // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
     std::vector<pmt_map>          meta_information{};
@@ -14012,8 +14023,11 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 
 } // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_units, signal_values, signal_errors, signal_ranges, meta_information,
-                               timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges,
+                               meta_information, timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::Packet, timestamp, signal_values, meta_information)
+
 #endif // GNURADIO_DATASET_HPP
 
 // #include "Message.hpp"
@@ -14809,6 +14823,7 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any &newD
     { t.direction() } -> std::same_as<PortDirection>;
     { t.domain() } -> std::same_as<std::string_view>;
     { t.resizeBuffer(n_items) } -> std::same_as<ConnectionResult>;
+    { t.isConnected() } -> std::same_as<bool>;
     { t.disconnect() } -> std::same_as<ConnectionResult>;
     { t.isSynchronous() } -> std::same_as<bool>;
     { t.isOptional() } -> std::same_as<bool>;
@@ -15082,7 +15097,6 @@ struct Port {
     PortMetaInfo metaInfo{};
 
 private:
-    bool      _connected    = false;
     IoType    _ioHandler    = newIoHandler();
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{};
@@ -15158,7 +15172,6 @@ public:
         , priority{ other.priority }
         , min_samples(other.min_samples)
         , max_samples(other.max_samples)
-        , _connected(other._connected)
         , _ioHandler(std::move(other._ioHandler))
         , _tagIoHandler(std::move(other._tagIoHandler)) {}
 
@@ -15170,8 +15183,11 @@ public:
 
     [[nodiscard]] constexpr bool
     isConnected() const noexcept {
-        // TODO: check if this is correct for output ports, since there _connected is always false, return `readerCount > 0?`?
-        return _connected;
+        if constexpr (kIsInput) {
+            return _ioHandler.buffer().n_writers() > 0;
+        } else {
+            return _ioHandler.buffer().n_readers() > 0;
+        }
     }
 
     [[nodiscard]] constexpr static PortType
@@ -15274,7 +15290,6 @@ public:
         if constexpr (kIsInput) {
             _ioHandler    = streamBuffer.new_reader();
             _tagIoHandler = tagBuffer.new_reader();
-            _connected    = true;
         } else {
             _ioHandler    = streamBuffer.new_writer();
             _tagIoHandler = tagBuffer.new_writer();
@@ -15331,12 +15346,11 @@ public:
 
     [[nodiscard]] ConnectionResult
     disconnect() noexcept {
-        if (_connected == false) {
+        if (isConnected() == false) {
             return ConnectionResult::FAILED;
         }
         _ioHandler    = newIoHandler();
         _tagIoHandler = newTagIoHandler();
-        _connected    = false;
         return ConnectionResult::SUCCESS;
     }
 
@@ -15570,6 +15584,10 @@ private:
         resizeBuffer(std::size_t min_size) noexcept
                 = 0;
 
+        [[nodiscard]] virtual bool
+        isConnected() const noexcept
+                = 0;
+
         [[nodiscard]] virtual ConnectionResult
         disconnect() noexcept
                 = 0;
@@ -15677,6 +15695,11 @@ private:
             return _value.resizeBuffer(min_size);
         }
 
+        [[nodiscard]] bool
+        isConnected() const noexcept override {
+            return _value.isConnected();
+        }
+
         [[nodiscard]] ConnectionResult
         disconnect() noexcept override {
             return _value.disconnect();
@@ -15773,6 +15796,11 @@ public:
         return ConnectionResult::FAILED;
     }
 
+    [[nodiscard]] bool
+    isConnected() const noexcept {
+        return _accessor->isConnected();
+    }
+
     [[nodiscard]] ConnectionResult
     disconnect() noexcept {
         return _accessor->disconnect();
@@ -15836,7 +15864,7 @@ ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::
                                     (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples,
                                     max_samples, metaInfo)
 
-#endif // include guard
+#endif // GNURADIO_PORT_HPP
 
 // #include "PortTraits.hpp"
 #ifndef GNURADIO_NODE_PORT_TRAITS_HPP
@@ -19536,9 +19564,8 @@ public:
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
-            "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{ false };
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
@@ -19548,7 +19575,8 @@ public:
     A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator
             = Resampling::kDenominator;
     using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">> stride = StrideControl::kStride;
+    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                               stride             = StrideControl::kStride;
+    A<bool, "disconnect on done", Doc<"if block has no downstream consumers, it declares itself 'DONE', and severs connections to upstream blocks.">> disconnect_on_done = true;
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
@@ -19566,7 +19594,9 @@ public:
             return "please add a public 'using Description = Doc<\"...\">' documentation annotation to your block definition";
         }
     }();
+#ifndef __EMSCRIPTEN__
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+#endif
 
     //
     static property_map
@@ -20537,10 +20567,41 @@ protected:
                 break;
             }
         }
-        if (nOutSamplesBeforeRequestedStop > 0) {
-            return ProcessOneResult{ OK, nOutSamplesBeforeRequestedStop, nOutSamplesBeforeRequestedStop };
+        return ProcessOneResult{ lifecycle::isShuttingDown(this->state()) ? DONE : OK, nSamplesToProcess, std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop) };
+    }
+
+    [[nodiscard]] bool
+    hasNoDownStreamConnectedChildren() const noexcept {
+        std::size_t nMandatoryChildren          = 0UZ;
+        std::size_t nMandatoryConnectedChildren = 0UZ;
+        for_each_port(
+                [&nMandatoryChildren, &nMandatoryConnectedChildren]<PortLike Port>(const Port &outputPort) {
+                    if constexpr (!Port::isOptional()) {
+                        nMandatoryChildren++;
+                        if (outputPort.isConnected()) {
+                            nMandatoryConnectedChildren++;
+                        }
+                    }
+                },
+                outputPorts<PortType::STREAM>(&self()));
+        return nMandatoryChildren > 0UZ && nMandatoryConnectedChildren == 0UZ;
+    }
+
+    constexpr void
+    disconnectFromUpStreamParents() noexcept {
+        using TInputTypes = traits::block::stream_input_port_types<Derived>;
+        if constexpr (TInputTypes::size.value > 0UZ) {
+            if (!disconnect_on_done) {
+                return;
+            }
+            for_each_port(
+                    []<PortLike Port>(Port &inputPort) {
+                        if (inputPort.isConnected()) {
+                            std::ignore = inputPort.disconnect();
+                        }
+                    },
+                    inputPorts<PortType::STREAM>(&self()));
         }
-        return ProcessOneResult{ OK, nSamplesToProcess, nSamplesToProcess };
     }
 
     void
@@ -20621,7 +20682,15 @@ protected:
             }
         }
 
+        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
+        if constexpr (TOutputTypes::size.value > 0UZ) {
+            if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
+                this->requestStop(); // no dependent non-optional children, should stop processing
+            }
+        }
+
         if (this->state() == lifecycle::State::STOPPED) {
+            disconnectFromUpStreamParents();
             return { requested_work, 0UZ, work::Status::DONE };
         }
 
@@ -20655,7 +20724,7 @@ protected:
                 updateInputAndOutputTags();
                 applyChangedSettings();
                 forwardTags();
-                return { requested_work, 0UZ, DONE };
+                return { requested_work, 0UZ, work::Status::DONE };
             }
             return { requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
         }
@@ -20700,8 +20769,9 @@ protected:
                     });
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
-                        invokeUserProvidedFunction("invokeProcessOnePure",
-                                                   [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
+                        invokeUserProvidedFunction("invokeProcessOnePure", [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) {
+                            ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn);
+                        });
                     } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
                         const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
                         ret               = result.status;
@@ -20770,6 +20840,10 @@ public:
             bool expectedThreadState = false;
             if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
+                    if (!ioThreadPool) {
+                        emitErrorMessage("work(..)", "blockingIO with useIoThread - no ioThreadPool being set");
+                        return { requested_work, 0UZ, work::Status::ERROR };
+                    }
                     ioThreadPool->execute([this]() {
                         assert(lifecycle::isActive(this->state()));
 
@@ -21010,7 +21084,7 @@ template<typename Derived, typename... Arguments>
 inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{ 0UZ };
 } // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, unique_name, name, meta_information);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, disconnect_on_done, unique_name, name, meta_information);
 
 namespace gr {
 

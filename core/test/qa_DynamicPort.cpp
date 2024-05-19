@@ -68,26 +68,13 @@ public:
     gr::PortOut<T> value;
     std::size_t    _counter = 0;
 
-    gr::work::Result
-    work(std::size_t requested_work) {
-        // check if STOPPED and return immediately
-        if (this->state() == gr::lifecycle::State::STOPPED) {
-            return { requested_work, 0UZ, gr::work::Status::DONE };
-        }
-
-        if (_counter < count) {
-            _counter++;
-            auto &writer = outputPort<"value">(this).streamWriter();
-            auto  data   = writer.reserve(1);
-            data[0]      = val;
-            data.publish(1);
-
-            return { requested_work, 1UZ, gr::work::Status::OK };
-        } else {
+    T
+    processOne() {
+        _counter++;
+        if (_counter >= count) {
             this->requestStop();
-            this->publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
-            return { requested_work, 0UZ, gr::work::Status::DONE };
         }
+        return val;
     }
 };
 
@@ -95,6 +82,7 @@ static_assert(gr::BlockLike<repeater_source<int, 42>>);
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
+    using namespace boost::ut;
     using namespace boost::ut::literals;
     using boost::ut::expect, boost::ut::eq, boost::ut::ge, boost::ut::nothrow, boost::ut::throws;
     using namespace gr;
@@ -147,10 +135,10 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(buffers.streamBuffer.n_readers(), 1UZ));
 
         int  offset = 1;
-        auto lambda = [&offset](auto &w) {
-            std::iota(w.begin(), w.end(), offset);
-            fmt::print("typed-port connected output vector: {}\n", w);
-            offset += static_cast<int>(w.size());
+        auto lambda = [&offset](auto &writableSpan) {
+            std::iota(writableSpan.begin(), writableSpan.end(), offset);
+            fmt::print("typed-port connected output vector: {}\n", writableSpan);
+            offset += static_cast<int>(writableSpan.size());
         };
 
         expect(writer.try_publish(lambda, 32UZ));
@@ -169,7 +157,35 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(port_list.size(), 2UZ));
     };
 
-    "ConnectionApi"_test = [] {
+    "ConnectionApi - Port-level"_test = [] {
+        gr::Graph flow;
+        auto     &number = flow.emplaceBlock<repeater_source<int, 6>>();
+        auto     &scaled = flow.emplaceBlock<scale<int, 2>>();
+
+        expect(!number.value.isConnected());
+        expect(!scaled.original.isConnected());
+        expect(eq(ConnectionResult::SUCCESS, number.value.connect(scaled.original))) << "connect on a port-level-basis";
+        expect(number.value.isConnected());
+        expect(scaled.original.isConnected());
+
+        expect(eq(ConnectionResult::SUCCESS, scaled.original.disconnect())) << "disconnect destination port";
+        expect(!number.value.isConnected());
+        expect(!scaled.original.isConnected());
+
+        expect(eq(ConnectionResult::SUCCESS, number.value.connect(scaled.original))) << "reconnect on a port-level-basis";
+        expect(number.value.isConnected());
+        expect(scaled.original.isConnected());
+
+        "disconnect source port"_test = [&number, &scaled] {
+            expect(eq(ConnectionResult::SUCCESS, number.value.disconnect())) << "disconnect source port";
+            expect(!number.value.isConnected());
+            expect(!scaled.original.isConnected());
+        };
+
+        fmt::println("after final test");
+    };
+
+    "ConnectionApi - Graph-level"_test = [] {
         using PortDirection::INPUT;
         using PortDirection::OUTPUT;
 
@@ -264,5 +280,4 @@ const boost::ut::suite PortApiTests = [] {
 };
 
 int
-main() { /* tests are statically executed */
-}
+main() { /* tests are statically executed */ }

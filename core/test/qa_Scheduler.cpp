@@ -1,6 +1,9 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
+
+#include <chrono>
 
 using TraceVectorType = std::vector<std::string>;
 
@@ -28,11 +31,15 @@ public:
 template<typename T>
 struct CountSource : public gr::Block<CountSource<T>> {
     gr::PortOut<T>          out;
-    std::size_t             n_samples_max = 0;
+    gr::Size_t              n_samples_max = 0;
     std::shared_ptr<Tracer> tracer{};
-    std::size_t             count = 0;
+    gr::Size_t              count = 0;
 
-    ~CountSource() { boost::ut::expect(boost::ut::that % count == n_samples_max); } // TODO: throwing exceptions in destructor is bad -> need to refactor test
+    ~CountSource() {
+        if (count != n_samples_max) {
+            fmt::println(stderr, "Error: CountSource did not process expected number of samples");
+        }
+    }
 
     constexpr T
     processOne() {
@@ -52,16 +59,19 @@ static_assert(gr::BlockLike<CountSource<float>>);
 template<typename T>
 struct ExpectSink : public gr::Block<ExpectSink<T>> {
     gr::PortIn<T>                                   in;
-    std::size_t                                     n_samples_max = 0;
+    gr::Size_t                                      n_samples_max = 0;
     std::shared_ptr<Tracer>                         tracer{};
-    std::int64_t                                    count       = 0;
-    std::int64_t                                    false_count = 0;
+    gr::Size_t                                      count       = 0;
+    gr::Size_t                                      false_count = 0;
     std::function<bool(std::int64_t, std::int64_t)> checker;
 
     ~ExpectSink() { // TODO: throwing exceptions in destructor is bad -> need to refactor test
-        boost::ut::expect(boost::ut::eq(count, static_cast<std::int64_t>(n_samples_max)))
-                << fmt::format("Number of processed samples ({}) must equal to n_samples_max ({}) for ExpectSink ({})", count, n_samples_max, this->name);
-        boost::ut::expect(boost::ut::eq(false_count, 0)) << fmt::format("False counter ({}) must equal to 0 for ExpectSink ({})", false_count, this->name);
+        if (count != n_samples_max) {
+            fmt::println(stderr, "Error: ExpectSink did not process expected number of samples");
+        }
+        if (false_count != 0) {
+            fmt::println(stderr, "Error: ExpectSink false count is not zero");
+        }
     }
 
     [[nodiscard]] gr::work::Status
@@ -121,7 +131,7 @@ getGraphLinear(std::shared_ptr<Tracer> tracer) {
     using gr::PortDirection::OUTPUT;
     using namespace boost::ut;
 
-    std::size_t nMaxSamples{ 100000 };
+    gr::Size_t nMaxSamples{ 100000 };
 
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
@@ -149,7 +159,7 @@ getGraphParallel(std::shared_ptr<Tracer> tracer) {
     using gr::PortDirection::OUTPUT;
     using namespace boost::ut;
 
-    std::size_t nMaxSamples{ 100000 };
+    gr::Size_t nMaxSamples{ 100000 };
 
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
@@ -203,7 +213,7 @@ getGraphScaledSum(std::shared_ptr<Tracer> tracer) {
     using gr::PortDirection::OUTPUT;
     using namespace boost::ut;
 
-    std::size_t nMaxSamples{ 100000 };
+    gr::Size_t nMaxSamples{ 100000 };
 
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
@@ -259,8 +269,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE(LifecycleSource, out);
 
 template<typename T>
 struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
-    gr::PortIn<T>  in{};
-    gr::PortOut<T> out{};
+    gr::PortIn<T>                in{};
+    gr::PortOut<T, gr::Optional> out{};
 
     int process_one_count{};
     int start_count{};
@@ -304,6 +314,7 @@ struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
 ENABLE_REFLECTION_FOR_TEMPLATE(LifecycleBlock, in, out);
 
 const boost::ut::suite SchedulerTests = [] {
+    using namespace std::chrono_literals;
     using namespace boost::ut;
     using namespace gr;
     auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
@@ -474,8 +485,145 @@ const boost::ut::suite SchedulerTests = [] {
         expect(eq(lifecycleBlock.resume_count, 0));
         expect(eq(lifecycleBlock.reset_count, 1));
     };
+
+    "propagate DONE check-infinite loop"_test = [&threadPool] {
+        using namespace gr::testing;
+        using scheduler = gr::scheduler::Simple<>;
+        gr::Graph flow;
+
+        auto &source  = flow.emplaceBlock<CountingSource<float>>();
+        auto &monitor = flow.emplaceBlock<Copy<float>>();
+        auto &sink    = flow.emplaceBlock<NullSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+
+        auto sched = scheduler{ std::move(flow), threadPool };
+
+        std::atomic_bool shutDownByWatchdog{ false };
+        std::thread      watchdogThread([&sched, &shutDownByWatchdog]() {
+            while (sched.state() != gr::lifecycle::State::RUNNING) { // wait until scheduler is running
+                std::this_thread::sleep_for(40ms);
+            }
+
+            if (sched.state() == gr::lifecycle::State::RUNNING) {
+                shutDownByWatchdog.store(true, std::memory_order_relaxed);
+                sched.requestStop();
+            }
+        });
+
+        expect(sched.runAndWait().has_value());
+
+        if (watchdogThread.joinable()) {
+            watchdogThread.join();
+        }
+
+        expect(ge(source.count, 0U));
+        expect(shutDownByWatchdog.load(std::memory_order_relaxed));
+        expect(sched.state() == gr::lifecycle::State::STOPPED);
+        fmt::println("N.B by-design infinite loop correctly stopped after having emitted {} samples", source.count);
+    };
+
+    // create and return a watchdog thread and its control flag
+    using TDuration     = std::chrono::duration<std::chrono::steady_clock::rep, std::chrono::steady_clock::period>;
+    auto createWatchdog = [](auto &sched, TDuration timeOut = 2s, TDuration pollingPeriod = 40ms) {
+        using namespace std::chrono_literals;
+        auto externalInterventionNeeded = std::make_shared<std::atomic_bool>(false); // unique_ptr because you cannot move atomics
+
+        // Create the watchdog thread
+        std::thread watchdogThread([&sched, &externalInterventionNeeded, timeOut, pollingPeriod]() {
+            auto timeout = std::chrono::steady_clock::now() + timeOut;
+            while (std::chrono::steady_clock::now() < timeout) {
+                if (sched.state() == gr::lifecycle::State::STOPPED) {
+                    return;
+                }
+                std::this_thread::sleep_for(pollingPeriod);
+            }
+            // time-out reached, need to force termination of scheduler
+            fmt::println("watchdog kicked in");
+            externalInterventionNeeded->store(true, std::memory_order_relaxed);
+            sched.requestStop();
+            fmt::println("requested scheduler to stop");
+        });
+
+        return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
+    };
+
+    "propagate source DONE state: down-stream using EOS tag"_test = [&threadPool, &createWatchdog] {
+        using namespace gr::testing;
+        using scheduler = gr::scheduler::Simple<>;
+        gr::Graph flow;
+
+        auto &source  = flow.emplaceBlock<ConstantSource<float>>({ { "n_samples_max", 1024U } });
+        auto &monitor = flow.emplaceBlock<Copy<float>>();
+        auto &sink    = flow.emplaceBlock<CountingSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+
+        auto sched                                        = scheduler{ std::move(flow), threadPool };
+        auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
+        expect(sched.runAndWait().has_value());
+
+        if (watchdogThread.joinable()) {
+            watchdogThread.join();
+        }
+        expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
+        expect(eq(source.count, 1024U));
+        expect(eq(sink.count, 1024U));
+
+        fmt::println("N.B. 'propagate source DONE state: down-stream using EOS tag' test finished");
+    };
+
+    "propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports"_test = [&threadPool, &createWatchdog] {
+        using namespace gr::testing;
+        using scheduler = gr::scheduler::Simple<>;
+        gr::Graph flow;
+
+        auto &source  = flow.emplaceBlock<NullSource<float>>();
+        auto &monitor = flow.emplaceBlock<HeadBlock<float>>({ { "n_samples_max", 1024U } });
+        auto &sink    = flow.emplaceBlock<CountingSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+
+        auto sched                                        = scheduler{ std::move(flow), threadPool };
+        auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
+        expect(sched.runAndWait().has_value());
+
+        if (watchdogThread.joinable()) {
+            watchdogThread.join();
+        }
+        expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
+        expect(eq(monitor.count, 1024U));
+        expect(eq(sink.count, 1024U));
+
+        fmt::println("N.B. 'propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports' test finished");
+    };
+
+    "propagate sink DONE status: upstream via disconnecting ports"_test = [&threadPool, &createWatchdog] {
+        using namespace gr::testing;
+        using scheduler = gr::scheduler::Simple<>;
+        gr::Graph flow;
+
+        auto &source  = flow.emplaceBlock<NullSource<float>>();
+        auto &monitor = flow.emplaceBlock<Copy<float>>();
+        auto &sink    = flow.emplaceBlock<CountingSink<float>>({ { "n_samples_max", 1024U } });
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+
+        auto sched                                        = scheduler{ std::move(flow), threadPool };
+        auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
+        expect(sched.runAndWait().has_value());
+
+        if (watchdogThread.joinable()) {
+            watchdogThread.join();
+        }
+        expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
+        expect(eq(sink.count, 1024U));
+
+        fmt::println("N.B. 'propagate sink DONE status: upstream via disconnecting ports' test finished");
+    };
+
+    fmt::println("N.B. test-suite finished");
 };
 
 int
-main() { /* tests are statically executed */
-}
+main() { /* tests are statically executed */ }

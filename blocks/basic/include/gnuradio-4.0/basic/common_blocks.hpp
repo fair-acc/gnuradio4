@@ -63,7 +63,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
     std::vector<gr::PortIn<T>> inputs;
     gr::PortOut<T>             out;
 
-    gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Doc<"variable number of inputs">, gr::Limits<1U, 32U>> n_inputs = 0U;
+    gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Doc<"variable number of inputs">, gr::Limits<1U, 32U>> n_inputs{ 0U };
 
     void
     settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {

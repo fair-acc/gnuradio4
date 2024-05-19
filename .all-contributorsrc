@@ -3,7 +3,9 @@
   "projectOwner": "fair-acc",
   "repoType": "github",
   "repoHost": "https://github.com",
-  "files": ["README.md"],
+  "files": [
+    "README.md"
+  ],
   "imageSize": 100,
   "commit": false,
   "contributorsPerLine": 7,
@@ -12,5 +14,92 @@
   "wrapperTemplate": "\n<table>\n  <tbody><%= bodyContent %>  </tbody>\n<%= tableFooterContent %></table>\n\n",
   "linkToUsage": true,
   "skipCi": true,
-  "contributors": []
+  "contributors": [
+    {
+      "login": "mormj",
+      "name": "mormj",
+      "avatar_url": "https://avatars.githubusercontent.com/u/34754695?v=4",
+      "profile": "https://github.com/mormj",
+      "contributions": [
+        "design"
+      ]
+    },
+    {
+      "login": "ivan-cukic",
+      "name": "Ivan Čukić",
+      "avatar_url": "https://avatars.githubusercontent.com/u/90119?v=4",
+      "profile": "http://cukic.co",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    },
+    {
+      "login": "mattkretz",
+      "name": "Matthias Kretz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3306474?v=4",
+      "profile": "https://mattkretz.github.io/",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    },
+    {
+      "login": "wirew0rm",
+      "name": "Alexander Krimm",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1202371?v=4",
+      "profile": "https://github.com/wirew0rm",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    },
+    {
+      "login": "frankosterfeld",
+      "name": "Frank Osterfeld",
+      "avatar_url": "https://avatars.githubusercontent.com/u/483854?v=4",
+      "profile": "https://github.com/frankosterfeld",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    },
+    {
+      "login": "cafeclimber",
+      "name": "Bailey Campbell",
+      "avatar_url": "https://avatars.githubusercontent.com/u/10188900?v=4",
+      "profile": "https://github.com/cafeclimber",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "RalphSteinhagen",
+      "name": "Ralph J. Steinhagen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/46007894?v=4",
+      "profile": "https://github.com/RalphSteinhagen",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    },
+    {
+      "login": "drslebedev",
+      "name": "drslebedev",
+      "avatar_url": "https://avatars.githubusercontent.com/u/25366186?v=4",
+      "profile": "https://github.com/drslebedev",
+      "contributions": [
+        "code",
+        "design",
+        "review"
+      ]
+    }
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular"
 }
