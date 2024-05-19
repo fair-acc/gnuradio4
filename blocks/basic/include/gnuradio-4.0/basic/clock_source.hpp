@@ -138,9 +138,10 @@ public:
 
         if (samplesToNextTag < samplesToNextTimeTag) {
             if (next_tag < tags.size() && samplesToNextTag <= samplesToProduce) {
-                const auto tagDeltaIndex = tags[next_tag].index - static_cast<Tag::signed_index_type>(n_samples_produced); // position w.r.t. start of this chunk
+                const auto signedSamplesProduced = static_cast<Tag::signed_index_type>(n_samples_produced);
+                const auto tagDeltaIndex         = tags[next_tag].index - signedSamplesProduced; // position w.r.t. start of this chunk
                 if (verbose_console) {
-                    gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced + tagDeltaIndex));
+                    gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, signedSamplesProduced + tagDeltaIndex));
                 }
                 out.publishTag(tags[next_tag].map, tagDeltaIndex);
                 samplesToProduce = samplesToNextTag;
@@ -154,7 +155,7 @@ public:
                 if (verbose_console) {
                     fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times[next_time_tag]);
                 }
-                out.publishTag(metaInfo, samplesToNextTimeTag);
+                out.publishTag(metaInfo, static_cast<Tag::signed_index_type>(samplesToNextTimeTag));
                 samplesToProduce = samplesToNextTimeTag;
                 next_time_tag++;
             }

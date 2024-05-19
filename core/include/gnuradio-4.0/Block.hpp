@@ -422,9 +422,8 @@ public:
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
-            "block_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{ false };
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
@@ -453,7 +452,9 @@ public:
             return "please add a public 'using Description = Doc<\"...\">' documentation annotation to your block definition";
         }
     }();
+#ifndef __EMSCRIPTEN__
     static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+#endif
 
     //
     static property_map
@@ -1697,6 +1698,10 @@ public:
             bool expectedThreadState = false;
             if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
+                    if (!ioThreadPool) {
+                        emitErrorMessage("work(..)", "blockingIO with useIoThread - no ioThreadPool being set");
+                        return { requested_work, 0UZ, work::Status::ERROR };
+                    }
                     ioThreadPool->execute([this]() {
                         assert(lifecycle::isActive(this->state()));
 

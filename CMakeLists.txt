@@ -98,19 +98,20 @@ if (EMSCRIPTEN)
     )
     add_link_options(
             "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+            "SHELL:-s ASSERTIONS=1"
             "SHELL:-s INITIAL_MEMORY=256MB"
-            "SHELL:-s MAXIMUM_MEMORY=1GB"
-            "SHELL:-s SAFE_HEAP=1"
-            "SHELL:-s ASSERTIONS=2"
-            "SHELL:-s STACK_OVERFLOW_CHECK=2"
-            "SHELL:-g"  # enable debugging information
-            "SHELL:-gsource-map"
-            "SHELL:--profiling-funcs"
-            "SHELL:--emit-symbol-map"
+            # "SHELL:-s SAFE_HEAP=1" # additional for debug
+            # "SHELL:-s ASSERTIONS=2" # additional for debug
+            # "SHELL:-s STACK_OVERFLOW_CHECK=2" # additional for debug
+            # "SHELL:-g" # additional for debug
+            # "SHELL:-gsource-map" # additional for debug
+            # "SHELL:--profiling-funcs" # additional for debug
+            # "SHELL:--emit-symbol-map" # additional for debug
             -fwasm-exceptions
             -pthread
-            "SHELL:-s PTHREAD_POOL_SIZE=30"
+            "SHELL:-s PTHREAD_POOL_SIZE=60"
             "SHELL:-s FETCH=1"
+            "SHELL:-s WASM=1" # output as web-assembly
     )
 endif ()
 

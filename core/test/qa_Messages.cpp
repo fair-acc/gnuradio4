@@ -497,7 +497,7 @@ const boost::ut::suite MessagesTests = [] {
             using ResultCheck                 = std::function<std::optional<bool>()>;
             SendCommand               cmd     = [] {};
             ResultCheck               check   = [] { return true; };
-            std::chrono::milliseconds delay   = 0ms; // delay after 'cmd' which the reply is being checked
+            std::chrono::milliseconds delay   = 1ms; // delay after 'cmd' which the reply is being checked
             std::chrono::milliseconds timeout = 1s;  // time-out for the 'check' test
         };
 
@@ -517,9 +517,18 @@ const boost::ut::suite MessagesTests = [] {
         fmt::println("##### starting test for scheduler {}", gr::meta::type_name<decltype(scheduler)>());
         std::fflush(stdout);
 
-        std::thread testWorker([&commands] {
-            std::this_thread::sleep_for(1s);
+        std::thread testWorker([&scheduler, &commands] {
+            fmt::println("starting testWorker.");
+            std::fflush(stdout);
+            while (scheduler.state() != gr::lifecycle::State::RUNNING) { // wait until scheduler is running
+                std::this_thread::sleep_for(40ms);
+            }
+            fmt::println("scheduler is running.");
+            std::fflush(stdout);
+
             for (auto &[command, resultCheck, delay, timeout] : commands) {
+                fmt::print("executing command: ");
+                std::fflush(stdout);
                 command();                          // execute the command
                 std::this_thread::sleep_for(delay); // wait for approximate time when command should be expected to be applied
 
@@ -548,8 +557,15 @@ const boost::ut::suite MessagesTests = [] {
                 }
             }
         });
+
+        fmt::println("starting scheduler {}", gr::meta::type_name<decltype(scheduler)>());
+        std::fflush(stdout);
         expect(scheduler.runAndWait().has_value());
-        testWorker.join();
+        fmt::println("stopped scheduler {}", gr::meta::type_name<decltype(scheduler)>());
+
+        if (testWorker.joinable()) {
+            testWorker.join();
+        }
 
         fmt::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink.n_samples_produced);
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::multiThreaded>>{};
