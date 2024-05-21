@@ -71,7 +71,7 @@ jobs:
             cxx: g++-14
           - cc: clang-18,
             cxx: clang++-18
-            cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-17"
+            cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-18"
           - cmake_wrapper: emcmake
             cc: emcc
             cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}"

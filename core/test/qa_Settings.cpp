@@ -247,7 +247,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().autoUpdateParameters().size(), 8UL));
         expect(eq(block1.settings().autoForwardParameters().size(), 2UL));
         // need to add 'n_samples_max' to forwarding list for the block to automatically forward it
-        // as the 'n_samples_max' tag is not part of the canonical 'gr::tag::DEFAULT_TAGS' list
+        // as the 'n_samples_max' tag is not part of the canonical 'gr::tag::kDefaultTags' list
         block1.settings().autoForwardParameters().emplace("n_samples_max");
         expect(eq(block1.settings().autoForwardParameters().size(), 3UL));
         // same check for block2

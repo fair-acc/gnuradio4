@@ -13671,10 +13671,10 @@ namespace gr {
  * ```
  */
 enum class TagPropagationPolicy {
-    TPP_DONT = 0,       /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
+    TPP_DONT       = 0, /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
     TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The scheduler takes care of that. */
     TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires same number of in- and outputs */
-    TPP_CUSTOM = 3      /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
+    TPP_CUSTOM     = 3  /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
 };
 
 using property_map = pmtv::map_t;
@@ -13871,8 +13871,9 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block st
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::tuple DEFAULT_TAGS = { SAMPLE_RATE,    SIGNAL_NAME,       SIGNAL_UNIT, SIGNAL_MIN,     SIGNAL_MAX,     TRIGGER_NAME, TRIGGER_TIME,
-                                             TRIGGER_OFFSET, TRIGGER_META_INFO, CONTEXT,     RESET_DEFAULTS, STORE_DEFAULTS, END_OF_STREAM };
+inline constexpr std::array<std::string_view, 14> kDefaultTags = { "sample_rate",  "signal_name",    "signal_quantity",   "signal_unit", "signal_min",    "signal_max",    "trigger_name",
+                                                                   "trigger_time", "trigger_offset", "trigger_meta_info", "context",     "reset_default", "store_default", "end_of_stream" };
+
 } // namespace tag
 
 } // namespace gr
@@ -18555,15 +18556,11 @@ public:
                     _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
                 }
 
-                // detect whether field has one of the DEFAULT_TAGS signature
+                // detect whether field has one of the kDefaultTags signature
                 if constexpr (traits::port::is_not_any_port_or_collection<Type> && !std::is_const_v<Type> && is_writable(member) && settings::isSupportedType<Type>()) {
-                    meta::tuple_for_each(
-                            [&memberName, this](auto &&default_tag) {
-                                if (default_tag.shortKey() == memberName) {
-                                    _auto_forward.emplace(memberName);
-                                }
-                            },
-                            gr::tag::DEFAULT_TAGS);
+                    if constexpr (std::ranges::find(gr::tag::kDefaultTags, std::string_view(get_display_name_const(member).c_str())) != gr::tag::kDefaultTags.cend()) {
+                        _auto_forward.emplace(memberName);
+                    }
                     _auto_update.emplace(memberName);
                 }
             };
@@ -20198,24 +20195,24 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value() && !message.data.value().contains("state")) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set block state w/o 'state' data msg: {}", unique_name, name, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
             }
 
             std::string stateStr;
             try {
                 stateStr = std::get<std::string>(message.data.value().at("state"));
             } catch (const std::exception &e) {
-                throw gr::exception(fmt::format("block {} property {} state conversion throws {}, msg: {}", unique_name, propertyName, e.what(), message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws {}, msg: {}", e.what(), message));
             } catch (...) {
-                throw gr::exception(fmt::format("block {} property {} state conversion throws unknown exception, msg: {}", unique_name, propertyName, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws unknown exception, msg: {}", message));
             }
             auto state = magic_enum::enum_cast<lifecycle::State>(stateStr);
             if (!state.has_value()) {
-                throw gr::exception(fmt::format("block {} property {} invalid lifecycle::State conversion from {}, msg: {}", unique_name, propertyName, stateStr, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
             }
             if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(fmt::format("error in state transition block {} property {} - what: {}", //
-                                                unique_name, propertyName, e.error().message, e.error().sourceLocation, e.error().errorTime));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", //
+                                                e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
             return std::nullopt;
         } else if (message.cmd == Get) {
@@ -20231,7 +20228,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(fmt::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
     }
 
     std::optional<Message>
@@ -20267,6 +20264,16 @@ protected:
     propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kStagedSetting);
+        const auto keys = [](const property_map &map) noexcept {
+            std::string result;
+            for (const auto &pair : map) {
+                if (!result.empty()) {
+                    result += ", ";
+                }
+                result += pair.first;
+            }
+            return result;
+        };
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
@@ -20285,8 +20292,7 @@ protected:
                 return std::nullopt;
             }
 
-            const auto keys = [](const auto &map) { return fmt::join(map | std::views::transform([](const auto &pair) { return pair.first; }), ", "); };
-            throw gr::exception(fmt::format("block {} (aka. {}) could not set fields: {}\nvs. available: {}", unique_name, name, keys(notSet), keys(settings().get())));
+            throw gr::exception(fmt::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(notSet), keys(settings().get())));
         } else if (message.cmd == Get) {
             message.data = self().settings().stagedParameters();
             return message;

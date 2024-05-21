@@ -1056,24 +1056,24 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value() && !message.data.value().contains("state")) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set block state w/o 'state' data msg: {}", unique_name, name, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
             }
 
             std::string stateStr;
             try {
                 stateStr = std::get<std::string>(message.data.value().at("state"));
             } catch (const std::exception &e) {
-                throw gr::exception(fmt::format("block {} property {} state conversion throws {}, msg: {}", unique_name, propertyName, e.what(), message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws {}, msg: {}", e.what(), message));
             } catch (...) {
-                throw gr::exception(fmt::format("block {} property {} state conversion throws unknown exception, msg: {}", unique_name, propertyName, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws unknown exception, msg: {}", message));
             }
             auto state = magic_enum::enum_cast<lifecycle::State>(stateStr);
             if (!state.has_value()) {
-                throw gr::exception(fmt::format("block {} property {} invalid lifecycle::State conversion from {}, msg: {}", unique_name, propertyName, stateStr, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
             }
             if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(fmt::format("error in state transition block {} property {} - what: {}", //
-                                                unique_name, propertyName, e.error().message, e.error().sourceLocation, e.error().errorTime));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", //
+                                                e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
             return std::nullopt;
         } else if (message.cmd == Get) {
@@ -1089,7 +1089,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(fmt::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
     }
 
     std::optional<Message>
@@ -1125,6 +1125,16 @@ protected:
     propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kStagedSetting);
+        const auto keys = [](const property_map &map) noexcept {
+            std::string result;
+            for (const auto &pair : map) {
+                if (!result.empty()) {
+                    result += ", ";
+                }
+                result += pair.first;
+            }
+            return result;
+        };
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
@@ -1143,8 +1153,7 @@ protected:
                 return std::nullopt;
             }
 
-            const auto keys = [](const auto &map) { return fmt::join(map | std::views::transform([](const auto &pair) { return pair.first; }), ", "); };
-            throw gr::exception(fmt::format("block {} (aka. {}) could not set fields: {}\nvs. available: {}", unique_name, name, keys(notSet), keys(settings().get())));
+            throw gr::exception(fmt::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(notSet), keys(settings().get())));
         } else if (message.cmd == Get) {
             message.data = self().settings().stagedParameters();
             return message;
