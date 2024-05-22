@@ -9,6 +9,7 @@
 		"./blocks/basic/include/",
 		"./blocks/filter/include/",
 		"./blocks/fourier/include/",
+		"./blocks/math/include/",
 		"./blocks/testing/include/",
 		"./algorithm/include/",
 		"./meta/include/",

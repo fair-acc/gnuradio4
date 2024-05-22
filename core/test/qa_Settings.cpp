@@ -690,6 +690,7 @@ const boost::ut::suite TransactionTests = [] {
     };
 
     // TODO enable this when load_grc works in emscripten (not relying on plugins here)
+#ifndef NOPLUGINS
     "Property auto-forwarding with GRC-loaded graph"_test = [&] {
         constexpr std::string_view grc = R"(
 blocks:
@@ -720,7 +721,9 @@ connections:
             expect(false);
         }
     };
+#endif
 };
 
 int
-main() { /* tests are statically executed */ }
+main() { /* tests are statically executed */
+}

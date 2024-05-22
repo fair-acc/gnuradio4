@@ -13,73 +13,69 @@ namespace gr {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
+namespace detail {
+
+template<typename TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+std::unique_ptr<gr::BlockModel>
+blockFactory(property_map params) {
+    return std::make_unique<gr::BlockWrapper<TBlock>>(std::move(params));
+}
+
+} // namespace detail
+
 class BlockRegistry {
-private:
-    using block_type_handler = std::function<void(std::unique_ptr<gr::BlockModel> &, const property_map &)>;
-    std::vector<std::string>                                                             _block_types;
-    std::unordered_map<std::string, std::unordered_map<std::string, block_type_handler>> _block_type_handlers;
-
-    template<typename TBlock>
-    static auto
-    createHandler() {
-        return [](std::unique_ptr<gr::BlockModel> &result, const property_map &params) {
-            if constexpr (std::is_constructible_v<TBlock, const property_map &>) {
-                result = std::make_unique<gr::BlockWrapper<TBlock>>(params); // gr_pluginBlock::wrap(std::make_shared<TBlock>(params));
-            } else if constexpr (std::is_constructible_v<TBlock>) {
-                result = std::make_unique<gr::BlockWrapper<TBlock>>();
-            } else {
-                gr::meta::print_types<gr::meta::message_type<"Can not default-construct the node instance, nor to construct it from const property_map&">, TBlock>{};
-            }
-            return true;
-        };
-    }
-
-    template<template<typename...> typename TBlock, typename... TBlockParameters>
-    static auto
-    createHandler() {
-        return createHandler<TBlock<TBlockParameters...>>();
-    }
+    using TBlockTypeHandler = std::function<std::unique_ptr<gr::BlockModel>(property_map)>;
+    std::vector<std::string>                                                            _blockTypes;
+    std::unordered_map<std::string, std::unordered_map<std::string, TBlockTypeHandler>> _blockTypeHandlers;
 
     auto &
-    findBlock_type_handlers_map(const std::string &blockType) {
-        if (auto it = _block_type_handlers.find(blockType); it != _block_type_handlers.end()) {
+    findBlockTypeHandlersMap(const std::string &blockType) {
+        if (auto it = _blockTypeHandlers.find(blockType); it != _blockTypeHandlers.end()) {
             return it->second;
-        } else {
-            _block_types.emplace_back(blockType);
-            return _block_type_handlers[blockType];
         }
+        _blockTypes.emplace_back(blockType);
+        return _blockTypeHandlers[blockType];
     }
 
 public:
-    template<typename TBlock>
+#ifndef NOPLUGINS
+    template<BlockLike TBlock>
+        requires std::is_constructible_v<TBlock, property_map>
     void
-    addBlockType(const std::string& blockType, const std::string& blockParams) {
-        auto &block_handlers                   = findBlock_type_handlers_map(blockType);
-        block_handlers[std::move(blockParams)] = createHandler<TBlock>();
+    addBlockType(std::string blockType, std::string blockParams) {
+        auto &block_handlers                   = findBlockTypeHandlersMap(blockType);
+        block_handlers[std::move(blockParams)] = detail::blockFactory<TBlock>;
     }
+#else
+    template<BlockLike TBlock>
+        requires std::is_constructible_v<TBlock, property_map>
+    void
+    addBlockType(std::string, std::string) {
+        // disables plugin system in favour of faster compile-times and when runtime or Python wrapping APIs are not requrired
+        // e.g. for compile-time only flow-graphs or for CI runners
+    }
+#endif
 
-    std::span<const std::string>
+
+    [[nodiscard]] std::span<const std::string>
     providedBlocks() const {
-        return _block_types;
+        return _blockTypes;
     }
 
-    std::unique_ptr<gr::BlockModel>
-    createBlock(std::string_view name, std::string_view type, const property_map &params) {
-        std::unique_ptr<gr::BlockModel> result;
-        auto                            block_it = _block_type_handlers.find(std::string(name));
-        if (block_it == _block_type_handlers.end()) return nullptr;
-
-        auto &block_handlers = block_it->second;
-        auto  handler_it     = block_handlers.find(std::string(type));
-        if (handler_it == block_handlers.end()) return nullptr;
-
-        handler_it->second(result, params);
-        return result;
+    [[nodiscard]] std::unique_ptr<gr::BlockModel>
+    createBlock(std::string_view name, std::string_view type, property_map params) const {
+        if (auto blockIt = _blockTypeHandlers.find(std::string(name)); blockIt != _blockTypeHandlers.end()) {
+            if (auto handlerIt = blockIt->second.find(std::string(type)); handlerIt != blockIt->second.end()) {
+                return handlerIt->second(std::move(params));
+            }
+        }
+        return nullptr;
     }
 
-    auto
+    [[nodiscard]] auto
     knownBlocks() const {
-        return _block_types;
+        return _blockTypes;
     }
 
     friend inline BlockRegistry &

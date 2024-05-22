@@ -196,14 +196,14 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
     T   _currentTime  = T(0.);
     int sampleCounter = 0;
 
-private:
     function_generator::SignalType _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
     T                              _timeTick   = T(1.) / static_cast<T>(sample_rate);
 
-public:
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) {
+        fmt::println("settingsChanged:\n");
         if (new_settings.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
+            fmt::println("settingsChanged:\nnew: {}\n", new_settings);
             const auto funcSettings = bestMatch(trigger_meta_info);
             if (funcSettings.has_value()) {
                 applyFunctionSettings(funcSettings.value());

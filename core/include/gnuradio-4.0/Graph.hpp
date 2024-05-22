@@ -18,7 +18,7 @@
 #include <tuple>
 #include <variant>
 
-#if !__has_include(<source_location>)
+#if !__has_include(<source_location> )
 #define HAVE_SOURCE_LOCATION 0
 #else
 
@@ -173,7 +173,9 @@ public:
         throw std::invalid_argument(fmt::format("Port {} does not exist", name));
     }
 
-    virtual ~BlockModel() = default;
+    virtual ~
+    BlockModel()
+            = default;
 
     /**
      * @brief to be called by scheduler->graph to initialise block
@@ -274,7 +276,8 @@ public:
     processScheduledMessages()
             = 0;
 
-    virtual UICategory uiCategory() const {
+    virtual UICategory
+    uiCategory() const {
         return UICategory::None;
     }
 
@@ -288,6 +291,7 @@ constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
 }
 
 template<BlockLike T>
+    requires std::is_constructible_v<T, property_map>
 class BlockWrapper : public BlockModel {
 private:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
@@ -318,56 +322,53 @@ private:
         msgOut = std::addressof(_block.msgOut);
     }
 
+    template<typename TPort>
+    constexpr static auto &
+    processPort(auto &where, TPort &port) noexcept {
+        where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
+        return where.back();
+    }
+
     void
-    createDynamicPortsLoader() {
-        _dynamicPortsLoader = [this] {
-            if (_dynamicPortsLoaded) return;
+    dynamicPortLoader() {
+        if (_dynamicPortsLoaded) return;
 
-            using Node = std::remove_cvref_t<decltype(blockRef())>;
-
-            auto registerPort = [&](auto &where, [[maybe_unused]] auto direction, [[maybe_unused]] auto index, auto &&t) {
-                auto processPort = []<typename Port>(auto &where_, Port &port) -> auto & {
-                    where_.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
-                    return where_.back();
-                };
-
-                using CurrentPortType = std::remove_cvref_t<decltype(t)>;
-                if constexpr (traits::port::is_port_v<CurrentPortType>) {
-                    using PortDescriptor = typename CurrentPortType::ReflDescriptor;
-                    if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
-                        auto &port = (blockRef().*(PortDescriptor::pointer));
-                        processPort(where, port);
-                    } else {
-                        // We can also have ports defined as template parameters
-                        if constexpr (decltype(direction)::value == PortDirection::INPUT) {
-                            processPort(where, gr::inputPort<decltype(index)::value, PortType::ANY>(&blockRef()));
-                        } else {
-                            processPort(where, gr::outputPort<decltype(index)::value, PortType::ANY>(&blockRef()));
-                        }
-                    }
+        auto registerPort = [this]<typename Direction, typename ConstIndex, typename CurrentPortType>(DynamicPorts &where, [[maybe_unused]] Direction direction, [[maybe_unused]] ConstIndex index,
+                                                                                                      CurrentPortType &&) noexcept {
+            if constexpr (traits::port::is_port_v<CurrentPortType>) {
+                using PortDescriptor = typename CurrentPortType::ReflDescriptor;
+                if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
+                    auto &port = (blockRef().*(PortDescriptor::pointer));
+                    processPort(where, port);
                 } else {
-                    using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
-                    if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
-                        auto               &collection = (blockRef().*(PortCollectionDescriptor::pointer));
-                        NamedPortCollection result;
-                        result.name = refl::descriptor::get_name(PortCollectionDescriptor()).data;
-                        for (auto &port : collection) {
-                            processPort(result.ports, port);
-                        }
-                        where.push_back(std::move(result));
+                    // We can also have ports defined as template parameters
+                    if constexpr (Direction::value == PortDirection::INPUT) {
+                        processPort(where, gr::inputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
                     } else {
-                        static_assert(meta::always_false<PortCollectionDescriptor>, "Port collections are only supported for member variables");
+                        processPort(where, gr::outputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
                     }
                 }
-            };
-            traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
-            traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
-
-            constexpr std::size_t input_port_count  = gr::traits::block::all_input_port_types<Node>::size;
-            constexpr std::size_t output_port_count = gr::traits::block::all_output_port_types<Node>::size;
-            static_assert(input_port_count + output_port_count > 0);
-            _dynamicPortsLoaded = true;
+            } else {
+                using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
+                if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
+                    auto               &collection = (blockRef().*(PortCollectionDescriptor::pointer));
+                    NamedPortCollection result;
+                    result.name = refl::descriptor::get_name(PortCollectionDescriptor()).data;
+                    for (auto &port : collection) {
+                        processPort(result.ports, port);
+                    }
+                    where.push_back(std::move(result));
+                } else {
+                    static_assert(meta::always_false<PortCollectionDescriptor>, "Port collections are only supported for member variables");
+                }
+            }
         };
+
+        using Node = std::remove_cvref_t<decltype(blockRef())>;
+        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
+        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
+
+        _dynamicPortsLoaded = true;
     }
 
 public:
@@ -380,30 +381,15 @@ public:
     operator=(BlockWrapper &&other)
             = delete;
 
-    ~BlockWrapper() override = default;
+    ~
+    BlockWrapper() override
+            = default;
 
-    BlockWrapper() {
+    explicit
+    BlockWrapper(property_map initParameter = {})
+        : _block(std::move(initParameter)) {
         initMessagePorts();
-        createDynamicPortsLoader();
-    }
-
-    template<typename Arg>
-        requires(!std::is_same_v<std::remove_cvref_t<Arg>, T>)
-    explicit BlockWrapper(Arg &&arg) : _block(std::forward<Arg>(arg)) {
-        initMessagePorts();
-        createDynamicPortsLoader();
-    }
-
-    template<typename... Args>
-        requires(!detail::contains_type<BlockWrapper, std::decay_t<Args>...> && sizeof...(Args) > 1)
-    explicit BlockWrapper(Args &&...args) : _block{ std::forward<Args>(args)... } {
-        initMessagePorts();
-        createDynamicPortsLoader();
-    }
-
-    explicit BlockWrapper(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) : _block{ std::move(init_parameter) } {
-        initMessagePorts();
-        createDynamicPortsLoader();
+        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
     }
 
     void
@@ -424,7 +410,8 @@ public:
         return work::Status::ERROR;
     }
 
-    UICategory uiCategory() const override {
+    UICategory
+    uiCategory() const override {
         return T::DrawableControl::kCategory;
     }
 
@@ -504,7 +491,9 @@ struct PortIndexDefinition {
     T           topLevel;
     std::size_t subIndex;
 
-    constexpr PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
+    constexpr
+    PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index)
+        : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
 };
 
 class Edge {
@@ -785,6 +774,7 @@ public:
     }
 
     template<BlockLike TBlock, typename... Args>
+        requires std::is_constructible_v<TBlock, property_map>
     auto &
     emplaceBlock(Args &&...args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
@@ -795,19 +785,13 @@ public:
     }
 
     template<BlockLike TBlock>
+        requires std::is_constructible_v<TBlock, property_map>
     auto &
-    emplaceBlock(const property_map &initialSettings) {
+    emplaceBlock(property_map initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto      &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>());
+        auto      &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
         auto       raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
         const auto failed        = raw_ref->settings().set(initialSettings);
-        if (!failed.empty()) {
-            std::vector<std::string> keys;
-            for (const auto &pair : failed) {
-                keys.push_back(pair.first);
-            }
-            throw std::invalid_argument(fmt::format("initial Block settings could not be applied successfully - mismatched keys or value-type: {}\n", fmt::join(keys, ", ")));
-        }
         raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
@@ -1044,7 +1028,9 @@ public:
     using TOutputPortTypes = typename traits::block::stream_output_port_types<base>;
     using TReturnType      = typename traits::block::stream_return_type<base>;
 
-    constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+    constexpr
+    MergedGraph(Left l, Right r)
+        : left(std::move(l)), right(std::move(r)) {}
 
     // if the left block (source) implements available_samples (a customization point), then pass the call through
     friend constexpr std::size_t
@@ -1128,10 +1114,10 @@ public:
         }
     } // end:: processOne
 
-    work::Result
-    work(std::size_t requested_work) noexcept {
-        return base::work(requested_work);
-    }
+    // work::Result // TODO: ask Matthias if this is still needed or whether this can be simplified.
+    // work(std::size_t requested_work) noexcept {
+    //     return base::work(requested_work);
+    // }
 };
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>

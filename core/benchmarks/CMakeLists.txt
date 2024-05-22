@@ -1,6 +1,6 @@
 function (add_gr_benchmark BM_NAME)
     add_benchmark(${BM_NAME})
-    target_link_libraries(${BM_NAME} PRIVATE gnuradio-core refl-cpp fmt gr-basic gr-testing)
+    target_link_libraries(${BM_NAME} PRIVATE gnuradio-core refl-cpp fmt gr-basic gr-math gr-testing)
     target_compile_options(${BM_NAME} PRIVATE -O3) # performance related benchmarks should be optimised during compile-time
 endfunction()
 
@@ -15,4 +15,4 @@ target_link_libraries(bm_fft PRIVATE gr-fourier)
 add_executable(bm-nosonar_node_api_nosimd bm-nosonar_node_api.cpp)
 append_compiler_flags(bm-nosonar_node_api_nosimd)
 target_compile_options(bm-nosonar_node_api_nosimd PRIVATE -DDISABLE_SIMD=1)
-target_link_libraries(bm-nosonar_node_api_nosimd PRIVATE gnuradio-options gnuradio-core refl-cpp fmt ut ut-benchmark gr-basic gr-testing)
+target_link_libraries(bm-nosonar_node_api_nosimd PRIVATE gnuradio-options gnuradio-core refl-cpp fmt ut ut-benchmark gr-basic gr-math gr-testing)
