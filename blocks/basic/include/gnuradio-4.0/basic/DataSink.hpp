@@ -402,13 +402,15 @@ synchronously (/asynchronously) if handled by the same (/different) sink block.
     bool                                          _registered = false;
 
 public:
+    PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>> in;
+
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
     Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -1.0f;
     Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +1.0f;
 
-    PortIn<T, RequiredSamples<std::dynamic_extent, _listener_buffer_size>> in;
+    using Block<DataSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
     struct Poller {
         // TODO consider whether reusing port<T> here makes sense

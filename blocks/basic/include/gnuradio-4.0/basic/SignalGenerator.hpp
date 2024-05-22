@@ -74,11 +74,9 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
 
     T _currentTime = T(0.);
 
-private:
     signal_generator::Type _signalType = signal_generator::parse(signal_type);
     T                      _timeTick   = T(1.) / T(sample_rate);
 
-public:
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
         _signalType = signal_generator::parse(signal_type);

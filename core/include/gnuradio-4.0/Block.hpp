@@ -215,7 +215,7 @@ template<typename Derived>
 concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processBulk)>;
 
 template<typename Derived>
-concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
 inline void
@@ -387,11 +387,7 @@ inline static const char *kResetDefaults = "ResetDefaults"; ///< retrieve and re
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : public lifecycle::StateMachine<Derived>, //
-              protected std::tuple<Arguments...>       // all arguments -> may cause code binary size bloat
-//              protected std::tuple<typename gr::meta::typelist<Arguments...>::template filter<gr::isBlockDependent>> // only add port types to the tuple, the other info are kept in the using
-//              statements below
-{
+class Block : public lifecycle::StateMachine<Derived>, protected std::tuple<Arguments...> {
     static std::atomic_size_t _uniqueIdCounter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -481,14 +477,14 @@ public:
     MsgPortOutNamed<"__Builtin"> msgOut;
 
     using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
-    std::map<std::string, PropertyCallback> propertyCallbacks{
-        { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
-        { block::property::kEcho, &Block::propertyCallbackEcho },                     //
-        { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
-        { block::property::kSetting, &Block::propertyCallbackSettings },              //
-        { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
-        { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
-        { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
+    std::map<std::string, PropertyCallback>         propertyCallbacks{
+                { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
+                { block::property::kEcho, &Block::propertyCallbackEcho },                     //
+                { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
+                { block::property::kSetting, &Block::propertyCallbackSettings },              //
+                { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
+                { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
+                { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -497,7 +493,7 @@ protected:
     Tag  _mergedInputTag{};
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<SettingsBase> _settings = std::make_unique<CtxSettings<Derived>>(self());
+    std::unique_ptr<SettingsBase> _settings;
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -528,18 +524,17 @@ protected:
     }
 
 public:
-    Block() noexcept(false) : Block({}) {} // N.B. throws in case of on contract violations
+    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
 
-    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept(false) // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived *>(this))) {             // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameter = {}) noexcept(false)                                   // N.B. throws in case of on contract violations
+        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
 
-        if (init_parameter.size() != 0) {
-            const auto failed = settings().set(init_parameter);
-            if (!failed.empty()) {
-                throw std::invalid_argument("Settings not applied successfully");
+        if (initParameter.size() != 0) {
+            if (const property_map failed = settings().set(std::move(initParameter)); !failed.empty()) {
+                throw gr::exception(fmt::format("settings could not be applied: {}", failed));
             }
         }
     }
@@ -564,7 +559,8 @@ public:
     operator=(Block &&other)
             = delete;
 
-    ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+    ~
+    Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
             emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
@@ -1336,7 +1332,7 @@ protected:
         }
     }
 
-    auto
+    std::size_t
     getMergedBlockLimit() {
         if constexpr (requires(const Derived &d) {
                           { available_samples(d) } -> std::same_as<std::size_t>;
@@ -1356,13 +1352,17 @@ protected:
     template<typename TIn, typename TOut>
     gr::work::Status
     invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(
-                                                       PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
-                                               inputReaderTuple);
+        auto tempInputSpanStorage = std::apply(
+                []<typename... PortReader>(PortReader &...args) {
+                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
+                },
+                inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(
-                                                        PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
-                                                outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply(
+                []<typename... PortReader>(PortReader &...args) {
+                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
+                },
+                outputReaderTuple);
 
         auto refToSpan = []<typename T, typename U>(T &&original, U &&temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
@@ -1566,10 +1566,10 @@ protected:
         const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn]     = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
-        auto       maxChunk                                                   = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto inputSkipBefore                                            = inputSamplesToSkipBeforeNextChunk(std::min({ maxSyncAvailableIn, nextTag, nextEosTag }));
-        const auto availableToProcess          = std::min({ maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore) });
-        const auto availableToPublish          = std::min({ maxSyncOut, maxSyncAvailableOut });
+        std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
+        const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({ maxSyncAvailableIn, nextTag, nextEosTag }));
+        const auto  availableToProcess         = std::min({ maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore) });
+        const auto  availableToPublish         = std::min({ maxSyncOut, maxSyncAvailableOut });
         const auto [resampledIn, resampledOut] = computeResampling(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
@@ -1602,7 +1602,7 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) &&hasTag;
 
         // call the block implementation's work function
         work::Status ret;
@@ -2082,8 +2082,7 @@ registerBlock(TRegisterInstance &registerInstance) {
     auto addBlockType = [&]<typename Type> {
         using ThisBlock = TBlock<Type>;
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), //
-                                                          detail::reflFirstTypeName<Type>());
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), detail::reflFirstTypeName<Type>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2096,8 +2095,7 @@ registerBlock(TRegisterInstance &registerInstance) {
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>>;
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                                                          Type::toString());
+        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), Type::toString());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};

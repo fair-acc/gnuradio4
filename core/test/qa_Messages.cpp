@@ -112,7 +112,7 @@ const boost::ut::suite MessagesTests = [] {
 
         "Block<T>-level heartbeat tests"_test = [] {
             gr::MsgPortOut toBlock;
-            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            TestBlock<int> unitTestBlock(property_map{ { "name", "UnitTestBlock" } });
             gr::MsgPortIn  fromBlock;
 
             expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
@@ -180,7 +180,7 @@ const boost::ut::suite MessagesTests = [] {
 
         "Block<T>-level echo tests"_test = [] {
             gr::MsgPortOut toBlock;
-            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            TestBlock<int> unitTestBlock(property_map{ { "name", "UnitTestBlock" } });
             gr::MsgPortIn  fromBlock;
 
             expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
@@ -258,7 +258,7 @@ const boost::ut::suite MessagesTests = [] {
 
         "Block<T>-level lifecycle::State tests"_test = [] {
             gr::MsgPortOut toBlock;
-            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            TestBlock<int> unitTestBlock(property_map{ { "name", "UnitTestBlock" } });
             gr::MsgPortIn  fromBlock;
 
             expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
@@ -314,7 +314,7 @@ const boost::ut::suite MessagesTests = [] {
 
         "Block<T>-level (staged) settings tests"_test = [] {
             gr::MsgPortOut toBlock;
-            TestBlock<int> unitTestBlock({ { "name", "UnitTestBlock" } });
+            TestBlock<int> unitTestBlock(property_map{ { "name", "UnitTestBlock" } });
             std::ignore = unitTestBlock.settings().applyStagedParameters(); // call manually (N.B. normally initialised by Graph/Scheduler)
             gr::MsgPortIn fromBlock;
 
@@ -375,8 +375,8 @@ const boost::ut::suite MessagesTests = [] {
         using enum gr::message::Command;
 
         gr::MsgPortOut toBlock;
-        TestBlock<int> unitTestBlock1({ { "name", "UnitTestBlock1" } });
-        TestBlock<int> unitTestBlock2({ { "name", "UnitTestBlock2" } });
+        TestBlock<int> unitTestBlock1(property_map{ { "name", "UnitTestBlock1" } });
+        TestBlock<int> unitTestBlock2(property_map{ { "name", "UnitTestBlock2" } });
         gr::MsgPortIn  fromBlock;
 
         const auto processMessage = [&]() {
