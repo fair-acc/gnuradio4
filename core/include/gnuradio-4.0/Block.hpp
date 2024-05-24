@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Settings.hpp>
+#include <gnuradio-4.0/Transactions.hpp>
 
 #include <gnuradio-4.0/LifeCycle.hpp>
 
@@ -496,7 +497,7 @@ protected:
     Tag  _mergedInputTag{};
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<SettingsBase> _settings = std::make_unique<BasicSettings<Derived>>(self());
+    std::unique_ptr<SettingsBase> _settings = std::make_unique<CtxSettings<Derived>>(self());
 
     [[nodiscard]] constexpr auto &
     self() noexcept {
@@ -530,7 +531,7 @@ public:
     Block() noexcept(false) : Block({}) {} // N.B. throws in case of on contract violations
 
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init_parameter) noexcept(false) // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) {           // N.B. safe delegated use of this (i.e. not used during construction)
+        : _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived *>(this))) {             // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
@@ -907,7 +908,7 @@ public:
                 inputPorts<PortType::STREAM>(&self()));
 
         if (!mergedInputTag().map.empty()) {
-            settings().autoUpdate(mergedInputTag().map); // apply tags as new settings if matching
+            settings().autoUpdate(mergedInputTag()); // apply tags as new settings if matching
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
                 for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
             }

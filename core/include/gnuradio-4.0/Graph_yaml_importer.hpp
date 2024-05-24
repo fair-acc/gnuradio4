@@ -180,7 +180,7 @@ load_grc(PluginLoader &loader, const std::string &yaml_source) {
                     // clang-format on
 
                 } else {
-                    const auto &value                   = kv.second.as<std::string>();
+                    const auto &value                    = kv.second.as<std::string>();
                     currentBlock->metaInformation()[key] = value;
                 }
             }
