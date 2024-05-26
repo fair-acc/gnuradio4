@@ -5,6 +5,19 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
+option(NOPLUGINS "Disable plugins" OFF)
+option(EMBEDDED "Enable embedded mode" OFF)
+option(TIMETRACE "Enable clang's -ftime-trace" OFF)
+option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
+option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
+
+if (NOPLUGINS)
+    set(NOPLUGINS ON)
+    add_compile_definitions(NOPLUGINS)
+    message(STATUS "disable plugin system (faster compile-times and when runtime or Python wrapping APIs are not required): ${NOPLUGINS}")
+endif ()
+
 # Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
 if (NOT DEFINED GR_TOPLEVEL_PROJECT)
     set(GR_TOPLEVEL_PROJECT OFF)
@@ -26,31 +39,31 @@ else ()
 endif ()
 
 set(CMAKE_EXT_DEP_WARNING_GUARD "")
-if(DISABLE_EXTERNAL_DEPS_WARNINGS) # enable warnings for external dependencies
+if (DISABLE_EXTERNAL_DEPS_WARNINGS) # enable warnings for external dependencies
     set(CMAKE_EXT_DEP_WARNING_GUARD SYSTEM)
-endif()
+endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
     # -Og is a much more reasonable default for debugging. Also enable gdb extensions.
     set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb" CACHE INTERNAL
-        "Flags used by the compiler during debug builds.")
+            "Flags used by the compiler during debug builds.")
 
     # Add a build type that keeps runtime checks enabled
     set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O3" CACHE INTERNAL
-        "Flags used by the compiler during release builds containing runtime checks.")
+            "Flags used by the compiler during release builds containing runtime checks.")
 
     # The default value is often an empty string, but this is usually not desirable and one of the
     # other standard build types is usually more appropriate.
-    if(NOT CMAKE_BUILD_TYPE)
+    if (NOT CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE "RelWithAssert" CACHE STRING
-            "Choose the type of build. Options are: None Debug Release RelWithAssert RelWithDebInfo MinSizeRel.\n\
+                "Choose the type of build. Options are: None Debug Release RelWithAssert RelWithDebInfo MinSizeRel.\n\
  - None: no compiler flags, defaults and target-specific flags apply\n\
  - Debug: best/complete debugging experience; as optimized as reasonable\n\
  - Release: full optimization; some runtime checks disabled\n\
  - RelWithAssert: full optimization; runtime checks enabled\n\
  - RelWithDebInfo: optimized; debug info; some runtime checks disabled"
-            FORCE)
-    endif(NOT CMAKE_BUILD_TYPE)
+                FORCE)
+    endif (NOT CMAKE_BUILD_TYPE)
 
     if (CMAKE_BUILD_TYPE STREQUAL "" AND NOT CMAKE_CXX_FLAGS MATCHES "-O[123gs]")
         message(WARNING "It seems you are compiling without optimization. Please set CMAKE_BUILD_TYPE or CMAKE_CXX_FLAGS.")
@@ -58,35 +71,63 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
 endif ()
 
 # Initialize a variable to hold all the compiler flags -> exported into global config.h(.in)
-if(CMAKE_BUILD_TYPE MATCHES Debug)
+if (CMAKE_BUILD_TYPE MATCHES Debug)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES Release)
+elseif (CMAKE_BUILD_TYPE MATCHES Release)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES RelWithAssert)
+elseif (CMAKE_BUILD_TYPE MATCHES RelWithAssert)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHASSERT} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
+elseif (CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS}")
-elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
+elseif (CMAKE_BUILD_TYPE MATCHES MinSizeRel)
     set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
+    set(EMBEDDED ON)
     # 'EMBEDDED is used to disable/minimise code features for embedded systems (e.g. code-size, console printouts, etc.)
     add_compile_definitions(EMBEDDED)
-endif()
+    message(STATUS "enable size-optimising core feature (e.g. suppressing self-documentation): ${EMBEDDED}")
+endif ()
 # Replace ; with space
 string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
-if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-    add_compile_options(-stdlib=libc++ -fcolor-diagnostics -ftime-trace)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++ -ftime-trace")
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+if (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
+    add_compile_options(-stdlib=libc++ -fcolor-diagnostics)
+    if (TIMETRACE)
+        add_compile_options(-ftime-trace)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ftime-trace")
+        message(STATUS "Enable TIMETRACE: ${TIMETRACE}")
+    endif ()
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-fdiagnostics-color=always)
-endif()
+endif ()
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
+    # Validate that only one sanitizer option is enabled
+    if ((ADDRESS_SANITIZER AND UB_SANITIZER) OR (ADDRESS_SANITIZER AND THREAD_SANITIZER) OR (UB_SANITIZER AND THREAD_SANITIZER))
+        message(FATAL_ERROR "Only one of ADDRESS_SANITIZER, UB_SANITIZER, or THREAD_SANITIZER can be enabled at the same time.")
+    endif ()
+
+    if (ADDRESS_SANITIZER)
+        add_compile_options(-fsanitize=address)
+        add_link_options(-fsanitize=address)
+        message(STATUS "Enable ADDRESS_SANITIZER: ${ADDRESS_SANITIZER}")
+    elseif (UB_SANITIZER)
+        add_compile_options(-fsanitize=undefined)
+        add_link_options(-fsanitize=undefined)
+        message(STATUS "Enable UB_SANITIZER: ${UB_SANITIZER}")
+    elseif (THREAD_SANITIZER)
+        add_compile_options(-fsanitize=thread)
+        add_link_options(-fsanitize=thread)
+        message(STATUS "Enable THREAD_SANITIZER: ${THREAD_SANITIZER}")
+    endif ()
+endif ()
 
 # Include What You Use tooling: https://github.com/include-what-you-use/include-what-you-use
 find_program(INCLUDE_WHAT_YOU_USE_TOOL_PATH NAMES include-what-you-use iwyu)
-if(INCLUDE_WHAT_YOU_USE_TOOL_PATH)
+if (INCLUDE_WHAT_YOU_USE_TOOL_PATH)
     message(" using 'Include What You Use' path: (${INCLUDE_WHAT_YOU_USE_TOOL_PATH})")
     set_property(GLOBAL PROPERTY CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${INCLUDE_WHAT_YOU_USE_TOOL_PATH})
-endif()
+endif ()
 
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -95,16 +136,16 @@ add_library(gnuradio-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(gnuradio-options)
 
-if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
+if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
     message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
     set(EMSCRIPTEN true)
-endif()
+endif ()
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
     add_compile_options(
-        -fwasm-exceptions
-        -pthread
+            -fwasm-exceptions
+            -pthread
             -g
     )
     add_link_options(
@@ -127,12 +168,12 @@ if (EMSCRIPTEN)
 endif ()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
-if (NOT(TARGET refl-cpp))
+if (NOT (TARGET refl-cpp))
     add_library(refl-cpp INTERFACE)
     target_include_directories(refl-cpp ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/refl-cpp/)
 endif ()
 
-if (NOT(TARGET magic_enum))
+if (NOT (TARGET magic_enum))
     add_library(magic_enum INTERFACE)
     target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
 endif ()
@@ -157,11 +198,11 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-    yaml-cpp
-    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-    GIT_TAG 0.8.0
-    PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/yaml-cpp/0001-Avoid-static-reference-to-temporary.patch
-    UPDATE_DISCONNECTED 1
+        yaml-cpp
+        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+        GIT_TAG 0.8.0
+        PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/yaml-cpp/0001-Avoid-static-reference-to-temporary.patch
+        UPDATE_DISCONNECTED 1
 )
 
 FetchContent_Declare(
@@ -171,9 +212,9 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-    cpp-httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.15.3
+        cpp-httplib
+        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+        GIT_TAG v0.15.3
 )
 
 FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd cpp-httplib)
@@ -226,11 +267,11 @@ add_dependencies(fftw fftw_ext)
 
 ## check for CPython and Numpy dependencies
 set(PYTHON_FORCE_INCLUDE OFF)
-if(PYTHON_FORCE_INCLUDE)
+if (PYTHON_FORCE_INCLUDE)
     find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter Development NumPy)
-else()
+else ()
     find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
-endif()
+endif ()
 
 set(PYTHON_AVAILABLE OFF)
 if (Python3_FOUND AND NOT EMSCRIPTEN)
@@ -242,19 +283,19 @@ if (Python3_FOUND AND NOT EMSCRIPTEN)
     )
 
     # If NumPy is found, set PYTHON_AVAILABLE to ON
-    if(NOT NUMPY_NOT_FOUND)
+    if (NOT NUMPY_NOT_FOUND)
         set(PYTHON_AVAILABLE ON)
         include_directories(${Python3_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
         add_definitions(-DPYTHON_AVAILABLE)
         message(STATUS "Using Python Include Dirs: ${Python3_INCLUDE_DIRS} and ${NUMPY_INCLUDE_DIR}")
-    else()
+    else ()
         message(STATUS "Python and Numpy Include headers not found!!")
-    endif()
-endif()
+    endif ()
+endif ()
 
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 
-option(ENABLE_TESTING "Enable Test Builds"  ${GR_TOPLEVEL_PROJECT})
+option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 if (ENABLE_TESTING AND UNIX AND NOT APPLE)
     list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
     enable_testing()

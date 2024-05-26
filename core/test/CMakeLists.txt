@@ -10,7 +10,7 @@ function(setup_test_no_asan TEST_NAME)
 endfunction()
 
 function(setup_test TEST_NAME)
-    if (PYTHON_AVAILABLE)
+    if(PYTHON_AVAILABLE)
         target_include_directories(${TEST_NAME} PRIVATE ${Python3_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
         target_link_libraries(${TEST_NAME} PRIVATE ${Python3_LIBRARIES})
     endif()
