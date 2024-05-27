@@ -10,16 +10,15 @@ namespace gr::testing {
 
 template<typename T>
 struct Delay : public gr::Block<Delay<T>> {
+    using clock = std::chrono::steady_clock;
+
     PortIn<T>  in;
     PortOut<T> out;
     uint32_t   delay_ms = 0;
 
-private:
-    using clock                = std::chrono::steady_clock;
     bool              _waiting = true;
     clock::time_point _start_time;
 
-public:
     gr::work::Status
     processBulk(ConsumableSpan auto &input, PublishableSpan auto &output) {
         if (_waiting) {

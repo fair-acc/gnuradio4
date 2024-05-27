@@ -1,57 +1,29 @@
+#include "../../blocks/math/include/gnuradio-4.0/math/Math.hpp"
 #include <benchmark.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Profiler.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
-#include <gnuradio-4.0/testing/bm_test_helper.hpp>
+#include <gnuradio-4.0/math/Math.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 
 inline constexpr std::size_t N_ITER    = 10;
-inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000'000, 1024);
+inline constexpr gr::Size_t  N_SAMPLES = gr::util::round_up(10'000'000, 1024);
 inline constexpr std::size_t N_NODES   = 5;
-
-template<typename T, char op>
-class math_op : public gr::Block<math_op<T, op>, gr::PortInNamed<T, "in">, gr::PortOutNamed<T, "out">> {
-    T _factor = static_cast<T>(1.0f);
-
-public:
-    math_op() = delete;
-
-    explicit math_op(T factor, std::string name_ = gr::this_source_location()) : _factor(factor) { this->name = name_; }
-
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(const V &a) const noexcept {
-        if constexpr (op == '*') {
-            return a * _factor;
-        } else if constexpr (op == '/') {
-            return a / _factor;
-        } else if constexpr (op == '+') {
-            return a + _factor;
-        } else if constexpr (op == '-') {
-            return a - _factor;
-        } else {
-            static_assert(gr::meta::always_false<T>, "unknown op");
-        }
-    }
-};
-
-template<typename T>
-using multiply = math_op<T, '*'>;
-template<typename T>
-using divide = math_op<T, '/'>;
 
 template<typename T, typename Sink, typename Source>
 void
 create_cascade(gr::Graph &testGraph, Sink &src, Source &sink, std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
+    using namespace gr::blocks::math;
 
-    std::vector<multiply<T> *> mult1;
-    std::vector<divide<T> *>   mult2;
+    std::vector<MultiplyConst<T> *> mult1;
+    std::vector<DivideConst<T> *>   mult2;
     for (std::size_t i = 0; i < depth; i++) {
-        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<multiply<T>>(T(2), fmt::format("mult.{}", i))));
-        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<divide<T>>(T(2), fmt::format("div.{}", i))));
+        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({ { "value", T(2) }, { "name", fmt::format("mult.{}", i) } })));
+        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({ { "value", T(2) }, { "name", fmt::format("div.{}", i) } })));
     }
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
@@ -70,8 +42,8 @@ gr::Graph
 test_graph_linear(std::size_t depth = 1) {
     gr::Graph testGraph;
 
-    auto &src  = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
-    auto &sink = testGraph.emplaceBlock<test::sink<T>>();
+    auto &src  = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({ { "n_samples_max", N_SAMPLES } });
+    auto &sink = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
 
     create_cascade<T>(testGraph, src, sink, depth);
 
@@ -85,9 +57,9 @@ test_graph_bifurcated(std::size_t depth = 1) {
     using namespace benchmark;
     gr::Graph testGraph;
 
-    auto &src   = testGraph.emplaceBlock<test::source<T>>(N_SAMPLES);
-    auto &sink1 = testGraph.emplaceBlock<test::sink<T>>();
-    auto &sink2 = testGraph.emplaceBlock<test::sink<T>>();
+    auto &src   = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({ { "n_samples_max", N_SAMPLES } });
+    auto &sink1 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
+    auto &sink2 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
 
     create_cascade<T>(testGraph, src, sink1, depth);
     create_cascade<T>(testGraph, src, sink2, depth);
@@ -99,11 +71,7 @@ void
 exec_bm(auto &scheduler, const std::string &test_case) {
     using namespace boost::ut;
     using namespace benchmark;
-    test::n_samples_produced = 0LU;
-    test::n_samples_consumed = 0LU;
-    expect(scheduler.runAndWait().has_value());
-    expect(eq(test::n_samples_produced, N_SAMPLES)) << fmt::format("did not produce enough output samples for {}", test_case);
-    expect(ge(test::n_samples_consumed, N_SAMPLES)) << fmt::format("did not consume enough input samples for {}", test_case);
+    expect(scheduler.runAndWait().has_value()) << fmt::format("scheduler failure for test-case: {}", test_case);
 }
 
 [[maybe_unused]] inline const boost::ut::suite scheduler_tests = [] {

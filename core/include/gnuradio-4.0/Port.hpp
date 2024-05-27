@@ -188,9 +188,14 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     PortMetaInfo() noexcept(true) : PortMetaInfo({}) {}
 
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{ initMetaInfo.begin(), initMetaInfo.end() }) {}
+    explicit
+    PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true)
+        : PortMetaInfo(property_map{ initMetaInfo.begin(), initMetaInfo.end() }) {}
 
-    explicit PortMetaInfo(const property_map &metaInfo) noexcept(true) { update<true>(metaInfo); }
+    explicit
+    PortMetaInfo(const property_map &metaInfo) noexcept(true) {
+        update<true>(metaInfo);
+    }
 
     void
     reset() {
@@ -344,16 +349,6 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{};
 
-public:
-    [[nodiscard]] constexpr bool
-    initBuffer(std::size_t nSamples = 0) noexcept {
-        if constexpr (kIsOutput) {
-            // write one default value into output -- needed for cyclic graph initialisation
-            return _ioHandler.try_publish([val = default_value](std::span<T> &out) { std::ranges::fill(out, val); }, nSamples);
-        }
-        return true;
-    }
-
     [[nodiscard]] constexpr auto
     newIoHandler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (kIsInput) {
@@ -370,6 +365,45 @@ public:
         } else {
             return TagBufferType(buffer_size).new_writer();
         }
+    }
+
+public:
+    constexpr
+    Port() noexcept
+            = default;
+
+    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
+        : name(std::move(port_name)), priority{ priority_ }, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{ newIoHandler() }, _tagIoHandler{ newTagIoHandler() } {
+        static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
+    }
+
+    constexpr
+    Port(Port &&other) noexcept
+        : name(std::move(other.name))
+        , priority{ other.priority }
+        , min_samples(other.min_samples)
+        , max_samples(other.max_samples)
+        , _ioHandler(std::move(other._ioHandler))
+        , _tagIoHandler(std::move(other._tagIoHandler)) {}
+
+    Port(const Port &) = delete;
+    auto
+    operator=(const Port &)
+            = delete;
+    constexpr Port &
+    operator=(Port &&other)
+            = delete;
+
+    ~
+    Port() = default;
+
+    [[nodiscard]] constexpr bool
+    initBuffer(std::size_t nSamples = 0) noexcept {
+        if constexpr (kIsOutput) {
+            // write one default value into output -- needed for cyclic graph initialisation
+            return _ioHandler.try_publish([val = default_value](std::span<T> &out) { std::ranges::fill(out, val); }, nSamples);
+        }
+        return true;
     }
 
     [[nodiscard]] InternalPortBuffers
@@ -398,31 +432,6 @@ public:
         setBuffer(typed_buffer_writer->buffer(), typed_tag_buffer_writer->buffer());
         return true;
     }
-
-    constexpr Port()   = default;
-    Port(const Port &) = delete;
-    auto
-    operator=(const Port &)
-            = delete;
-
-    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
-        : name(std::move(port_name)), priority{ priority_ }, min_samples(min_samples_), max_samples(max_samples_) {
-        static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
-    }
-
-    constexpr Port(Port &&other) noexcept
-        : name(std::move(other.name))
-        , priority{ other.priority }
-        , min_samples(other.min_samples)
-        , max_samples(other.max_samples)
-        , _ioHandler(std::move(other._ioHandler))
-        , _tagIoHandler(std::move(other._tagIoHandler)) {}
-
-    constexpr Port &
-    operator=(Port &&other)
-            = delete;
-
-    ~Port() = default;
 
     [[nodiscard]] constexpr bool
     isConnected() const noexcept {
@@ -793,7 +802,8 @@ public:
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
-        virtual ~model() = default;
+        virtual ~
+        model() = default;
 
         [[nodiscard]] virtual std::any
         defaultValue() const noexcept
@@ -880,7 +890,9 @@ private:
         operator=(wrapper &&)
                 = delete;
 
-        explicit constexpr wrapper(T &arg) noexcept : _value{ arg } {
+        explicit constexpr
+        wrapper(T &arg) noexcept
+            : _value{ arg } {
             if constexpr (T::kIsInput) {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
@@ -888,7 +900,9 @@ private:
             }
         }
 
-        explicit constexpr wrapper(T &&arg) noexcept : _value{ std::move(arg) } {
+        explicit constexpr
+        wrapper(T &&arg) noexcept
+            : _value{ std::move(arg) } {
             if constexpr (T::kIsInput) {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
@@ -896,7 +910,9 @@ private:
             }
         }
 
-        ~wrapper() override = default;
+        ~
+        wrapper() override
+                = default;
 
         [[nodiscard]] std::any
         defaultValue() const noexcept override {
@@ -973,7 +989,9 @@ public:
 
     struct non_owned_reference_tag {};
 
-    constexpr DynamicPort() = delete;
+    constexpr
+    DynamicPort()
+            = delete;
 
     DynamicPort(const DynamicPort &arg) = delete;
     DynamicPort &

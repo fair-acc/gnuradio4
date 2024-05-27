@@ -14,8 +14,8 @@
 template<typename T>
 constexpr void
 addTimeTagEntry(gr::basic::ClockSource<T> &clockSource, std::uint64_t timeInNanoseconds, const std::string &value) {
-    clockSource.tag_times.push_back(timeInNanoseconds);
-    clockSource.tag_values.push_back(value);
+    clockSource.tag_times.value.push_back(timeInNanoseconds);
+    clockSource.tag_values.value.push_back(value);
 }
 
 const boost::ut::suite TagTests = [] {

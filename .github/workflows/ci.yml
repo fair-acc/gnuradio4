@@ -69,6 +69,7 @@ jobs:
         compiler:
           - cc: gcc-14
             cxx: g++-14
+            cmake_flags: "-DADDRESS_SANITIZER=ON"
           - cc: clang-18,
             cxx: clang++-18
             cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-18"

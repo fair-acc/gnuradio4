@@ -239,6 +239,8 @@ private:
     gr::http::RequestType _type = gr::http::RequestType::GET;
 
 public:
+    using Block<HttpBlock<T>, BlockingIO<false>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
+
     PortOut<pmtv::map_t> out;
 
     std::string url;

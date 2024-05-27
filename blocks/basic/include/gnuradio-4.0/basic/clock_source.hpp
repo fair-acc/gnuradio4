@@ -30,23 +30,21 @@ using namespace gr;
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
 struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {
-    using Description                                      = Doc<R""(
-ClockSource Documentation -- add here
-)"">;
-    std::chrono::time_point<ClockSourceType> nextTimePoint = ClockSourceType::now();
+    using Description = Doc<R""(A source block that generates clock signals with specified timing intervals.
+This block can generate periodic signals based on a system clock and allows for customization of the sample rate and chunk size.
+The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with a single 'context' keys at specified times after the block started.)"">;
+    using TimePoint   = std::chrono::time_point<ClockSourceType>;
 
     PortOut<T> out;
 
     // Ready-to-use tags set by user
     std::vector<Tag> tags{};
-    std::size_t      next_tag{ 0 };
 
     // Time-string tags
-    std::vector<std::uint64_t> tag_times; // time in nanoseconds
-    std::vector<std::string>   tag_values;
-    std::size_t                next_time_tag{ 0 };
-    std::uint64_t              repeat_period{ 0 };          // if repeat_period > last tag_time -> restart tags, in nanoseconds
-    bool                       do_zero_order_hold{ false }; // if more tag_times than values: true=publish last tag, false=publish empty
+    Annotated<std::vector<std::uint64_t>, "tag offset time", Doc<"time in nanoseconds since block start">>                 tag_times;
+    Annotated<std::vector<std::string>, "tag values", Doc<"values to be emittages as {\" context \":value_i}">>            tag_values;
+    Annotated<std::uint64_t, "repeat period", Doc<"if repeat_period > last tag_time -> restart tags, in nanoseconds">>     repeat_period{ 0 };
+    Annotated<bool, "perform zero hold", Doc<"if more tag_times than values: true=publish last tag, false=publish empty">> do_zero_order_hold{ false };
 
     A<gr::Size_t, "n_samples_max", Visible, Doc<"0: unlimited">>              n_samples_max = 1024;
     gr::Size_t                                                                n_samples_produced{ 0 };
@@ -55,11 +53,12 @@ ClockSource Documentation -- add here
     std::shared_ptr<std::thread>                                              userProvidedThread;
     bool                                                                      verbose_console = false;
 
-private:
-    std::chrono::time_point<ClockSourceType> _beginSequenceTimePoint = ClockSourceType::now();
-    bool                                     _beginSequenceTimePointInitialized{ false };
+    std::size_t _nextTag{ 0 };
+    std::size_t _nextTimeTag{ 0 };
+    TimePoint   _nextTimePoint          = ClockSourceType::now();
+    TimePoint   _beginSequenceTimePoint = ClockSourceType::now();
+    bool        _beginSequenceTimePointInitialized{ false };
 
-public:
     void
     start() {
         if (verbose_console) {
@@ -70,7 +69,7 @@ public:
         if (verbose_console) {
             fmt::println("started {}", this->name);
         }
-        nextTimePoint = ClockSourceType::now();
+        _nextTimePoint = ClockSourceType::now();
     }
 
     void
@@ -89,20 +88,17 @@ public:
 
     void
     settingsChanged(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
-        nextTimePoint = ClockSourceType::now();
+        _nextTimePoint = ClockSourceType::now();
+
+        bool isAscending = std::ranges::adjacent_find(tag_times.value, std::greater_equal()) == tag_times.value.end();
+        if (!isAscending) {
+            using namespace gr::message;
+            this->emitErrorMessage("error()", Error("The input tag_times vector should be ascending."));
+        }
     }
 
     work::Status
     processBulk(PublishableSpan auto &output) noexcept {
-        // TODO: does one need to check every processBulk call
-        bool isAscending = std::ranges::adjacent_find(tag_times, std::greater_equal()) == tag_times.end();
-        if (!isAscending) {
-            using namespace gr::message;
-            this->emitErrorMessage("error()", Error("The input tag_times vector should be ascending."));
-            output.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
             output.publish(0UZ);
             return work::Status::DONE;
@@ -110,54 +106,54 @@ public:
 
         if constexpr (useIoThread) { // using scheduler-graph provided user thread
             // sleep until next update period -- the following call blocks
-            std::this_thread::sleep_until(nextTimePoint);
+            std::this_thread::sleep_until(_nextTimePoint);
         }
 
         const gr::Size_t remainingSamples = n_samples_max - n_samples_produced;
         gr::Size_t       samplesToProduce = std::min(remainingSamples, chunk_size.value);
 
         gr::Size_t samplesToNextTimeTag = std::numeric_limits<uint32_t>::max();
-        if (!tag_times.empty()) {
-            if (next_time_tag == 0 && !_beginSequenceTimePointInitialized) {
-                _beginSequenceTimePoint            = nextTimePoint;
+        if (!tag_times.value.empty()) {
+            if (_nextTimeTag == 0 && !_beginSequenceTimePointInitialized) {
+                _beginSequenceTimePoint            = _nextTimePoint;
                 _beginSequenceTimePointInitialized = true;
             }
-            if (next_time_tag >= tag_times.size() && repeat_period >= tag_times.back()) {
+            if (_nextTimeTag >= tag_times.value.size() && repeat_period >= tag_times.value.back()) {
                 _beginSequenceTimePoint += std::chrono::microseconds(repeat_period / 1000); // ns -> μs
                 _beginSequenceTimePointInitialized = true;
-                next_time_tag                      = 0;
+                _nextTimeTag                       = 0;
             }
-            if (next_time_tag < tag_times.size()) {
-                const auto currentTagTime = std::chrono::microseconds(tag_times[next_time_tag] / 1000); // ns -> μs
-                const auto timeToNextTag  = std::chrono::duration_cast<std::chrono::microseconds>((_beginSequenceTimePoint + currentTagTime - nextTimePoint));
+            if (_nextTimeTag < tag_times.value.size()) {
+                const auto currentTagTime = std::chrono::microseconds(tag_times.value[_nextTimeTag] / 1000); // ns -> μs
+                const auto timeToNextTag  = std::chrono::duration_cast<std::chrono::microseconds>((_beginSequenceTimePoint + currentTagTime - _nextTimePoint));
                 samplesToNextTimeTag      = static_cast<gr::Size_t>((static_cast<double>(timeToNextTag.count()) / 1.e6) * static_cast<double>(sample_rate));
             }
         }
 
-        auto samplesToNextTag = tags.empty() || next_tag >= tags.size() ? std::numeric_limits<uint32_t>::max() : static_cast<gr::Size_t>(tags[next_tag].index) - n_samples_produced;
+        auto samplesToNextTag = tags.empty() || _nextTag >= tags.size() ? std::numeric_limits<uint32_t>::max() : static_cast<gr::Size_t>(tags[_nextTag].index) - n_samples_produced;
 
         if (samplesToNextTag < samplesToNextTimeTag) {
-            if (next_tag < tags.size() && samplesToNextTag <= samplesToProduce) {
+            if (_nextTag < tags.size() && samplesToNextTag <= samplesToProduce) {
                 const auto signedSamplesProduced = static_cast<Tag::signed_index_type>(n_samples_produced);
-                const auto tagDeltaIndex         = tags[next_tag].index - signedSamplesProduced; // position w.r.t. start of this chunk
+                const auto tagDeltaIndex         = tags[_nextTag].index - signedSamplesProduced; // position w.r.t. start of this chunk
                 if (verbose_console) {
-                    gr::testing::print_tag(tags[next_tag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, signedSamplesProduced + tagDeltaIndex));
+                    gr::testing::print_tag(tags[_nextTag], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, signedSamplesProduced + tagDeltaIndex));
                 }
-                out.publishTag(tags[next_tag].map, tagDeltaIndex);
+                out.publishTag(tags[_nextTag].map, tagDeltaIndex);
                 samplesToProduce = samplesToNextTag;
-                next_tag++;
+                _nextTag++;
             }
         } else {
-            if (!tag_times.empty() && next_time_tag < tag_times.size() && samplesToNextTimeTag <= samplesToProduce) {
-                std::string  value    = next_time_tag < tag_values.size() ? tag_values[next_time_tag] : do_zero_order_hold ? tag_values.back() : "";
+            if (!tag_times.value.empty() && _nextTimeTag < tag_times.value.size() && samplesToNextTimeTag <= samplesToProduce) {
+                std::string  value    = _nextTimeTag < tag_values.value.size() ? tag_values.value[_nextTimeTag] : do_zero_order_hold ? tag_values.value.back() : "";
                 property_map context  = { { "context", value } };
                 property_map metaInfo = { { "trigger_meta_info", context } };
                 if (verbose_console) {
-                    fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times[next_time_tag]);
+                    fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);
                 }
                 out.publishTag(metaInfo, static_cast<Tag::signed_index_type>(samplesToNextTimeTag));
                 samplesToProduce = samplesToNextTimeTag;
-                next_time_tag++;
+                _nextTimeTag++;
             }
         }
         samplesToProduce = std::min(samplesToProduce, n_samples_max.value);
@@ -172,16 +168,16 @@ public:
 
         if constexpr (basicPeriodAlgorithm) {
             const auto updatePeriod = std::chrono::microseconds(static_cast<long>(1e6f * static_cast<float>(samplesToProduce) / sample_rate));
-            nextTimePoint += updatePeriod;
+            _nextTimePoint += updatePeriod;
         } else {
             const auto updatePeriod = std::chrono::microseconds(static_cast<long>(1e6f * static_cast<float>(samplesToProduce) / sample_rate));
             // verify the actual rate
-            const auto actual_elapsed_time   = std::chrono::duration_cast<std::chrono::microseconds>(ClockSourceType::now() - nextTimePoint + updatePeriod).count();
+            const auto actual_elapsed_time   = std::chrono::duration_cast<std::chrono::microseconds>(ClockSourceType::now() - _nextTimePoint + updatePeriod).count();
             const auto expected_elapsed_time = 1e6f * static_cast<float>(samplesToProduce) / sample_rate;
 
             // adjust the next update period
             const float ratio = static_cast<float>(actual_elapsed_time) / expected_elapsed_time;
-            nextTimePoint += std::chrono::microseconds(static_cast<long>(static_cast<float>(updatePeriod.count()) * ratio));
+            _nextTimePoint += std::chrono::microseconds(static_cast<long>(static_cast<float>(updatePeriod.count()) * ratio));
         }
 
         return work::Status::OK;
@@ -212,7 +208,7 @@ private:
                         }
                         lifecycle::State actualThreadState = this->state();
                         while (lifecycle::isActive(actualThreadState)) {
-                            std::this_thread::sleep_until(nextTimePoint);
+                            std::this_thread::sleep_until(_nextTimePoint);
                             // invoke and execute work function from user-provided thread
                             const work::Status status = this->invokeWork();
                             if (status == work::Status::DONE) {
@@ -255,8 +251,8 @@ template<typename T>
 using DefaultClockSource = ClockSource<T, true, std::chrono::system_clock, true>;
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, n_samples_max, chunk_size, sample_rate,
-                                    verbose_console);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), out, tag_times, tag_values, repeat_period,
+                                    do_zero_order_hold, n_samples_max, chunk_size, sample_rate, verbose_console);
 
 auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, std::uint8_t, std::uint32_t, std::int32_t, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<float>>);
