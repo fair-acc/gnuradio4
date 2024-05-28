@@ -853,10 +853,6 @@ private:
         [[nodiscard]] virtual bool
         updateReaderInternal(InternalPortBuffers buffer_other) noexcept
                 = 0;
-
-        [[nodiscard]] virtual std::string
-        valueTypeName() const
-                = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -968,11 +964,6 @@ private:
             return _value.disconnect();
         }
 
-        [[nodiscard]] std::string
-        valueTypeName() const override {
-            return gr::meta::type_name<typename T::value_type>();
-        }
-
         [[nodiscard]] ConnectionResult
         connect(DynamicPort &dst_port) override {
             using enum gr::ConnectionResult;
@@ -1051,11 +1042,6 @@ public:
     [[nodiscard]] bool
     isSynchronous() noexcept {
         return _accessor->isSynchronous();
-    }
-
-    [[nodiscard]] std::string
-    valueTypeName() const noexcept {
-        return _accessor->valueTypeName();
     }
 
     [[nodiscard]] bool
