@@ -19024,6 +19024,16 @@ namespace gr {
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
+namespace settings {
+/**
+ * Policy for handling Settings Auto Update when `context` is not found in storedParameters.
+ */
+enum class AutoUpdatePolicy {
+    Ignore,     // do nothing when context is not in storedParameters
+    AddToStored // Add the new context to storedParameters with empty parameters and apply any new changes present in the Tag
+};
+} // namespace settings
+
 template<typename TBlock>
 class CtxSettings : public SettingsBase {
     /**
@@ -19071,8 +19081,9 @@ class CtxSettings : public SettingsBase {
     std::set<std::string, std::less<>>                                                         _allWritableMembers{};   // all `isWritableMember` class members
     std::map<pmtv::pmt, std::set<std::string, std::less<>>, PMTCompare>                        _autoUpdateParameters{}; // for each SettingsCtx.context auto updated members are store separately
     std::set<std::string, std::less<>>                                                         _autoForwardParameters{};
-    MatchPredicate                                                                             _matchPred = nullMatchPred;
-    pmtv::pmt                                                                                  _activeCtx = "";
+    MatchPredicate                                                                             _matchPred        = nullMatchPred;
+    pmtv::pmt                                                                                  _activeCtx        = "";
+    settings::AutoUpdatePolicy                                                                 _autoUpdatePolicy = settings::AutoUpdatePolicy::AddToStored;
 
 public:
     explicit CtxSettings(TBlock &block, MatchPredicate matchPred = nullMatchPred) noexcept : SettingsBase(), _block(&block), _matchPred(matchPred) {
@@ -19242,15 +19253,17 @@ public:
         if constexpr (refl::is_reflectable<TBlock>()) {
             SettingsCtx ctx = createSettingsCtxFromTag(tag);
 
-            const auto bestMatchCtx = findBestMatchCtx(ctx.context);
-            // if no best match context is found just ignore and return
+            auto bestMatchCtx = findBestMatchCtx(ctx.context);
             if (bestMatchCtx == std::nullopt) {
-                return;
+                if (_autoUpdatePolicy == settings::AutoUpdatePolicy::AddToStored) {
+                    bestMatchCtx = ctx.context;
+                } else if (_autoUpdatePolicy == settings::AutoUpdatePolicy::Ignore) {
+                    return;
+                }
             }
-            const auto &autoUpdateParameters = _autoUpdateParameters.find(bestMatchCtx.value());
-            if (autoUpdateParameters == _autoUpdateParameters.end()) {
-                return;
-            }
+
+            const auto  found                = _autoUpdateParameters.find(bestMatchCtx.value());
+            const auto &autoUpdateParameters = found == _autoUpdateParameters.end() ? _allWritableMembers : found->second;
 
             property_map        newParameters = getBestMatchStoredParameters(ctx);
             const property_map &parameters    = tag.map;
@@ -19258,7 +19271,7 @@ public:
                 auto processOneMember = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
-                        if (autoUpdateParameters->second.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                        if (autoUpdateParameters.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             newParameters.insert_or_assign(key, value);
                             SettingsBase::_changed.store(true);
                         }
@@ -20077,7 +20090,7 @@ template<typename Derived>
 concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processBulk)>;
 
 template<typename Derived>
-concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and(HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
 inline void
@@ -20339,14 +20352,14 @@ public:
     MsgPortOutNamed<"__Builtin"> msgOut;
 
     using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
-    std::map<std::string, PropertyCallback>         propertyCallbacks{
-                { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
-                { block::property::kEcho, &Block::propertyCallbackEcho },                     //
-                { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
-                { block::property::kSetting, &Block::propertyCallbackSettings },              //
-                { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
-                { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
-                { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
+    std::map<std::string, PropertyCallback> propertyCallbacks{
+        { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
+        { block::property::kEcho, &Block::propertyCallbackEcho },                     //
+        { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
+        { block::property::kSetting, &Block::propertyCallbackSettings },              //
+        { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
+        { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
+        { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -20389,7 +20402,7 @@ public:
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
 
     Block(property_map initParameter = {}) noexcept(false)                                   // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+        : _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
@@ -20421,8 +20434,7 @@ public:
     operator=(Block &&other)
             = delete;
 
-    ~
-    Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+    ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
             emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
@@ -21214,17 +21226,13 @@ protected:
     template<typename TIn, typename TOut>
     gr::work::Status
     invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply(
-                []<typename... PortReader>(PortReader &...args) {
-                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
-                },
-                inputReaderTuple);
+        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(
+                                                       PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
+                                               inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply(
-                []<typename... PortReader>(PortReader &...args) {
-                    return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... };
-                },
-                outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(
+                                                        PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
+                                                outputReaderTuple);
 
         auto refToSpan = []<typename T, typename U>(T &&original, U &&temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
@@ -21464,7 +21472,7 @@ protected:
         // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) &&hasTag;
+        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
 
         // call the block implementation's work function
         work::Status ret;

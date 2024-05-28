@@ -43,8 +43,9 @@ const boost::ut::suite TagTests = [] {
         addTimeTagEntry(clockSrc, 850 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=8");
         clockSrc.repeat_period      = 1000 * ms;
         clockSrc.do_zero_order_hold = true;
-        auto &funcGen               = testGraph.emplaceBlock<FunctionGenerator<float>>({ { "sample_rate", sample_rate }, { "name", "FunctionGenerator" } });
-        funcGen.match_pred          = [](const auto &tableEntry, const auto &searchEntry, const auto attempt) -> std::optional<bool> {
+
+        auto &funcGen      = testGraph.emplaceBlock<FunctionGenerator<float>>({ { "sample_rate", sample_rate }, { "name", "FunctionGenerator" } });
+        funcGen.match_pred = [](const auto &tableEntry, const auto &searchEntry, const auto attempt) -> std::optional<bool> {
             if (searchEntry.find("context") == searchEntry.end()) {
                 return std::nullopt;
             }
@@ -83,14 +84,15 @@ const boost::ut::suite TagTests = [] {
         funcGen.addFunctionTableEntry({ { "context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=8" } }, createImpulseResponsePropertyMap(10.f, 20.f, 0.02f /* [s]*/, 0.06f /* [s]*/));
 
         auto &sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "SampleGeneratorSink" } });
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(funcGen)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
 
         // connect UI sink -- doesn't strictly need to be part of the graph due to BlockingIO<false> definition
         // but the present 'connect' API assumes it to be part of the Graph
         auto &uiSink = testGraph.emplaceBlock<testing::ImChartMonitor<float>>({ { "name", "BasicImChartSink" } });
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(uiSink)));
         expect(uiSink.meta_information.value.contains("Drawable")) << "drawable";
+
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(funcGen)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(uiSink)));
 
         scheduler::Simple sched{ std::move(testGraph) };
 
@@ -110,5 +112,4 @@ const boost::ut::suite TagTests = [] {
 };
 
 int
-main() { /* not needed for UT */
-}
+main() { /* not needed for UT */ }
