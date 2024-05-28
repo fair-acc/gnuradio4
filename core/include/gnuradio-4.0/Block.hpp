@@ -2010,7 +2010,19 @@ using namespace std::string_literals;
 template<typename Type>
 std::string
 reflFirstTypeName() {
-    if constexpr (refl::is_reflectable<Type>()) {
+    //
+    // Using refl cpp for getting names of types does not work
+    // with class templates. It returns "Template<T...>" as the name
+    // instead of replacing "T..." with the names of types.
+    //
+    // Until we get proper reflection support in C++, we need to
+    // cover the special cases manually.
+    //
+    if constexpr (DataSetLike<Type>) {
+        return fmt::format("gr::DataSet<{}>", reflFirstTypeName<typename Type::value_type>());
+    } else if constexpr (UncertainValueLike<Type>) {
+        return fmt::format("gr::UncertainValue<{}>", reflFirstTypeName<typename Type::value_type>());
+    } else if constexpr (refl::is_reflectable<Type>()) {
         return refl::reflect<Type>().name.str();
 
     } else {
