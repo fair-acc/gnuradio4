@@ -91,6 +91,11 @@ const boost::ut::suite BlockInstantiationTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
+    "KnownBlocksParameterizations"_test = [] {
+        expect(std::ranges::contains(context().loader.knownBlockParameterizations(names::fixed_source), "double"));
+        expect(std::ranges::contains(context().loader.knownBlockParameterizations(names::convert), "double,float"));
+    };
+
     "KnownBlocksInstantiate"_test = [] {
         expect(context().loader.instantiate(names::fixed_source, "double") != nullptr);
         expect(context().loader.instantiate(names::cout_sink, "double") != nullptr);
@@ -192,5 +197,4 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
 };
 
 int
-main() { /* not needed for UT */
-}
+main() { /* not needed for UT */ }
