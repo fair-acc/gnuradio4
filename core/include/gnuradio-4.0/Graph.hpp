@@ -339,6 +339,9 @@ private:
                 using PortDescriptor = typename CurrentPortType::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
                     auto &port = (blockRef().*(PortDescriptor::pointer));
+                    if (port.name.empty()) {
+                        port.name = refl::descriptor::get_name(PortDescriptor()).data;
+                    }
                     processPort(where, port);
                 } else {
                     // We can also have ports defined as template parameters

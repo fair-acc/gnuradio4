@@ -38,6 +38,8 @@ public:
     providedBlocks() const = 0;
     virtual std::unique_ptr<gr::BlockModel>
     createBlock(std::string_view name, std::string_view type, const gr::property_map &params) = 0;
+    virtual std::vector<std::string>
+    knownBlockParameterizations(std::string_view block) const = 0;
 };
 
 namespace gr {
@@ -62,6 +64,11 @@ public:
     std::unique_ptr<gr::BlockModel>
     createBlock(std::string_view name, std::string_view type, const property_map &params) override {
         return registry.createBlock(name, type, params);
+    }
+
+    std::vector<std::string>
+    knownBlockParameterizations(std::string_view block) const override {
+        return registry.knownBlockParameterizations(block);
     }
 
     template<typename TBlock>

@@ -78,6 +78,25 @@ public:
         return _blockTypes;
     }
 
+    bool
+    isBlockKnown(std::string_view block) const {
+        return _blockTypeHandlers.find(std::string(block)) != _blockTypeHandlers.end();
+    }
+
+    auto
+    knownBlockParameterizations(std::string_view block) const {
+        std::vector<std::string> result;
+        if (auto it = _blockTypeHandlers.find(std::string(block)); it != _blockTypeHandlers.end()) {
+            const auto &map = it->second;
+            result.reserve(map.size());
+            for (const auto &[key, _] : map) {
+                result.push_back(key);
+            }
+        }
+
+        return result;
+    }
+
     friend inline BlockRegistry &
     globalBlockRegistry();
 };

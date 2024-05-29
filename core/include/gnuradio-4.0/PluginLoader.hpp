@@ -140,6 +140,15 @@ private:
     BlockRegistry           *_registry;
     std::vector<std::string> _knownBlocks;
 
+    gr_plugin_base *
+    handlerForName(std::string_view name) const {
+        if (auto it = _handlerForName.find(std::string(name)); it != _handlerForName.end()) {
+            return it->second;
+        } else {
+            return nullptr;
+        }
+    }
+
 public:
     PluginLoader(BlockRegistry &registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
         for (const auto &directory : plugin_directories) {
@@ -192,16 +201,31 @@ public:
         return result;
     }
 
+    std::vector<std::string>
+    knownBlockParameterizations(std::string_view block) const {
+        if (_registry->isBlockKnown(block)) {
+            return _registry->knownBlockParameterizations(block);
+        }
+
+        gr_plugin_base *handler = handlerForName(block);
+        if (handler) {
+            return handler->knownBlockParameterizations(block);
+        } else {
+            return {};
+        }
+    }
+
     std::unique_ptr<gr::BlockModel>
     instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
         // Try to create a node from the global registry
         if (auto result = _registry->createBlock(name, type, params)) {
             return result;
         }
-        auto it = _handlerForName.find(std::string(name)); // TODO avoid std::string here
-        if (it == _handlerForName.end()) return {};
 
-        auto &handler = it->second;
+        auto *handler = handlerForName(name);
+        if (handler == nullptr) {
+            return {};
+        }
 
         return handler->createBlock(name, type, params);
     }
@@ -234,6 +258,15 @@ public:
     auto
     knownBlocks() const {
         return _registry->knownBlocks();
+    }
+
+    std::vector<std::string>
+    knownBlockParameterizations(std::string_view block) const {
+        if (_registry->isBlockKnown(block)) {
+            return _registry->knownBlockParameterizations(block);
+        }
+
+        return {};
     }
 
     std::unique_ptr<gr::BlockModel>
