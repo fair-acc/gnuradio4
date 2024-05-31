@@ -65,7 +65,7 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
 
 } // namespace detail
 
-enum class FileMode { override, append, multi };
+enum class Mode { overwrite, append, multi };
 
 template<typename T>
 struct BasicFileSink : public gr::Block<BasicFileSink<T>> {
@@ -79,8 +79,8 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     PortIn<T> in;
 
     A<std::string, "file name", Doc<"base filename, prefixed if ">, Visible>              file_name;
-    FileMode                                                                              _mode              = FileMode::override;
-    A<std::string, "mode", Doc<"mode: \"override\", \"append\", \"multi\"">, Visible>     mode               = std::string(magic_enum::enum_name(_mode));
+    Mode                                                                                  _mode              = Mode::overwrite;
+    A<std::string, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>    mode               = std::string(magic_enum::enum_name(_mode));
     A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible> max_bytes_per_file = 0U;
 
     std::size_t   _totalBytesWritten{0UZ};
@@ -90,7 +90,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     std::string   _actualFileName;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        _mode = magic_enum::enum_cast<FileMode>(mode, magic_enum::case_insensitive).value_or(_mode);
+        _mode = magic_enum::enum_cast<Mode>(mode, magic_enum::case_insensitive).value_or(_mode);
         if (lifecycle::isActive(this->state())) {
             closeFile();
             openNextFile();
@@ -105,6 +105,11 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     void stop() { closeFile(); }
 
     [[nodiscard]] constexpr work::Status processBulk(ConsumableSpan auto& dataIn) {
+        if (max_bytes_per_file.value != 0U && _totalBytesWrittenFile >= max_bytes_per_file.value) {
+            closeFile();
+            openNextFile();
+        }
+
         std::size_t nBytesMax = dataIn.size() * sizeof(T);
         if (max_bytes_per_file.value != 0U) {
             nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(max_bytes_per_file.value - _totalBytesWrittenFile));
@@ -120,10 +125,6 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
         _totalBytesWritten += nBytesMax;
         _totalBytesWrittenFile += nBytesMax;
-        if (max_bytes_per_file.value != 0U && _totalBytesWrittenFile >= max_bytes_per_file.value) {
-            closeFile();
-            openNextFile();
-        }
 
         return work::Status::OK;
     }
@@ -131,7 +132,6 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 private:
     void closeFile() {
         if (_file.is_open()) {
-            _file.flush();
             _file.close();
         }
     }
@@ -148,15 +148,15 @@ private:
 
         // Open file handle based on mode
         switch (_mode) {
-        case FileMode::override: {
+        case Mode::overwrite: {
             _actualFileName = file_name.value;
             _file.open(_actualFileName, std::ios::binary | std::ios::trunc);
         } break;
-        case FileMode::append: {
+        case Mode::append: {
             _actualFileName = file_name.value;
             _file.open(_actualFileName, std::ios::binary | std::ios::app);
         } break;
-        case FileMode::multi: {
+        case Mode::multi: {
             // _fileCounter ensures that the filenames are unique and still sortable by date-time, with an additional counter to handle rapid successive file creation.
             _actualFileName = filePath.parent_path() / (detail::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string());
             _file.open(_actualFileName, std::ios::binary);
@@ -184,8 +184,8 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     PortOut<T> out;
 
     A<std::string, "file name", Doc<"Base filename, prefixed if necessary">, Visible>          file_name;
-    FileMode                                                                                   _mode        = FileMode::override;
-    A<std::string, "mode", Doc<"mode: \"override\", \"append\", \"multi\"">, Visible>          mode         = std::string(magic_enum::enum_name(_mode));
+    Mode                                                                                       _mode        = Mode::overwrite;
+    A<std::string, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>         mode         = std::string(magic_enum::enum_name(_mode));
     A<bool, "repeat", Doc<"true: repeat back-to-back">>                                        repeat       = false;
     A<gr::Size_t, "offset", Doc<"file start offset in bytes">, Visible>                        offset       = 0U;
     A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible> length       = 0U;
@@ -200,7 +200,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     std::string                        _currentFileName;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { //
-        _mode = magic_enum::enum_cast<FileMode>(mode, magic_enum::case_insensitive).value_or(_mode);
+        _mode = magic_enum::enum_cast<Mode>(mode, magic_enum::case_insensitive).value_or(_mode);
     }
 
     void start() {
@@ -214,11 +214,11 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         }
 
         switch (_mode) {
-        case FileMode::override:
-        case FileMode::append: {
+        case Mode::overwrite:
+        case Mode::append: {
             _filesToRead.push_back(filePath);
         } break;
-        case FileMode::multi: {
+        case Mode::multi: {
             _filesToRead = detail::getSortedFilesContaining(file_name.value);
         } break;
         default: throw gr::exception("unsupported file mode.");

@@ -31,14 +31,14 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
 }
 
 template<typename DataType>
-void runTest(const gr::blocks::fileio::FileMode mode, const std::shared_ptr<gr::thread_pool::BasicThreadPool>& threadPool) {
+void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thread_pool::BasicThreadPool>& threadPool) {
     using namespace boost::ut;
     using namespace gr::blocks::fileio;
     using namespace gr::testing;
     using scheduler = gr::scheduler::Simple<>;
 
     constexpr gr::Size_t nSamples    = 1024U;
-    const gr::Size_t     maxFileSize = mode == gr::blocks::fileio::FileMode::multi ? 256U : 0U;
+    const gr::Size_t     maxFileSize = mode == gr::blocks::fileio::Mode::multi ? 256U : 0U;
     std::string          modeName{magic_enum::enum_name(mode)};
     std::string          fileName = fmt::format("/tmp/gr4_file_sink_test/TestFileName_{}.bin", modeName);
     gr::blocks::fileio::detail::deleteFilesContaining(fileName);
@@ -63,7 +63,7 @@ void runTest(const gr::blocks::fileio::FileMode mode, const std::shared_ptr<gr::
         expect(eq(fileSink._totalBytesWritten / sizeof(DataType), nSamples)) << testCaseName;
 
         std::vector<std::filesystem::path> files = gr::blocks::fileio::detail::getSortedFilesContaining(fileName);
-        if (mode == gr::blocks::fileio::FileMode::multi) {
+        if (mode == gr::blocks::fileio::Mode::multi) {
             // greater-equal 'ge' because files can be legitimally zero-sized
             expect(ge(files.size(), (nSamples * sizeof(DataType)) / maxFileSize)) << testCaseName;
         } else {
@@ -71,7 +71,7 @@ void runTest(const gr::blocks::fileio::FileMode mode, const std::shared_ptr<gr::
         }
         for (const auto& file : files) {
             auto fileSize = gr::blocks::fileio::detail::getFileSize(file);
-            if (mode == gr::blocks::fileio::FileMode::multi) {
+            if (mode == gr::blocks::fileio::Mode::multi) {
                 // less-equal 'le' because files can be legitimally zero-sized
                 expect(le(fileSize, maxFileSize)) << testCaseName;
             } else {
@@ -140,8 +140,8 @@ const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
 
     constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>();
 
-    using enum gr::blocks::fileio::FileMode;
-    "override mode"_test = [&threadPool]<typename T>(const T&) { runTest<T>(override, threadPool); } | kArithmeticTypes;
+    using enum gr::blocks::fileio::Mode;
+    "overwrite mode"_test = [&threadPool]<typename T>(const T&) { runTest<T>(overwrite, threadPool); } | kArithmeticTypes;
 
     "append mode"_test = [&threadPool]<typename T>(const T&) { runTest<T>(append, threadPool); } | kArithmeticTypes;
 
