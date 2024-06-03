@@ -25,7 +25,8 @@ namespace settings {
 template<typename T>
 inline constexpr static bool isSupportedVectorType() {
     if constexpr (gr::meta::vector_type<T>) {
-        return std::is_arithmetic_v<typename T::value_type> || std::is_same_v<typename T::value_type, std::string>;
+        return std::is_arithmetic_v<typename T::value_type> || std::is_same_v<typename T::value_type, std::string> //
+               || std::is_same_v<typename T::value_type, std::complex<double>> || std::is_same_v<typename T::value_type, std::complex<float>>;
     } else {
         return false;
     }
@@ -33,7 +34,8 @@ inline constexpr static bool isSupportedVectorType() {
 
 template<typename T>
 inline constexpr static bool isSupportedType() {
-    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map>;
+    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>;
 }
 
 template<typename T, typename TMember>

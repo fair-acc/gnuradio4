@@ -791,7 +791,7 @@ connections:
         gr::registerBlock<Sink, double>(registry);
         PluginLoader loader(registry, {});
         try {
-            scheduler::Simple sched{load_grc(loader, std::string(grc))};
+            scheduler::Simple sched{loadGrc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());
             sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
         } catch (const std::string& e) {
