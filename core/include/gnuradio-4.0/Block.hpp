@@ -527,7 +527,7 @@ public:
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
 
     Block(property_map initParameter = {}) noexcept(false)                                   // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
