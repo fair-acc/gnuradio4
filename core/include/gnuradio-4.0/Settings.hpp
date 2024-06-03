@@ -59,17 +59,13 @@ struct PMTCompare {
             // TODO: throw if types are not the same?
             return lhs.index() < rhs.index();
         } else {
-            return std::visit(
-                [&](const auto& left) -> bool {
-                    using T = std::decay_t<decltype(left)>;
-                    if constexpr ((pmtv::String<T> || pmtv::Scalar<T>) && !pmtv::Complex<T>) {
-                        return left < std::get<T>(rhs);
-                    } else {
-                        throw gr::exception("Invalid CtxSettings context type " + std::string(typeid(T).name()));
-                    }
-                    return false;
-                },
-                lhs);
+            if (std::holds_alternative<std::string>(lhs)) {
+                return std::get<std::string>(lhs) < std::get<std::string>(rhs);
+            } else if (std::holds_alternative<int>(lhs)) {
+                return std::get<int>(lhs) < std::get<int>(rhs);
+            } else {
+                throw gr::exception("Invalid CtxSettings context type " + std::string(typeid(lhs).name()));
+            }
         }
     }
 };
