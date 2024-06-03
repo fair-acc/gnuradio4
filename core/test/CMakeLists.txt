@@ -5,7 +5,7 @@ configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
 
 function(setup_test_no_asan TEST_NAME)
     target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
-    target_link_libraries(${TEST_NAME} PRIVATE gnuradio-options gnuradio-core fmt refl-cpp yaml-cpp::yaml-cpp fftw gr-basic gr-math gr-testing ut)
+    target_link_libraries(${TEST_NAME} PRIVATE gnuradio-options gnuradio-core fmt refl-cpp yaml-cpp::yaml-cpp fftw gr-basic gr-fileio gr-math gr-testing ut)
     add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
 endfunction()
 
