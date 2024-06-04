@@ -8,10 +8,11 @@
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
-#include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/Transactions.hpp>
+#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 using namespace std::string_literals;
 
@@ -19,46 +20,41 @@ namespace gr::setting_test {
 
 namespace utils {
 
-std::string
-format_variant(const auto &value) noexcept {
+std::string format_variant(const auto& value) noexcept {
     return std::visit(
-            [](auto &arg) {
-                using Type = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
-                    return fmt::format("{}", arg);
-                } else if constexpr (std::is_same_v<Type, std::monostate>) {
-                    return fmt::format("monostate");
-                } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
-                    return fmt::format("[{}]", fmt::join(arg, ", "));
-                } else if constexpr (std::is_same_v<Type, std::vector<std::string>> || std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>>
-                                     || std::is_same_v<Type, std::vector<unsigned short>> || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>>
-                                     || std::is_same_v<Type, std::vector<signed char>> || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>>
-                                     || std::is_same_v<Type, std::vector<long>> || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
-                    return fmt::format("[{}]", fmt::join(arg, ", "));
-                } else {
-                    return fmt::format("not-yet-supported type {}", gr::meta::type_name<Type>());
-                }
-            },
-            value);
+        [](auto& arg) {
+            using Type = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
+                return fmt::format("{}", arg);
+            } else if constexpr (std::is_same_v<Type, std::monostate>) {
+                return fmt::format("monostate");
+            } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
+                return fmt::format("[{}]", fmt::join(arg, ", "));
+            } else if constexpr (std::is_same_v<Type, std::vector<std::string>> || std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>> || std::is_same_v<Type, std::vector<unsigned short>> || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>> || std::is_same_v<Type, std::vector<signed char>> || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>> || std::is_same_v<Type, std::vector<long>> || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
+                return fmt::format("[{}]", fmt::join(arg, ", "));
+            } else {
+                return fmt::format("not-yet-supported type {}", gr::meta::type_name<Type>());
+            }
+        },
+        value);
 }
 
-void
-printChanges(const property_map &oldMap, const property_map &newMap) noexcept {
-    for (const auto &[key, newValue] : newMap) {
+void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
+    for (const auto& [key, newValue] : newMap) {
         if (!oldMap.contains(key)) {
             fmt::print("    key added '{}` = {}\n", key, format_variant(newValue));
         } else {
-            const auto &oldValue = oldMap.at(key);
+            const auto& oldValue = oldMap.at(key);
             const bool  areEqual = std::visit(
-                    [](auto &&arg1, auto &&arg2) {
-                        if constexpr (std::is_same_v<std::decay_t<decltype(arg1)>, std::decay_t<decltype(arg2)>>) {
-                            // compare values if they are of the same type
-                            return arg1 == arg2;
-                        } else {
-                            return false; // values are of different type
-                        }
-                    },
-                    oldValue, newValue);
+                [](auto&& arg1, auto&& arg2) {
+                    if constexpr (std::is_same_v<std::decay_t<decltype(arg1)>, std::decay_t<decltype(arg2)>>) {
+                        // compare values if they are of the same type
+                        return arg1 == arg2;
+                    } else {
+                        return false; // values are of different type
+                    }
+                },
+                oldValue, newValue);
 
             if (!areEqual) {
                 fmt::print("    key value changed: '{}` = {} -> {}\n", key, format_variant(oldValue), format_variant(newValue));
@@ -75,15 +71,13 @@ struct Source : public Block<Source<T>> {
     gr::Size_t n_samples_max      = 1024;
     float      sample_rate        = 1000.0f;
 
-    void
-    settingsChanged(const property_map & /*oldSettings*/, property_map &newSettings, property_map &fwdSettings) {
+    void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& fwdSettings) {
         // optional init function that is called after construction and whenever settings change
         newSettings.insert_or_assign("n_samples_max", n_samples_max);
         fwdSettings.insert_or_assign("n_samples_max", n_samples_max);
     }
 
-    [[nodiscard]] constexpr T
-    processOne() noexcept {
+    [[nodiscard]] constexpr T processOne() noexcept {
         n_samples_produced++;
         if (n_samples_produced >= n_samples_max) {
             this->requestStop();
@@ -109,37 +103,34 @@ some test doc documentation
     A<std::string, "context information", Visible>                                   context{};
     gr::Size_t                                                                       n_samples_max = 0;
     A<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
-    std::vector<T>                                                                   vector_setting{ T(3), T(2), T(1) };
+    std::vector<T>                                                                   vector_setting{T(3), T(2), T(1)};
     A<std::vector<std::string>, "string vector">                                     string_vector_setting = {};
     int                                                                              update_count          = 0;
     bool                                                                             debug                 = true;
     bool                                                                             resetCalled           = false;
     gr::Size_t                                                                       n_samples_consumed    = 0;
 
-    void
-    settingsChanged(const property_map &oldSettings, property_map &newSettings, property_map &fwdSettings) noexcept {
+    void settingsChanged(const property_map& oldSettings, property_map& newSettings, property_map& fwdSettings) noexcept {
         // optional function that is called whenever settings change
         update_count++;
 
         if (debug) {
             fmt::println("block '{}' settings changed - update_count: {}", this->name, update_count);
             utils::printChanges(oldSettings, newSettings);
-            for (const auto &[key, value] : fwdSettings) {
+            for (const auto& [key, value] : fwdSettings) {
                 fmt::println(" -- forward: '{}':{}", key, value);
             }
         }
     }
 
-    void
-    reset() {
+    void reset() {
         // optional reset function
         n_samples_consumed = 0;
         resetCalled        = true;
     }
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr V
-    processOne(const V &a) noexcept {
+    [[nodiscard]] constexpr V processOne(const V& a) noexcept {
         if constexpr (gr::meta::any_simd<V>) {
             n_samples_consumed += static_cast<gr::Size_t>(V::size());
         } else {
@@ -162,8 +153,7 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
     PortOut<T>                       out{};
     A<float, "sample rate", Visible> sample_rate = 1.f;
 
-    void
-    settingsChanged(const property_map & /*old_settings*/, property_map &new_settings, property_map &fwd_settings) noexcept {
+    void settingsChanged(const property_map& /*old_settings*/, property_map& new_settings, property_map& fwd_settings) noexcept {
         if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
             const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->denominator);
             fwd_settings[std::string(gr::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
@@ -171,8 +161,7 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
         }
     }
 
-    constexpr work::Status
-    processBulk(std::span<const T> input, std::span<T> output) noexcept {
+    constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         assert(this->numerator == gr::Size_t(1) && "block implements only basic decimation");
         assert(this->denominator != gr::Size_t(0) && "denominator must be non-zero");
 
@@ -206,8 +195,7 @@ struct Sink : public Block<Sink<T>> {
     float      sample_rate        = 1.0f;
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(V) noexcept {
+    [[nodiscard]] constexpr auto processOne(V) noexcept {
         if constexpr (gr::meta::any_simd<V>) {
             n_samples_consumed += static_cast<gr::Size_t>(V::size());
         } else {
@@ -232,15 +220,15 @@ const boost::ut::suite SettingsTests = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->TestBlock->Sink flow graph
-        auto &src = testGraph.emplaceBlock<Source<float>>({ { "sample_rate", 42.f }, { "n_samples_max", n_samples } });
+        auto& src = testGraph.emplaceBlock<Source<float>>({{"sample_rate", 42.f}, {"n_samples_max", n_samples}});
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
         expect(eq(src.sample_rate, 42.f)) << "check map constructor";
         expect(eq(src.n_samples_produced, gr::Size_t(0))) << "default value";
         expect(eq(src.settings().autoUpdateParameters().size(), 4UL));
         expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // sample_rate
-        auto &block1 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#1" } });
-        auto &block2 = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestBlock#2" } });
-        auto &sink   = testGraph.emplaceBlock<Sink<float>>();
+        auto& block1 = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestBlock#1"}});
+        auto& block2 = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestBlock#2"}});
+        auto& sink   = testGraph.emplaceBlock<Sink<float>>();
         expect(eq(sink.settings().autoUpdateParameters().size(), 7UL));
         expect(eq(sink.settings().autoForwardParameters().size(), 1UL)); // sample_rate
 
@@ -259,12 +247,12 @@ const boost::ut::suite SettingsTests = [] {
         sink.settings().autoForwardParameters().emplace("n_samples_max");
 
         expect(block1.settings().get("context").has_value());
-        expect(block1.settings().get({ "context" }).has_value());
-        expect(not block1.settings().get({ "test" }).has_value());
+        expect(block1.settings().get({"context"}).has_value());
+        expect(not block1.settings().get({"test"}).has_value());
 
-        std::vector<std::string>   keys1{ "key1", "key2", "key3" };
-        std::span<std::string>     keys2{ keys1 };
-        std::array<std::string, 3> keys3{ "key1", "key2", "key3" };
+        std::vector<std::string>   keys1{"key1", "key2", "key3"};
+        std::span<std::string>     keys2{keys1};
+        std::array<std::string, 3> keys3{"key1", "key2", "key3"};
         expect(block1.settings().get(keys1).empty());
         expect(block1.settings().get(keys2).empty());
         expect(block1.settings().get(keys3).empty());
@@ -272,12 +260,12 @@ const boost::ut::suite SettingsTests = [] {
 
         // set non-existent setting
         expect(not block1.settings().changed()) << "settings not changed";
-        auto ret1 = block1.settings().set({ { "unknown", "random value" } });
+        auto ret1 = block1.settings().set({{"unknown", "random value"}});
         expect(eq(ret1.size(), 1U)) << "setting one unknown parameter";
         expect(eq(std::get<std::string>(static_cast<property_map>(block1.meta_information).at("unknown")), "random value"sv)) << "setting one unknown parameter";
 
         expect(not block1.settings().changed());
-        auto ret2 = block1.settings().set({ { "context", "alt context" } });
+        auto ret2 = block1.settings().set({{"context", "alt context"}});
         expect(not block1.settings().stagedParameters().empty());
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().changed()) << "settings changed";
@@ -291,10 +279,10 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         expect(!src.settings().autoUpdateParameters().contains("sample_rate")) << "manual setting disable auto-update";
-        expect(src.settings().set({ { "sample_rate", 49000.0f } }).empty()) << "successful set returns empty map";
+        expect(src.settings().set({{"sample_rate", 49000.0f}}).empty()) << "successful set returns empty map";
 
-        auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
-        gr::scheduler::Simple sched{ std::move(testGraph), thread_pool };
+        auto                  thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
+        gr::scheduler::Simple sched{std::move(testGraph), thread_pool};
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
@@ -302,16 +290,16 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(static_cast<gr::Size_t>(block2.n_samples_consumed), n_samples)) << "block2 did not consume enough input samples";
         expect(eq(sink.n_samples_consumed, n_samples)) << "sink did not consume enough input samples";
 
-        for (auto &fwd : src.settings().autoUpdateParameters()) {
+        for (auto& fwd : src.settings().autoUpdateParameters()) {
             fmt::println("## src auto {}", fwd);
         }
-        for (auto &fwd : block1.settings().autoUpdateParameters()) {
+        for (auto& fwd : block1.settings().autoUpdateParameters()) {
             fmt::println("## block1 auto {}", fwd);
         }
-        for (auto &fwd : block2.settings().autoUpdateParameters()) {
+        for (auto& fwd : block2.settings().autoUpdateParameters()) {
             fmt::println("## block2 auto {}", fwd);
         }
-        for (auto &fwd : sink.settings().autoUpdateParameters()) {
+        for (auto& fwd : sink.settings().autoUpdateParameters()) {
             fmt::println("## sink auto {}", fwd);
         }
 
@@ -346,7 +334,7 @@ const boost::ut::suite SettingsTests = [] {
         };
 
         "with init parameter"_test = [] {
-            auto block = TestBlock<float>({ { "scaling_factor", 2.f } });
+            auto block = TestBlock<float>({{"scaling_factor", 2.f}});
             expect(eq(block.settings().stagedParameters().size(), 1u));
             block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().stagedParameters().size(), 0u));
@@ -358,7 +346,7 @@ const boost::ut::suite SettingsTests = [] {
 
         "empty via graph"_test = [] {
             Graph testGraph;
-            auto &block = testGraph.emplaceBlock<TestBlock<float>>();
+            auto& block = testGraph.emplaceBlock<TestBlock<float>>();
             expect(eq(block.settings().get().size(), 13UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
@@ -366,7 +354,7 @@ const boost::ut::suite SettingsTests = [] {
 
         "with init parameter via graph"_test = [] {
             Graph testGraph;
-            auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "scaling_factor", 2.f } });
+            auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"scaling_factor", 2.f}});
             expect(eq(block.settings().get().size(), 13UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
@@ -375,23 +363,23 @@ const boost::ut::suite SettingsTests = [] {
 
     "vector-type support"_test = [] {
         Graph testGraph;
-        auto &block = testGraph.emplaceBlock<TestBlock<float>>();
+        auto& block = testGraph.emplaceBlock<TestBlock<float>>();
         block.settings().updateActiveParameters();
         expect(eq(block.settings().get().size(), 13UL));
 
         block.debug    = true;
-        const auto val = block.settings().set({ { "vector_setting", std::vector{ 42.f, 2.f, 3.f } }, { "string_vector_setting", std::vector<std::string>{ "A", "B", "C" } } });
+        const auto val = block.settings().set({{"vector_setting", std::vector{42.f, 2.f, 3.f}}, {"string_vector_setting", std::vector<std::string>{"A", "B", "C"}}});
         expect(val.empty()) << "unable to stage settings";
         block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
-        expect(eq(block.vector_setting, std::vector{ 42.f, 2.f, 3.f }));
-        expect(eq(block.string_vector_setting.value, std::vector<std::string>{ "A", "B", "C" }));
+        expect(eq(block.vector_setting, std::vector{42.f, 2.f, 3.f}));
+        expect(eq(block.string_vector_setting.value, std::vector<std::string>{"A", "B", "C"}));
         expect(eq(block.update_count, 1)) << fmt::format("actual update count: {}\n", block.update_count);
     };
 
     "unique ID"_test = [] {
         Graph       testGraph;
-        const auto &block1 = testGraph.emplaceBlock<TestBlock<float>>();
-        const auto &block2 = testGraph.emplaceBlock<TestBlock<float>>();
+        const auto& block1 = testGraph.emplaceBlock<TestBlock<float>>();
+        const auto& block2 = testGraph.emplaceBlock<TestBlock<float>>();
         expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
         expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
 
@@ -410,17 +398,17 @@ const boost::ut::suite SettingsTests = [] {
         wrapped1.setName("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped1.uniqueName().empty()) << "unique name";
-        expect(wrapped1.settings().set({ { "context", "a string" } }).empty()) << "successful set returns empty map";
+        expect(wrapped1.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
         (wrapped1.metaInformation())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped1.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
-        auto wrapped2 = BlockWrapper<TestBlock<float>>({ { "name", "test_name" } });
-        expect(wrapped2.settings().set({ { "context", "a string" } }).empty()) << "successful set returns empty map";
+        auto wrapped2 = BlockWrapper<TestBlock<float>>({{"name", "test_name"}});
+        expect(wrapped2.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
         wrapped2.init(progress, ioThreadPool);
         expect(eq(wrapped2.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped2.uniqueName().empty()) << "unique name";
-        expect(wrapped2.settings().set({ { "context", "a string" } }).empty()) << "successful set returns empty map";
+        expect(wrapped2.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
         (wrapped2.metaInformation())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped2.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
     };
@@ -428,10 +416,10 @@ const boost::ut::suite SettingsTests = [] {
     "basic decimation test"_test = []() {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
-        auto                &src       = testGraph.emplaceBlock<Source<float>>({ { "n_samples_max", n_samples }, { "sample_rate", 1000.0f } });
-        auto                &block1    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate1" }, { "denominator", gr::Size_t(2) } });
-        auto                &block2    = testGraph.emplaceBlock<Decimate<float>>({ { "name", "Decimate2" }, { "denominator", gr::Size_t(5) } });
-        auto                &sink      = testGraph.emplaceBlock<Sink<float>>();
+        auto&                src       = testGraph.emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {"sample_rate", 1000.0f}});
+        auto&                block1    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"denominator", gr::Size_t(2)}});
+        auto&                block2    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate2"}, {"denominator", gr::Size_t(5)}});
+        auto&                sink      = testGraph.emplaceBlock<Sink<float>>();
 
         // check denominator
         expect(eq(block1.denominator, std::size_t(2)));
@@ -442,7 +430,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{ std::move(testGraph) };
+        gr::scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.n_samples_produced, n_samples)) << "did not produce enough output samples";
@@ -456,11 +444,11 @@ const boost::ut::suite SettingsTests = [] {
 
     "basic store/reset settings"_test = []() {
         Graph testGraph;
-        auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
 
-        expect(block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }).empty()) << "successful set returns empty map\n";
+        expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}).empty()) << "successful set returns empty map\n";
         expect(block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map\n";
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
@@ -470,13 +458,13 @@ const boost::ut::suite SettingsTests = [] {
         block.resetCalled = false;
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
-        expect(block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }).empty()) << "successful set returns empty map\n";
+        expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}).empty()) << "successful set returns empty map\n";
         auto frw2 = block.settings().applyStagedParameters().forwardParameters;
         expect(frw2.empty()) << "successful set returns empty map\n";
         expect(block.name == "TestNameAlt");
         expect(eq(block.scaling_factor, 42.f));
         block.settings().storeDefaults();
-        expect(block.settings().set({ { "name", "TestNameAlt2" }, { "scaling_factor", 43.f } }).empty()) << "successful set returns empty map\n";
+        expect(block.settings().set({{"name", "TestNameAlt2"}, {"scaling_factor", 43.f}}).empty()) << "successful set returns empty map\n";
         expect(block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map\n";
         expect(block.name == "TestNameAlt2");
         expect(eq(block.scaling_factor, 43.f));
@@ -495,7 +483,7 @@ const boost::ut::suite AnnotationTests = [] {
 
     "basic node annotations"_test = [] {
         Graph             testGraph;
-        TestBlock<float> &block = testGraph.emplaceBlock<TestBlock<float>>();
+        TestBlock<float>& block = testGraph.emplaceBlock<TestBlock<float>>();
         expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlock<float>::Description::value)) != std::string_view::npos);
         expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlock<float>::Description::value))) << "type-erased block description";
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
@@ -518,18 +506,18 @@ const boost::ut::suite AnnotationTests = [] {
         expect(block.sample_rate.validate_and_set(1.f));
         expect(not block.sample_rate.validate_and_set(-1.f));
 
-        constexpr auto                                             isPowerOfTwo   = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+        constexpr auto                                             isPowerOfTwo   = [](const int& val) { return val > 0 && (val & (val - 1)) == 0; };
         Annotated<int, "power of two", Limits<0, 0, isPowerOfTwo>> needPowerOfTwo = 2;
         expect(isPowerOfTwo(4));
         expect(!isPowerOfTwo(5));
         expect(needPowerOfTwo.validate_and_set(4));
         expect(not needPowerOfTwo.validate_and_set(5));
         expect(eq(needPowerOfTwo.value, 4));
-        Annotated<int, "power of two", Limits<0, 0, [](const int &val) { return (val > 0) && (val & (val - 1)) == 0; }>> needPowerOfTwoAlt = 2;
+        Annotated<int, "power of two", Limits<0, 0, [](const int& val) { return (val > 0) && (val & (val - 1)) == 0; }>> needPowerOfTwoAlt = 2;
         expect(needPowerOfTwoAlt.validate_and_set(4));
         expect(not needPowerOfTwoAlt.validate_and_set(5));
 
-        expect(block.settings().set({ { "sample_rate", -1.0f } }).empty()) << "successful set returns empty map";
+        expect(block.settings().set({{"sample_rate", -1.0f}}).empty()) << "successful set returns empty map";
         expect(!block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
         // should print out a warning -> TODO: replace with pmt error message on msgOut port
     };
@@ -558,7 +546,7 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings Time"_test = [] {
         Graph testGraph;
-        auto &block    = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName0" }, { "scaling_factor", 0.f } });
+        auto& block    = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
         auto  settings = CtxSettings(block);
         expect(block.settings().applyStagedParameters().forwardParameters.empty());
         block.settings().storeDefaults();
@@ -567,11 +555,11 @@ const boost::ut::suite TransactionTests = [] {
         // Store t = 0, t = 2, t = 4
         // Test t = -1, t = 0, t = 1, t = 2, t = 3, t = 4, t = 5, t = nullopt
         auto ctx0 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow));
-        expect(settings.set({ { "name", "TestName10" }, { "scaling_factor", 10.f } }, ctx0).empty()) << "successful set returns empty map";
+        expect(settings.set({{"name", "TestName10"}, {"scaling_factor", 10.f}}, ctx0).empty()) << "successful set returns empty map";
         auto ctx2 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(2)));
-        expect(settings.set({ { "name", "TestName12" }, { "scaling_factor", 12.f } }, ctx2).empty()) << "successful set returns empty map";
+        expect(settings.set({{"name", "TestName12"}, {"scaling_factor", 12.f}}, ctx2).empty()) << "successful set returns empty map";
         auto ctx4 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(4)));
-        expect(settings.set({ { "name", "TestName14" }, { "scaling_factor", 14.f } }, ctx4).empty()) << "successful set returns empty map";
+        expect(settings.set({{"name", "TestName14"}, {"scaling_factor", 14.f}}, ctx4).empty()) << "successful set returns empty map";
         auto ctxM1   = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow - std::chrono::seconds(1)));
         auto ctx1    = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(1)));
         auto ctx3    = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(3)));
@@ -590,7 +578,7 @@ const boost::ut::suite TransactionTests = [] {
         expect(eq(std::get<float>(settings.getStored("scaling_factor", ctxNull).value()), 14.f)); // return latest
 
         // several keys
-        std::vector<std::string> parameterKeys = { "scaling_factor", "name" };
+        std::vector<std::string> parameterKeys = {"scaling_factor", "name"};
 
         const property_map params = settings.getStored(parameterKeys); // return latest
         expect(eq(std::get<float>(params.at("scaling_factor")), 14.f));
@@ -629,7 +617,7 @@ const boost::ut::suite TransactionTests = [] {
         expect(eq(std::get<std::string>(paramsNull.at("name")), std::string("TestName14")));
     };
 
-    auto matchPred = [](const auto &table, const auto &search, const auto attempt) -> std::optional<bool> {
+    auto matchPred = [](const auto& table, const auto& search, const auto attempt) -> std::optional<bool> {
         if (std::holds_alternative<std::string>(table) && std::holds_alternative<std::string>(search)) {
             const auto tableString  = std::get<std::string>(table);
             const auto searchString = std::get<std::string>(search);
@@ -642,8 +630,7 @@ const boost::ut::suite TransactionTests = [] {
                 return std::nullopt;
             }
             auto [it1, it2] = std::ranges::mismatch(searchString, tableString);
-            if (std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(searchString.length() - attempt)
-                && std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(tableString.length())) {
+            if (std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(searchString.length() - attempt) && std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(tableString.length())) {
                 return true;
             }
         }
@@ -652,15 +639,15 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings Matching"_test = [&] {
         Graph      testGraph;
-        auto      &block    = testGraph.emplaceBlock<TestBlock<int>>({ { "scaling_factor", 42 } });
+        auto&      block    = testGraph.emplaceBlock<TestBlock<int>>({{"scaling_factor", 42}});
         auto       settings = CtxSettings(block, matchPred);
         const auto timeNow  = std::chrono::system_clock::now();
         const auto ctx0     = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=1:S=1:P=1");
-        expect(settings.set({ { "scaling_factor", 101 } }, ctx0).empty()) << "successful set returns empty map";
+        expect(settings.set({{"scaling_factor", 101}}, ctx0).empty()) << "successful set returns empty map";
         const auto ctx1 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=1:S=1");
-        expect(settings.set({ { "scaling_factor", 102 } }, ctx1).empty()) << "successful set returns empty map";
+        expect(settings.set({{"scaling_factor", 102}}, ctx1).empty()) << "successful set returns empty map";
         const auto ctx2 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=1");
-        expect(settings.set({ { "scaling_factor", 103 } }, ctx2).empty()) << "successful set returns empty map";
+        expect(settings.set({{"scaling_factor", 103}}, ctx2).empty()) << "successful set returns empty map";
 
         // exact matches
         expect(eq(std::get<int>(settings.getStored("scaling_factor", ctx0).value()), 101));
@@ -681,12 +668,76 @@ const boost::ut::suite TransactionTests = [] {
     "CtxSettings Drop-In Settings replacement"_test = [&] {
         // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
         Graph testGraph;
-        auto &block = testGraph.emplaceBlock<TestBlock<float>>({ { "name", "TestName" }, { "scaling_factor", 2.f } });
+        auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
         auto  s     = std::make_unique<CtxSettings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
         block.setSettings(s);
         auto ctx0 = SettingsCtx(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
-        expect(block.settings().set({ { "name", "TestNameAlt" }, { "scaling_factor", 42.f } }, ctx0).empty()) << "successful set returns empty map";
+        expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}, ctx0).empty()) << "successful set returns empty map";
         expect(eq(std::get<float>(block.settings().getStored("scaling_factor").value()), 42.f)); // TODO:
+    };
+
+    "CtxSettings autoUpdate settings"_test = [&] {
+        using namespace gr::testing;
+
+        gr::Size_t         n_samples = 1024;
+        Graph              testGraph;
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float>>(srcParameter);
+        const auto         timeNow      = std::chrono::system_clock::now();
+
+        src.tags.push_back({50, {{"sample_rate", 50.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(30))}}});
+        for (std::size_t i = 100; i < 500; i++) {
+            src.tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
+        }
+        src.tags.push_back({550, {{"sample_rate", 550.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}}});
+        src.tags.push_back({560, {{"sample_rate", 560.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}}});
+        for (std::size_t i = 600; i < n_samples; i++) {
+            src.tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
+        }
+
+        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}});
+        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}});
+        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}, {"n_samples_expected", n_samples}});
+
+        // src -> monitorBulk -> monitorOne -> sinkBulk
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkBulk)));
+        scheduler::Simple sched{std::move(testGraph)};
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
+        expect(eq(monitorBulk.n_samples_produced, n_samples)) << "monitorBulk did not consume enough input samples";
+        expect(eq(monitorOne.n_samples_produced, n_samples)) << "monitorOne did not consume enough input samples";
+        expect(eq(sinkBulk.n_samples_produced, n_samples)) << "sink did not consume enough input samples";
+
+        expect(eq(src.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(monitorBulk.sample_rate, static_cast<float>(n_samples - 1)));
+        expect(eq(monitorOne.sample_rate, static_cast<float>(n_samples - 1)));
+        expect(eq(sinkBulk.sample_rate, static_cast<float>(n_samples - 1)));
+
+        expect(eq(src.settings().getNStoredParameters(), 0UZ));
+        expect(eq(monitorBulk.settings().getNStoredParameters(), 3UZ));
+        expect(eq(monitorOne.settings().getNStoredParameters(), 3UZ));
+        expect(eq(sinkBulk.settings().getNStoredParameters(), 3UZ));
+
+        auto testStored = [&](BlockLike auto& block) {
+            const auto& stored = block.settings().getStoredAll();
+            expect(stored.contains("")); // empty string is default context
+            const auto& vec = stored.at("");
+            expect(eq(vec.size(), 3UZ));
+
+            expect(eq(vec[0].second.size(), 1UZ));
+            expect(eq(vec[1].second.size(), 1UZ));
+            expect(eq(vec[2].second.size(), 1uZ));
+
+            expect(eq(pmtv::cast<float>(vec[0].second.at("sample_rate")), 560.f));
+            expect(eq(pmtv::cast<float>(vec[1].second.at("sample_rate")), 550.f));
+            expect(eq(pmtv::cast<float>(vec[2].second.at("sample_rate")), 50.f));
+        };
+        testStored(monitorBulk);
+        testStored(monitorOne);
+        testStored(sinkBulk);
     };
 
     // TODO enable this when load_grc works in emscripten (not relying on plugins here)
@@ -713,10 +764,10 @@ connections:
         gr::registerBlock<Sink, double>(registry);
         PluginLoader loader(registry, {});
         try {
-            scheduler::Simple sched{ load_grc(loader, std::string(grc)) };
+            scheduler::Simple sched{load_grc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());
-            sched.graph().forEachBlock([](auto &block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
-        } catch (const std::string &e) {
+            sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
+        } catch (const std::string& e) {
             fmt::print(std::cerr, "GRC loading failed: {}\n", e);
             expect(false);
         }
@@ -724,6 +775,4 @@ connections:
 #endif
 };
 
-int
-main() { /* tests are statically executed */
-}
+int main() { /* tests are statically executed */ }
