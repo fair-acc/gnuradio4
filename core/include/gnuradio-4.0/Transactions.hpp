@@ -52,47 +52,23 @@ class CtxSettings : public SettingsBase {
      * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
      * which indicates that no matches were found and there is no chance of matching anything in a further round.
      */
-    using MatchPredicate = std::function<std::optional<bool>(const pmtv::pmt &, const pmtv::pmt &, std::size_t)>;
+    using MatchPredicate = std::function<std::optional<bool>(const pmtv::pmt&, const pmtv::pmt&, std::size_t)>;
 
-    // pmtv::pmt comparison is needed to use it as a key of std::map
-    struct PMTCompare {
-        bool
-        operator()(const pmtv::pmt &lhs, const pmtv::pmt &rhs) const {
-            // If the types are different, cast rhs to the type of lhs and compare
-            if (lhs.index() != rhs.index()) {
-                // TODO: throw if types are not the same?
-                return lhs.index() < rhs.index();
-            } else {
-                return std::visit(
-                        [&](const auto &left) -> bool {
-                            using T = std::decay_t<decltype(left)>;
-                            if constexpr ((pmtv::String<T> || pmtv::Scalar<T>) && !pmtv::Complex<T>) {
-                                return left < std::get<T>(rhs);
-                            } else {
-                                throw gr::exception("Invalid CtxSettings context type " + std::string(typeid(T).name()));
-                            }
-                            return false;
-                        },
-                        lhs);
-            }
-        }
-    };
-
-    TBlock            *_block = nullptr;
+    TBlock*            _block = nullptr;
     mutable std::mutex _lock{};
     property_map       _activeParameters{};
     // key is SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, PMTCompare> _storedParameters{};
-    property_map                                                                               _defaultParameters{};
-    std::set<std::string, std::less<>>                                                         _allWritableMembers{};   // all `isWritableMember` class members
-    std::map<pmtv::pmt, std::set<std::string, std::less<>>, PMTCompare>                        _autoUpdateParameters{}; // for each SettingsCtx.context auto updated members are store separately
-    std::set<std::string, std::less<>>                                                         _autoForwardParameters{};
-    MatchPredicate                                                                             _matchPred        = nullMatchPred;
-    pmtv::pmt                                                                                  _activeCtx        = "";
-    settings::AutoUpdatePolicy                                                                 _autoUpdatePolicy = settings::AutoUpdatePolicy::AddToStored;
+    mutable std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> _storedParameters{};
+    property_map                                                                                         _defaultParameters{};
+    std::set<std::string, std::less<>>                                                                   _allWritableMembers{};   // all `isWritableMember` class members
+    std::map<pmtv::pmt, std::set<std::string, std::less<>>, settings::PMTCompare>                        _autoUpdateParameters{}; // for each SettingsCtx.context auto updated members are store separately
+    std::set<std::string, std::less<>>                                                                   _autoForwardParameters{};
+    MatchPredicate                                                                                       _matchPred        = nullMatchPred;
+    pmtv::pmt                                                                                            _activeCtx        = "";
+    settings::AutoUpdatePolicy                                                                           _autoUpdatePolicy = settings::AutoUpdatePolicy::AddToStored;
 
 public:
-    explicit CtxSettings(TBlock &block, MatchPredicate matchPred = nullMatchPred) noexcept : SettingsBase(), _block(&block), _matchPred(matchPred) {
+    explicit CtxSettings(TBlock& block, MatchPredicate matchPred = nullMatchPred) noexcept : SettingsBase(), _block(&block), _matchPred(matchPred) {
         if constexpr (requires { &TBlock::settingsChanged; }) { // if settingsChanged is defined
             static_assert(HasSettingsChangedCallback<TBlock>, "if provided, settingsChanged must have either a `(const property_map& old, property_map& new, property_map& fwd)`"
                                                               "or `(const property_map& old, property_map& new)` paremeter signatures.");
@@ -140,31 +116,28 @@ public:
         addStoredParameters(property_map(), SettingsCtx(0ULL, ""));
     }
 
-    constexpr CtxSettings(const CtxSettings &other) noexcept : SettingsBase(other) {
+    constexpr CtxSettings(const CtxSettings& other) noexcept : SettingsBase(other) {
         CtxSettings temp(other);
         swap(temp);
     }
 
-    constexpr CtxSettings(CtxSettings &&other) noexcept : SettingsBase(std::move(other)) {
+    constexpr CtxSettings(CtxSettings&& other) noexcept : SettingsBase(std::move(other)) {
         CtxSettings temp(std::move(other));
         swap(temp);
     }
 
-    CtxSettings &
-    operator=(const CtxSettings &other) noexcept {
+    CtxSettings& operator=(const CtxSettings& other) noexcept {
         swap(other);
         return *this;
     }
 
-    CtxSettings &
-    operator=(CtxSettings &&other) noexcept {
+    CtxSettings& operator=(CtxSettings&& other) noexcept {
         CtxSettings temp(std::move(other));
         swap(temp);
         return *this;
     }
 
-    void
-    swap(CtxSettings &other) noexcept {
+    void swap(CtxSettings& other) noexcept {
         if (this == &other) {
             return;
         }
@@ -181,8 +154,7 @@ public:
         std::swap(_activeCtx, other._activeCtx);
     }
 
-    [[nodiscard]] property_map
-    set(const property_map &parameters, SettingsCtx ctx = {}) override {
+    [[nodiscard]] property_map set(const property_map& parameters, SettingsCtx ctx = {}) override {
         property_map ret;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
@@ -194,7 +166,7 @@ public:
                 _autoUpdateParameters[ctx.context] = _allWritableMembers;
             }
 
-            for (const auto &[key, value] : parameters) {
+            for (const auto& [key, value] : parameters) {
                 bool isSet            = false;
                 auto processOneMember = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
@@ -212,8 +184,7 @@ public:
                             throw std::invalid_argument([&key, &value] { // lazy evaluation
                                 const std::size_t actual_index   = value.index();
                                 const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
-                                return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>",
-                                                   required_index, gr::meta::type_name<Type>());
+                                return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
                             }());
                         }
                     }
@@ -238,13 +209,9 @@ public:
         return ret; // N.B. returns those <key:value> parameters that could not be set
     }
 
-    void
-    storeDefaults() override {
-        this->storeDefaultSettings(_defaultParameters);
-    }
+    void storeDefaults() override { this->storeDefaultSettings(_defaultParameters); }
 
-    void
-    resetDefaults() override {
+    void resetDefaults() override {
         _storedParameters.clear();
         _autoUpdateParameters.clear();
         addStoredParameters(_defaultParameters, SettingsCtx(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), ""));
@@ -254,8 +221,7 @@ public:
         }
     }
 
-    void
-    autoUpdate(const Tag &tag) override {
+    void autoUpdate(const Tag& tag) override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             SettingsCtx ctx = createSettingsCtxFromTag(tag);
 
@@ -269,41 +235,43 @@ public:
             }
 
             const auto  found                = _autoUpdateParameters.find(bestMatchCtx.value());
-            const auto &autoUpdateParameters = found == _autoUpdateParameters.end() ? _allWritableMembers : found->second;
+            const auto& autoUpdateParameters = found == _autoUpdateParameters.end() ? _allWritableMembers : found->second;
 
             property_map        newParameters = getBestMatchStoredParameters(ctx);
-            const property_map &parameters    = tag.map;
-            for (const auto &[key, value] : parameters) {
+            const property_map& parameters    = tag.map;
+            bool                wasChanged    = false;
+            for (const auto& [key, value] : parameters) {
                 auto processOneMember = [&](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
                         if (autoUpdateParameters.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
                             newParameters.insert_or_assign(key, value);
-                            SettingsBase::_changed.store(true);
+                            wasChanged = true;
                         }
                     }
                 };
                 processMembers<TBlock>(processOneMember);
             }
-            addStoredParameters(newParameters, SettingsCtx(ctx.time, bestMatchCtx.value()));
-            _activeCtx = bestMatchCtx.value();
+            if (wasChanged || isContextPresentInTag(tag)) {
+                addStoredParameters(newParameters, SettingsCtx(ctx.time, bestMatchCtx.value()));
+                _activeCtx = bestMatchCtx.value();
+                SettingsBase::_changed.store(true);
+            }
         }
     }
 
-    [[nodiscard]] const property_map
-    stagedParameters(SettingsCtx ctx = {}) const noexcept override {
+    [[nodiscard]] const property_map stagedParameters(SettingsCtx ctx = {}) const noexcept override {
         std::lock_guard lg(_lock);
         return hasStoredParameters(ctx) ? getBestMatchStoredParameters(ctx) : property_map();
     }
 
-    [[nodiscard]] property_map
-    get(std::span<const std::string> parameterKeys = {}) const noexcept override {
+    [[nodiscard]] property_map get(std::span<const std::string> parameterKeys = {}) const noexcept override {
         std::lock_guard lg(_lock);
         if (parameterKeys.empty()) {
             return _activeParameters;
         }
         property_map ret;
-        for (const auto &key : parameterKeys) {
+        for (const auto& key : parameterKeys) {
             if (_activeParameters.contains(key)) {
                 ret.insert_or_assign(key, _activeParameters.at(key));
             }
@@ -311,9 +279,8 @@ public:
         return ret;
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt>
-    get(const std::string &parameterKey) const noexcept override {
-        auto res = get(std::array<std::string, 1>({ parameterKey }));
+    [[nodiscard]] std::optional<pmtv::pmt> get(const std::string& parameterKey) const noexcept override {
+        auto res = get(std::array<std::string, 1>({parameterKey}));
         if (res.contains(parameterKey)) {
             return res.at(parameterKey);
         } else {
@@ -321,16 +288,15 @@ public:
         }
     }
 
-    [[nodiscard]] property_map
-    getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override {
+    [[nodiscard]] property_map getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override {
         std::lock_guard     lg(_lock);
-        const property_map &allBestMatchParameters = this->getBestMatchStoredParameters(ctx);
+        const property_map& allBestMatchParameters = this->getBestMatchStoredParameters(ctx);
 
         if (parameterKeys.empty()) {
             return allBestMatchParameters;
         }
         property_map ret;
-        for (const auto &key : parameterKeys) {
+        for (const auto& key : parameterKeys) {
             if (allBestMatchParameters.contains(key)) {
                 ret.insert_or_assign(key, allBestMatchParameters.at(key));
             }
@@ -338,9 +304,8 @@ public:
         return ret;
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt>
-    getStored(const std::string &parameterKey, SettingsCtx ctx = {}) const noexcept override {
-        auto res = getStored(std::array<std::string, 1>({ parameterKey }), ctx);
+    [[nodiscard]] std::optional<pmtv::pmt> getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override {
+        auto res = getStored(std::array<std::string, 1>({parameterKey}), ctx);
         if (res.contains(parameterKey)) {
             return res.at(parameterKey);
         } else {
@@ -348,19 +313,25 @@ public:
         }
     }
 
-    [[nodiscard]] std::set<std::string, std::less<>>
-    autoUpdateParameters(SettingsCtx ctx = {}) noexcept override {
+    [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override {
+        std::lock_guard lg(_lock);
+        gr::Size_t      nParameters{0};
+        for (const auto& stored : _storedParameters) {
+            nParameters += stored.second.size();
+        }
+        return nParameters;
+    }
+
+    [[nodiscard]] std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
+
+    [[nodiscard]] std::set<std::string, std::less<>> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override {
         auto bestMatchCtx = findBestMatchCtx(ctx.context);
         return bestMatchCtx == std::nullopt ? std::set<std::string, std::less<>>() : _autoUpdateParameters[bestMatchCtx.value()];
     }
 
-    [[nodiscard]] std::set<std::string, std::less<>> &
-    autoForwardParameters() noexcept override {
-        return _autoForwardParameters;
-    }
+    [[nodiscard]] std::set<std::string, std::less<>>& autoForwardParameters() noexcept override { return _autoForwardParameters; }
 
-    [[nodiscard]] ApplyStagedParametersResult
-    applyStagedParameters(std::uint64_t currentTime = 0ULL) noexcept override {
+    [[nodiscard]] ApplyStagedParametersResult applyStagedParameters(std::uint64_t currentTime = 0ULL) noexcept override {
         ApplyStagedParametersResult result;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
@@ -370,8 +341,11 @@ public:
             if constexpr (HasSettingsChangedCallback<TBlock>) {
                 storeDefaultSettings(oldSettings);
             }
+            if (currentTime == 0ULL) {
+                currentTime = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+            }
 
-            const SettingsCtx  activeSettingsCtx{ currentTime, _activeCtx };
+            const SettingsCtx  activeSettingsCtx{currentTime, _activeCtx};
             const property_map bestMatchParameters = getBestMatchStoredParameters(activeSettingsCtx);
 
             // check if reset of settings should be performed
@@ -381,7 +355,7 @@ public:
 
             // update staged and forward parameters based on member properties
             property_map staged;
-            for (const auto &[key, stagedValue] : bestMatchParameters) {
+            for (const auto& [key, stagedValue] : bestMatchParameters) {
                 auto applyOneMemberChanges = [&key, &staged, &result, &stagedValue, this](auto member) {
                     using RawType = std::remove_cvref_t<decltype(member(*_block))>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
@@ -398,16 +372,16 @@ public:
                                     // TODO: replace with pmt error message on msgOut port (to note: clang compiler bug/issue)
 #if !defined(__EMSCRIPTEN__) && !defined(__clang__)
                                     fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                               _block->unique_name, _block->name, member(*_block), std::get<Type>(stagedValue),                                   //
-                                               std::string(get_display_name(member)), RawType::LimitType::MinRange,
-                                               RawType::LimitType::MaxRange, //
-                                               RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+                                        _block->unique_name, _block->name, member(*_block), std::get<Type>(stagedValue),                                          //
+                                        std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                        RawType::LimitType::MaxRange, //
+                                        RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
 #else
                                     fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                               "_block->uniqueName", "_block->name", member(*_block), std::get<Type>(stagedValue),                                //
-                                               std::string(get_display_name(member)), RawType::LimitType::MinRange,
-                                               RawType::LimitType::MaxRange, //
-                                               RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+                                        "_block->uniqueName", "_block->name", member(*_block), std::get<Type>(stagedValue),                                       //
+                                        std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                        RawType::LimitType::MaxRange, //
+                                        RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
 #endif
                                 }
                             } else {
@@ -462,8 +436,7 @@ public:
         return result;
     }
 
-    void
-    updateActiveParameters() noexcept override {
+    void updateActiveParameters() noexcept override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
             auto            processOneMember = [&, this](auto member) {
@@ -477,8 +450,7 @@ public:
     }
 
 private:
-    [[nodiscard]] std::optional<pmtv::pmt>
-    findBestMatchCtx(const pmtv::pmt &contextToSearch) const {
+    [[nodiscard]] std::optional<pmtv::pmt> findBestMatchCtx(const pmtv::pmt& contextToSearch) const {
         if (_storedParameters.empty()) {
             return std::nullopt;
         }
@@ -490,7 +462,7 @@ private:
 
         // retry until we either get a match or std::nullopt
         for (std::size_t attempt = 0;; ++attempt) {
-            for (const auto &i : _storedParameters) {
+            for (const auto& i : _storedParameters) {
                 const auto matches = _matchPred(i.first, contextToSearch, attempt);
                 if (!matches) {
                     return std::nullopt;
@@ -502,8 +474,7 @@ private:
         return std::nullopt;
     }
 
-    [[nodiscard]] bool
-    hasStoredParameters(const SettingsCtx &ctx) const {
+    [[nodiscard]] bool hasStoredParameters(const SettingsCtx& ctx) const {
         const auto bestMatchCtx = findBestMatchCtx(ctx.context);
         if (bestMatchCtx == std::nullopt) {
             return false;
@@ -511,20 +482,19 @@ private:
         return !_storedParameters[bestMatchCtx.value()].empty();
     }
 
-    [[nodiscard]] property_map
-    getBestMatchStoredParameters(const SettingsCtx &ctx) const {
+    [[nodiscard]] property_map getBestMatchStoredParameters(const SettingsCtx& ctx) const {
         const auto bestMatchCtx = findBestMatchCtx(ctx.context);
         if (bestMatchCtx == std::nullopt) {
             return property_map();
         }
-        const auto &vec = _storedParameters[bestMatchCtx.value()];
+        const auto& vec = _storedParameters[bestMatchCtx.value()];
         if (vec.empty()) {
             return property_map();
         }
         if (ctx.time == 0ULL || vec.back().first.time <= ctx.time) {
             return vec.back().second;
         } else {
-            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto &a) { return a.first.time; });
+            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.first.time; });
             if (lower == vec.end()) {
                 return vec.back().second;
             } else {
@@ -539,31 +509,29 @@ private:
         return property_map();
     }
 
-    void
-    addStoredParameters(const property_map &newParameters, const SettingsCtx &ctx) {
-        _storedParameters[ctx.context].push_back({ ctx, newParameters });
-        auto &vec = _storedParameters[ctx.context];
-        std::sort(vec.begin(), vec.end(), [](const auto &a, const auto &b) { return a.first.time < b.first.time; });
+    void addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx) {
+        _storedParameters[ctx.context].push_back({ctx, newParameters});
+        auto& vec = _storedParameters[ctx.context];
+        std::sort(vec.begin(), vec.end(), [](const auto& a, const auto& b) { return a.first.time < b.first.time; });
 
         if (_autoUpdateParameters.find(ctx.context) == _autoUpdateParameters.end()) {
             _autoUpdateParameters[ctx.context] = _allWritableMembers;
         }
     }
 
-    void
-    removeExpiredStoredParameters(const SettingsCtx &ctx) {
+    void removeExpiredStoredParameters(const SettingsCtx& ctx) {
         const auto bestMatchCtx = findBestMatchCtx(ctx.context);
         if (bestMatchCtx == std::nullopt) {
             return;
         }
-        auto &vec = _storedParameters[bestMatchCtx.value()];
+        auto& vec = _storedParameters[bestMatchCtx.value()];
         if (vec.empty()) {
             return;
         }
         if (ctx.time == 0ULL || vec.back().first.time <= ctx.time) {
             vec.clear();
         } else {
-            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto &a) { return a.first.time; });
+            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.first.time; });
             if (lower == vec.end()) {
                 vec.clear();
             } else {
@@ -576,34 +544,45 @@ private:
         }
     }
 
-    [[nodiscard]] SettingsCtx
-    createSettingsCtxFromTag(const Tag &tag) const {
+    [[nodiscard]] bool isContextPresentInTag(const Tag& tag) const {
+        if (tag.map.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
+            const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
+            if (std::holds_alternative<property_map>(pmtMetaInfo)) {
+                const property_map& metaInfo = std::get<property_map>(pmtMetaInfo);
+                if (metaInfo.contains(std::string(gr::tag::CONTEXT.shortKey()))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool isTriggeredTimePresentInTag(const Tag& tag) const {
+        if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
+            const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
+            if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] SettingsCtx createSettingsCtxFromTag(const Tag& tag) const {
         // If TRIGGER_META_INFO is not present then context =_activeCtx, time = now()
         // If CONTEXT is not present then context =_activeCtx
         // IF TRIGGER_TIME is not present then time = now()
 
-        const property_map &parameters = tag.map;
-        SettingsCtx         ctx(0ULL, _activeCtx);
+        SettingsCtx ctx(0ULL, _activeCtx);
 
-        // update if trigger_meta_info is present
-        if (parameters.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
-            const pmtv::pmt &pmtMetaInfo = parameters.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
-            if (std::holds_alternative<property_map>(pmtMetaInfo)) {
-                const property_map &metaInfo = std::get<property_map>(pmtMetaInfo);
-
-                // update context if present
-                if (metaInfo.contains(std::string(gr::tag::CONTEXT.shortKey()))) {
-                    ctx.context = metaInfo.at(std::string(gr::tag::CONTEXT.shortKey()));
-                }
-            }
+        // update if context is present
+        if (isContextPresentInTag(tag)) {
+            const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
+            ctx.context                  = std::get<property_map>(pmtMetaInfo).at(std::string(gr::tag::CONTEXT.shortKey()));
         }
 
         // update trigger time if present
-        if (parameters.contains(gr::tag::TRIGGER_TIME.shortKey())) {
-            const pmtv::pmt &pmtTimeUtcNs = parameters.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
-            if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
-                ctx.time = std::get<uint64_t>(pmtTimeUtcNs);
-            }
+        if (isTriggeredTimePresentInTag(tag)) {
+            ctx.time = std::get<uint64_t>(tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey())));
         }
 
         if (ctx.time == 0ULL) {
@@ -612,8 +591,7 @@ private:
         return ctx;
     }
 
-    void
-    storeDefaultSettings(property_map &oldSettings) {
+    void storeDefaultSettings(property_map& oldSettings) {
         // take a copy of the field -> map value of the old settings
         if constexpr (refl::is_reflectable<TBlock>()) {
             auto processOneMember = [&, this](auto member) {
@@ -628,8 +606,7 @@ private:
     }
 
     template<typename T, typename Func>
-    inline constexpr static void
-    processMembers(Func func) {
+    inline constexpr static void processMembers(Func func) {
         if constexpr (detail::HasBaseType<T>) {
             refl::util::for_each(refl::reflect<typename std::remove_cvref_t<T>::base_t>().members, func);
         }
