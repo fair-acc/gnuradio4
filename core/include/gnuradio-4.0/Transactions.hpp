@@ -241,7 +241,7 @@ public:
             const property_map& parameters    = tag.map;
             bool                wasChanged    = false;
             for (const auto& [key, value] : parameters) {
-                auto processOneMember = [&](auto member) {
+                auto processOneMember = [&, this](auto member) {
                     using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
                         if (autoUpdateParameters.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
@@ -317,7 +317,7 @@ public:
         std::lock_guard lg(_lock);
         gr::Size_t      nParameters{0};
         for (const auto& stored : _storedParameters) {
-            nParameters += stored.second.size();
+            nParameters += static_cast<gr::Size_t>(stored.second.size());
         }
         return nParameters;
     }

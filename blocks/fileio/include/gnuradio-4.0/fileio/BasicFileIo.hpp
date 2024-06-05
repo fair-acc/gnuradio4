@@ -1,10 +1,9 @@
 #ifndef BASICFILEIO_HPP
 #define BASICFILEIO_HPP
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <magic_enum.hpp>
 
 #include <chrono>
@@ -17,12 +16,6 @@
 namespace gr::blocks::fileio {
 
 namespace detail {
-[[nodiscard]] inline std::string getIsoTime() noexcept {
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-    return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:06}",               // ms-precision ISO time-format
-        fmt::localtime(std::chrono::system_clock::to_time_t(now)), //
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1'000);
-}
 
 inline void ensureDirectoryExists(const std::filesystem::path& filePath) { std::filesystem::create_directories(filePath.parent_path()); }
 
@@ -33,7 +26,8 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
     }
 
     std::vector<std::filesystem::path> matchingFiles;
-    std::copy_if(std::filesystem::directory_iterator(filePath.parent_path()), std::filesystem::directory_iterator{}, std::back_inserter(matchingFiles), [&](const auto& entry) { return entry.is_regular_file() && entry.path().string().find(filePath.filename().string()) != std::string::npos; });
+    std::copy_if(std::filesystem::directory_iterator(filePath.parent_path()), std::filesystem::directory_iterator{}, std::back_inserter(matchingFiles), //
+        [&](const auto& entry) { return entry.is_regular_file() && entry.path().string().find(filePath.filename().string()) != std::string::npos; });
 
     std::sort(matchingFiles.begin(), matchingFiles.end());
     return matchingFiles;
@@ -158,7 +152,7 @@ private:
         } break;
         case Mode::multi: {
             // _fileCounter ensures that the filenames are unique and still sortable by date-time, with an additional counter to handle rapid successive file creation.
-            _actualFileName = filePath.parent_path() / (detail::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string());
+            _actualFileName = filePath.parent_path() / (gr::time::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string());
             _file.open(_actualFileName, std::ios::binary);
             break;
         }

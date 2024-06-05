@@ -685,14 +685,18 @@ const boost::ut::suite TransactionTests = [] {
         auto&              src          = testGraph.emplaceBlock<TagSource<float>>(srcParameter);
         const auto         timeNow      = std::chrono::system_clock::now();
 
-        src.tags.push_back({50, {{"sample_rate", 50.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(30))}}});
+        src._tags.push_back({50, {{"sample_rate", 50.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(30))}, //
+                                     {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name30"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
         for (std::size_t i = 100; i < 500; i++) {
-            src.tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
+            src._tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
         }
-        src.tags.push_back({550, {{"sample_rate", 550.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}}});
-        src.tags.push_back({560, {{"sample_rate", 560.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}}});
+        src._tags.push_back({550, {{"sample_rate", 550.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //
+                                      {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name20"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
+        src._tags.push_back({560, {{"sample_rate", 560.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
+                                      {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name10"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
+
         for (std::size_t i = 600; i < n_samples; i++) {
-            src.tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
+            src._tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
         }
 
         auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}});
