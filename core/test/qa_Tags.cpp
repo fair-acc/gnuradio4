@@ -5,9 +5,9 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/reflection.hpp>
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -52,7 +52,7 @@ const boost::ut::suite TagTests = [] {
         // testTag.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
         expect(testTag.at(tag::SAMPLE_RATE) == 4.0f);
         expect(tag::SAMPLE_RATE.shortKey() == "sample_rate");
-        expect(tag::SAMPLE_RATE.key() == std::string{ GR_TAG_PREFIX }.append("sample_rate"));
+        expect(tag::SAMPLE_RATE.key() == std::string{GR_TAG_PREFIX}.append("sample_rate"));
 
         expect(testTag.get(tag::SAMPLE_RATE).has_value());
         static_assert(!std::is_const_v<decltype(testTag.get(tag::SAMPLE_RATE).value())>);
@@ -102,31 +102,26 @@ const boost::ut::suite TagPropagation = [] {
     auto runTest = []<auto srcType>(bool verbose = true) {
         gr::Size_t         n_samples = 1024;
         Graph              testGraph;
-        const property_map srcParameter = { { "n_samples_max", n_samples }, { "name", "TagSource" }, { "signal_name", "tagStream" }, { "verbose_console", true && verbose } };
-        auto              &src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
-        src.tags                        = {
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"signal_name", "tagStream"}, {"verbose_console", true && verbose}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
+        src._tags                       = {
             // TODO: allow parameter settings to include maps?!?
-            { 0, { { "key", "value@0" } } },       //
-            { 1, { { "key", "value@1" } } },       //
-            { 100, { { "key", "value@100" } } },   //
-            { 150, { { "key", "value@150" } } },   //
-            { 1000, { { "key", "value@1000" } } }, //
-            { 1001, { { "key", "value@1001" } } }, //
-            { 1002, { { "key", "value@1002" } } }, //
-            { 1023, { { "key", "value@1023" } } }  //
+            {0, {{"key", "value@0"}}},       //
+            {1, {{"key", "value@1"}}},       //
+            {100, {{"key", "value@100"}}},   //
+            {150, {{"key", "value@150"}}},   //
+            {1000, {{"key", "value@1000"}}}, //
+            {1001, {{"key", "value@1001"}}}, //
+            {1002, {{"key", "value@1002"}}}, //
+            {1023, {{"key", "value@1023"}}}  //
         };
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
 
-        auto &monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>(
-                { { "name", "TagMonitorBulk" }, { "n_samples_expected", n_samples }, { "verbose_console", true && verbose } });
-        auto &monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>(
-                { { "name", "TagMonitorOne" }, { "n_samples_expected", n_samples }, { "verbose_console", false && verbose } });
-        auto &monitorOneSIMD = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE_SIMD>>(
-                { { "name", "TagMonitorOneSIMD" }, { "n_samples_expected", n_samples }, { "verbose_console", false && verbose } });
-        auto &sinkBulk = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>(
-                { { "name", "TagSinkN" }, { "n_samples_expected", n_samples }, { "verbose_console", true && verbose } });
-        auto &sinkOne = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>(
-                { { "name", "TagSinkOne" }, { "n_samples_expected", n_samples }, { "verbose_console", true && verbose } });
+        auto& monitorBulk    = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
+        auto& monitorOne     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& monitorOneSIMD = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE_SIMD>>({{"name", "TagMonitorOneSIMD"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& sinkBulk       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
+        auto& sinkOne        = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
 
         // src ─> monitorBulk ─> monitorOne ─> monitorOneSIMD ┬─> sinkBulk
         //                                                    └─> sinkOne
@@ -136,7 +131,7 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkBulk)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkOne)));
 
-        scheduler::Simple sched{ std::move(testGraph) };
+        scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
 
         // settings forwarding
@@ -160,11 +155,11 @@ const boost::ut::suite TagPropagation = [] {
         expect(!sinkBulk.log_samples || eq(sinkBulk.samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
         expect(!sinkOne.log_samples || eq(sinkOne.samples.size(), n_samples)) << "sinkOne did not log enough input samples";
 
-        expect(equal_tag_lists(src.tags, monitorBulk.tags, "signal_name"s)) << "monitorBulk did not receive the required tags";
-        expect(equal_tag_lists(src.tags, monitorOne.tags, "signal_name"s)) << "monitorOne did not receive the required tags";
-        expect(equal_tag_lists(src.tags, monitorOneSIMD.tags, "signal_name"s)) << "monitorOneSIMD did not receive the required tags";
-        expect(equal_tag_lists(src.tags, sinkBulk.tags, "signal_name"s)) << "sinkBulk did not receive the required tags";
-        expect(equal_tag_lists(src.tags, sinkOne.tags, "signal_name"s)) << "sinkOne did not receive the required tags";
+        expect(equal_tag_lists(src._tags, monitorBulk._tags, "signal_name"s)) << "monitorBulk did not receive the required tags";
+        expect(equal_tag_lists(src._tags, monitorOne._tags, "signal_name"s)) << "monitorOne did not receive the required tags";
+        expect(equal_tag_lists(src._tags, monitorOneSIMD._tags, "signal_name"s)) << "monitorOneSIMD did not receive the required tags";
+        expect(equal_tag_lists(src._tags, sinkBulk._tags, "signal_name"s)) << "sinkBulk did not receive the required tags";
+        expect(equal_tag_lists(src._tags, sinkOne._tags, "signal_name"s)) << "sinkOne did not receive the required tags";
     };
 
     "TagSource<float, USE_PROCESS_BULK>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
@@ -172,6 +167,40 @@ const boost::ut::suite TagPropagation = [] {
     "TagSource<float, USE_PROCESS_ONE>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_ONE>(true); };
 };
 
-int
-main() { /* tests are statically executed */
-}
+const boost::ut::suite RepeatedTags = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    auto runTest = []<auto srcType>(bool verbose = true) {
+        gr::Size_t         n_samples = 30;
+        Graph              testGraph;
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
+        src._tags                       = {{2, {{"key", "value@2"}}}, {3, {{"key", "value@3"}}}, {5, {{"key", "value@5"}}}, {8, {{"key", "value@8"}}}};
+
+        auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+
+        // src -> monitorOne -> sinkOne
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
+
+        scheduler::Simple sched{std::move(testGraph)};
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(src._tags.size(), 4UZ));
+        expect(eq(monitorOne._tags.size(), 13UZ));
+        expect(eq(sinkOne._tags.size(), 13UZ));
+        for (std::size_t i = 0; i < monitorOne._tags.size(); i++) {
+            expect(monitorOne._tags[i].map.at("key") == src._tags[i % src._tags.size()].map.at("key"));
+            expect(sinkOne._tags[i].map.at("key") == src._tags[i % src._tags.size()].map.at("key"));
+        }
+    };
+
+    "TagSource<float, USE_PROCESS_BULK>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
+
+    "TagSource<float, USE_PROCESS_ONE>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_ONE>(true); };
+};
+
+int main() { /* tests are statically executed */ }

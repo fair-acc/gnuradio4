@@ -533,7 +533,7 @@ public:
         }
     }
 
-    [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override { return 0; } // Implemented only for compatibility
+    [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override { return 1; } // Implemented only for compatibility
 
     [[nodiscard]] std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept override { return {}; } // Implemented only for compatibility
 
