@@ -11,7 +11,6 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/Transactions.hpp>
-#include <gnuradio-4.0/reflection.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 using namespace std::string_literals;
@@ -506,7 +505,8 @@ const boost::ut::suite AnnotationTests = [] {
         expect(block.sample_rate.validate_and_set(1.f));
         expect(not block.sample_rate.validate_and_set(-1.f));
 
-        constexpr auto                                             isPowerOfTwo   = [](const int& val) { return val > 0 && (val & (val - 1)) == 0; };
+        constexpr auto isPowerOfTwo = [](const int& val) { return val > 0 && (val & (val - 1)) == 0; };
+
         Annotated<int, "power of two", Limits<0, 0, isPowerOfTwo>> needPowerOfTwo = 2;
         expect(isPowerOfTwo(4));
         expect(!isPowerOfTwo(5));
@@ -520,6 +520,48 @@ const boost::ut::suite AnnotationTests = [] {
         expect(block.settings().set({{"sample_rate", -1.0f}}).empty()) << "successful set returns empty map";
         expect(!block.settings().applyStagedParameters().forwardParameters.empty()) << "successful set returns empty map";
         // should print out a warning -> TODO: replace with pmt error message on msgOut port
+    };
+
+    "annotated implicit conversions"_test = [] {
+        Annotated<int> annotatedInt = 10;
+        int            value        = annotatedInt; // implicit conversion
+        expect(value == 10);
+
+        Annotated<std::string> annotatedString = "hello";
+        std::string            str             = annotatedString; // implicit conversion
+        expect(str == "hello");
+    };
+
+    "annotated forwarding member functions"_test = [] {
+        Annotated<std::string> annotatedString = "hello";
+        expect(annotatedString->size() == 5);  // operator-> forwarding
+        expect(annotatedString[1] == 'e');     // operator[]
+        expect(annotatedString->at(1) == 'e'); // operator->*
+
+        annotatedString[1] = 'a';
+        expect(annotatedString == "hallo"); // check modified string
+    };
+
+    "const correctness"_test = [] {
+        const Annotated<std::string> annotatedString = "hello";
+        expect(annotatedString->size() == 5);  // const operator->
+        expect(annotatedString[1] == 'e');     // const operator[]
+        expect(annotatedString->at(1) == 'e'); // const operator->*
+
+        // Ensure the original string is not modified
+        expect(annotatedString == "hello");
+    };
+
+    "validator edge cases"_test = [] {
+        constexpr auto isNonNegative = [](const int& val) { return val >= 0; };
+
+        Annotated<int, "non-negative", Limits<0, 0, isNonNegative>> nonNegative = 0;
+
+        expect(nonNegative.validate_and_set(0));      // Edge case: exactly 0
+        expect(nonNegative.validate_and_set(100));    // Positive case
+        expect(not nonNegative.validate_and_set(-1)); // Negative case
+
+        expect(nonNegative == 100); // Ensure value is correctly set to the last valid value
     };
 };
 
