@@ -12,9 +12,8 @@
 #include <vector>
 
 #include "BlockRegistry.hpp"
-#include "Graph.hpp"
 
-#ifndef __EMSCRIPTEN__
+#ifdef ENABLE_BLOCK_PLUGINS
 #include <dlfcn.h>
 
 #include "plugin.hpp"
@@ -25,23 +24,22 @@ namespace gr {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-#ifndef __EMSCRIPTEN__
+#ifdef ENABLE_BLOCK_PLUGINS
 // Plugins are not supported on WASM
 
-using plugin_create_function_t  = void (*)(gr_plugin_base **);
-using plugin_destroy_function_t = void (*)(gr_plugin_base *);
+using plugin_create_function_t  = void (*)(gr_plugin_base**);
+using plugin_destroy_function_t = void (*)(gr_plugin_base*);
 
 class PluginHandler {
 private:
-    void                     *_dl_handle  = nullptr;
+    void*                     _dl_handle  = nullptr;
     plugin_create_function_t  _create_fn  = nullptr;
     plugin_destroy_function_t _destroy_fn = nullptr;
-    gr_plugin_base           *_instance   = nullptr;
+    gr_plugin_base*           _instance   = nullptr;
 
     std::string _status;
 
-    void
-    release() {
+    void release() {
         if (_instance) {
             _destroy_fn(_instance);
             _instance = nullptr;
@@ -56,7 +54,7 @@ private:
 public:
     PluginHandler() = default;
 
-    explicit PluginHandler(const std::string &plugin_file) {
+    explicit PluginHandler(const std::string& plugin_file) {
         _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY);
         if (!_dl_handle) {
             _status = "Failed to load the plugin file";
@@ -91,19 +89,12 @@ public:
         }
     }
 
-    PluginHandler(const PluginHandler &other) = delete;
-    PluginHandler &
-    operator=(const PluginHandler &other)
-            = delete;
+    PluginHandler(const PluginHandler& other)            = delete;
+    PluginHandler& operator=(const PluginHandler& other) = delete;
 
-    PluginHandler(PluginHandler &&other) noexcept
-        : _dl_handle(std::exchange(other._dl_handle, nullptr))
-        , _create_fn(std::exchange(other._create_fn, nullptr))
-        , _destroy_fn(std::exchange(other._destroy_fn, nullptr))
-        , _instance(std::exchange(other._instance, nullptr)) {}
+    PluginHandler(PluginHandler&& other) noexcept : _dl_handle(std::exchange(other._dl_handle, nullptr)), _create_fn(std::exchange(other._create_fn, nullptr)), _destroy_fn(std::exchange(other._destroy_fn, nullptr)), _instance(std::exchange(other._instance, nullptr)) {}
 
-    PluginHandler &
-    operator=(PluginHandler &&other) noexcept {
+    PluginHandler& operator=(PluginHandler&& other) noexcept {
         auto tmp = std::move(other);
         std::swap(_dl_handle, tmp._dl_handle);
         std::swap(_create_fn, tmp._create_fn);
@@ -114,34 +105,24 @@ public:
 
     ~PluginHandler() { release(); }
 
-    explicit
-    operator bool() const {
-        return _instance;
-    }
+    explicit operator bool() const { return _instance; }
 
-    [[nodiscard]] const std::string &
-    status() const {
-        return _status;
-    }
+    [[nodiscard]] const std::string& status() const { return _status; }
 
-    auto *
-    operator->() const {
-        return _instance;
-    }
+    auto* operator->() const { return _instance; }
 };
 
 class PluginLoader {
 private:
-    std::vector<PluginHandler>                        _handlers;
-    std::unordered_map<std::string, gr_plugin_base *> _handlerForName;
-    std::unordered_map<std::string, std::string>      _failedPlugins;
-    std::unordered_set<std::string>                   _loadedPluginFiles;
+    std::vector<PluginHandler>                       _handlers;
+    std::unordered_map<std::string, gr_plugin_base*> _handlerForName;
+    std::unordered_map<std::string, std::string>     _failedPlugins;
+    std::unordered_set<std::string>                  _loadedPluginFiles;
 
-    BlockRegistry           *_registry;
+    BlockRegistry*           _registry;
     std::vector<std::string> _knownBlocks;
 
-    gr_plugin_base *
-    handlerForName(std::string_view name) const {
+    gr_plugin_base* handlerForName(std::string_view name) const {
         if (auto it = _handlerForName.find(std::string(name)); it != _handlerForName.end()) {
             return it->second;
         } else {
@@ -150,20 +131,24 @@ private:
     }
 
 public:
-    PluginLoader(BlockRegistry &registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
-        for (const auto &directory : plugin_directories) {
+    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
+        for (const auto& directory : plugin_directories) {
             std::cerr << std::filesystem::current_path() << std::endl;
 
-            if (!std::filesystem::is_directory(directory)) continue;
+            if (!std::filesystem::is_directory(directory)) {
+                continue;
+            }
 
-            for (const auto &file : std::filesystem::directory_iterator{ directory }) {
+            for (const auto& file : std::filesystem::directory_iterator{directory}) {
                 if (file.is_regular_file() && file.path().extension() == ".so") {
                     auto fileString = file.path().string();
-                    if (_loadedPluginFiles.contains(fileString)) continue;
+                    if (_loadedPluginFiles.contains(fileString)) {
+                        continue;
+                    }
                     _loadedPluginFiles.insert(fileString);
 
                     if (PluginHandler handler(file.path().string()); handler) {
-                        for (const auto &block_name : handler->providedBlocks()) {
+                        for (const auto& block_name : handler->providedBlocks()) {
                             _handlerForName.emplace(std::string(block_name), handler.operator->());
                             _knownBlocks.emplace_back(block_name);
                         }
@@ -178,36 +163,25 @@ public:
         }
     }
 
-    BlockRegistry &
-    registry() {
-        return *_registry;
-    }
+    BlockRegistry& registry() { return *_registry; }
 
-    const auto &
-    plugins() const {
-        return _handlers;
-    }
+    const auto& plugins() const { return _handlers; }
 
-    const auto &
-    failed_plugins() const {
-        return _failedPlugins;
-    }
+    const auto& failed_plugins() const { return _failedPlugins; }
 
-    auto
-    knownBlocks() const {
+    auto knownBlocks() const {
         auto        result  = _knownBlocks;
-        const auto &builtin = _registry->knownBlocks();
+        const auto& builtin = _registry->knownBlocks();
         result.insert(result.end(), builtin.begin(), builtin.end());
         return result;
     }
 
-    std::vector<std::string>
-    knownBlockParameterizations(std::string_view block) const {
+    std::vector<std::string> knownBlockParameterizations(std::string_view block) const {
         if (_registry->isBlockKnown(block)) {
             return _registry->knownBlockParameterizations(block);
         }
 
-        gr_plugin_base *handler = handlerForName(block);
+        gr_plugin_base* handler = handlerForName(block);
         if (handler) {
             return handler->knownBlockParameterizations(block);
         } else {
@@ -215,29 +189,18 @@ public:
         }
     }
 
-    std::unique_ptr<gr::BlockModel>
-    instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) {
         // Try to create a node from the global registry
         if (auto result = _registry->createBlock(name, type, params)) {
             return result;
         }
 
-        auto *handler = handlerForName(name);
+        auto* handler = handlerForName(name);
         if (handler == nullptr) {
             return {};
         }
 
         return handler->createBlock(name, type, params);
-    }
-
-    template<typename Graph, typename... InstantiateArgs>
-    gr::BlockModel &
-    instantiateInGraph(Graph &graph, InstantiateArgs &&...args) {
-        auto block_load = instantiate(std::forward<InstantiateArgs>(args)...);
-        if (!block_load) {
-            throw fmt::format("Unable to create node");
-        }
-        return graph.addBlock(std::move(block_load));
     }
 };
 #else
@@ -245,23 +208,16 @@ public:
 // same API as proper PluginLoader
 class PluginLoader {
 private:
-    BlockRegistry *_registry;
+    BlockRegistry* _registry;
 
 public:
-    PluginLoader(BlockRegistry &registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
+    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
 
-    BlockRegistry &
-    registry() {
-        return *_registry;
-    }
+    BlockRegistry& registry() { return *_registry; }
 
-    auto
-    knownBlocks() const {
-        return _registry->knownBlocks();
-    }
+    auto knownBlocks() const { return _registry->knownBlocks(); }
 
-    std::vector<std::string>
-    knownBlockParameterizations(std::string_view block) const {
+    std::vector<std::string> knownBlockParameterizations(std::string_view block) const {
         if (_registry->isBlockKnown(block)) {
             return _registry->knownBlockParameterizations(block);
         }
@@ -269,22 +225,44 @@ public:
         return {};
     }
 
-    std::unique_ptr<gr::BlockModel>
-    instantiate(std::string_view name, std::string_view type, const property_map &params = {}) {
-        return _registry->createBlock(name, type, params);
-    }
-
-    template<typename Graph, typename... InstantiateArgs>
-    gr::BlockModel &
-    instantiateInGraph(Graph &graph, InstantiateArgs &&...args) {
-        auto block_load = instantiate(std::forward<InstantiateArgs>(args)...);
-        if (!block_load) {
-            throw fmt::format("Unable to create node");
-        }
-        return graph.addBlock(std::move(block_load));
-    }
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) { return _registry->createBlock(name, type, params); }
 };
 #endif
+
+inline auto& globalPluginLoader() {
+    auto pluginPaths = [] {
+        std::vector<std::filesystem::path> result;
+
+        auto* envpath = ::getenv("GNURADIO4_PLUGIN_DIRECTORIES");
+        if (envpath == nullptr) {
+            // TODO choose proper paths when we get the system GR installation done
+            result.emplace_back("core/test/plugins");
+
+        } else {
+            std::string_view paths(envpath);
+
+            auto i = paths.cbegin();
+
+            // TODO If we want to support Windows, this should be ; there
+            auto isSeparator = [](char c) { return c == ':'; };
+
+            while (i != paths.cend()) {
+                i      = std::find_if_not(i, paths.cend(), isSeparator);
+                auto j = std::find_if(i, paths.cend(), isSeparator);
+
+                if (i != paths.cend()) {
+                    result.emplace_back(std::string_view(i, j));
+                }
+                i = j;
+            }
+        }
+
+        return result;
+    };
+
+    static PluginLoader instance(gr::globalBlockRegistry(), {pluginPaths()});
+    return instance;
+}
 
 } // namespace gr
 

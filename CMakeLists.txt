@@ -5,18 +5,29 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
-option(NOPLUGINS "Disable plugins" OFF)
+if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
+    message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
+    set(EMSCRIPTEN ON)
+endif ()
+
+option(ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ON)
+option(ENABLE_BLOCK_REGISTRY "Enable building the block registry" ON)
 option(EMBEDDED "Enable embedded mode" OFF)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)
 option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
 option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
-if (NOPLUGINS)
-    set(NOPLUGINS ON)
-    add_compile_definitions(NOPLUGINS)
-    message(STATUS "disable plugin system (faster compile-times and when runtime or Python wrapping APIs are not required): ${NOPLUGINS}")
+if (EMSCRIPTEN)
+    set(ENABLE_BLOCK_PLUGINS OFF)
 endif ()
+
+if (ENABLE_BLOCK_PLUGINS)
+    set(ENABLE_BLOCK_REGISTRY ON)
+endif ()
+
+message(STATUS "Is block registry enabled? (faster compile-times and when runtime or Python wrapping APIs are not required) ${ENABLE_BLOCK_REGISTRY}")
+message(STATUS "Is plugin system enabled? ${ENABLE_BLOCK_PLUGINS}")
 
 # Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
 if (NOT DEFINED GR_TOPLEVEL_PROJECT)
@@ -135,11 +146,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 add_library(gnuradio-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(gnuradio-options)
-
-if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
-    message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
-    set(EMSCRIPTEN true)
-endif ()
 
 if (EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".js")

@@ -28,8 +28,7 @@ const auto builtin_multiply = "builtin_multiply"s;
 const auto builtin_counter  = "builtin_counter"s;
 } // namespace names
 
-int
-main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
     std::vector<std::filesystem::path> paths;
     if (argc < 2) {
         paths.emplace_back("test/plugins");
@@ -47,38 +46,38 @@ main(int argc, char *argv[]) {
     fmt::print("PluginLoaderTests\n");
     using namespace gr;
 
-    for (const auto &plugin [[maybe_unused]] : context.loader.plugins()) {
+    for (const auto& plugin [[maybe_unused]] : context.loader.plugins()) {
         assert(plugin->metadata->plugin_name.starts_with("Good"));
     }
 
-    for (const auto &plugin [[maybe_unused]] : context.loader.failed_plugins()) {
+    for (const auto& plugin [[maybe_unused]] : context.loader.failed_plugins()) {
         assert(plugin.first.ends_with("bad_plugin.so"));
     }
 
     auto        known = context.loader.knownBlocks();
-    std::vector requireds{ names::cout_sink, names::fixed_source, names::divide, names::multiply };
+    std::vector requireds{names::cout_sink, names::fixed_source, names::divide, names::multiply};
 
-    for (const auto &plugin : known) {
+    for (const auto& plugin : known) {
         fmt::print("Known: {}\n", plugin);
     }
 
-    for (const auto &required [[maybe_unused]] : requireds) {
+    for (const auto& required [[maybe_unused]] : requireds) {
         assert(std::ranges::find(known, required) != known.end());
     }
 
     gr::Graph testGraph;
 
     // Instantiate the node that is defined in a plugin
-    auto &block_source = context.loader.instantiateInGraph(testGraph, names::fixed_source, "double");
+    auto& block_source = testGraph.emplaceBlock(names::fixed_source, "double", context.loader);
 
     // Instantiate a built-in node in a static way
     gr::property_map block_multiply_1_params;
     block_multiply_1_params["factor"] = 2.0;
-    auto &block_multiply_1            = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
+    auto& block_multiply_1            = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
     // Instantiate a built-in node via the plugin loader
-    auto &block_multiply_2 = context.loader.instantiateInGraph(testGraph, names::builtin_multiply, "double");
-    auto &block_counter    = context.loader.instantiateInGraph(testGraph, names::builtin_counter, "double");
+    auto& block_multiply_2 = testGraph.emplaceBlock(names::builtin_multiply, "double", context.loader);
+    auto &block_counter    = context.loadernames::builtin_counter, "double");
 
     //
     const std::size_t repeats = 100;
@@ -87,7 +86,7 @@ main(int argc, char *argv[]) {
     auto block_sink_load             = context.loader.instantiate(names::cout_sink, "double", block_sink_params);
 
     assert(block_sink_load);
-    auto &block_sink = testGraph.addBlock(std::move(block_sink_load));
+    auto& block_sink = testGraph.addBlock(std::move(block_sink_load));
 
     auto connection_1 [[maybe_unused]] = testGraph.connect(block_source, 0, block_multiply_1, 0);
     auto connection_2 [[maybe_unused]] = testGraph.connect(block_multiply_1, 0, block_multiply_2, 0);
