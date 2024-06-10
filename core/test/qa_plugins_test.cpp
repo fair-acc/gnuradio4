@@ -8,6 +8,7 @@
 #include <fmt/ranges.h>
 
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 
 using namespace std::chrono_literals;
@@ -149,7 +150,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         gr::Graph testGraph;
 
         // Instantiate the node that is defined in a plugin
-        auto& block_source = context().loader.instantiateInGraph(testGraph, names::fixed_source, "double");
+        auto& block_source = testGraph.emplaceBlock(names::fixed_source, "double", {}, context().loader);
 
         // Instantiate a built-in node in a static way
         gr::property_map block_multiply_1_params;
@@ -157,10 +158,10 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto& block_multiply_double       = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
         // Instantiate a built-in node via the plugin loader
-        auto& block_multiply_float = context().loader.instantiateInGraph(testGraph, names::builtin_multiply, "float");
+        auto& block_multiply_float = testGraph.emplaceBlock(names::builtin_multiply, "float", {}, context().loader);
 
-        auto& block_convert_to_float  = context().loader.instantiateInGraph(testGraph, names::convert, "double,float");
-        auto& block_convert_to_double = context().loader.instantiateInGraph(testGraph, names::convert, "float,double");
+        auto& block_convert_to_float  = testGraph.emplaceBlock(names::convert, "double,float", {}, context().loader);
+        auto& block_convert_to_double = testGraph.emplaceBlock(names::convert, "float,double", {}, context().loader);
 
         //
         std::size_t      repeats = 10;
