@@ -744,6 +744,29 @@ const boost::ut::suite TransactionTests = [] {
         testStored(sinkBulk);
     };
 
+    "CtxSettings supported context types"_test = [&] {
+        Graph      testGraph;
+        auto&      block    = testGraph.emplaceBlock<TestBlock<int>>({{"scaling_factor", 1}});
+        auto       settings = CtxSettings(block);
+        const auto timeNow  = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+        const auto ctxStr = SettingsCtx(timeNow, "String context"); // OK: string
+        expect(settings.set({{"scaling_factor", 1}}, ctxStr).empty()) << "successful set returns empty map";
+        const auto ctxInt = SettingsCtx(timeNow, static_cast<int>(1)); // OK: int
+        expect(settings.set({{"scaling_factor", 2}}, ctxInt).empty()) << "successful set returns empty map";
+
+        auto runType = [&]<typename TCtx>() {
+            expect(throws([&] {
+                const auto ctx = SettingsCtx(timeNow, static_cast<TCtx>(1));
+                std::ignore    = settings.set({{"scaling_factor", 3}}, ctx);
+            }));
+        };
+
+        runType.template operator()<float>();
+        runType.template operator()<double>();
+        runType.template operator()<std::size_t>();
+    };
+
     // TODO enable this when load_grc works in emscripten (not relying on plugins here)
 #ifndef NOPLUGINS
     "Property auto-forwarding with GRC-loaded graph"_test = [&] {
@@ -768,7 +791,7 @@ connections:
         gr::registerBlock<Sink, double>(registry);
         PluginLoader loader(registry, {});
         try {
-            scheduler::Simple sched{load_grc(loader, std::string(grc))};
+            scheduler::Simple sched{loadGrc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());
             sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
         } catch (const std::string& e) {
