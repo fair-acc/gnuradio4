@@ -8936,56 +8936,35 @@ struct fixed_string {
     constexpr fixed_string() = default;
 
     constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
-        if constexpr (N != 0)
-            for (std::size_t i = 0; i < N; ++i) _data[i] = str[i];
+        if constexpr (N != 0) {
+            for (std::size_t i = 0; i < N; ++i) {
+                _data[i] = str[i];
+            }
+        }
     }
 
-    [[nodiscard]] constexpr std::size_t
-    size() const noexcept {
-        return N;
-    }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
 
-    [[nodiscard]] constexpr bool
-    empty() const noexcept {
-        return N == 0;
-    }
+    [[nodiscard]] constexpr bool empty() const noexcept { return N == 0; }
 
-    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return { _data, N }; }
+    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] explicit
-    operator std::string() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] explicit operator std::string() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] explicit
-    operator const char *() const noexcept {
-        return _data;
-    }
+    [[nodiscard]] explicit operator const char*() const noexcept { return _data; }
 
-    [[nodiscard]] constexpr bool
-    operator==(const fixed_string &other) const noexcept {
-        return std::string_view{ _data, N } == std::string_view(other);
-    }
+    [[nodiscard]] constexpr bool operator==(const fixed_string& other) const noexcept { return std::string_view{_data, N} == std::string_view(other); }
 
     template<std::size_t N2>
-    [[nodiscard]] friend constexpr bool
-    operator==(const fixed_string &, const fixed_string<CharT, N2> &) {
+    [[nodiscard]] friend constexpr bool operator==(const fixed_string&, const fixed_string<CharT, N2>&) {
         return false;
     }
 
-    constexpr auto
-    operator<=>(const fixed_string &other) const noexcept
-            = default;
+    constexpr auto operator<=>(const fixed_string& other) const noexcept = default;
 
-    friend constexpr auto
-    operator<=>(const fixed_string &fs, std::string_view sv) noexcept {
-        return std::string_view(fs) <=> sv;
-    }
+    friend constexpr auto operator<=>(const fixed_string& fs, std::string_view sv) noexcept { return std::string_view(fs) <=> sv; }
 
-    friend constexpr auto
-    operator<=>(const fixed_string &fs, const std::string &str) noexcept {
-        return std::string(fs) <=> str;
-    }
+    friend constexpr auto operator<=>(const fixed_string& fs, const std::string& str) noexcept { return std::string(fs) <=> str; }
 };
 
 template<typename CharT, std::size_t N>
@@ -9001,8 +8980,7 @@ template<typename T>
 concept FixedString = is_fixed_string<T>::value;
 
 template<typename CharT, std::size_t N1, std::size_t N2>
-constexpr fixed_string<CharT, N1 + N2>
-operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs) noexcept {
+constexpr fixed_string<CharT, N1 + N2> operator+(const fixed_string<CharT, N1>& lhs, const fixed_string<CharT, N2>& rhs) noexcept {
     meta::fixed_string<CharT, N1 + N2> result{};
     for (std::size_t i = 0; i < N1; ++i) {
         result._data[i] = lhs._data[i];
@@ -9015,31 +8993,31 @@ operator+(const fixed_string<CharT, N1> &lhs, const fixed_string<CharT, N2> &rhs
 }
 
 namespace detail {
-constexpr int
-log10(int n) noexcept {
-    if (n < 10) return 0;
+constexpr int log10(int n) noexcept {
+    if (n < 10) {
+        return 0;
+    }
     return 1 + log10(n / 10);
 }
 
-constexpr int
-pow10(int n) noexcept {
-    if (n == 0) return 1;
+constexpr int pow10(int n) noexcept {
+    if (n == 0) {
+        return 1;
+    }
     return 10 * pow10(n - 1);
 }
 
 template<int N, std::size_t... Idx>
-constexpr fixed_string<char, sizeof...(Idx)>
-make_fixed_string_impl(std::index_sequence<Idx...>) {
+constexpr fixed_string<char, sizeof...(Idx)> make_fixed_string_impl(std::index_sequence<Idx...>) {
     constexpr auto numDigits = sizeof...(Idx);
-    return { { ('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0 } };
+    return {{('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0}};
 }
 } // namespace detail
 
 template<int N>
-constexpr auto
-make_fixed_string() noexcept {
+constexpr auto make_fixed_string() noexcept {
     if constexpr (N == 0) {
-        return fixed_string{ "0" };
+        return fixed_string{"0"};
     } else {
         constexpr std::size_t digits = 1U + static_cast<std::size_t>(detail::log10(N));
         return detail::make_fixed_string_impl<N>(std::make_index_sequence<digits>());
@@ -9053,11 +9031,10 @@ static_assert(fixed_string("123") == make_fixed_string<123>());
 static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("out123"));
 
 template<typename T>
-[[nodiscard]] std::string
-type_name() noexcept {
+[[nodiscard]] std::string type_name() noexcept {
     std::string type_name = typeid(T).name();
     int         status;
-    char       *demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
+    char*       demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
     if (status == 0) {
         std::string ret(demangled_name);
         free(demangled_name);
@@ -9078,32 +9055,30 @@ constexpr std::size_t invalid_index              = -1UZ;
 constexpr std::size_t default_message_port_index = -2UZ;
 
 #if HAVE_SOURCE_LOCATION
-[[gnu::always_inline]] inline void
-precondition(bool cond, const std::source_location loc = std::source_location::current()) {
+[[gnu::always_inline]] inline void precondition(bool cond, const std::source_location loc = std::source_location::current()) {
     struct handle {
-        [[noreturn]] static void
-        failure(std::source_location const &loc) {
+        [[noreturn]] static void failure(std::source_location const& loc) {
             std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':' << loc.column() << ": `" << loc.function_name() << "`\n";
             __builtin_trap();
         }
     };
 
-    if (not cond) [[unlikely]]
+    if (not cond) [[unlikely]] {
         handle::failure(loc);
+    }
 }
 #else
-[[gnu::always_inline]] inline void
-precondition(bool cond) {
+[[gnu::always_inline]] inline void precondition(bool cond) {
     struct handle {
-        [[noreturn]] static void
-        failure() {
+        [[noreturn]] static void failure() {
             std::clog << "failed precondition\n";
             __builtin_trap();
         }
     };
 
-    if (not cond) [[unlikely]]
+    if (not cond) [[unlikely]] {
         handle::failure();
+    }
 }
 #endif
 
@@ -9113,7 +9088,7 @@ precondition(bool cond) {
  */
 template<typename T>
 concept tuple_like = (std::tuple_size<T>::value > 0) && requires(T tup) {
-    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T> &>;
+    { std::get<0>(tup) } -> std::same_as<typename std::tuple_element_t<0, T>&>;
 };
 
 template<template<typename...> class Template, typename Class>
@@ -9140,7 +9115,7 @@ template<typename T>
 concept array_type = is_std_array_type<std::remove_cv_t<T>>::value;
 
 template<typename T, typename V = void>
-concept array_or_vector_type = (vector_type<T> || array_type<T>) &&(std::same_as<V, void> || std::same_as<typename T::value_type, V>);
+concept array_or_vector_type = (vector_type<T> || array_type<T>) && (std::same_as<V, void> || std::same_as<typename T::value_type, V>);
 
 namespace stdx = vir::stdx;
 
@@ -9172,9 +9147,7 @@ struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
 
 template<tuple_like Tup>
 struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
-    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...);
-    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) { return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...); }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
 
 template<typename T>
@@ -9194,7 +9167,7 @@ struct simdize_impl {
 };
 
 template<vectorizable_v T, std::size_t N>
-    requires requires { typename stdx::native_simd<T>; }
+requires requires { typename stdx::native_simd<T>; }
 struct simdize_impl<T, N> {
     using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
 };
@@ -9205,17 +9178,14 @@ struct simdize_impl<std::tuple<>, N> {
 };
 
 template<tuple_like Tup, std::size_t N>
-    requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
+requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
 struct simdize_impl<Tup, N> {
-    static inline constexpr std::size_t size
-            = N > 0 ? N
-                    : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr { return std::max({ simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>... }); }
+    static inline constexpr std::size_t size = N > 0 ? N
+                                                     : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr { return std::max({simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>...}); }
 
-                      (std::make_index_sequence<std::tuple_size_v<Tup>>());
+                                                   (std::make_index_sequence<std::tuple_size_v<Tup>>());
 
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> {
-        return {};
-    }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> { return {}; }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
 };
 } // namespace detail
 
@@ -9229,13 +9199,10 @@ struct simdize_impl<Tup, N> {
 template<typename T, std::size_t N = 0>
 using simdize = typename detail::simdize_impl<T, N>::type;
 
-static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>,
-                           std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>,
-                                      std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
+static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>, std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>, std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<fixed_string Name, typename PortList>
-consteval std::size_t
-indexForName() {
+consteval std::size_t indexForName() {
     auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
         auto static_name_for_index = []<std::size_t Id> {
             using Port = typename PortList::template at<Id>;
@@ -9304,24 +9271,20 @@ overloaded(Lambdas...) -> overloaded<Lambdas...>;
 
 namespace detail {
 template<template<typename...> typename Mapper, template<typename...> typename Wrapper, typename... Args>
-Wrapper<Mapper<Args>...> *
-type_transform_impl(Wrapper<Args...> *);
+Wrapper<Mapper<Args>...>* type_transform_impl(Wrapper<Args...>*);
 
 template<template<typename...> typename Mapper, typename T>
-Mapper<T> *
-type_transform_impl(T *);
+Mapper<T>* type_transform_impl(T*);
 
 template<template<typename...> typename Mapper>
-void *
-type_transform_impl(void *);
+void* type_transform_impl(void*);
 } // namespace detail
 
 template<template<typename...> typename Mapper, typename T>
-using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T *>(nullptr)))>;
+using type_transform = std::remove_pointer_t<decltype(detail::type_transform_impl<Mapper>(static_cast<T*>(nullptr)))>;
 
 template<typename Arg, typename... Args>
-auto
-safe_min(Arg &&arg, Args &&...args) {
+auto safe_min(Arg&& arg, Args&&... args) {
     if constexpr (sizeof...(Args) == 0) {
         return arg;
     } else {
@@ -9330,8 +9293,7 @@ safe_min(Arg &&arg, Args &&...args) {
 }
 
 template<typename Arg, typename... Args>
-auto
-safe_pair_min(Arg &&arg, Args &&...args) {
+auto safe_pair_min(Arg&& arg, Args&&... args) {
     if constexpr (sizeof...(Args) == 0) {
         return arg;
     } else {
@@ -9340,39 +9302,27 @@ safe_pair_min(Arg &&arg, Args &&...args) {
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto
-tuple_for_each(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...));
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+auto tuple_for_each(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) { (([&function, &tuple, &tuples...](auto I) { function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{}), ...)); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-void
-tuple_for_each_enumerate(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        ([&function](auto I, auto &&t0, auto &&...ts) { function(I, std::get<I>(t0), std::get<I>(ts)...); }(std::integral_constant<std::size_t, Idx>{}, tuple, tuples...), ...);
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+void tuple_for_each_enumerate(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+    [&]<std::size_t... Idx>(std::index_sequence<Idx...>) { ([&function](auto I, auto&& t0, auto&&... ts) { function(I, std::get<I>(t0), std::get<I>(ts)...); }(std::integral_constant<std::size_t, Idx>{}, tuple, tuples...), ...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto
-tuple_transform(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+auto tuple_transform(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-auto
-tuple_transform_enumerated(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
-    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) &&...));
-    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(I, std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...);
-    }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
+auto tuple_transform_enumerated(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    static_assert(((std::tuple_size_v<std::remove_cvref_t<Tuple>> == std::tuple_size_v<std::remove_cvref_t<Tuples>>) && ...));
+    return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::make_tuple([&function, &tuple, &tuples...](auto I) { return function(I, std::get<I>(tuple), std::get<I>(tuples)...); }(std::integral_constant<std::size_t, Idx>{})...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<Tuple>>>());
 }
 
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
@@ -9439,6 +9389,13 @@ template<typename T>
 concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detail::is_noexcept_member_function<T>::value;
 
 } // namespace meta
+
+#if HAVE_SOURCE_LOCATION
+inline auto this_source_location(std::source_location l = std::source_location::current()) { return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
+#else
+inline auto this_source_location() { return "not yet implemented"; }
+#endif // HAVE_SOURCE_LOCATION
+
 } // namespace gr
 
 #endif // include guard
@@ -9463,432 +9420,6 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 
 // #include <gnuradio-4.0/meta/utils.hpp>
 
-
-// #include "annotated.hpp"
-#ifndef GNURADIO_ANNOTATED_HPP
-#define GNURADIO_ANNOTATED_HPP
-
-#include <string_view>
-#include <type_traits>
-#include <utility>
-
-#include <fmt/format.h>
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-namespace gr {
-
-/**
- * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
- * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
- */
-template<gr::meta::fixed_string doc_string>
-struct Doc {
-    static constexpr gr::meta::fixed_string value = doc_string;
-};
-
-using EmptyDoc = Doc<"">; // nomen-est-omen
-
-template<typename T>
-struct is_doc : std::false_type {};
-
-template<gr::meta::fixed_string N>
-struct is_doc<Doc<N>> : std::true_type {};
-
-template<typename T>
-concept Documentation = is_doc<T>::value;
-
-/**
- * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
- * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
- */
-template<gr::meta::fixed_string doc_string>
-struct Unit {
-    static constexpr gr::meta::fixed_string value = doc_string;
-};
-
-using EmptyUnit = Unit<"">; // nomen-est-omen
-
-template<typename T>
-struct is_unit : std::false_type {};
-
-template<gr::meta::fixed_string N>
-struct is_unit<Unit<N>> : std::true_type {};
-
-template<typename T>
-concept UnitType = is_unit<T>::value;
-
-static_assert(Documentation<EmptyDoc>);
-static_assert(UnitType<EmptyUnit>);
-static_assert(!UnitType<EmptyDoc>);
-static_assert(!Documentation<EmptyUnit>);
-
-/**
- * @brief Annotates field etc. that the entity is visible from a UI perspective.
- */
-struct Visible {};
-
-/**
- * @brief Annotates block, indicating to calling schedulers that it may block due IO.
- */
-template<bool UseIoThread = true>
-struct BlockingIO {
-    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
-};
-
-/**
- * @brief Annotates block, indicating to perform resampling based on the provided ratio.
- *
- * The ratio between numerator and denominator defines the number of samples to be interpolated or decimated.
- * - If the ratio is greater than 1, interpolation occurs.
- * - If the ratio is less than 1, decimation occurs.
- * - If the ratio is 1, no effect on the sampling rate.
- *
- * @tparam numerator Top number in the input-to-output sample ratio.
- * @tparam denominator Bottom number in the input-to-output sample ratio.
- * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
- */
-template<gr::Size_t numerator = 1U, gr::Size_t denominator = 1U, bool isConst = false>
-struct ResamplingRatio {
-    static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
-    static constexpr gr::Size_t kNumerator   = numerator;
-    static constexpr gr::Size_t kDenominator = denominator;
-    static constexpr bool       kIsConst     = isConst;
-    static constexpr bool       kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
-};
-
-template<typename T>
-concept IsResamplingRatio = requires {
-    T::kNumerator;
-    T::kDenominator;
-    T::kIsConst;
-    T::kEnabled;
-} && std::is_base_of_v<ResamplingRatio<T::kNumerator, T::kDenominator, T::kIsConst>, T>;
-
-template<typename T>
-using is_resampling_ratio = std::bool_constant<IsResamplingRatio<T>>;
-
-static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
-static_assert(!is_resampling_ratio<int>::value);
-
-/**
- * @brief Annotates block, indicating the stride control for data processing.
- *
- * Stride determines the number of samples between consecutive data processing events:
- * - If stride is less than N, it indicates overlap.
- * - If stride is greater than N, it indicates skipped samples.
- * - If stride is equal to 0, it indicates back-to-back processing without skipping.
- *
- * @tparam stride The number of samples between data processing events.
- * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
- */
-template<std::uint64_t stride = 0U, bool isConst = false>
-struct Stride {
-    static_assert(stride >= 0U, "Stride must be >= 0");
-
-    static constexpr gr::Size_t kStride  = stride;
-    static constexpr bool       kIsConst = isConst;
-    static constexpr bool       kEnabled = !isConst || (stride > 0U);
-};
-
-template<typename T>
-concept IsStride = requires {
-    T::kStride;
-    T::kIsConst;
-    T::kEnabled;
-} && std::is_base_of_v<Stride<T::kStride, T::kIsConst>, T>;
-
-template<typename T>
-using is_stride = std::bool_constant<IsStride<T>>;
-
-static_assert(is_stride<Stride<10, true>>::value);
-static_assert(!is_stride<int>::value);
-
-enum class IncompleteFinalUpdateEnum { DROP, PULL_FORWARD, PUSH_BACKWARD };
-
-template<IncompleteFinalUpdateEnum updatePolicy>
-struct IncompleteFinalUpdatePolicy {
-    static constexpr IncompleteFinalUpdateEnum kIncompleteFinalUpdatePolicy = updatePolicy;
-};
-
-template<typename T>
-concept IsIncompleteFinalUpdatePolicy = requires { T::kIncompleteFinalUpdatePolicy; } && std::is_base_of_v<IncompleteFinalUpdatePolicy<T::kIncompleteFinalUpdatePolicy>, T>;
-
-template<typename T>
-using is_incompleteFinalUpdatePolicy = std::bool_constant<IsIncompleteFinalUpdatePolicy<T>>;
-
-static_assert(is_incompleteFinalUpdatePolicy<IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>::value);
-
-enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
-
-/**
- * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
- *
- * @tparam category_ ui category where it
- * @tparam toolkit_ specifies the applicable UI toolkit (e.g. 'console', 'ImGui', 'Qt', etc.)
- */
-template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
-struct Drawable {
-    static constexpr UICategory             kCategory = category_;
-    static constexpr gr::meta::fixed_string kToolkit  = toolkit_;
-};
-
-template<typename T>
-concept IsDrawable = requires {
-    T::kCategory;
-    T::kToolkit;
-} && std::is_base_of_v<Drawable<T::kCategory, T::kToolkit>, T>;
-
-template<typename T>
-using is_drawable = std::bool_constant<IsDrawable<T>>;
-
-using NotDrawable = Drawable<UICategory::None, "">; // nomen-est-omen
-static_assert(is_drawable<NotDrawable>::value);
-static_assert(is_drawable<Drawable<UICategory::ChartPane, "console">>::value);
-static_assert(!is_drawable<int>::value);
-
-/**
- * @brief Annotates templated block, indicating which port data types are supported.
- */
-template<typename... Ts>
-struct SupportedTypes {};
-
-template<typename T>
-struct is_supported_types : std::false_type {};
-
-template<typename... Ts>
-struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
-
-using DefaultSupportedTypes = SupportedTypes<>;
-
-static_assert(gr::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
-static_assert(gr::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
-
-/**
- * @brief Represents limits and optional validation for an Annotated<..> type.
- *
- * The `Limits` structure defines lower and upper bounds for a value of type `T`.
- * Additionally, it allows for an optional custom validation function to be provided.
- * This function should take a value of type `T` and return a `bool`, indicating
- * whether the value passes the custom validation or not.
- *
- * Example:
- * ```
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
- * // or:
- * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
- * // or:
- * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
- * ```
- */
-template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
-    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
-        { f(v) } -> std::same_as<bool>;
-    } || Validator == nullptr)
-struct Limits {
-    using ValueType                                    = decltype(LowerLimit);
-    static constexpr ValueType           MinRange      = LowerLimit;
-    static constexpr ValueType           MaxRange      = UpperLimit;
-    static constexpr decltype(Validator) ValidatorFunc = Validator;
-
-    static constexpr bool
-    validate(const ValueType &value) noexcept {
-        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
-            if constexpr (Validator != nullptr) {
-                try {
-                    return Validator(value);
-                } catch (...) {
-                    return false;
-                }
-            } else {
-                return true; // if no validator and limits are same, return true by default
-            }
-        }
-        if constexpr (Validator != nullptr) {
-            try {
-                return value >= LowerLimit && value <= UpperLimit && Validator(value);
-            } catch (...) {
-                return false;
-            }
-        } else {
-            return value >= LowerLimit && value <= UpperLimit;
-        }
-        return true;
-    }
-};
-
-template<typename T>
-struct is_limits : std::false_type {};
-
-template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
-struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
-
-template<typename T>
-concept Limit = is_limits<T>::value;
-
-using EmptyLimit = Limits<0, 0>; // nomen-est-omen
-
-static_assert(Limit<EmptyLimit>);
-
-/**
- * @brief Annotated is a template class that acts as a transparent wrapper around another type.
- * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
- * The meta-information is supplied as template parameters.
- */
-template<typename T, gr::meta::fixed_string description_ = "", typename... Arguments>
-struct Annotated {
-    using value_type = T;
-    using LimitType  = typename gr::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
-    T value;
-
-    Annotated() = default;
-
-    template<typename U>
-        requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(static_cast<T>(std::forward<U>(input))) {}
-
-    template<typename U>
-        requires std::assignable_from<T &, U>
-    Annotated &
-    operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
-        value = static_cast<T>(std::forward<U>(input));
-        return *this;
-    }
-
-    inline explicit(false) constexpr
-    operator T &() noexcept {
-        return value;
-    }
-
-    inline explicit(false) constexpr
-    operator const T &() const noexcept {
-        return value;
-    }
-
-    constexpr bool
-    operator==(const Annotated &other) const noexcept {
-        return value == other.value;
-    }
-
-    template<typename U>
-    constexpr bool
-    operator==(const U &other) const noexcept {
-        if constexpr (requires { other.value; }) {
-            return value == other.value;
-        } else {
-            return value == other;
-        }
-    }
-
-    template<typename U>
-        requires std::is_same_v<std::remove_cvref_t<U>, T>
-    [[nodiscard]] constexpr bool
-    validate_and_set(U &&value_) {
-        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
-            value = std::forward<U>(value_);
-            return true;
-        } else {
-            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
-                value = std::forward<U>(value_);
-                return true;
-            } else {
-                return false;
-            }
-        }
-    }
-
-    operator std::string_view() const noexcept
-        requires std::is_same_v<T, std::string>
-    {
-        return std::string_view(value); // Convert from std::string to std::string_view
-    }
-
-    // meta-information
-    inline static constexpr std::string_view
-    description() noexcept {
-        return std::string_view{ description_ };
-    }
-
-    inline static constexpr std::string_view
-    documentation() noexcept {
-        using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
-        return std::string_view{ Documentation::value };
-    }
-
-    inline static constexpr std::string_view
-    unit() noexcept {
-        using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
-        return std::string_view{ PhysicalUnit::value };
-    }
-
-    inline static constexpr bool
-    visible() noexcept {
-        return gr::meta::typelist<Arguments...>::template contains<Visible>;
-    }
-};
-
-template<typename T>
-struct is_annotated : std::false_type {};
-
-template<typename T, gr::meta::fixed_string str, typename... Args>
-struct is_annotated<gr::Annotated<T, str, Args...>> : std::true_type {};
-
-template<typename T>
-concept AnnotatedType = is_annotated<T>::value;
-
-template<typename T>
-struct unwrap_if_wrapped {
-    using type = T;
-};
-
-template<typename U, gr::meta::fixed_string str, typename... Args>
-struct unwrap_if_wrapped<gr::Annotated<U, str, Args...>> {
-    using type = U;
-};
-
-/**
- * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
- * If the given type is not an `Annotated`, it returns the type itself.
- */
-template<typename T>
-using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
-
-} // namespace gr
-
-template<typename... Ts>
-struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
-
-template<typename T, gr::meta::fixed_string description, typename... Arguments>
-struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
-    using Type = std::remove_const_t<T>;
-    fmt::formatter<Type> value_formatter;
-
-    template<typename FormatContext>
-    constexpr auto
-    parse(FormatContext &ctx) {
-        return value_formatter.parse(ctx);
-    }
-
-    template<typename FormatContext>
-    constexpr auto
-    format(const gr::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
-        // TODO: add switch for printing only brief and/or meta-information
-        return value_formatter.format(annotated.value, ctx);
-    }
-};
-
-namespace gr {
-template<typename T, gr::meta::fixed_string description, typename... Arguments>
-inline std::ostream &
-operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &v) {
-    // TODO: add switch for printing only brief and/or meta-information
-    return os << fmt::format("{}", v.value);
-}
-} // namespace gr
-
-#endif // GNURADIO_ANNOTATED_HPP
 
 // #include "CircularBuffer.hpp"
 #ifndef GNURADIO_CIRCULARBUFFER_HPP
@@ -14772,6 +14303,432 @@ operator<<(std::ostream &os, const gr::Message &msg) {
 
 // #include "Tag.hpp"
 
+// #include "annotated.hpp"
+#ifndef GNURADIO_ANNOTATED_HPP
+#define GNURADIO_ANNOTATED_HPP
+
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+#include <fmt/format.h>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+namespace gr {
+
+/**
+ * @brief a template wrapping structure, which holds a static documentation (e.g. mark down) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<gr::meta::fixed_string doc_string>
+struct Doc {
+    static constexpr gr::meta::fixed_string value = doc_string;
+};
+
+using EmptyDoc = Doc<"">; // nomen-est-omen
+
+template<typename T>
+struct is_doc : std::false_type {};
+
+template<gr::meta::fixed_string N>
+struct is_doc<Doc<N>> : std::true_type {};
+
+template<typename T>
+concept Documentation = is_doc<T>::value;
+
+/**
+ * @brief Unit is a template structure, which holds a static physical-unit (i.e. SI unit) string as its value.
+ * It's used as a trait class to annotate other template classes (e.g. blocks or fields).
+ */
+template<gr::meta::fixed_string doc_string>
+struct Unit {
+    static constexpr gr::meta::fixed_string value = doc_string;
+};
+
+using EmptyUnit = Unit<"">; // nomen-est-omen
+
+template<typename T>
+struct is_unit : std::false_type {};
+
+template<gr::meta::fixed_string N>
+struct is_unit<Unit<N>> : std::true_type {};
+
+template<typename T>
+concept UnitType = is_unit<T>::value;
+
+static_assert(Documentation<EmptyDoc>);
+static_assert(UnitType<EmptyUnit>);
+static_assert(!UnitType<EmptyDoc>);
+static_assert(!Documentation<EmptyUnit>);
+
+/**
+ * @brief Annotates field etc. that the entity is visible from a UI perspective.
+ */
+struct Visible {};
+
+/**
+ * @brief Annotates block, indicating to calling schedulers that it may block due IO.
+ */
+template<bool UseIoThread = true>
+struct BlockingIO {
+    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
+};
+
+/**
+ * @brief Annotates block, indicating to perform resampling based on the provided ratio.
+ *
+ * The ratio between numerator and denominator defines the number of samples to be interpolated or decimated.
+ * - If the ratio is greater than 1, interpolation occurs.
+ * - If the ratio is less than 1, decimation occurs.
+ * - If the ratio is 1, no effect on the sampling rate.
+ *
+ * @tparam numerator Top number in the input-to-output sample ratio.
+ * @tparam denominator Bottom number in the input-to-output sample ratio.
+ * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
+ */
+template<gr::Size_t numerator = 1U, gr::Size_t denominator = 1U, bool isConst = false>
+struct ResamplingRatio {
+    static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
+    static constexpr gr::Size_t kNumerator   = numerator;
+    static constexpr gr::Size_t kDenominator = denominator;
+    static constexpr bool       kIsConst     = isConst;
+    static constexpr bool       kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
+};
+
+template<typename T>
+concept IsResamplingRatio = requires {
+    T::kNumerator;
+    T::kDenominator;
+    T::kIsConst;
+    T::kEnabled;
+} && std::is_base_of_v<ResamplingRatio<T::kNumerator, T::kDenominator, T::kIsConst>, T>;
+
+template<typename T>
+using is_resampling_ratio = std::bool_constant<IsResamplingRatio<T>>;
+
+static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
+static_assert(!is_resampling_ratio<int>::value);
+
+/**
+ * @brief Annotates block, indicating the stride control for data processing.
+ *
+ * Stride determines the number of samples between consecutive data processing events:
+ * - If stride is less than N, it indicates overlap.
+ * - If stride is greater than N, it indicates skipped samples.
+ * - If stride is equal to 0, it indicates back-to-back processing without skipping.
+ *
+ * @tparam stride The number of samples between data processing events.
+ * @tparam isConst Specifies if the stride is constant or can be modified during run-time.
+ */
+template<std::uint64_t stride = 0U, bool isConst = false>
+struct Stride {
+    static_assert(stride >= 0U, "Stride must be >= 0");
+
+    static constexpr gr::Size_t kStride  = stride;
+    static constexpr bool       kIsConst = isConst;
+    static constexpr bool       kEnabled = !isConst || (stride > 0U);
+};
+
+template<typename T>
+concept IsStride = requires {
+    T::kStride;
+    T::kIsConst;
+    T::kEnabled;
+} && std::is_base_of_v<Stride<T::kStride, T::kIsConst>, T>;
+
+template<typename T>
+using is_stride = std::bool_constant<IsStride<T>>;
+
+static_assert(is_stride<Stride<10, true>>::value);
+static_assert(!is_stride<int>::value);
+
+enum class IncompleteFinalUpdateEnum { DROP, PULL_FORWARD, PUSH_BACKWARD };
+
+template<IncompleteFinalUpdateEnum updatePolicy>
+struct IncompleteFinalUpdatePolicy {
+    static constexpr IncompleteFinalUpdateEnum kIncompleteFinalUpdatePolicy = updatePolicy;
+};
+
+template<typename T>
+concept IsIncompleteFinalUpdatePolicy = requires { T::kIncompleteFinalUpdatePolicy; } && std::is_base_of_v<IncompleteFinalUpdatePolicy<T::kIncompleteFinalUpdatePolicy>, T>;
+
+template<typename T>
+using is_incompleteFinalUpdatePolicy = std::bool_constant<IsIncompleteFinalUpdatePolicy<T>>;
+
+static_assert(is_incompleteFinalUpdatePolicy<IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>::value);
+
+enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
+
+/**
+ * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
+ *
+ * @tparam category_ ui category where it
+ * @tparam toolkit_ specifies the applicable UI toolkit (e.g. 'console', 'ImGui', 'Qt', etc.)
+ */
+template<UICategory category_, gr::meta::fixed_string toolkit_ = "">
+struct Drawable {
+    static constexpr UICategory             kCategory = category_;
+    static constexpr gr::meta::fixed_string kToolkit  = toolkit_;
+};
+
+template<typename T>
+concept IsDrawable = requires {
+    T::kCategory;
+    T::kToolkit;
+} && std::is_base_of_v<Drawable<T::kCategory, T::kToolkit>, T>;
+
+template<typename T>
+using is_drawable = std::bool_constant<IsDrawable<T>>;
+
+using NotDrawable = Drawable<UICategory::None, "">; // nomen-est-omen
+static_assert(is_drawable<NotDrawable>::value);
+static_assert(is_drawable<Drawable<UICategory::ChartPane, "console">>::value);
+static_assert(!is_drawable<int>::value);
+
+/**
+ * @brief Annotates templated block, indicating which port data types are supported.
+ */
+template<typename... Ts>
+struct SupportedTypes {};
+
+template<typename T>
+struct is_supported_types : std::false_type {};
+
+template<typename... Ts>
+struct is_supported_types<SupportedTypes<Ts...>> : std::true_type {};
+
+using DefaultSupportedTypes = SupportedTypes<>;
+
+static_assert(gr::meta::is_instantiation_of<DefaultSupportedTypes, SupportedTypes>);
+static_assert(gr::meta::is_instantiation_of<SupportedTypes<float, double>, SupportedTypes>);
+
+/**
+ * @brief Represents limits and optional validation for an Annotated<..> type.
+ *
+ * The `Limits` structure defines lower and upper bounds for a value of type `T`.
+ * Additionally, it allows for an optional custom validation function to be provided.
+ * This function should take a value of type `T` and return a `bool`, indicating
+ * whether the value passes the custom validation or not.
+ *
+ * Example:
+ * ```
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f>>             exampleVar1;
+ * // or:
+ * constexpr auto isPowerOfTwo = [](const int &val) { return val > 0 && (val & (val - 1)) == 0; };
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, isPowerOfTwo>> exampleVar2;
+ * // or:
+ * Annotated<float, "example float", Visible, Limits<0.f, 1024.f, [](const int &val) { return val > 0 && (val & (val - 1)) == 0; }>> exampleVar2;
+ * ```
+ */
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
+    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
+        { f(v) } -> std::same_as<bool>;
+    } || Validator == nullptr)
+struct Limits {
+    using ValueType                                    = decltype(LowerLimit);
+    static constexpr ValueType           MinRange      = LowerLimit;
+    static constexpr ValueType           MaxRange      = UpperLimit;
+    static constexpr decltype(Validator) ValidatorFunc = Validator;
+
+    static constexpr bool
+    validate(const ValueType &value) noexcept {
+        if constexpr (LowerLimit == UpperLimit) { // ignore range checks
+            if constexpr (Validator != nullptr) {
+                try {
+                    return Validator(value);
+                } catch (...) {
+                    return false;
+                }
+            } else {
+                return true; // if no validator and limits are same, return true by default
+            }
+        }
+        if constexpr (Validator != nullptr) {
+            try {
+                return value >= LowerLimit && value <= UpperLimit && Validator(value);
+            } catch (...) {
+                return false;
+            }
+        } else {
+            return value >= LowerLimit && value <= UpperLimit;
+        }
+        return true;
+    }
+};
+
+template<typename T>
+struct is_limits : std::false_type {};
+
+template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator>
+struct is_limits<Limits<LowerLimit, UpperLimit, Validator>> : std::true_type {};
+
+template<typename T>
+concept Limit = is_limits<T>::value;
+
+using EmptyLimit = Limits<0, 0>; // nomen-est-omen
+
+static_assert(Limit<EmptyLimit>);
+
+/**
+ * @brief Annotated is a template class that acts as a transparent wrapper around another type.
+ * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
+ * The meta-information is supplied as template parameters.
+ */
+template<typename T, gr::meta::fixed_string description_ = "", typename... Arguments>
+struct Annotated {
+    using value_type = T;
+    using LimitType  = typename gr::meta::typelist<Arguments...>::template find_or_default<is_limits, EmptyLimit>;
+    T value;
+
+    Annotated() = default;
+
+    template<typename U>
+        requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
+    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(static_cast<T>(std::forward<U>(input))) {}
+
+    template<typename U>
+        requires std::assignable_from<T &, U>
+    Annotated &
+    operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
+        value = static_cast<T>(std::forward<U>(input));
+        return *this;
+    }
+
+    inline explicit(false) constexpr
+    operator T &() noexcept {
+        return value;
+    }
+
+    inline explicit(false) constexpr
+    operator const T &() const noexcept {
+        return value;
+    }
+
+    constexpr bool
+    operator==(const Annotated &other) const noexcept {
+        return value == other.value;
+    }
+
+    template<typename U>
+    constexpr bool
+    operator==(const U &other) const noexcept {
+        if constexpr (requires { other.value; }) {
+            return value == other.value;
+        } else {
+            return value == other;
+        }
+    }
+
+    template<typename U>
+        requires std::is_same_v<std::remove_cvref_t<U>, T>
+    [[nodiscard]] constexpr bool
+    validate_and_set(U &&value_) {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value = std::forward<U>(value_);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
+                value = std::forward<U>(value_);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    operator std::string_view() const noexcept
+        requires std::is_same_v<T, std::string>
+    {
+        return std::string_view(value); // Convert from std::string to std::string_view
+    }
+
+    // meta-information
+    inline static constexpr std::string_view
+    description() noexcept {
+        return std::string_view{ description_ };
+    }
+
+    inline static constexpr std::string_view
+    documentation() noexcept {
+        using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
+        return std::string_view{ Documentation::value };
+    }
+
+    inline static constexpr std::string_view
+    unit() noexcept {
+        using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
+        return std::string_view{ PhysicalUnit::value };
+    }
+
+    inline static constexpr bool
+    visible() noexcept {
+        return gr::meta::typelist<Arguments...>::template contains<Visible>;
+    }
+};
+
+template<typename T>
+struct is_annotated : std::false_type {};
+
+template<typename T, gr::meta::fixed_string str, typename... Args>
+struct is_annotated<gr::Annotated<T, str, Args...>> : std::true_type {};
+
+template<typename T>
+concept AnnotatedType = is_annotated<T>::value;
+
+template<typename T>
+struct unwrap_if_wrapped {
+    using type = T;
+};
+
+template<typename U, gr::meta::fixed_string str, typename... Args>
+struct unwrap_if_wrapped<gr::Annotated<U, str, Args...>> {
+    using type = U;
+};
+
+/**
+ * @brief A type trait class that extracts the underlying type `T` from an `Annotated` instance.
+ * If the given type is not an `Annotated`, it returns the type itself.
+ */
+template<typename T>
+using unwrap_if_wrapped_t = typename unwrap_if_wrapped<T>::type;
+
+} // namespace gr
+
+template<typename... Ts>
+struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
+
+template<typename T, gr::meta::fixed_string description, typename... Arguments>
+struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
+    using Type = std::remove_const_t<T>;
+    fmt::formatter<Type> value_formatter;
+
+    template<typename FormatContext>
+    constexpr auto
+    parse(FormatContext &ctx) {
+        return value_formatter.parse(ctx);
+    }
+
+    template<typename FormatContext>
+    constexpr auto
+    format(const gr::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+        // TODO: add switch for printing only brief and/or meta-information
+        return value_formatter.format(annotated.value, ctx);
+    }
+};
+
+namespace gr {
+template<typename T, gr::meta::fixed_string description, typename... Arguments>
+inline std::ostream &
+operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &v) {
+    // TODO: add switch for printing only brief and/or meta-information
+    return os << fmt::format("{}", v.value);
+}
+} // namespace gr
+
+#endif // GNURADIO_ANNOTATED_HPP
+
 
 namespace gr {
 
@@ -14812,7 +14769,7 @@ static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
 
 template<class T>
-concept PortLike = requires(T t, const std::size_t n_items, const std::any &newDefault) { // dynamic definitions
+concept PortLike = requires(T t, const std::size_t n_items, const std::any& newDefault) { // dynamic definitions
     typename T::value_type;
     { t.defaultValue() } -> std::same_as<std::any>;
     { t.setDefaultValue(newDefault) } -> std::same_as<bool>;
@@ -14836,8 +14793,8 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any &newD
  * N.B. void* needed for type-erasure/Python compatibility/wrapping
  */
 struct InternalPortBuffers {
-    void *streamHandler;
-    void *tagHandler;
+    void* streamHandler;
+    void* tagHandler;
 };
 
 /**
@@ -14942,36 +14899,27 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     Annotated<float, "signal max,", Doc<"maximum expected signal value">>                                            signal_max = std::numeric_limits<float>::max();
 
     // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{ "sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max" };
+    std::set<std::string, std::less<>> auto_update{"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"};
 
     PortMetaInfo() noexcept(true) : PortMetaInfo({}) {}
 
-    explicit
-    PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true)
-        : PortMetaInfo(property_map{ initMetaInfo.begin(), initMetaInfo.end() }) {}
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
 
-    explicit
-    PortMetaInfo(const property_map &metaInfo) noexcept(true) {
-        update<true>(metaInfo);
-    }
+    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
 
-    void
-    reset() {
-        auto_update = { "sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max" };
-    }
+    void reset() { auto_update = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"}; }
 
     template<bool isNoexcept = false>
-    void
-    update(const property_map &metaInfo) noexcept(isNoexcept) {
+    void update(const property_map& metaInfo) noexcept(isNoexcept) {
         if (metaInfo.empty()) {
             return;
         }
 
-        auto updateValue = [&metaInfo](const std::string &key, auto &member) {
+        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
             if (!metaInfo.contains(key)) {
                 return;
             }
-            const auto &value = metaInfo.at(key);
+            const auto& value = metaInfo.at(key);
             using T           = std::decay_t<decltype(member.value)>;
             if (std::holds_alternative<T>(value)) {
                 member = std::get<T>(value);
@@ -14980,7 +14928,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
             }
         };
 
-        for (const auto &key : auto_update) {
+        for (const auto& key : auto_update) {
             if (key == "sample_rate") {
                 updateValue(key, sample_rate);
             } else if (key == "signal_name") {
@@ -14997,8 +14945,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
         }
     }
 
-    [[nodiscard]] property_map
-    get() const noexcept {
+    [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
         metaInfo["sample_rate"]     = sample_rate;
         metaInfo["signal_name"]     = signal_name;
@@ -15107,8 +15054,7 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{};
 
-    [[nodiscard]] constexpr auto
-    newIoHandler(std::size_t buffer_size = 65536) const noexcept {
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (kIsInput) {
             return BufferType(buffer_size).new_reader();
         } else {
@@ -15116,8 +15062,7 @@ private:
         }
     }
 
-    [[nodiscard]] constexpr auto
-    newTagIoHandler(std::size_t buffer_size = 65536) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (kIsInput) {
             return TagBufferType(buffer_size).new_reader();
         } else {
@@ -15126,52 +15071,32 @@ private:
     }
 
 public:
-    constexpr
-    Port() noexcept
-            = default;
+    constexpr Port() noexcept = default;
 
-    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept
-        : name(std::move(port_name)), priority{ priority_ }, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{ newIoHandler() }, _tagIoHandler{ newTagIoHandler() } {
-        static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter");
-    }
+    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : name(std::move(port_name)), priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} { static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter"); }
 
-    constexpr
-    Port(Port &&other) noexcept
-        : name(std::move(other.name))
-        , priority{ other.priority }
-        , min_samples(other.min_samples)
-        , max_samples(other.max_samples)
-        , _ioHandler(std::move(other._ioHandler))
-        , _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port&& other) noexcept : name(std::move(other.name)), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
 
-    Port(const Port &) = delete;
-    auto
-    operator=(const Port &)
-            = delete;
-    constexpr Port &
-    operator=(Port &&other)
-            = delete;
+    Port(const Port&)                       = delete;
+    auto            operator=(const Port&)  = delete;
+    constexpr Port& operator=(Port&& other) = delete;
 
-    ~
-    Port() = default;
+    ~Port() = default;
 
-    [[nodiscard]] constexpr bool
-    initBuffer(std::size_t nSamples = 0) noexcept {
+    [[nodiscard]] constexpr bool initBuffer(std::size_t nSamples = 0) noexcept {
         if constexpr (kIsOutput) {
             // write one default value into output -- needed for cyclic graph initialisation
-            return _ioHandler.try_publish([val = default_value](std::span<T> &out) { std::ranges::fill(out, val); }, nSamples);
+            return _ioHandler.try_publish([val = default_value](std::span<T>& out) { std::ranges::fill(out, val); }, nSamples);
         }
         return true;
     }
 
-    [[nodiscard]] InternalPortBuffers
-    writerHandlerInternal() noexcept {
+    [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept {
         static_assert(kIsOutput, "only to be used with output ports");
-        return { static_cast<void *>(std::addressof(_ioHandler)), static_cast<void *>(std::addressof(_tagIoHandler)) };
+        return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
     }
 
-    [[nodiscard]] bool
-    updateReaderInternal(InternalPortBuffers buffer_writer_handler_other) noexcept {
+    [[nodiscard]] bool updateReaderInternal(InternalPortBuffers buffer_writer_handler_other) noexcept {
         static_assert(kIsInput, "only to be used with input ports");
 
         if (buffer_writer_handler_other.streamHandler == nullptr) {
@@ -15185,14 +15110,13 @@ public:
         //       this will fail. We need to add a check that two ports that
         //       connect to each other use the same buffer type
         //       (std::any could be a viable approach)
-        auto typed_buffer_writer     = static_cast<WriterType *>(buffer_writer_handler_other.streamHandler);
-        auto typed_tag_buffer_writer = static_cast<TagWriterType *>(buffer_writer_handler_other.tagHandler);
+        auto typed_buffer_writer     = static_cast<WriterType*>(buffer_writer_handler_other.streamHandler);
+        auto typed_tag_buffer_writer = static_cast<TagWriterType*>(buffer_writer_handler_other.tagHandler);
         setBuffer(typed_buffer_writer->buffer(), typed_tag_buffer_writer->buffer());
         return true;
     }
 
-    [[nodiscard]] constexpr bool
-    isConnected() const noexcept {
+    [[nodiscard]] constexpr bool isConnected() const noexcept {
         if constexpr (kIsInput) {
             return _ioHandler.buffer().n_writers() > 0;
         } else {
@@ -15200,45 +15124,25 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr static PortType
-    type() noexcept {
-        return portType;
-    }
+    [[nodiscard]] constexpr static PortType type() noexcept { return portType; }
 
-    [[nodiscard]] constexpr static PortDirection
-    direction() noexcept {
-        return portDirection;
-    }
+    [[nodiscard]] constexpr static PortDirection direction() noexcept { return portDirection; }
 
-    [[nodiscard]] constexpr static std::string_view
-    domain() noexcept {
-        return std::string_view(Domain::Name);
-    }
+    [[nodiscard]] constexpr static std::string_view domain() noexcept { return std::string_view(Domain::Name); }
 
-    [[nodiscard]] constexpr static bool
-    isSynchronous() noexcept {
-        return kIsSynch;
-    }
+    [[nodiscard]] constexpr static bool isSynchronous() noexcept { return kIsSynch; }
 
-    [[nodiscard]] constexpr static bool
-    isOptional() noexcept {
-        return kIsOptional;
-    }
+    [[nodiscard]] constexpr static bool isOptional() noexcept { return kIsOptional; }
 
-    [[nodiscard]] constexpr static decltype(portName)
-    static_name() noexcept
-        requires(!portName.empty())
+    [[nodiscard]] constexpr static decltype(portName) static_name() noexcept
+    requires(!portName.empty())
     {
         return portName;
     }
 
-    [[nodiscard]] std::any
-    defaultValue() const noexcept {
-        return default_value;
-    }
+    [[nodiscard]] std::any defaultValue() const noexcept { return default_value; }
 
-    [[nodiscard]] bool
-    setDefaultValue(const std::any &newDefault) {
+    [[nodiscard]] bool setDefaultValue(const std::any& newDefault) {
         if (newDefault.type() == typeid(T)) {
             default_value = std::any_cast<T>(newDefault);
             return true;
@@ -15246,13 +15150,9 @@ public:
         return false;
     }
 
-    [[nodiscard]] constexpr static std::size_t
-    available() noexcept {
-        return 0;
-    } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
+    [[nodiscard]] constexpr static std::size_t available() noexcept { return 0; } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
 
-    [[nodiscard]] constexpr std::size_t
-    min_buffer_size() const noexcept {
+    [[nodiscard]] constexpr std::size_t min_buffer_size() const noexcept {
         if constexpr (Required::kIsConst) {
             return Required::kMinSamples;
         } else {
@@ -15260,8 +15160,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr std::size_t
-    max_buffer_size() const noexcept {
+    [[nodiscard]] constexpr std::size_t max_buffer_size() const noexcept {
         if constexpr (Required::kIsConst) {
             return Required::kMaxSamples;
         } else {
@@ -15269,8 +15168,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr ConnectionResult
-    resizeBuffer(std::size_t min_size) noexcept {
+    [[nodiscard]] constexpr ConnectionResult resizeBuffer(std::size_t min_size) noexcept {
         using enum gr::ConnectionResult;
         if constexpr (kIsInput) {
             return SUCCESS;
@@ -15285,18 +15183,16 @@ public:
         return SUCCESS;
     }
 
-    [[nodiscard]] auto
-    buffer() {
+    [[nodiscard]] auto buffer() {
         struct port_buffers {
             BufferType    streamBuffer;
             TagBufferType tagBuffer;
         };
 
-        return port_buffers{ _ioHandler.buffer(), _tagIoHandler.buffer() };
+        return port_buffers{_ioHandler.buffer(), _tagIoHandler.buffer()};
     }
 
-    void
-    setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
+    void setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
         if constexpr (kIsInput) {
             _ioHandler    = streamBuffer.new_reader();
             _tagIoHandler = tagBuffer.new_reader();
@@ -15306,56 +15202,47 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr const ReaderType &
-    streamReader() const noexcept {
+    [[nodiscard]] constexpr const ReaderType& streamReader() const noexcept {
         static_assert(!kIsOutput, "streamReader() not applicable for outputs (yet)");
         return _ioHandler;
     }
 
-    [[nodiscard]] constexpr ReaderType &
-    streamReader() noexcept {
+    [[nodiscard]] constexpr ReaderType& streamReader() noexcept {
         static_assert(!kIsOutput, "streamReader() not applicable for outputs (yet)");
         return _ioHandler;
     }
 
-    [[nodiscard]] constexpr const WriterType &
-    streamWriter() const noexcept {
+    [[nodiscard]] constexpr const WriterType& streamWriter() const noexcept {
         static_assert(!kIsInput, "streamWriter() not applicable for inputs (yet)");
         return _ioHandler;
     }
 
-    [[nodiscard]] constexpr WriterType &
-    streamWriter() noexcept {
+    [[nodiscard]] constexpr WriterType& streamWriter() noexcept {
         static_assert(!kIsInput, "streamWriter() not applicable for inputs (yet)");
         return _ioHandler;
     }
 
-    [[nodiscard]] constexpr const TagReaderType &
-    tagReader() const noexcept {
+    [[nodiscard]] constexpr const TagReaderType& tagReader() const noexcept {
         static_assert(!kIsOutput, "tagReader() not applicable for outputs (yet)");
         return _tagIoHandler;
     }
 
-    [[nodiscard]] constexpr TagReaderType &
-    tagReader() noexcept {
+    [[nodiscard]] constexpr TagReaderType& tagReader() noexcept {
         static_assert(!kIsOutput, "tagReader() not applicable for outputs (yet)");
         return _tagIoHandler;
     }
 
-    [[nodiscard]] constexpr const TagWriterType &
-    tagWriter() const noexcept {
+    [[nodiscard]] constexpr const TagWriterType& tagWriter() const noexcept {
         static_assert(!kIsInput, "tagWriter() not applicable for inputs (yet)");
         return _tagIoHandler;
     }
 
-    [[nodiscard]] constexpr TagWriterType &
-    tagWriter() noexcept {
+    [[nodiscard]] constexpr TagWriterType& tagWriter() noexcept {
         static_assert(!kIsInput, "tagWriter() not applicable for inputs (yet)");
         return _tagIoHandler;
     }
 
-    [[nodiscard]] ConnectionResult
-    disconnect() noexcept {
+    [[nodiscard]] ConnectionResult disconnect() noexcept {
         if (isConnected() == false) {
             return ConnectionResult::FAILED;
         }
@@ -15365,9 +15252,9 @@ public:
     }
 
     template<typename Other>
-    [[nodiscard]] ConnectionResult
-    connect(Other &&other) {
+    [[nodiscard]] ConnectionResult connect(Other&& other) {
         static_assert(kIsOutput && std::remove_cvref_t<Other>::kIsInput);
+        static_assert(std::is_same_v<value_type, typename std::remove_cvref_t<Other>::value_type>);
         auto src_buffer = writerHandlerInternal();
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
     }
@@ -15375,16 +15262,15 @@ public:
     /**
      * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
      */
-    inline constexpr ConsumableSpan auto
-    getTags(Tag::signed_index_type untilOffset = 0) noexcept
-        requires(kIsInput)
+    inline constexpr ConsumableSpan auto getTags(Tag::signed_index_type untilOffset = 0) noexcept
+    requires(kIsInput)
     {
         const auto  readPos           = streamReader().position();
         const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
         std::size_t nTagsProcessed    = 0UZ;
         bool        properTagDistance = false;
 
-        for (const Tag &tag : tags) {
+        for (const Tag& tag : tags) {
             const auto relativeTagPosition = (tag.index - readPos); // w.r.t. present stream reader position
             const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition <= untilOffset;
             if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
@@ -15399,9 +15285,8 @@ public:
         return tagReader().get(nTagsProcessed);
     }
 
-    inline const Tag
-    getTag(Tag::signed_index_type untilOffset = 0)
-        requires(kIsInput)
+    inline const Tag getTag(Tag::signed_index_type untilOffset = 0)
+    requires(kIsInput)
     {
         const auto readPos = streamReader().position();
         if (_cachedTag.index == readPos && readPos >= 0) {
@@ -15409,38 +15294,35 @@ public:
         }
         _cachedTag.reset();
 
-        auto mergeSrcMapInto = [](const property_map &sourceMap, property_map &destinationMap) {
+        auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
             assert(&sourceMap != &destinationMap);
-            for (const auto &[key, value] : sourceMap) {
+            for (const auto& [key, value] : sourceMap) {
                 destinationMap.insert_or_assign(key, value);
             }
         };
 
         const auto tags  = getTags(untilOffset);
         _cachedTag.index = readPos;
-        std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag &tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
+        std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag& tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
         std::ignore = tags.consume(tags.size());
 
         return _cachedTag;
     }
 
-    inline constexpr void
-    publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept
-        requires(kIsOutput)
+    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+    requires(kIsOutput)
     {
         processPublishTag(std::move(tag_data), tagOffset);
     }
 
-    inline constexpr void
-    publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept
-        requires(kIsOutput)
+    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+    requires(kIsOutput)
     {
         processPublishTag(tag_data, tagOffset);
     }
 
-    [[maybe_unused]] inline constexpr bool
-    publishPendingTags() noexcept
-        requires(kIsOutput)
+    [[maybe_unused]] inline constexpr bool publishPendingTags() noexcept
+    requires(kIsOutput)
     {
         if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
             return false;
@@ -15456,20 +15338,19 @@ public:
 
 private:
     template<PropertyMapType PropertyMap>
-    inline constexpr void
-    processPublishTag(PropertyMap &&tag_data, Tag::signed_index_type tagOffset) noexcept {
+    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::signed_index_type tagOffset) noexcept {
         const auto newTagIndex = tagOffset < 0 ? tagOffset : streamWriter().position() + tagOffset;
 
         if (tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
             publishPendingTags();
         }
         _cachedTag.index = newTagIndex;
-        if constexpr (std::is_rvalue_reference_v<PropertyMap &&>) { // -> move semantics
-            for (auto &[key, value] : tag_data) {
+        if constexpr (std::is_rvalue_reference_v<PropertyMap&&>) { // -> move semantics
+            for (auto& [key, value] : tag_data) {
                 _cachedTag.map.insert_or_assign(std::move(key), std::move(value));
             }
         } else { // -> copy semantics
-            for (const auto &[key, value] : tag_data) {
+            for (const auto& [key, value] : tag_data) {
                 _cachedTag.map.insert_or_assign(key, value);
             }
         }
@@ -15487,8 +15368,7 @@ template<typename T, auto>
 using just_t = T;
 
 template<typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Attributes, std::size_t... Is>
-consteval gr::meta::typelist<just_t<Port<T, baseName + meta::make_fixed_string<Is>(), portType, portDirection, Attributes...>, Is>...>
-repeated_ports_impl(std::index_sequence<Is...>) {
+consteval gr::meta::typelist<just_t<Port<T, baseName + meta::make_fixed_string<Is>(), portType, portDirection, Attributes...>, Is>...> repeated_ports_impl(std::index_sequence<Is...>) {
     return {};
 }
 } // namespace detail
@@ -15553,64 +15433,39 @@ static_assert(MsgPortIn::kPortType == PortType::MESSAGE);
  */
 class DynamicPort {
 public:
-    const std::string &name;
-    std::int16_t      &priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t       &min_samples;
-    std::size_t       &max_samples;
+    const std::string& name;
+    std::int16_t&      priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t&       min_samples;
+    std::size_t&       max_samples;
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
-        virtual ~
-        model() = default;
+        virtual ~model() = default;
 
-        [[nodiscard]] virtual std::any
-        defaultValue() const noexcept
-                = 0;
+        [[nodiscard]] virtual std::any defaultValue() const noexcept = 0;
 
-        [[nodiscard]] virtual bool
-        setDefaultValue(const std::any &val) noexcept
-                = 0;
+        [[nodiscard]] virtual bool setDefaultValue(const std::any& val) noexcept = 0;
 
-        [[nodiscard]] virtual PortType
-        type() const noexcept
-                = 0;
+        [[nodiscard]] virtual PortType type() const noexcept = 0;
 
-        [[nodiscard]] virtual PortDirection
-        direction() const noexcept
-                = 0;
+        [[nodiscard]] virtual PortDirection direction() const noexcept = 0;
 
-        [[nodiscard]] virtual std::string_view
-        domain() const noexcept
-                = 0;
+        [[nodiscard]] virtual std::string_view domain() const noexcept = 0;
 
-        [[nodiscard]] virtual bool
-        isSynchronous() noexcept
-                = 0;
+        [[nodiscard]] virtual bool isSynchronous() noexcept = 0;
 
-        [[nodiscard]] virtual bool
-        isOptional() noexcept
-                = 0;
+        [[nodiscard]] virtual bool isOptional() noexcept = 0;
 
-        [[nodiscard]] virtual ConnectionResult
-        resizeBuffer(std::size_t min_size) noexcept
-                = 0;
+        [[nodiscard]] virtual ConnectionResult resizeBuffer(std::size_t min_size) noexcept = 0;
 
-        [[nodiscard]] virtual bool
-        isConnected() const noexcept
-                = 0;
+        [[nodiscard]] virtual bool isConnected() const noexcept = 0;
 
-        [[nodiscard]] virtual ConnectionResult
-        disconnect() noexcept
-                = 0;
+        [[nodiscard]] virtual ConnectionResult disconnect() noexcept = 0;
 
-        [[nodiscard]] virtual ConnectionResult
-        connect(DynamicPort &dst_port)
-                = 0;
+        [[nodiscard]] virtual ConnectionResult connect(DynamicPort& dst_port) = 0;
 
         // internal runtime polymorphism access
-        [[nodiscard]] virtual bool
-        updateReaderInternal(InternalPortBuffers buffer_other) noexcept
-                = 0;
+        [[nodiscard]] virtual bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -15618,15 +15473,11 @@ private:
     template<PortLike T, bool owning>
     class wrapper final : public model {
         using TPortType = std::decay_t<T>;
-        std::conditional_t<owning, TPortType, TPortType &> _value;
+        std::conditional_t<owning, TPortType, TPortType&> _value;
 
-        [[nodiscard]] InternalPortBuffers
-        writerHandlerInternal() noexcept {
-            return _value.writerHandlerInternal();
-        };
+        [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept { return _value.writerHandlerInternal(); };
 
-        [[nodiscard]] bool
-        updateReaderInternal(InternalPortBuffers buffer_other) noexcept override {
+        [[nodiscard]] bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept override {
             if constexpr (T::kIsInput) {
                 return _value.updateReaderInternal(buffer_other);
             } else {
@@ -15638,19 +15489,13 @@ private:
     public:
         wrapper() = delete;
 
-        wrapper(const wrapper &) = delete;
+        wrapper(const wrapper&) = delete;
 
-        auto &
-        operator=(const wrapper &)
-                = delete;
+        auto& operator=(const wrapper&) = delete;
 
-        auto &
-        operator=(wrapper &&)
-                = delete;
+        auto& operator=(wrapper&&) = delete;
 
-        explicit constexpr
-        wrapper(T &arg) noexcept
-            : _value{ arg } {
+        explicit constexpr wrapper(T& arg) noexcept : _value{arg} {
             if constexpr (T::kIsInput) {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
@@ -15658,9 +15503,7 @@ private:
             }
         }
 
-        explicit constexpr
-        wrapper(T &&arg) noexcept
-            : _value{ std::move(arg) } {
+        explicit constexpr wrapper(T&& arg) noexcept : _value{std::move(arg)} {
             if constexpr (T::kIsInput) {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
@@ -15668,62 +15511,29 @@ private:
             }
         }
 
-        ~
-        wrapper() override
-                = default;
+        ~wrapper() override = default;
 
-        [[nodiscard]] std::any
-        defaultValue() const noexcept override {
-            return _value.defaultValue();
-        }
+        [[nodiscard]] std::any defaultValue() const noexcept override { return _value.defaultValue(); }
 
-        [[nodiscard]] bool
-        setDefaultValue(const std::any &val) noexcept override {
-            return _value.setDefaultValue(val);
-        }
+        [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
 
-        [[nodiscard]] constexpr PortType
-        type() const noexcept override {
-            return _value.type();
-        }
+        [[nodiscard]] constexpr PortType type() const noexcept override { return _value.type(); }
 
-        [[nodiscard]] constexpr PortDirection
-        direction() const noexcept override {
-            return _value.direction();
-        }
+        [[nodiscard]] constexpr PortDirection direction() const noexcept override { return _value.direction(); }
 
-        [[nodiscard]] constexpr std::string_view
-        domain() const noexcept override {
-            return _value.domain();
-        }
+        [[nodiscard]] constexpr std::string_view domain() const noexcept override { return _value.domain(); }
 
-        [[nodiscard]] bool
-        isSynchronous() noexcept override {
-            return _value.isSynchronous();
-        }
+        [[nodiscard]] bool isSynchronous() noexcept override { return _value.isSynchronous(); }
 
-        [[nodiscard]] bool
-        isOptional() noexcept override {
-            return _value.isOptional();
-        }
+        [[nodiscard]] bool isOptional() noexcept override { return _value.isOptional(); }
 
-        [[nodiscard]] ConnectionResult
-        resizeBuffer(std::size_t min_size) noexcept override {
-            return _value.resizeBuffer(min_size);
-        }
+        [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
 
-        [[nodiscard]] bool
-        isConnected() const noexcept override {
-            return _value.isConnected();
-        }
+        [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
 
-        [[nodiscard]] ConnectionResult
-        disconnect() noexcept override {
-            return _value.disconnect();
-        }
+        [[nodiscard]] ConnectionResult disconnect() noexcept override { return _value.disconnect(); }
 
-        [[nodiscard]] ConnectionResult
-        connect(DynamicPort &dst_port) override {
+        [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) override {
             using enum gr::ConnectionResult;
             if constexpr (T::kIsOutput) {
                 auto src_buffer = _value.writerHandlerInternal();
@@ -15735,10 +15545,7 @@ private:
         }
     };
 
-    bool
-    updateReaderInternal(InternalPortBuffers buffer_other) noexcept {
-        return _accessor->updateReaderInternal(buffer_other);
-    }
+    bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
 
 public:
     using value_type = void; // a sterile port
@@ -15747,99 +15554,60 @@ public:
 
     struct non_owned_reference_tag {};
 
-    constexpr
-    DynamicPort()
-            = delete;
+    constexpr DynamicPort() = delete;
 
-    DynamicPort(const DynamicPort &arg) = delete;
-    DynamicPort &
-    operator=(const DynamicPort &arg)
-            = delete;
+    DynamicPort(const DynamicPort& arg)            = delete;
+    DynamicPort& operator=(const DynamicPort& arg) = delete;
 
-    DynamicPort(DynamicPort &&arg) = default;
-    DynamicPort &
-    operator=(DynamicPort &&arg)
-            = delete;
+    DynamicPort(DynamicPort&& arg)            = default;
+    DynamicPort& operator=(DynamicPort&& arg) = delete;
 
     // TODO: The lifetime of ports is a problem here, if we keep
     // a reference to the port in DynamicPort, the port object
     // can not be reallocated
     template<PortLike T>
-    explicit constexpr DynamicPort(T &arg, non_owned_reference_tag) noexcept
-        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, false>>(arg) } {}
+    explicit constexpr DynamicPort(T& arg, non_owned_reference_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<wrapper<T, false>>(arg)} {}
 
     template<PortLike T>
-    explicit constexpr DynamicPort(T &&arg, owned_value_tag) noexcept
-        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{ std::make_unique<wrapper<T, true>>(std::forward<T>(arg)) } {}
+    explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<wrapper<T, true>>(std::forward<T>(arg))} {}
 
-    [[nodiscard]] std::any
-    defaultValue() const noexcept {
-        return _accessor->defaultValue();
-    }
+    [[nodiscard]] std::any defaultValue() const noexcept { return _accessor->defaultValue(); }
 
-    [[nodiscard]] bool
-    setDefaultValue(const std::any &val) noexcept {
-        return _accessor->setDefaultValue(val);
-    }
+    [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
 
-    [[nodiscard]] PortType
-    type() const noexcept {
-        return _accessor->type();
-    }
+    [[nodiscard]] PortType type() const noexcept { return _accessor->type(); }
 
-    [[nodiscard]] PortDirection
-    direction() const noexcept {
-        return _accessor->direction();
-    }
+    [[nodiscard]] PortDirection direction() const noexcept { return _accessor->direction(); }
 
-    [[nodiscard]] std::string_view
-    domain() const noexcept {
-        return _accessor->domain();
-    }
+    [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
 
-    [[nodiscard]] bool
-    isSynchronous() noexcept {
-        return _accessor->isSynchronous();
-    }
+    [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 
-    [[nodiscard]] bool
-    isOptional() noexcept {
-        return _accessor->isOptional();
-    }
+    [[nodiscard]] bool isOptional() noexcept { return _accessor->isOptional(); }
 
-    [[nodiscard]] ConnectionResult
-    resizeBuffer(std::size_t min_size) {
+    [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) {
         if (direction() == PortDirection::OUTPUT) {
             return _accessor->resizeBuffer(min_size);
         }
         return ConnectionResult::FAILED;
     }
 
-    [[nodiscard]] bool
-    isConnected() const noexcept {
-        return _accessor->isConnected();
-    }
+    [[nodiscard]] bool isConnected() const noexcept { return _accessor->isConnected(); }
 
-    [[nodiscard]] ConnectionResult
-    disconnect() noexcept {
-        return _accessor->disconnect();
-    }
+    [[nodiscard]] ConnectionResult disconnect() noexcept { return _accessor->disconnect(); }
 
-    [[nodiscard]] ConnectionResult
-    connect(DynamicPort &dst_port) {
-        return _accessor->connect(dst_port);
-    }
+    [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) { return _accessor->connect(dst_port); }
 };
 
 static_assert(PortLike<DynamicPort>);
 
 namespace detail {
 template<typename T>
-concept TagPredicate = requires(const T &t, const Tag &tag, Tag::signed_index_type readPosition) {
+concept TagPredicate = requires(const T& t, const Tag& tag, Tag::signed_index_type readPosition) {
     { t(tag, readPosition) } -> std::convertible_to<bool>;
 };
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition; };
-inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag::signed_index_type readPosition) noexcept {
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, Tag::signed_index_type readPosition) noexcept {
     auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
     if (eosTagIter != tag.map.end() && eosTagIter->second == true) {
         if (tag.index >= readPosition || tag.index < 0) {
@@ -15850,8 +15618,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag &tag, Tag
 };
 } // namespace detail
 
-inline constexpr std::optional<std::size_t>
-nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate auto &predicate, Tag::signed_index_type readOffset) {
+inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(const PortLike auto& port, detail::TagPredicate auto& predicate, Tag::signed_index_type readOffset) {
     const gr::ConsumableSpan auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
@@ -15859,7 +15626,7 @@ nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate aut
     const Tag::signed_index_type readPosition = port.streamReader().position();
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position, or if the tag has a special 'index = -1'
-    const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto &tag) { return predicate(tag, readPosition + readOffset); });
+    const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto& tag) { return predicate(tag, readPosition + readOffset); });
     std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
         return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::signed_index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
@@ -15868,20 +15635,12 @@ nSamplesToNextTagConditional(const PortLike auto &port, detail::TagPredicate aut
     }
 }
 
-inline constexpr std::optional<std::size_t>
-nSamplesUntilNextTag(const PortLike auto &port, Tag::signed_index_type offset = 0) {
-    return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset);
-}
+inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(const PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
-inline constexpr std::optional<std::size_t>
-samples_to_eos_tag(const PortLike auto &port, Tag::signed_index_type offset = 0) {
-    return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset);
-}
+inline constexpr std::optional<std::size_t> samples_to_eos_tag(const PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
 
 } // namespace gr
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes),
-                                    (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples,
-                                    max_samples, metaInfo)
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)
 
 #endif // GNURADIO_PORT_HPP
 
@@ -18256,10 +18015,6 @@ static_assert(ThreadPool<BasicThreadPool>);
 #endif // THREADPOOL_HPP
 
 
-// #include <gnuradio-4.0/annotated.hpp>
- // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
-// #include <gnuradio-4.0/reflection.hpp>
-
 // #include <gnuradio-4.0/Settings.hpp>
 #ifndef GNURADIO_SETTINGS_HPP
 #define GNURADIO_SETTINGS_HPP
@@ -19637,6 +19392,10 @@ static_assert(SettingsLike<CtxSettings<int>>);
 
 #endif // GNURADIO_TRANSACTIONS_HPP
 
+// #include <gnuradio-4.0/annotated.hpp>
+ // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
+// #include <gnuradio-4.0/reflection.hpp>
+
 
 // #include <gnuradio-4.0/LifeCycle.hpp>
 #ifndef GNURADIO_LIFECYCLE_HPP
@@ -19906,8 +19665,7 @@ namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
 template<typename F>
-constexpr void
-simd_epilogue(auto width, F &&fun) {
+constexpr void simd_epilogue(auto width, F&& fun) {
     static_assert(std::has_single_bit(+width));
     auto w2 = std::integral_constant<std::size_t, width / 2>{};
     if constexpr (w2 > 0) {
@@ -19917,25 +19675,22 @@ simd_epilogue(auto width, F &&fun) {
 }
 
 template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
-constexpr auto
-simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...> &rngs, auto offset, auto &&fun, Flag f = {}) {
+constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>& rngs, auto offset, auto&& fun, Flag f = {}) {
     using Tup = meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
-    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...);
-    }(std::make_index_sequence<sizeof...(Ts)>());
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
 template<typename T, typename... Us>
-auto
-invokeProcessOneWithOrWithoutOffset(T &node, std::size_t offset, const Us &...inputs) {
-    if constexpr (traits::block::can_processOne_with_offset<T>) return node.processOne(offset, inputs...);
-    else
+auto invokeProcessOneWithOrWithoutOffset(T& node, std::size_t offset, const Us&... inputs) {
+    if constexpr (traits::block::can_processOne_with_offset<T>) {
+        return node.processOne(offset, inputs...);
+    } else {
         return node.processOne(inputs...);
+    }
 }
 
 template<std::size_t Index, PortType portType, typename Self>
-[[nodiscard]] constexpr auto &
-inputPort(Self *self) noexcept {
+[[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
     using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::input_ports::template at<Index>;
     if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
         using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
@@ -19946,8 +19701,7 @@ inputPort(Self *self) noexcept {
 }
 
 template<std::size_t Index, PortType portType, typename Self>
-[[nodiscard]] constexpr auto &
-outputPort(Self *self) noexcept {
+[[nodiscard]] constexpr auto& outputPort(Self* self) noexcept {
     using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::output_ports::template at<Index>;
     if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
         using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
@@ -19958,8 +19712,7 @@ outputPort(Self *self) noexcept {
 }
 
 template<fixed_string Name, typename Self>
-[[nodiscard]] constexpr auto &
-inputPort(Self *self) noexcept {
+[[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
     constexpr int Index = meta::indexForName<Name, traits::block::all_input_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
         return self->msgIn;
@@ -19968,8 +19721,7 @@ inputPort(Self *self) noexcept {
 }
 
 template<fixed_string Name, typename Self>
-[[nodiscard]] constexpr auto &
-outputPort(Self *self) noexcept {
+[[nodiscard]] constexpr auto& outputPort(Self* self) noexcept {
     constexpr int Index = meta::indexForName<Name, traits::block::all_output_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
         return self->msgOut;
@@ -19978,29 +19730,22 @@ outputPort(Self *self) noexcept {
 }
 
 template<PortType portType, typename Self>
-[[nodiscard]] constexpr auto
-inputPorts(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(inputPort<Idx, portType>(self)...);
-    }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::input_ports::size()>());
+[[nodiscard]] constexpr auto inputPorts(Self* self) noexcept {
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(inputPort<Idx, portType>(self)...); }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::input_ports::size()>());
 }
 
 template<PortType portType, typename Self>
-[[nodiscard]] constexpr auto
-outputPorts(Self *self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        return std::tie(outputPort<Idx, portType>(self)...);
-    }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::output_ports::size>());
+[[nodiscard]] constexpr auto outputPorts(Self* self) noexcept {
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portType>(self)...); }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::output_ports::size>());
 }
 
 namespace work {
 
 class Counter {
-    std::atomic_uint64_t encodedCounter{ static_cast<uint64_t>(std::numeric_limits<gr::Size_t>::max()) << 32 };
+    std::atomic_uint64_t encodedCounter{static_cast<uint64_t>(std::numeric_limits<gr::Size_t>::max()) << 32};
 
 public:
-    void
-    increment(std::size_t workRequestedInc, std::size_t workDoneInc) {
+    void increment(std::size_t workRequestedInc, std::size_t workDoneInc) {
         uint64_t oldCounter;
         uint64_t newCounter;
         do {
@@ -20015,26 +19760,24 @@ public:
         } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
     }
 
-    std::pair<std::size_t, std::size_t>
-    getAndReset() {
+    std::pair<std::size_t, std::size_t> getAndReset() {
         uint64_t oldCounter    = encodedCounter.exchange(0);
         auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
         auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
         if (workRequested == std::numeric_limits<gr::Size_t>::max()) {
-            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+            return {std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone)};
         }
-        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+        return {static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone)};
     }
 
-    std::pair<std::size_t, std::size_t>
-    get() {
+    std::pair<std::size_t, std::size_t> get() {
         uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
         auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
         auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
         if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
-            return { std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone) };
+            return {std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone)};
         }
-        return { static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone) };
+        return {static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone)};
     }
 };
 
@@ -20060,14 +19803,14 @@ concept HasWork = requires(T t, std::size_t requested_work) {
 
 template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::same_as<const std::string &>;
+    { t.unique_name } -> std::same_as<const std::string&>;
     { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
-    { t.description } noexcept -> std::same_as<const std::string_view &>;
+    { t.description } noexcept -> std::same_as<const std::string_view&>;
 
     { t.isBlocking() } noexcept -> std::same_as<bool>;
 
-    { t.settings() } -> std::same_as<SettingsBase &>;
+    { t.settings() } -> std::same_as<SettingsBase&>;
 
     // N.B. TODO discuss these requirements
     requires !std::is_copy_constructible_v<T>;
@@ -20093,8 +19836,7 @@ template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
-inline void
-checkBlockContracts();
+inline void checkBlockContracts();
 
 template<typename T>
 struct isBlockDependent {
@@ -20102,15 +19844,15 @@ struct isBlockDependent {
 };
 
 namespace block::property {
-inline static const char *kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
-inline static const char *kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
-inline static const char *kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
-inline static const char *kSetting        = "Settings";       ///< asynchronous message-based setting handling,
+inline static const char* kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
+inline static const char* kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
+inline static const char* kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
+inline static const char* kSetting        = "Settings";       ///< asynchronous message-based setting handling,
                                                               // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
-inline static const char *kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
+inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
 
-inline static const char *kStoreDefaults = "StoreDefaults"; ///< store present settings as default, for counterpart @see kResetDefaults
-inline static const char *kResetDefaults = "ResetDefaults"; ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
+inline static const char* kStoreDefaults = "StoreDefaults"; ///< store present settings as default, for counterpart @see kResetDefaults
+inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
 } // namespace block::property
 
 /**
@@ -20279,34 +20021,31 @@ public:
     constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
 
     template<typename T>
-    auto &
-    getArgument() {
+    auto& getArgument() {
         return std::get<T>(*this);
     }
 
     template<typename T>
-    const auto &
-    getArgument() const {
+    const auto& getArgument() const {
         return std::get<T>(*this);
     }
 
     // TODO: These are not involved in move operations, might be a problem later
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{ std::numeric_limits<std::size_t>::max() };
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{std::numeric_limits<std::size_t>::max()};
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
-    alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{ work::Status::OK };
+    alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
-    alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{ false };
+    alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{false};
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
-    using RatioValue = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> numerator = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator
-            = Resampling::kDenominator;
-    using StrideValue = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                               stride             = StrideControl::kStride;
-    A<bool, "disconnect on done", Doc<"if block has no downstream consumers, it declares itself 'DONE', and severs connections to upstream blocks.">> disconnect_on_done = true;
+    using RatioValue                                                                                                                                                                = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
+    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>>      numerator   = Resampling::kNumerator;
+    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator = Resampling::kDenominator;
+    using StrideValue                                                                                                                                                               = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
+    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                               stride                        = StrideControl::kStride;
+    A<bool, "disconnect on done", Doc<"if block has no downstream consumers, it declares itself 'DONE', and severs connections to upstream blocks.">> disconnect_on_done            = true;
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
@@ -20329,8 +20068,7 @@ public:
 #endif
 
     //
-    static property_map
-    initMetaInfo() {
+    static property_map initMetaInfo() {
         using namespace std::string_literals;
         property_map ret;
         if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
@@ -20353,13 +20091,13 @@ public:
 
     using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
     std::map<std::string, PropertyCallback> propertyCallbacks{
-        { block::property::kHeartbeat, &Block::propertyCallbackHeartbeat },           //
-        { block::property::kEcho, &Block::propertyCallbackEcho },                     //
-        { block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState }, //
-        { block::property::kSetting, &Block::propertyCallbackSettings },              //
-        { block::property::kStagedSetting, &Block::propertyCallbackStagedSettings },  //
-        { block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults },   //
-        { block::property::kResetDefaults, &Block::propertyCallbackResetDefaults },   //
+        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},           //
+        {block::property::kEcho, &Block::propertyCallbackEcho},                     //
+        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState}, //
+        {block::property::kSetting, &Block::propertyCallbackSettings},              //
+        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},  //
+        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},   //
+        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},   //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -20370,27 +20108,20 @@ protected:
     // intermediate non-real-time<->real-time setting states
     std::unique_ptr<SettingsBase> _settings;
 
-    [[nodiscard]] constexpr auto &
-    self() noexcept {
-        return *static_cast<Derived *>(this);
-    }
+    [[nodiscard]] constexpr auto& self() noexcept { return *static_cast<Derived*>(this); }
 
-    [[nodiscard]] constexpr const auto &
-    self() const noexcept {
-        return *static_cast<const Derived *>(this);
-    }
+    [[nodiscard]] constexpr const auto& self() const noexcept { return *static_cast<const Derived*>(this); }
 
     template<typename TFunction, typename... Args>
-    [[maybe_unused]] constexpr inline auto
-    invokeUserProvidedFunction(std::string_view callingSite, TFunction &&func, Args &&...args, const std::source_location &location = std::source_location::current()) noexcept {
+    [[maybe_unused]] constexpr inline auto invokeUserProvidedFunction(std::string_view callingSite, TFunction&& func, Args&&... args, const std::source_location& location = std::source_location::current()) noexcept {
         if constexpr (noexcept(func(std::forward<Args>(args)...))) { // function declared as 'noexcept' skip exception handling
             return std::forward<TFunction>(func)(std::forward<Args>(args)...);
         } else { // function not declared with 'noexcept' -> may throw
             try {
                 return std::forward<TFunction>(func)(std::forward<Args>(args)...);
-            } catch (const gr::exception &e) {
+            } catch (const gr::exception& e) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error(std::move(e))));
-            } catch (const std::exception &e) {
+            } catch (const std::exception& e) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error(e, location)));
             } catch (...) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error("unknown error", location)));
@@ -20401,11 +20132,11 @@ protected:
 public:
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
 
-    Block(property_map initParameter = {}) noexcept(false)                                   // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived *>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameter = {}) noexcept(false)                                    // N.B. throws in case of on contract violations
+        : _settings(std::make_unique<BasicSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
-        checkBlockContracts<decltype(*static_cast<Derived *>(this))>();
+        checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
 
         if (initParameter.size() != 0) {
             if (const property_map failed = settings().set(std::move(initParameter)); !failed.empty()) {
@@ -20414,25 +20145,12 @@ public:
         }
     }
 
-    Block(Block &&other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other))
-        , std::tuple<Arguments...>(std::move(other))
-        , numerator(std::move(other.numerator))
-        , denominator(std::move(other.denominator))
-        , stride(std::move(other.stride))
-        , strideCounter(std::move(other.strideCounter))
-        , msgIn(std::move(other.msgIn))
-        , msgOut(std::move(other.msgOut))
-        , _outputTagsChanged(std::move(other._outputTagsChanged))
-        , _mergedInputTag(std::move(other._mergedInputTag))
-        , _settings(std::move(other._settings)) {}
+    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), std::tuple<Arguments...>(std::move(other)), numerator(std::move(other.numerator)), denominator(std::move(other.denominator)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _outputTagsChanged(std::move(other._outputTagsChanged)), _mergedInputTag(std::move(other._mergedInputTag)), _settings(std::move(other._settings)) {}
 
     // There are a few const or conditionally const member variables,
     // we can not have a move-assignment that is equivalent to
     // the move constructor
-    Block &
-    operator=(Block &&other)
-            = delete;
+    Block& operator=(Block&& other) = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
@@ -20450,28 +20168,27 @@ public:
         emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::STOPPED));
     }
 
-    void
-    init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
+    void init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
         progress     = std::move(progress_);
         ioThreadPool = std::move(ioThreadPool_);
 
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
-        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto &&t) {
+        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto&& t) {
             using CurrentPortType = std::remove_cvref_t<decltype(t)>;
             if constexpr (traits::port::is_port_v<CurrentPortType>) {
                 using PortDescriptor = typename CurrentPortType::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
-                    auto &port = (self().*(PortDescriptor::pointer));
+                    auto& port = (self().*(PortDescriptor::pointer));
                     port.name  = CurrentPortType::Name;
                 }
             } else {
                 using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
-                    auto       &collection     = (self().*(PortCollectionDescriptor::pointer));
+                    auto&       collection     = (self().*(PortCollectionDescriptor::pointer));
                     std::string collectionName = refl::descriptor::get_name(PortCollectionDescriptor()).data;
-                    for (auto &port : collection) {
+                    for (auto& port : collection) {
                         port.name = collectionName;
                     }
                 }
@@ -20498,8 +20215,7 @@ public:
     }
 
     template<gr::meta::array_or_vector_type Container>
-    [[nodiscard]] constexpr std::size_t
-    availableInputSamples(Container &data) const noexcept {
+    [[nodiscard]] constexpr std::size_t availableInputSamples(Container& data) const noexcept {
         if constexpr (gr::meta::vector_type<Container>) {
             data.resize(traits::block::stream_input_port_types<Derived>::size);
         } else if constexpr (gr::meta::array_type<Container>) {
@@ -20508,23 +20224,22 @@ public:
             static_assert(gr::meta::always_false<Container>, "type not supported");
         }
         meta::tuple_for_each_enumerate(
-                [&data]<typename Port>(auto index, Port &input_port) {
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        data[index] = input_port.streamReader().available();
-                    } else {
-                        data[index] = 0;
-                        for (auto &port : input_port) {
-                            data[index] += port.streamReader().available();
-                        }
+            [&data]<typename Port>(auto index, Port& input_port) {
+                if constexpr (traits::port::is_port_v<Port>) {
+                    data[index] = input_port.streamReader().available();
+                } else {
+                    data[index] = 0;
+                    for (auto& port : input_port) {
+                        data[index] += port.streamReader().available();
                     }
-                },
-                inputPorts<PortType::STREAM>(&self()));
+                }
+            },
+            inputPorts<PortType::STREAM>(&self()));
         return traits::block::stream_input_port_types<Derived>::size;
     }
 
     template<gr::meta::array_or_vector_type Container>
-    [[nodiscard]] constexpr std::size_t
-    availableOutputSamples(Container &data) const noexcept {
+    [[nodiscard]] constexpr std::size_t availableOutputSamples(Container& data) const noexcept {
         if constexpr (gr::meta::vector_type<Container>) {
             data.resize(traits::block::stream_output_port_types<Derived>::size);
         } else if constexpr (gr::meta::array_type<Container>) {
@@ -20533,69 +20248,48 @@ public:
             static_assert(gr::meta::always_false<Container>, "type not supported");
         }
         meta::tuple_for_each_enumerate(
-                [&data]<typename Port>(auto index, Port &output_port) {
-                    if constexpr (traits::port::is_port_v<Port>) {
-                        data[index] = output_port.streamWriter().available();
-                    } else {
-                        data[index] = 0;
-                        for (auto &port : output_port) {
-                            data[index] += port.streamWriter().available();
-                        }
+            [&data]<typename Port>(auto index, Port& output_port) {
+                if constexpr (traits::port::is_port_v<Port>) {
+                    data[index] = output_port.streamWriter().available();
+                } else {
+                    data[index] = 0;
+                    for (auto& port : output_port) {
+                        data[index] += port.streamWriter().available();
                     }
-                },
-                outputPorts<PortType::STREAM>(&self()));
+                }
+            },
+            outputPorts<PortType::STREAM>(&self()));
         return traits::block::stream_output_port_types<Derived>::size;
     }
 
-    [[nodiscard]] constexpr bool
-    isBlocking() const noexcept {
-        return blockingIO;
-    }
+    [[nodiscard]] constexpr bool isBlocking() const noexcept { return blockingIO; }
 
-    [[nodiscard]] constexpr bool
-    input_tags_present() const noexcept {
-        return !_mergedInputTag.map.empty();
-    };
+    [[nodiscard]] constexpr bool input_tags_present() const noexcept { return !_mergedInputTag.map.empty(); };
 
-    [[nodiscard]] Tag
-    mergedInputTag() const noexcept {
-        return _mergedInputTag;
-    }
+    [[nodiscard]] Tag mergedInputTag() const noexcept { return _mergedInputTag; }
 
-    [[nodiscard]] constexpr SettingsBase &
-    settings() const noexcept {
-        return *_settings;
-    }
+    [[nodiscard]] constexpr SettingsBase& settings() const noexcept { return *_settings; }
 
-    [[nodiscard]] constexpr SettingsBase &
-    settings() noexcept {
-        return *_settings;
-    }
+    [[nodiscard]] constexpr SettingsBase& settings() noexcept { return *_settings; }
 
     template<typename T>
-    void
-    setSettings(std::unique_ptr<T> &settings) {
+    void setSettings(std::unique_ptr<T>& settings) {
         _settings = std::move(settings);
     }
 
     template<std::size_t Index, typename Self>
-    friend constexpr auto &
-    inputPort(Self *self) noexcept;
+    friend constexpr auto& inputPort(Self* self) noexcept;
 
     template<std::size_t Index, typename Self>
-    friend constexpr auto &
-    outputPort(Self *self) noexcept;
+    friend constexpr auto& outputPort(Self* self) noexcept;
 
     template<fixed_string Name, typename Self>
-    friend constexpr auto &
-    inputPort(Self *self) noexcept;
+    friend constexpr auto& inputPort(Self* self) noexcept;
 
     template<fixed_string Name, typename Self>
-    friend constexpr auto &
-    outputPort(Self *self) noexcept;
+    friend constexpr auto& outputPort(Self* self) noexcept;
 
-    constexpr void
-    checkBlockParameterConsistency() {
+    constexpr void checkBlockParameterConsistency() {
         constexpr bool kIsSourceBlock = traits::block::stream_input_port_types<Derived>::size == 0;
         constexpr bool kIsSinkBlock   = traits::block::stream_output_port_types<Derived>::size == 0;
 
@@ -20605,8 +20299,7 @@ public:
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
         } else {
             if (numerator != 1ULL || denominator != 1ULL) {
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:",
-                                 fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
                 requestStop();
                 return;
             }
@@ -20646,96 +20339,92 @@ public:
         }
     }
 
-    void
-    publishSamples(std::size_t nSamples, auto &publishableSpanTuple) noexcept {
+    void publishSamples(std::size_t nSamples, auto& publishableSpanTuple) noexcept {
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
-                    [nSamples]<typename OutputRange>(auto, OutputRange &outputRange) {
-                        auto processOneRange = [nSamples]<typename Out>(Out &out) {
-                            if constexpr (Out::isMultiThreadedStrategy()) {
-                                if (!out.isFullyPublished()) {
-                                    fmt::print(stderr, "Block::publishSamples - did not publish all samples for MultiThreadedStrategy\n");
-                                    std::abort();
-                                }
+                [nSamples]<typename OutputRange>(auto, OutputRange& outputRange) {
+                    auto processOneRange = [nSamples]<typename Out>(Out& out) {
+                        if constexpr (Out::isMultiThreadedStrategy()) {
+                            if (!out.isFullyPublished()) {
+                                fmt::print(stderr, "Block::publishSamples - did not publish all samples for MultiThreadedStrategy\n");
+                                std::abort();
                             }
-                            if (!out.isPublished()) {
-                                using enum gr::SpanReleasePolicy;
-                                if constexpr (Out::spanReleasePolicy() == Terminate) {
-                                    fmt::print(stderr, "Block::publishSamples - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
-                                    std::abort();
-                                } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
-                                    out.publish(nSamples);
-                                } else if constexpr (Out::spanReleasePolicy() == ProcessNone) {
-                                    out.publish(0U);
-                                }
-                            }
-                        };
-                        if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
-                            for (auto &out : outputRange) {
-                                processOneRange(out);
-                            }
-                        } else {
-                            processOneRange(outputRange);
                         }
-                    },
-                    publishableSpanTuple);
+                        if (!out.isPublished()) {
+                            using enum gr::SpanReleasePolicy;
+                            if constexpr (Out::spanReleasePolicy() == Terminate) {
+                                fmt::print(stderr, "Block::publishSamples - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
+                                std::abort();
+                            } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
+                                out.publish(nSamples);
+                            } else if constexpr (Out::spanReleasePolicy() == ProcessNone) {
+                                out.publish(0U);
+                            }
+                        }
+                    };
+                    if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
+                        for (auto& out : outputRange) {
+                            processOneRange(out);
+                        }
+                    } else {
+                        processOneRange(outputRange);
+                    }
+                },
+                publishableSpanTuple);
         }
     }
 
-    bool
-    consumeReaders(std::size_t nSamples, auto &consumableSpanTuple) {
+    bool consumeReaders(std::size_t nSamples, auto& consumableSpanTuple) {
         bool success = true;
         if constexpr (traits::block::stream_input_ports<Derived>::size > 0) {
             meta::tuple_for_each_enumerate(
-                    [nSamples, &success]<typename InputRange>(auto, InputRange &inputRange) {
-                        auto processOneRange = [nSamples, &success]<typename In>(In &in) {
-                            if (!in.isConsumeRequested()) {
-                                using enum gr::SpanReleasePolicy;
-                                if constexpr (In::spanReleasePolicy() == Terminate) {
-                                    fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
-                                    std::abort();
-                                } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
-                                    success = success && in.consume(nSamples);
-                                } else if constexpr (In::spanReleasePolicy() == ProcessNone) {
-                                    success = success && in.consume(0U);
-                                }
+                [nSamples, &success]<typename InputRange>(auto, InputRange& inputRange) {
+                    auto processOneRange = [nSamples, &success]<typename In>(In& in) {
+                        if (!in.isConsumeRequested()) {
+                            using enum gr::SpanReleasePolicy;
+                            if constexpr (In::spanReleasePolicy() == Terminate) {
+                                fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
+                                std::abort();
+                            } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
+                                success = success && in.consume(nSamples);
+                            } else if constexpr (In::spanReleasePolicy() == ProcessNone) {
+                                success = success && in.consume(0U);
                             }
-                        };
-                        if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<InputRange>>) {
-                            for (auto &in : inputRange) {
-                                processOneRange(in);
-                            }
-                        } else {
-                            processOneRange(inputRange);
                         }
-                    },
-                    consumableSpanTuple);
+                    };
+                    if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<InputRange>>) {
+                        for (auto& in : inputRange) {
+                            processOneRange(in);
+                        }
+                    } else {
+                        processOneRange(inputRange);
+                    }
+                },
+                consumableSpanTuple);
         }
         return success;
     }
 
     template<typename... Ts>
-    constexpr auto
-    invoke_processOne(std::size_t offset, Ts &&...inputs) {
+    constexpr auto invoke_processOne(std::size_t offset, Ts&&... inputs) {
         if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
             invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-            return std::tuple{ invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...) };
+            return std::tuple{invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...)};
         } else {
             return invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
         }
     }
 
     template<typename... Ts>
-    constexpr auto
-    invoke_processOne_simd(std::size_t offset, auto width, Ts &&...input_simds) {
+    constexpr auto invoke_processOne_simd(std::size_t offset, auto width, Ts&&... input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
             if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
                 self().processOne_simd(offset, width);
                 return std::tuple{};
             } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-                return std::tuple{ self().processOne_simd(offset, width) };
+                return std::tuple{self().processOne_simd(offset, width)};
             } else {
                 return self().processOne_simd(offset, width);
             }
@@ -20744,14 +20433,13 @@ public:
         }
     }
 
-    constexpr void
-    forwardTags() noexcept {
+    constexpr void forwardTags() noexcept {
         if (input_tags_present()) {
             // clear temporary cached input tags after processing - won't be needed after this
             _mergedInputTag.map.clear();
         }
 
-        for_each_port([](PortLike auto &outPort) noexcept { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port([](PortLike auto& outPort) noexcept { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
         _outputTagsChanged = false;
     }
 
@@ -20761,26 +20449,25 @@ public:
      * @param untilOffset defaults to 0, if bigger merges all tags from samples 0...untilOffset for each port before merging
      *                    them
      */
-    constexpr void
-    updateInputAndOutputTags(std::size_t untilOffset = 0) noexcept {
+    constexpr void updateInputAndOutputTags(std::size_t untilOffset = 0) noexcept {
         for_each_port(
-                [untilOffset, this]<typename Port>(Port &input_port) noexcept {
-                    auto mergeSrcMapInto = [](const property_map &sourceMap, property_map &destinationMap) {
-                        assert(&sourceMap != &destinationMap);
-                        for (const auto &[key, value] : sourceMap) {
-                            destinationMap.insert_or_assign(key, value);
-                        }
-                    };
+            [untilOffset, this]<typename Port>(Port& input_port) noexcept {
+                auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
+                    assert(&sourceMap != &destinationMap);
+                    for (const auto& [key, value] : sourceMap) {
+                        destinationMap.insert_or_assign(key, value);
+                    }
+                };
 
-                    const Tag mergedPortTags = input_port.getTag(static_cast<gr::Tag::signed_index_type>(untilOffset));
-                    mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
-                },
-                inputPorts<PortType::STREAM>(&self()));
+                const Tag mergedPortTags = input_port.getTag(static_cast<gr::Tag::signed_index_type>(untilOffset));
+                mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
+            },
+            inputPorts<PortType::STREAM>(&self()));
 
         if (!mergedInputTag().map.empty()) {
             settings().autoUpdate(mergedInputTag()); // apply tags as new settings if matching
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                for_each_port([this](PortLike auto &outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
+                for_each_port([this](PortLike auto& outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
             }
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
                 requestStop();
@@ -20788,8 +20475,7 @@ public:
         }
     }
 
-    void
-    applyChangedSettings() {
+    void applyChangedSettings() {
         if (!settings().changed()) {
             return;
         }
@@ -20810,61 +20496,54 @@ public:
         });
     }
 
-    constexpr static auto
-    prepareStreams(auto ports, std::size_t sync_samples) {
+    constexpr static auto prepareStreams(auto ports, std::size_t sync_samples) {
         return meta::tuple_transform(
-                [sync_samples]<typename PortOrCollection>(PortOrCollection &output_port_or_collection) noexcept {
-                    auto process_single_port = [&sync_samples]<typename Port>(Port &&port) {
-                        using enum gr::SpanReleasePolicy;
-                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                                return std::forward<Port>(port).streamReader().template get<ProcessAll>(sync_samples);
-                            } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                                return std::forward<Port>(port).streamWriter().template reserve<ProcessAll>(sync_samples);
-                            }
-                        } else {
-                            // for the Async port get/reserve all available samples
-                            if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                                return std::forward<Port>(port).streamReader().template get<ProcessNone>(port.streamReader().available());
-                            } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                                return std::forward<Port>(port).streamWriter().template reserve<ProcessNone>(port.streamWriter().available());
-                            }
+            [sync_samples]<typename PortOrCollection>(PortOrCollection& output_port_or_collection) noexcept {
+                auto process_single_port = [&sync_samples]<typename Port>(Port&& port) {
+                    using enum gr::SpanReleasePolicy;
+                    if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsInput) {
+                            return std::forward<Port>(port).streamReader().template get<ProcessAll>(sync_samples);
+                        } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
+                            return std::forward<Port>(port).streamWriter().template reserve<ProcessAll>(sync_samples);
                         }
-                    };
-                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
-                        return process_single_port(output_port_or_collection);
                     } else {
-                        using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
-                        std::vector<value_span> result{};
-                        std::transform(output_port_or_collection.begin(), output_port_or_collection.end(), std::back_inserter(result), process_single_port);
-                        return result;
+                        // for the Async port get/reserve all available samples
+                        if constexpr (std::remove_cvref_t<Port>::kIsInput) {
+                            return std::forward<Port>(port).streamReader().template get<ProcessNone>(port.streamReader().available());
+                        } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
+                            return std::forward<Port>(port).streamWriter().template reserve<ProcessNone>(port.streamWriter().available());
+                        }
                     }
-                },
-                ports);
+                };
+                if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                    return process_single_port(output_port_or_collection);
+                } else {
+                    using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
+                    std::vector<value_span> result{};
+                    std::transform(output_port_or_collection.begin(), output_port_or_collection.end(), std::back_inserter(result), process_single_port);
+                    return result;
+                }
+            },
+            ports);
     }
 
-    inline constexpr void
-    publishTag(property_map &&tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
+    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
+        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto& outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
     }
 
-    inline constexpr void
-    publishTag(const property_map &tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([&tag_data, tagOffset](PortLike auto &outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
+    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
+        for_each_port([&tag_data, tagOffset](PortLike auto& outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
     }
 
-    constexpr void
-    requestStop() noexcept {
-        emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-    }
+    constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
 
-    constexpr void
-    processScheduledMessages() {
+    constexpr void processScheduledMessages() {
         using namespace std::chrono;
         const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
-        notifyListeners(block::property::kHeartbeat, { { "heartbeat", nanoseconds_count } });
+        notifyListeners(block::property::kHeartbeat, {{"heartbeat", nanoseconds_count}});
 
-        auto processPort = [this]<PortLike TPort>(TPort &inPort) {
+        auto processPort = [this]<PortLike TPort>(TPort& inPort) {
             const auto available = inPort.streamReader().available();
             if (available == 0UZ) {
                 return;
@@ -20886,14 +20565,13 @@ public:
     }
 
 protected:
-    std::optional<Message>
-    propertyCallbackHeartbeat(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackHeartbeat(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kHeartbeat);
 
         if (message.cmd == Set || message.cmd == Get) {
             std::uint64_t nanoseconds_count = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-            message.data                    = { { "heartbeat", nanoseconds_count } };
+            message.data                    = {{"heartbeat", nanoseconds_count}};
             return message;
         } else if (message.cmd == Subscribe) {
             if (!message.clientRequestID.empty()) {
@@ -20908,8 +20586,7 @@ protected:
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
-    std::optional<Message>
-    propertyCallbackEcho(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEcho(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kEcho);
 
@@ -20920,8 +20597,7 @@ protected:
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
-    std::optional<Message>
-    propertyCallbackLifecycleState(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackLifecycleState(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kLifeCycleState);
 
@@ -20933,7 +20609,7 @@ protected:
             std::string stateStr;
             try {
                 stateStr = std::get<std::string>(message.data.value().at("state"));
-            } catch (const std::exception &e) {
+            } catch (const std::exception& e) {
                 throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws {}, msg: {}", e.what(), message));
             } catch (...) {
                 throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws unknown exception, msg: {}", message));
@@ -20944,11 +20620,11 @@ protected:
             }
             if (auto e = this->changeStateTo(state.value()); !e) {
                 throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", //
-                                                e.error().message, e.error().sourceLocation, e.error().errorTime));
+                    e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
             return std::nullopt;
         } else if (message.cmd == Get) {
-            message.data = { { "state", std::string(magic_enum::enum_name(this->state())) } };
+            message.data = {{"state", std::string(magic_enum::enum_name(this->state()))}};
             return message;
         } else if (message.cmd == Subscribe) {
             if (!message.clientRequestID.empty()) {
@@ -20963,8 +20639,7 @@ protected:
         throw gr::exception(fmt::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
     }
 
-    std::optional<Message>
-    propertyCallbackSettings(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackSettings(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kSetting);
 
@@ -20992,13 +20667,12 @@ protected:
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
-    std::optional<Message>
-    propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kStagedSetting);
-        const auto keys = [](const property_map &map) noexcept {
+        const auto keys = [](const property_map& map) noexcept {
             std::string result;
-            for (const auto &pair : map) {
+            for (const auto& pair : map) {
                 if (!result.empty()) {
                     result += ", ";
                 }
@@ -21041,8 +20715,7 @@ protected:
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
-    std::optional<Message>
-    propertyCallbackStoreDefaults(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackStoreDefaults(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kStoreDefaults);
 
@@ -21054,8 +20727,7 @@ protected:
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
-    std::optional<Message>
-    propertyCallbackResetDefaults(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackResetDefaults(std::string_view propertyName, Message message) {
         using enum gr::message::Command;
         assert(propertyName == block::property::kResetDefaults);
 
@@ -21074,8 +20746,7 @@ protected:
      * @return an anonymous struct representing the amount of available data on the ports
      */
     template<typename P>
-    auto
-    getPortLimits(P &&ports) {
+    auto getPortLimits(P&& ports) {
         struct {
             std::size_t minSync      = 0UL;                                     // the minimum amount of samples that the block needs for processing on the sync ports
             std::size_t maxSync      = std::numeric_limits<std::size_t>::max(); // the maximum amount of that can be consumed on all sync ports
@@ -21083,7 +20754,7 @@ protected:
             bool        hasAsync     = false;                                   // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
 
-        auto adjustForInputPort = [&result]<PortLike Port>(Port &port) {
+        auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
                     return port.streamReader().available();
@@ -21101,15 +20772,14 @@ protected:
                 }
             }
         };
-        for_each_port([&adjustForInputPort](PortLike auto &port) { adjustForInputPort(port); }, std::forward<P>(ports));
+        for_each_port([&adjustForInputPort](PortLike auto& port) { adjustForInputPort(port); }, std::forward<P>(ports));
         return result;
     }
 
     /***
      * Check the input ports for available samples
      */
-    auto
-    getNextTagAndEosPosition() {
+    auto getNextTagAndEosPosition() {
         struct {
             bool        hasTag     = false;
             std::size_t nextTag    = std::numeric_limits<std::size_t>::max();
@@ -21117,7 +20787,7 @@ protected:
             bool        asyncEoS   = false;
         } result;
 
-        auto adjustForInputPort = [&result]<PortLike Port>(Port &port) {
+        auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
             if (port.isConnected()) {
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
@@ -21133,7 +20803,7 @@ protected:
                 }
             }
         };
-        for_each_port([&adjustForInputPort](PortLike auto &port) { adjustForInputPort(port); }, inputPorts<PortType::STREAM>(&self()));
+        for_each_port([&adjustForInputPort](PortLike auto& port) { adjustForInputPort(port); }, inputPorts<PortType::STREAM>(&self()));
         return result;
     }
 
@@ -21142,8 +20812,7 @@ protected:
      * @param available number of samples that can be consumed from each sync port
      * @return inputSamples to skip before the chunk
      */
-    std::size_t
-    inputSamplesToSkipBeforeNextChunk(std::size_t availableSamples) {
+    std::size_t inputSamplesToSkipBeforeNextChunk(std::size_t availableSamples) {
         if constexpr (StrideControl::kEnabled) { // check if stride was removed at compile time
             const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
             std::size_t toSkip                      = 0;
@@ -21160,8 +20829,7 @@ protected:
      * calculate how many samples to consume taking into account stride
      * @return number of samples to consume or 0 if stride is disabled
      */
-    std::size_t
-    inputSamplesToConsumeAdjustedWithStride(std::size_t remainingSamples) {
+    std::size_t inputSamplesToConsumeAdjustedWithStride(std::size_t remainingSamples) {
         if constexpr (StrideControl::kEnabled) {
             const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
             std::size_t toSkip                      = 0;
@@ -21174,8 +20842,7 @@ protected:
         return 0UZ;
     }
 
-    auto
-    computeResampling(std::size_t minSyncIn, std::size_t maxSyncIn, std::size_t minSyncOut, std::size_t maxSyncOut) {
+    auto computeResampling(std::size_t minSyncIn, std::size_t maxSyncIn, std::size_t minSyncOut, std::size_t maxSyncOut) {
         struct ResamplingResult {
             std::size_t decimatedIn;
             std::size_t decimatedOut;
@@ -21183,11 +20850,11 @@ protected:
 
         if constexpr (!Resampling::kEnabled) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return ResamplingResult{ .decimatedIn = n, .decimatedOut = n };
+            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
         }
         if (denominator == 1UL && numerator == 1UL) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            return ResamplingResult{ .decimatedIn = n, .decimatedOut = n };
+            return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
         }
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
@@ -21200,21 +20867,18 @@ protected:
             nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
         }
         if (nResamplingChunks * denominator < minSyncIn || nResamplingChunks * numerator < minSyncOut) {
-            return ResamplingResult{ .decimatedIn = 0UZ, .decimatedOut = 0UZ };
+            return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
         } else {
-            return ResamplingResult{ static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator) };
+            return ResamplingResult{static_cast<std::size_t>(nResamplingChunks * denominator), static_cast<std::size_t>(nResamplingChunks * numerator)};
         }
     }
 
-    std::size_t
-    getMergedBlockLimit() {
-        if constexpr (requires(const Derived &d) {
+    std::size_t getMergedBlockLimit() {
+        if constexpr (requires(const Derived& d) {
                           { available_samples(d) } -> std::same_as<std::size_t>;
                       }) {
             return available_samples(self());
-        } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0
-                             && traits::block::stream_output_port_types<Derived>::size
-                                        == 0) { // allow blocks that have neither input nor output ports (by merging source to sink block) -> use internal buffer size
+        } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0 && traits::block::stream_output_port_types<Derived>::size == 0) { // allow blocks that have neither input nor output ports (by merging source to sink block) -> use internal buffer size
             constexpr gr::Size_t chunkSize = Derived::merged_work_chunk_size();
             static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                              "friend function `available_samples(const BlockType&)` must be defined.");
@@ -21224,17 +20888,12 @@ protected:
     }
 
     template<typename TIn, typename TOut>
-    gr::work::Status
-    invokeProcessBulk(TIn &inputReaderTuple, TOut &outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(
-                                                       PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
-                                               inputReaderTuple);
+    gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple) {
+        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(
-                                                        PortReader &...args) { return std::tuple{ (gr::meta::array_or_vector_type<PortReader> ? std::span{ args.data(), args.size() } : args)... }; },
-                                                outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, outputReaderTuple);
 
-        auto refToSpan = []<typename T, typename U>(T &&original, U &&temporary) -> decltype(auto) {
+        auto refToSpan = []<typename T, typename U>(T&& original, U&& temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
                 return std::forward<U>(temporary);
             } else {
@@ -21242,41 +20901,34 @@ protected:
             }
         };
 
-        return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
-            return self().processBulk(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))...,
-                                      refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...);
-        }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(),
-               std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
+        return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) { return self().processBulk(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))..., refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
     }
 
-    work::Status
-    invokeProcessOneSimd(auto &inputSpans, auto &outputSpans, auto width, std::size_t nSamplesToProcess) {
+    work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
         std::size_t i = 0;
         for (; i + width <= nSamplesToProcess; i += width) {
-            const auto &results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto &...input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
-            meta::tuple_for_each([i](auto &output_range, const auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
+            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
+            meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
         }
         simd_epilogue(width, [&](auto w) {
             if (i + w <= nSamplesToProcess) {
-                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto &&...input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
-                meta::tuple_for_each([i](auto &output_range, auto &result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
+                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
+                meta::tuple_for_each([i](auto& output_range, auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
                 i += w;
             }
         });
         return work::Status::OK;
     }
 
-    work::Status
-    invokeProcessOnePure(auto &inputSpans, auto &outputSpans, std::size_t nSamplesToProcess) {
+    work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
-            meta::tuple_for_each([i]<typename R>(auto &output_range, R &&result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
         return work::Status::OK;
     }
 
-    auto
-    invokeProcessOneNonConst(auto &inputSpans, auto &outputSpans, std::size_t nSamplesToProcess) {
+    auto invokeProcessOneNonConst(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         using enum work::Status;
 
         struct ProcessOneResult {
@@ -21287,88 +20939,75 @@ protected:
 
         std::size_t nOutSamplesBeforeRequestedStop = 0;
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto &...inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
-                    [i]<typename R>(auto &output_range, R &&result) {
-                        if constexpr (meta::array_or_vector_type<std::remove_cvref<decltype(result)>>) {
-                            for (int j = 0; j < result.size(); j++) {
-                                output_range[i][j] = std::move(result[j]);
-                            }
-                        } else {
-                            output_range[i] = std::forward<R>(result);
+                [i]<typename R>(auto& output_range, R&& result) {
+                    if constexpr (meta::array_or_vector_type<std::remove_cvref<decltype(result)>>) {
+                        for (int j = 0; j < result.size(); j++) {
+                            output_range[i][j] = std::move(result[j]);
                         }
-                    },
-                    outputSpans, results);
+                    } else {
+                        output_range[i] = std::forward<R>(result);
+                    }
+                },
+                outputSpans, results);
             nOutSamplesBeforeRequestedStop++;
             // the block implementer can set `_outputTagsChanged` to true in `processOne` to prematurely leave the loop and apply his changes
             if (_outputTagsChanged || lifecycle::isShuttingDown(this->state())) [[unlikely]] { // emitted tag and/or requested to stop
                 break;
             }
         }
-        return ProcessOneResult{ lifecycle::isShuttingDown(this->state()) ? DONE : OK, nSamplesToProcess, std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop) };
+        return ProcessOneResult{lifecycle::isShuttingDown(this->state()) ? DONE : OK, nSamplesToProcess, std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop)};
     }
 
-    [[nodiscard]] bool
-    hasNoDownStreamConnectedChildren() const noexcept {
+    [[nodiscard]] bool hasNoDownStreamConnectedChildren() const noexcept {
         std::size_t nMandatoryChildren          = 0UZ;
         std::size_t nMandatoryConnectedChildren = 0UZ;
         for_each_port(
-                [&nMandatoryChildren, &nMandatoryConnectedChildren]<PortLike Port>(const Port &outputPort) {
-                    if constexpr (!Port::isOptional()) {
-                        nMandatoryChildren++;
-                        if (outputPort.isConnected()) {
-                            nMandatoryConnectedChildren++;
-                        }
+            [&nMandatoryChildren, &nMandatoryConnectedChildren]<PortLike Port>(const Port& outputPort) {
+                if constexpr (!Port::isOptional()) {
+                    nMandatoryChildren++;
+                    if (outputPort.isConnected()) {
+                        nMandatoryConnectedChildren++;
                     }
-                },
-                outputPorts<PortType::STREAM>(&self()));
+                }
+            },
+            outputPorts<PortType::STREAM>(&self()));
         return nMandatoryChildren > 0UZ && nMandatoryConnectedChildren == 0UZ;
     }
 
-    constexpr void
-    disconnectFromUpStreamParents() noexcept {
+    constexpr void disconnectFromUpStreamParents() noexcept {
         using TInputTypes = traits::block::stream_input_port_types<Derived>;
         if constexpr (TInputTypes::size.value > 0UZ) {
             if (!disconnect_on_done) {
                 return;
             }
             for_each_port(
-                    []<PortLike Port>(Port &inputPort) {
-                        if (inputPort.isConnected()) {
-                            std::ignore = inputPort.disconnect();
-                        }
-                    },
-                    inputPorts<PortType::STREAM>(&self()));
+                []<PortLike Port>(Port& inputPort) {
+                    if (inputPort.isConnected()) {
+                        std::ignore = inputPort.disconnect();
+                    }
+                },
+                inputPorts<PortType::STREAM>(&self()));
         }
     }
 
-    void
-    emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept {
-        sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(message), clientRequestID);
-    }
+    void emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept { sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(message), clientRequestID); }
 
-    void
-    notifyListeners(std::string_view endpoint, property_map message) noexcept {
+    void notifyListeners(std::string_view endpoint, property_map message) noexcept {
         const auto it = propertySubscriptions.find(std::string(endpoint));
         if (it != propertySubscriptions.end()) {
-            for (const auto &clientID : it->second) {
+            for (const auto& clientID : it->second) {
                 emitMessage(endpoint, message, clientID);
             }
         }
     }
 
-    void
-    emitErrorMessage(std::string_view endpoint, std::string_view errorMsg, std::string_view clientRequestID = "", std::source_location location = std::source_location::current()) noexcept {
-        emitErrorMessageIfAny(endpoint, std::unexpected(Error(errorMsg, location)), clientRequestID);
-    }
+    void emitErrorMessage(std::string_view endpoint, std::string_view errorMsg, std::string_view clientRequestID = "", std::source_location location = std::source_location::current()) noexcept { emitErrorMessageIfAny(endpoint, std::unexpected(Error(errorMsg, location)), clientRequestID); }
 
-    void
-    emitErrorMessage(std::string_view endpoint, Error e, std::string_view clientRequestID = "") noexcept {
-        emitErrorMessageIfAny(endpoint, std::unexpected(e), clientRequestID);
-    }
+    void emitErrorMessage(std::string_view endpoint, Error e, std::string_view clientRequestID = "") noexcept { emitErrorMessageIfAny(endpoint, std::unexpected(e), clientRequestID); }
 
-    inline void
-    emitErrorMessageIfAny(std::string_view endpoint, std::expected<void, Error> e, std::string_view clientRequestID = "") noexcept {
+    inline void emitErrorMessageIfAny(std::string_view endpoint, std::expected<void, Error> e, std::string_view clientRequestID = "") noexcept {
         if (!e.has_value()) [[unlikely]] {
             sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(e.error()), clientRequestID);
         }
@@ -21406,8 +21045,7 @@ protected:
      *   - consume in samples (has to be last to correctly propagate back-pressure)
      * @return struct { std::size_t produced_work, work_return_t}
      */
-    work::Result
-    workInternal(std::size_t requested_work) {
+    work::Result workInternal(std::size_t requested_work) {
         using enum gr::work::Status;
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
@@ -21429,7 +21067,7 @@ protected:
 
         if (this->state() == lifecycle::State::STOPPED) {
             disconnectFromUpStreamParents();
-            return { requested_work, 0UZ, work::Status::DONE };
+            return {requested_work, 0UZ, work::Status::DONE};
         }
 
         // evaluate number of available and processable samples
@@ -21437,10 +21075,10 @@ protected:
         const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
         std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({ maxSyncAvailableIn, nextTag, nextEosTag }));
-        const auto  availableToProcess         = std::min({ maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore) });
-        const auto  availableToPublish         = std::min({ maxSyncOut, maxSyncAvailableOut });
-        const auto [resampledIn, resampledOut] = computeResampling(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
+        const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore)});
+        const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
+        const auto [resampledIn, resampledOut]                                = computeResampling(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
             updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
@@ -21451,20 +21089,20 @@ protected:
         if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
             if (asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
                 emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
+                publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
                 updateInputAndOutputTags();
                 forwardTags();
                 this->setAndNotifyState(lifecycle::State::STOPPED);
-                return { requested_work, 0UZ, work::Status::DONE };
+                return {requested_work, 0UZ, work::Status::DONE};
             }
             if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
                 emitErrorMessageIfAny("workInternal(): REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                 updateInputAndOutputTags();
                 applyChangedSettings();
                 forwardTags();
-                return { requested_work, 0UZ, work::Status::DONE };
+                return {requested_work, 0UZ, work::Status::DONE};
             }
-            return { requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS };
+            return {requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS};
         }
         // process stream tags
         updateInputAndOutputTags();
@@ -21499,17 +21137,13 @@ protected:
                 constexpr std::size_t                          simd_size             = input_types_simd_size == 0 ? max_simd_double_size : std::min(max_simd_double_size, input_types_simd_size * 4);
                 std::integral_constant<std::size_t, simd_size> width{};
 
-                if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived &d) {
-                                                                                      { d.processOne_simd(simd_size) };
-                                                                                  }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
-                    invokeUserProvidedFunction("invokeProcessOneSimd", [&ret, &inputSpans, &outputSpans, &width, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) {
-                        ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn);
-                    });
+                if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived& d) {
+                                  { d.processOne_simd(simd_size) };
+                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
+                    invokeUserProvidedFunction("invokeProcessOneSimd", [&ret, &inputSpans, &outputSpans, &width, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { ret = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn); });
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
-                        invokeUserProvidedFunction("invokeProcessOnePure", [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) {
-                            ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn);
-                        });
+                        invokeUserProvidedFunction("invokeProcessOnePure", [&ret, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { ret = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
                     } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
                         const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
                         ret               = result.status;
@@ -21542,15 +21176,14 @@ protected:
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (ret == work::Status::DONE) {
             this->setAndNotifyState(lifecycle::State::STOPPED);
-            publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
+            publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
         }
-        return { requested_work, processedIn, success ? ret : work::Status::ERROR };
+        return {requested_work, processedIn, success ? ret : work::Status::ERROR};
     } // end: work_return_t workInternal() noexcept { ..}
 
 public:
-    work::Status
-    invokeWork()
-        requires(blockingIO)
+    work::Status invokeWork()
+    requires(blockingIO)
     {
         auto [work_requested, work_done, last_status] = workInternal(std::atomic_load_explicit(&ioRequestedWork, std::memory_order_acquire));
         ioWorkDone.increment(work_requested, work_done);
@@ -21569,8 +21202,7 @@ public:
      * @return { requested_work, performed_work, status}
      */
     template<typename = void>
-    work::Result
-    work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept {
         if constexpr (blockingIO) {
             constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
             std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
@@ -21580,7 +21212,7 @@ public:
                 if constexpr (useIoThread) { // use graph-provided ioThreadPool
                     if (!ioThreadPool) {
                         emitErrorMessage("work(..)", "blockingIO with useIoThread - no ioThreadPool being set");
-                        return { requested_work, 0UZ, work::Status::ERROR };
+                        return {requested_work, 0UZ, work::Status::ERROR};
                     }
                     ioThreadPool->execute([this]() {
                         assert(lifecycle::isActive(this->state()));
@@ -21607,28 +21239,27 @@ public:
             if constexpr (!useIoThread) {
                 const bool blockIsActive = lifecycle::isActive(this->state());
                 if (!blockIsActive) {
-                    publishTag({ { gr::tag::END_OF_STREAM, true } }, 0);
+                    publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
                     ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
                 }
             }
 
-            const auto &[accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
+            const auto& [accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
             // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
 #if defined(__EMSCRIPTEN__)
             std::this_thread::sleep_for(std::chrono::nanoseconds(1));
 #endif
-            return { accumulatedRequestedWork, performedWork, ioLastWorkStatus.load() };
+            return {accumulatedRequestedWork, performedWork, ioLastWorkStatus.load()};
         } else {
             return workInternal(requested_work);
         }
     }
 
-    void
-    processMessages([[maybe_unused]] const MsgPortInNamed<"__Builtin"> &port, std::span<const Message> messages) {
+    void processMessages([[maybe_unused]] const MsgPortInNamed<"__Builtin">& port, std::span<const Message> messages) {
         using enum gr::message::Command;
         assert(std::addressof(port) == std::addressof(msgIn) && "got a message on wrong port");
 
-        for (const auto &message : messages) {
+        for (const auto& message : messages) {
             if (!message.serviceName.empty() && message.serviceName != unique_name && message.serviceName != name) {
                 // Skip if target does not match the block's (unique) name and is not empty.
                 continue;
@@ -21653,14 +21284,14 @@ public:
             std::optional<Message> retMessage;
             try {
                 retMessage = (self().*callback)(message.endpoint, message); // N.B. life-time: message is copied
-            } catch (const gr::exception &e) {
-                retMessage       = Message{ message };
+            } catch (const gr::exception& e) {
+                retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(e));
-            } catch (const std::exception &e) {
-                retMessage       = Message{ message };
+            } catch (const std::exception& e) {
+                retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(e));
             } catch (...) {
-                retMessage       = Message{ message };
+                retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(fmt::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
             }
 
@@ -21670,7 +21301,7 @@ public:
 
             retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
             retMessage->serviceName = unique_name;
-            msgOut.streamWriter().publish([&](auto &out) { out[0] = *retMessage; }, 1UZ);
+            msgOut.streamWriter().publish([&](auto& out) { out[0] = *retMessage; }, 1UZ);
         } // - end - for (const auto &message : messages) { ..
     }
 
@@ -21678,8 +21309,7 @@ public:
 
 namespace detail {
 template<typename List, std::size_t Index = 0, typename StringFunction>
-inline constexpr auto
-for_each_type_to_string(StringFunction func) -> std::string {
+inline constexpr auto for_each_type_to_string(StringFunction func) -> std::string {
     if constexpr (Index < List::size) {
         using T = typename List::template at<Index>;
         return std::string(Index > 0 ? ", " : "") + func(Index, T()) + for_each_type_to_string<List, Index + 1>(func);
@@ -21689,8 +21319,7 @@ for_each_type_to_string(StringFunction func) -> std::string {
 }
 
 template<typename T>
-inline constexpr std::string
-container_type_name() {
+inline constexpr std::string container_type_name() {
     if constexpr (requires { typename T::allocator_type; }) {
         return fmt::format("std::vector<{}>", gr::meta::type_name<typename T::value_type>());
     } else if constexpr (requires { std::tuple_size<T>::value; }) {
@@ -21707,8 +21336,7 @@ container_type_name() {
 } // namespace detail
 
 template<typename TBlock, typename TDecayedBlock>
-inline void
-checkBlockContracts() {
+inline void checkBlockContracts() {
     // N.B. some checks could be evaluated during compile time but the expressed intent is to do this during runtime to allow
     // for more verbose feedback on method signatures etc.
     constexpr static auto processMembers = []<typename Func>(Func func) {
@@ -21741,9 +21369,9 @@ checkBlockContracts() {
         using Type                 = std::remove_cvref_t<unwrap_if_wrapped_t<RawType>>;
         constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
         // N.B. this function is compile-time ready but static_assert does not allow for configurable error messages
-        if constexpr (!gr::settings::isSupportedType<Type>() && !(traits::port::is_port_v<Type> || traits::port::is_port_collection_v<Type>) ) {
+        if constexpr (!gr::settings::isSupportedType<Type>() && !(traits::port::is_port_v<Type> || traits::port::is_port_collection_v<Type>)) {
             throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
-                                                    gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", get_display_name(member), shortTypeName.template operator()<Type>()));
+                gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", get_display_name(member), shortTypeName.template operator()<Type>()));
         }
     };
     processMembers(checkSettingsTypes);
@@ -21806,8 +21434,7 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
         TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
-        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}",
-                                                shortTypeName.template operator()<TDecayedBlock>(), signatures));
+        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", shortTypeName.template operator()<TDecayedBlock>(), signatures));
     }
 
     // test for optional Drawable interface
@@ -21819,7 +21446,7 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
 }
 
 template<typename Derived, typename... Arguments>
-inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{ 0UZ };
+inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{0UZ};
 } // namespace gr
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, disconnect_on_done, unique_name, name, meta_information);
@@ -21830,8 +21457,7 @@ namespace gr {
  * @brief a short human-readable/markdown description of the node -- content is not contractual and subject to change
  */
 template<BlockLike TBlock>
-[[nodiscard]] /*constexpr*/ std::string
-blockDescription() noexcept {
+[[nodiscard]] /*constexpr*/ std::string blockDescription() noexcept {
     using DerivedBlock         = typename TBlock::derived_t;
     using ArgumentList         = typename TBlock::block_template_parameters;
     using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
@@ -21839,9 +21465,8 @@ blockDescription() noexcept {
 
     // re-enable once string and constexpr static is supported by all compilers
     /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
-                                                gr::meta::type_name<DerivedBlock>(), TBlock::description,
-                                                kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
-    gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto &&t) {
+        gr::meta::type_name<DerivedBlock>(), TBlock::description, kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
+    gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto&& t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
         ret += fmt::format("{}:{} ", index, type_name);
     });
@@ -21851,17 +21476,17 @@ blockDescription() noexcept {
             using RawType = std::remove_cvref_t<typename decltype(member)::value_type>;
             using Type    = unwrap_if_wrapped_t<RawType>;
 
-            if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) ) {
+            if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
                     const std::string member_name = get_display_name_const(member).str();
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
-                                       RawType::visible() ? "" : "_", //
-                                       type_name,
-                                       member_name, //
-                                       RawType::description(), RawType::unit(),
-                                       RawType::documentation(), //
-                                       RawType::visible() ? "" : "_");
+                        RawType::visible() ? "" : "_", //
+                        type_name,
+                        member_name, //
+                        RawType::description(), RawType::unit(),
+                        RawType::documentation(), //
+                        RawType::visible() ? "" : "_");
                 } else {
                     const std::string type_name   = refl::detail::get_type_name<Type>().str();
                     const std::string member_name = get_display_name_const(member).str();
@@ -21878,8 +21503,7 @@ namespace detail {
 using namespace std::string_literals;
 
 template<typename Type>
-std::string
-reflFirstTypeName() {
+std::string reflFirstTypeName() {
     //
     // Using refl cpp for getting names of types does not work
     // with class templates. It returns "Template<T...>" as the name
@@ -21901,16 +21525,16 @@ reflFirstTypeName() {
 }
 
 template<typename... Types>
-std::string
-encodeListOfTypes() {
+std::string encodeListOfTypes() {
     struct accumulator {
         std::string value;
 
-        accumulator &
-        operator%(const std::string &type) {
-            if (value.empty()) value = type;
-            else
+        accumulator& operator%(const std::string& type) {
+            if (value.empty()) {
+                value = type;
+            } else {
                 value += ","s + type;
+            }
 
             return *this;
         }
@@ -21920,16 +21544,14 @@ encodeListOfTypes() {
 }
 
 template<typename TBlock>
-std::string
-blockBaseName() {
+std::string blockBaseName() {
     auto blockName = reflFirstTypeName<TBlock>();
     auto it        = std::ranges::find(blockName, '<');
     return std::string(blockName.begin(), it);
 }
 
 template<auto Value>
-std::string
-nttpToString() {
+std::string nttpToString() {
     if constexpr (magic_enum::is_scoped_enum_v<decltype(Value)> || magic_enum::is_unscoped_enum_v<decltype(Value)>) {
         return std::string(magic_enum::enum_name(Value));
     } else {
@@ -21940,10 +21562,7 @@ nttpToString() {
 
 template<typename... Types>
 struct BlockParameters : meta::typelist<Types...> {
-    static std::string
-    toString() {
-        return detail::encodeListOfTypes<Types...>();
-    }
+    static std::string toString() { return detail::encodeListOfTypes<Types...>(); }
 };
 
 /**
@@ -21959,8 +21578,7 @@ struct BlockParameters : meta::typelist<Types...> {
  *  - TBlockParameters -- types that the block can be instantiated with
  */
 template<template<typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int
-registerBlock(TRegisterInstance &registerInstance) {
+inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         using ThisBlock = TBlock<Type>;
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
@@ -21971,8 +21589,7 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int
-registerBlock(TRegisterInstance &registerInstance) {
+inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>>;
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
@@ -21984,111 +21601,990 @@ registerBlock(TRegisterInstance &registerInstance) {
 }
 
 template<template<typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int
-registerBlock(TRegisterInstance &registerInstance) {
+inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                                                          detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>());
+            detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
 }
 
 template<template<typename, typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int
-registerBlock(TRegisterInstance &registerInstance) {
+inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                                                          Type::toString() + "," + detail::nttpToString<Value0>());
+            Type::toString() + "," + detail::nttpToString<Value0>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
 }
 
 template<template<typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int
-registerBlock(TRegisterInstance &registerInstance) {
+inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                                                          detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
+            detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
 }
 
 template<template<typename, typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int
-registerBlock(TRegisterInstance &registerInstance) {
+inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-                                                          Type::toString() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
+            Type::toString() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto
-for_each_port(Function &&function, Tuple &&tuple, Tuples &&...tuples) {
+inline constexpr auto for_each_port(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
     return gr::meta::tuple_for_each(
-            [&function](auto &&...args) {
-                (..., ([&function](auto &&arg) {
-                     using ArgType = std::decay_t<decltype(arg)>;
-                     if constexpr (traits::port::is_port_v<ArgType>) {
-                         function(arg); // arg is a port, apply function directly
-                     } else if constexpr (traits::port::is_port_collection_v<ArgType>) {
-                         for (auto &port : arg) { // arg is a collection of ports, apply function to each port
-                             function(port);
-                         }
-                     } else {
-                         static_assert(gr::meta::always_false<Tuple>, "not a port or collection of ports");
-                     }
-                 }(args)));
-            },
-            std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+        [&function](auto&&... args) {
+            (..., ([&function](auto&& arg) {
+                using ArgType = std::decay_t<decltype(arg)>;
+                if constexpr (traits::port::is_port_v<ArgType>) {
+                    function(arg); // arg is a port, apply function directly
+                } else if constexpr (traits::port::is_port_collection_v<ArgType>) {
+                    for (auto& port : arg) { // arg is a collection of ports, apply function to each port
+                        function(port);
+                    }
+                } else {
+                    static_assert(gr::meta::always_false<Tuple>, "not a port or collection of ports");
+                }
+            }(args)));
+        },
+        std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
 }
 
 } // namespace gr
 
 template<>
 struct fmt::formatter<gr::work::Result> {
-    static constexpr auto
-    parse(const format_parse_context &ctx) {
+    static constexpr auto parse(const format_parse_context& ctx) {
         const auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') throw format_error("invalid format");
+        if (it != ctx.end() && *it != '}') {
+            throw format_error("invalid format");
+        }
         return it;
     }
 
     template<typename FormatContext>
-    auto
-    format(const gr::work::Result &work_return, FormatContext &ctx) {
+    auto format(const gr::work::Result& work_return, FormatContext& ctx) {
         return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, magic_enum::enum_name(work_return.status));
     }
 };
 
 #endif // include guard
 
+// #include <gnuradio-4.0/BlockModel.hpp>
+#ifndef GNURADIO_BLOCK_MODEL_HPP
+#define GNURADIO_BLOCK_MODEL_HPP
+
+// #include <gnuradio-4.0/Block.hpp>
+
+// #include <gnuradio-4.0/LifeCycle.hpp>
+
+// #include <gnuradio-4.0/Port.hpp>
+
+// #include <gnuradio-4.0/Settings.hpp>
+
+// #include <gnuradio-4.0/thread/thread_pool.hpp>
+
+
+#include <charconv>
+
+namespace gr {
+
+class BlockModel {
+protected:
+    struct NamedPortCollection {
+        std::string                  name;
+        std::vector<gr::DynamicPort> ports;
+    };
+
+    using DynamicPortOrCollection             = std::variant<gr::DynamicPort, NamedPortCollection>;
+    using DynamicPorts                        = std::vector<DynamicPortOrCollection>;
+    bool                  _dynamicPortsLoaded = false;
+    std::function<void()> _dynamicPortsLoader;
+    DynamicPorts          _dynamicInputPorts;
+    DynamicPorts          _dynamicOutputPorts;
+
+    BlockModel() = default;
+
+    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, std::string_view name) {
+        initDynamicPorts();
+
+        if (auto separatorIt = std::ranges::find(name, '.'); separatorIt == name.end()) {
+            auto it = std::ranges::find_if(what, [name](const DynamicPortOrCollection& portOrCollection) {
+                const auto* port = std::get_if<gr::DynamicPort>(&portOrCollection);
+                return port && port->name == name;
+            });
+
+            if (it == what.end()) {
+                throw gr::exception(fmt::format("Port {} not found in {}\n", name, uniqueName()));
+            }
+
+            return std::get<gr::DynamicPort>(*it);
+        } else {
+            const std::string_view base(name.begin(), separatorIt);
+            const std::string_view indexString(separatorIt + 1, name.end());
+            std::size_t            index = -1UZ;
+            auto [_, ec]                 = std::from_chars(indexString.data(), indexString.data() + indexString.size(), index);
+            if (ec != std::errc()) {
+                throw gr::exception(fmt::format("Invalid index {} specified, needs to be an integer", indexString));
+            }
+
+            auto collectionIt = std::ranges::find_if(what, [name](const DynamicPortOrCollection& portOrCollection) {
+                const auto* collection = std::get_if<NamedPortCollection>(&portOrCollection);
+                return collection && collection->name == name;
+            });
+
+            auto& collection = std::get<NamedPortCollection>(*collectionIt);
+
+            if (index >= collection.ports.size()) {
+                throw gr::exception(fmt::format("Invalid index {} specified, out of range. Number of ports is {}", index, collection.ports.size()));
+            }
+
+            return collection.ports[index];
+        }
+    }
+
+public:
+    BlockModel(const BlockModel&)             = delete;
+    BlockModel& operator=(const BlockModel&)  = delete;
+    BlockModel(BlockModel&& other)            = delete;
+    BlockModel& operator=(BlockModel&& other) = delete;
+
+    void initDynamicPorts() const {
+        if (!_dynamicPortsLoaded) {
+            _dynamicPortsLoader();
+        }
+    }
+
+    MsgPortInNamed<"__Builtin">*  msgIn;
+    MsgPortOutNamed<"__Builtin">* msgOut;
+
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::string_view name) { return dynamicPortFromName(_dynamicInputPorts, name); }
+
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::string_view name) { return dynamicPortFromName(_dynamicOutputPorts, name); }
+
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
+        initDynamicPorts();
+        if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                throw std::invalid_argument("Need to specify the index in the port collection");
+            } else {
+                return portCollection->ports[subIndex];
+            }
+
+        } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                return *port;
+            } else {
+                throw std::invalid_argument("Specified sub-index for a normal port");
+            }
+        }
+
+        throw std::logic_error("Variant construction failed");
+    }
+
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
+        initDynamicPorts();
+        if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                throw std::invalid_argument("Need to specify the index in the port collection");
+            } else {
+                return portCollection->ports[subIndex];
+            }
+
+        } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(index))) {
+            if (subIndex == meta::invalid_index) {
+                return *port;
+            } else {
+                throw std::invalid_argument("Specified sub-index for a normal port");
+            }
+        }
+
+        throw std::logic_error("Variant construction failed");
+    }
+
+    [[nodiscard]] std::size_t dynamicInputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
+        initDynamicPorts();
+        if (parentIndex == meta::invalid_index) {
+            return _dynamicInputPorts.size();
+        } else {
+            if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(parentIndex))) {
+                return portCollection->ports.size();
+            } else {
+                return meta::invalid_index;
+            }
+        }
+    }
+
+    [[nodiscard]] std::size_t dynamicOutputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
+        initDynamicPorts();
+        if (parentIndex == meta::invalid_index) {
+            return _dynamicOutputPorts.size();
+        } else {
+            if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(parentIndex))) {
+                return portCollection->ports.size();
+            } else {
+                return meta::invalid_index;
+            }
+        }
+    }
+
+    std::size_t dynamicInputPortIndex(std::string_view name) const {
+        initDynamicPorts();
+        for (std::size_t i = 0; i < _dynamicInputPorts.size(); ++i) {
+            if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(i))) {
+                if (portCollection->name == name) {
+                    return i;
+                }
+            } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(i))) {
+                if (port->name == name) {
+                    return i;
+                }
+            }
+        }
+
+        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+    }
+
+    std::size_t dynamicOutputPortIndex(std::string_view name) const {
+        initDynamicPorts();
+        for (std::size_t i = 0; i < _dynamicOutputPorts.size(); ++i) {
+            if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(i))) {
+                if (portCollection->name == name) {
+                    return i;
+                }
+            } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(i))) {
+                if (port->name == name) {
+                    return i;
+                }
+            }
+        }
+
+        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+    }
+
+    virtual ~BlockModel() = default;
+
+    /**
+     * @brief to be called by scheduler->graph to initialise block
+     */
+    virtual void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) = 0;
+
+    /**
+     * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
+     */
+    [[nodiscard]] virtual constexpr bool isBlocking() const noexcept = 0;
+
+    /**
+     * @brief change Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
+     * See enum description for details.
+     */
+    [[nodiscard]] virtual std::expected<void, Error> changeState(lifecycle::State newState) noexcept = 0;
+
+    /**
+     * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
+     * See enum description for details.
+     */
+    [[nodiscard]] virtual lifecycle::State state() const noexcept = 0;
+
+    /**
+     * @brief number of available readable samples at the block's input ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t availableInputSamples(std::vector<std::size_t>&) const noexcept = 0;
+
+    /**
+     * @brief number of available writable samples at the block's output ports
+     */
+    [[nodiscard]] virtual constexpr std::size_t availableOutputSamples(std::vector<std::size_t>&) const noexcept = 0;
+
+    /**
+     * @brief user defined name
+     */
+    [[nodiscard]] virtual std::string_view name() const = 0;
+
+    /**
+     * @brief the type of the node as a string
+     */
+    [[nodiscard]] virtual std::string_view typeName() const = 0;
+
+    /**
+     * @brief user-defined name
+     * N.B. may not be unique -> ::uniqueName
+     */
+    virtual void setName(std::string name) noexcept = 0;
+
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] virtual property_map& metaInformation() noexcept = 0;
+
+    [[nodiscard]] virtual const property_map& metaInformation() const = 0;
+
+    /**
+     * @brief process-wide unique name
+     * N.B. can be used to disambiguate in case user provided the same 'name()' for several blocks.
+     */
+    [[nodiscard]] virtual std::string_view uniqueName() const = 0;
+
+    [[nodiscard]] virtual SettingsBase& settings() const = 0;
+
+    [[nodiscard]] virtual work::Result work(std::size_t requested_work) = 0;
+
+    [[nodiscard]] virtual work::Status draw() = 0;
+
+    virtual void processScheduledMessages() = 0;
+
+    virtual UICategory uiCategory() const { return UICategory::None; }
+
+    [[nodiscard]] virtual void* raw() = 0;
+};
+
+namespace detail {
+template<typename T, typename... Ts>
+constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
+}
+
+template<BlockLike T>
+requires std::is_constructible_v<T, property_map>
+class BlockWrapper : public BlockModel {
+private:
+    static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
+    T           _block;
+    std::string _type_name = gr::meta::type_name<T>();
+
+    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    [[nodiscard]] constexpr auto& blockRef() noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    void initMessagePorts() {
+        msgIn  = std::addressof(_block.msgIn);
+        msgOut = std::addressof(_block.msgOut);
+    }
+
+    template<typename TPort>
+    constexpr static auto& processPort(auto& where, TPort& port) noexcept {
+        where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
+        return where.back();
+    }
+
+    void dynamicPortLoader() {
+        if (_dynamicPortsLoaded) {
+            return;
+        }
+
+        auto registerPort = [this]<typename Direction, typename ConstIndex, typename CurrentPortType>(DynamicPorts& where, [[maybe_unused]] Direction direction, [[maybe_unused]] ConstIndex index, CurrentPortType&&) noexcept {
+            if constexpr (traits::port::is_port_v<CurrentPortType>) {
+                using PortDescriptor = typename CurrentPortType::ReflDescriptor;
+                if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
+                    auto& port = (blockRef().*(PortDescriptor::pointer));
+                    if (port.name.empty()) {
+                        port.name = refl::descriptor::get_name(PortDescriptor()).data;
+                    }
+                    processPort(where, port);
+                } else {
+                    // We can also have ports defined as template parameters
+                    if constexpr (Direction::value == PortDirection::INPUT) {
+                        processPort(where, gr::inputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
+                    } else {
+                        processPort(where, gr::outputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
+                    }
+                }
+            } else {
+                using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
+                if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
+                    auto&               collection = (blockRef().*(PortCollectionDescriptor::pointer));
+                    NamedPortCollection result;
+                    result.name = refl::descriptor::get_name(PortCollectionDescriptor()).data;
+                    for (auto& port : collection) {
+                        processPort(result.ports, port);
+                    }
+                    where.push_back(std::move(result));
+                } else {
+                    static_assert(meta::always_false<PortCollectionDescriptor>, "Port collections are only supported for member variables");
+                }
+            }
+        };
+
+        using Node = std::remove_cvref_t<decltype(blockRef())>;
+        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
+        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
+
+        _dynamicPortsLoaded = true;
+    }
+
+public:
+    BlockWrapper(const BlockWrapper& other)            = delete;
+    BlockWrapper(BlockWrapper&& other)                 = delete;
+    BlockWrapper& operator=(const BlockWrapper& other) = delete;
+    BlockWrapper& operator=(BlockWrapper&& other)      = delete;
+
+    ~BlockWrapper() override = default;
+
+    explicit BlockWrapper(property_map initParameter = {}) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
+    }
+
+    void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
+
+    [[nodiscard]] constexpr work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override { return blockRef().work(requested_work); }
+
+    constexpr work::Status draw() override {
+        if constexpr (requires { blockRef().draw(); }) {
+            return blockRef().draw();
+        }
+        return work::Status::ERROR;
+    }
+
+    UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
+
+    void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
+
+    [[nodiscard]] constexpr bool isBlocking() const noexcept override { return blockRef().isBlocking(); }
+
+    [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
+
+    [[nodiscard]] lifecycle::State state() const noexcept override { return blockRef().state(); }
+
+    [[nodiscard]] constexpr std::size_t availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
+
+    [[nodiscard]] constexpr std::size_t availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
+
+    [[nodiscard]] std::string_view name() const override { return blockRef().name; }
+
+    void setName(std::string name) noexcept override { blockRef().name = std::move(name); }
+
+    [[nodiscard]] std::string_view typeName() const override { return _type_name; }
+
+    [[nodiscard]] property_map& metaInformation() noexcept override { return blockRef().meta_information; }
+
+    [[nodiscard]] const property_map& metaInformation() const override { return blockRef().meta_information; }
+
+    [[nodiscard]] std::string_view uniqueName() const override { return blockRef().unique_name; }
+
+    [[nodiscard]] SettingsBase& settings() const override { return blockRef().settings(); }
+
+    [[nodiscard]] void* raw() override { return std::addressof(blockRef()); }
+};
+
+} // namespace gr
+
+#endif // GNURADIO_BLOCK_MODEL_HPP
+
 // #include <gnuradio-4.0/Buffer.hpp>
 
 // #include <gnuradio-4.0/CircularBuffer.hpp>
 
-// #include <gnuradio-4.0/meta/typelist.hpp>
+// #include <gnuradio-4.0/PluginLoader.hpp>
+#ifndef GNURADIO_PLUGIN_LOADER_H
+#define GNURADIO_PLUGIN_LOADER_H
+
+#include <algorithm>
+#include <filesystem>
+#include <iostream>
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+// #include "BlockRegistry.hpp"
+#ifndef GNURADIO_BLOCK_REGISTRY_HPP
+#define GNURADIO_BLOCK_REGISTRY_HPP
+
+#include <memory>
+#include <string>
+#include <string_view>
+
+#include <gnuradio-4.0/config.hpp>
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+// #include "BlockModel.hpp"
+
+
+namespace gr {
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+
+namespace detail {
+
+template<typename TBlock>
+requires std::is_constructible_v<TBlock, property_map>
+std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
+    return std::make_unique<gr::BlockWrapper<TBlock>>(std::move(params));
+}
+
+} // namespace detail
+
+class BlockRegistry {
+    using TBlockTypeHandler = std::function<std::unique_ptr<gr::BlockModel>(property_map)>;
+    std::vector<std::string>                                                            _blockTypes;
+    std::unordered_map<std::string, std::unordered_map<std::string, TBlockTypeHandler>> _blockTypeHandlers;
+
+    auto& findBlockTypeHandlersMap(const std::string& blockType) {
+        if (auto it = _blockTypeHandlers.find(blockType); it != _blockTypeHandlers.end()) {
+            return it->second;
+        }
+        _blockTypes.emplace_back(blockType);
+        return _blockTypeHandlers[blockType];
+    }
+
+public:
+#ifdef ENABLE_BLOCK_REGISTRY
+    template<BlockLike TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+    void addBlockType(std::string blockType, std::string blockParams) {
+        auto& block_handlers                   = findBlockTypeHandlersMap(blockType);
+        block_handlers[std::move(blockParams)] = detail::blockFactory<TBlock>;
+    }
+#else
+    template<BlockLike TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+    void addBlockType(std::string, std::string) {
+        // disables plugin system in favour of faster compile-times and when runtime or Python wrapping APIs are not requrired
+        // e.g. for compile-time only flow-graphs or for CI runners
+    }
+#endif
+
+    [[nodiscard]] std::span<const std::string> providedBlocks() const { return _blockTypes; }
+
+    [[nodiscard]] std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, property_map params) const {
+        if (auto blockIt = _blockTypeHandlers.find(std::string(name)); blockIt != _blockTypeHandlers.end()) {
+            if (auto handlerIt = blockIt->second.find(std::string(type)); handlerIt != blockIt->second.end()) {
+                return handlerIt->second(std::move(params));
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] auto knownBlocks() const { return _blockTypes; }
+
+    bool isBlockKnown(std::string_view block) const { return _blockTypeHandlers.find(std::string(block)) != _blockTypeHandlers.end(); }
+
+    auto knownBlockParameterizations(std::string_view block) const {
+        std::vector<std::string> result;
+        if (auto it = _blockTypeHandlers.find(std::string(block)); it != _blockTypeHandlers.end()) {
+            const auto& map = it->second;
+            result.reserve(map.size());
+            for (const auto& [key, _] : map) {
+                result.push_back(key);
+            }
+        }
+
+        return result;
+    }
+
+    friend inline BlockRegistry& globalBlockRegistry();
+};
+
+inline BlockRegistry& globalBlockRegistry() {
+    static BlockRegistry s_instance;
+    return s_instance;
+}
+
+} // namespace gr
+
+#endif // GNURADIO_BLOCK_REGISTRY_HPP
+
+
+#ifdef ENABLE_BLOCK_PLUGINS
+#include <dlfcn.h>
+
+// #include "plugin.hpp"
+#ifndef GNURADIO_PLUGIN_H
+#define GNURADIO_PLUGIN_H
+
+#include <span>
+#include <string>
+#include <string_view>
+
+#include <dlfcn.h>
+
+// #include "BlockRegistry.hpp"
+
+
+#include <gnuradio-plugin_export.h>
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+
+#define GR_PLUGIN_CURRENT_ABI_VERSION 1
+
+struct GNURADIO_PLUGIN_EXPORT gr_plugin_metadata {
+    std::string_view plugin_name;
+    std::string_view plugin_author;
+    std::string_view plugin_license;
+    std::string_view plugin_version;
+};
+
+class GNURADIO_PLUGIN_EXPORT gr_plugin_base {
+public:
+    gr_plugin_metadata* metadata = nullptr;
+
+    virtual ~gr_plugin_base();
+
+    virtual std::uint8_t abi_version() const = 0;
+
+    virtual std::span<const std::string>    providedBlocks() const                                                                    = 0;
+    virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
+    virtual std::vector<std::string>        knownBlockParameterizations(std::string_view block) const                                 = 0;
+};
+
+namespace gr {
+template<std::uint8_t ABI_VERSION = GR_PLUGIN_CURRENT_ABI_VERSION>
+class plugin : public gr_plugin_base {
+private:
+    gr::BlockRegistry registry;
+
+public:
+    plugin() {}
+
+    std::uint8_t abi_version() const override { return ABI_VERSION; }
+
+    std::span<const std::string> providedBlocks() const override { return registry.providedBlocks(); }
+
+    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, const property_map& params) override { return registry.createBlock(name, type, params); }
+
+    std::vector<std::string> knownBlockParameterizations(std::string_view block) const override { return registry.knownBlockParameterizations(block); }
+
+    template<typename TBlock>
+    void addBlockType(std::string blockType = {}, std::string blockParams = {}) {
+        registry.addBlockType<TBlock>(std::move(blockType), std::move(blockParams));
+    }
+};
+
+} // namespace gr
+
+/*
+ * Defines a plugin - creates the plugin meta-data and creates
+ * a block registry (grPluginInstance()) for the plugin.
+ *
+ * Arguments:
+ *  - plugin name
+ *  - author
+ *  - license of the plugin
+ *  - plugin version
+ *
+ * Example usage:
+ *     GR_PLUGIN("Good Base Plugin", "Unknown", "LGPL3", "v1")
+ */
+#define GR_PLUGIN(Name, Author, License, Version)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+    inline namespace GR_PLUGIN_DEFINITION_NAMESPACE {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
+    gr::plugin<>& grPluginInstance() {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+        static gr::plugin<>* instance = [] {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
+            auto*                     result = new gr::plugin<>();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
+            static gr_plugin_metadata plugin_metadata{Name, Author, License, Version};                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+            result->metadata = &plugin_metadata;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+            return result;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
+        }();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
+        return *instance;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
+    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
+    extern "C" {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    void GNURADIO_PLUGIN_EXPORT gr_plugin_make(gr_plugin_base** plugin) { *plugin = &grPluginInstance(); }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
+    void GNURADIO_PLUGIN_EXPORT gr_plugin_free(gr_plugin_base* plugin) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
+        if (plugin != &grPluginInstance()) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
+            assert(false && "Requested to delete something that is not us");                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
+            return;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+        }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+        delete plugin;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
+    }
+
+#endif // include guard
+
+#endif
+
+namespace gr {
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+
+#ifdef ENABLE_BLOCK_PLUGINS
+// Plugins are not supported on WASM
+
+using plugin_create_function_t  = void (*)(gr_plugin_base**);
+using plugin_destroy_function_t = void (*)(gr_plugin_base*);
+
+class PluginHandler {
+private:
+    void*                     _dl_handle  = nullptr;
+    plugin_create_function_t  _create_fn  = nullptr;
+    plugin_destroy_function_t _destroy_fn = nullptr;
+    gr_plugin_base*           _instance   = nullptr;
+
+    std::string _status;
+
+    void release() {
+        if (_instance) {
+            _destroy_fn(_instance);
+            _instance = nullptr;
+        }
+
+        if (_dl_handle) {
+            dlclose(_dl_handle);
+            _dl_handle = nullptr;
+        }
+    }
+
+public:
+    PluginHandler() = default;
+
+    explicit PluginHandler(const std::string& plugin_file) {
+        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY);
+        if (!_dl_handle) {
+            _status = "Failed to load the plugin file";
+            return;
+        }
+
+        _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gr_plugin_make"));
+        if (!_create_fn) {
+            _status = "Failed to load symbol gr_plugin_make";
+            release();
+            return;
+        }
+
+        _destroy_fn = reinterpret_cast<plugin_destroy_function_t>(dlsym(_dl_handle, "gr_plugin_free"));
+        if (!_destroy_fn) {
+            _status = "Failed to load symbol gr_plugin_free";
+            release();
+            return;
+        }
+
+        _create_fn(&_instance);
+        if (!_instance) {
+            _status = "Failed to create an instance of the plugin";
+            release();
+            return;
+        }
+
+        if (_instance->abi_version() != GR_PLUGIN_CURRENT_ABI_VERSION) {
+            _status = "Wrong ABI version";
+            release();
+            return;
+        }
+    }
+
+    PluginHandler(const PluginHandler& other)            = delete;
+    PluginHandler& operator=(const PluginHandler& other) = delete;
+
+    PluginHandler(PluginHandler&& other) noexcept : _dl_handle(std::exchange(other._dl_handle, nullptr)), _create_fn(std::exchange(other._create_fn, nullptr)), _destroy_fn(std::exchange(other._destroy_fn, nullptr)), _instance(std::exchange(other._instance, nullptr)) {}
+
+    PluginHandler& operator=(PluginHandler&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(_dl_handle, tmp._dl_handle);
+        std::swap(_create_fn, tmp._create_fn);
+        std::swap(_destroy_fn, tmp._destroy_fn);
+        std::swap(_instance, tmp._instance);
+        return *this;
+    }
+
+    ~PluginHandler() { release(); }
+
+    explicit operator bool() const { return _instance; }
+
+    [[nodiscard]] const std::string& status() const { return _status; }
+
+    auto* operator->() const { return _instance; }
+};
+
+class PluginLoader {
+private:
+    std::vector<PluginHandler>                       _handlers;
+    std::unordered_map<std::string, gr_plugin_base*> _handlerForName;
+    std::unordered_map<std::string, std::string>     _failedPlugins;
+    std::unordered_set<std::string>                  _loadedPluginFiles;
+
+    BlockRegistry*           _registry;
+    std::vector<std::string> _knownBlocks;
+
+    gr_plugin_base* handlerForName(std::string_view name) const {
+        if (auto it = _handlerForName.find(std::string(name)); it != _handlerForName.end()) {
+            return it->second;
+        } else {
+            return nullptr;
+        }
+    }
+
+public:
+    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
+        for (const auto& directory : plugin_directories) {
+            std::cerr << std::filesystem::current_path() << std::endl;
+
+            if (!std::filesystem::is_directory(directory)) {
+                continue;
+            }
+
+            for (const auto& file : std::filesystem::directory_iterator{directory}) {
+                if (file.is_regular_file() && file.path().extension() == ".so") {
+                    auto fileString = file.path().string();
+                    if (_loadedPluginFiles.contains(fileString)) {
+                        continue;
+                    }
+                    _loadedPluginFiles.insert(fileString);
+
+                    if (PluginHandler handler(file.path().string()); handler) {
+                        for (const auto& block_name : handler->providedBlocks()) {
+                            _handlerForName.emplace(std::string(block_name), handler.operator->());
+                            _knownBlocks.emplace_back(block_name);
+                        }
+
+                        _handlers.push_back(std::move(handler));
+
+                    } else {
+                        _failedPlugins[file.path()] = handler.status();
+                    }
+                }
+            }
+        }
+    }
+
+    BlockRegistry& registry() { return *_registry; }
+
+    const auto& plugins() const { return _handlers; }
+
+    const auto& failed_plugins() const { return _failedPlugins; }
+
+    auto knownBlocks() const {
+        auto        result  = _knownBlocks;
+        const auto& builtin = _registry->knownBlocks();
+        result.insert(result.end(), builtin.begin(), builtin.end());
+        return result;
+    }
+
+    std::vector<std::string> knownBlockParameterizations(std::string_view block) const {
+        if (_registry->isBlockKnown(block)) {
+            return _registry->knownBlockParameterizations(block);
+        }
+
+        gr_plugin_base* handler = handlerForName(block);
+        if (handler) {
+            return handler->knownBlockParameterizations(block);
+        } else {
+            return {};
+        }
+    }
+
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) {
+        // Try to create a node from the global registry
+        if (auto result = _registry->createBlock(name, type, params)) {
+            return result;
+        }
+
+        auto* handler = handlerForName(name);
+        if (handler == nullptr) {
+            return {};
+        }
+
+        return handler->createBlock(name, type, params);
+    }
+};
+#else
+// PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
+// same API as proper PluginLoader
+class PluginLoader {
+private:
+    BlockRegistry* _registry;
+
+public:
+    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
+
+    BlockRegistry& registry() { return *_registry; }
+
+    auto knownBlocks() const { return _registry->knownBlocks(); }
+
+    std::vector<std::string> knownBlockParameterizations(std::string_view block) const {
+        if (_registry->isBlockKnown(block)) {
+            return _registry->knownBlockParameterizations(block);
+        }
+
+        return {};
+    }
+
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) { return _registry->createBlock(name, type, params); }
+};
+#endif
+
+inline auto& globalPluginLoader() {
+    auto pluginPaths = [] {
+        std::vector<std::filesystem::path> result;
+
+        auto* envpath = ::getenv("GNURADIO4_PLUGIN_DIRECTORIES");
+        if (envpath == nullptr) {
+            // TODO choose proper paths when we get the system GR installation done
+            result.emplace_back("core/test/plugins");
+
+        } else {
+            std::string_view paths(envpath);
+
+            auto i = paths.cbegin();
+
+            // TODO If we want to support Windows, this should be ; there
+            auto isSeparator = [](char c) { return c == ':'; };
+
+            while (i != paths.cend()) {
+                i      = std::find_if_not(i, paths.cend(), isSeparator);
+                auto j = std::find_if(i, paths.cend(), isSeparator);
+
+                if (i != paths.cend()) {
+                    result.emplace_back(std::string_view(i, j));
+                }
+                i = j;
+            }
+        }
+
+        return result;
+    };
+
+    static PluginLoader instance(gr::globalBlockRegistry(), {pluginPaths()});
+    return instance;
+}
+
+} // namespace gr
+
+#endif // include guard
 
 // #include <gnuradio-4.0/Port.hpp>
 
-// #include <gnuradio-4.0/reflection.hpp>
-
 // #include <gnuradio-4.0/Sequence.hpp>
+
+// #include <gnuradio-4.0/meta/typelist.hpp>
+
+// #include <gnuradio-4.0/reflection.hpp>
 
 // #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -22116,478 +22612,20 @@ struct fmt::formatter<gr::work::Result> {
 
 namespace gr {
 
-class BlockModel {
-protected:
-    struct NamedPortCollection {
-        std::string                  name;
-        std::vector<gr::DynamicPort> ports;
-    };
-
-    using DynamicPortOrCollection             = std::variant<gr::DynamicPort, NamedPortCollection>;
-    using DynamicPorts                        = std::vector<DynamicPortOrCollection>;
-    bool                  _dynamicPortsLoaded = false;
-    std::function<void()> _dynamicPortsLoader;
-    DynamicPorts          _dynamicInputPorts;
-    DynamicPorts          _dynamicOutputPorts;
-
-    BlockModel() = default;
-
-public:
-    BlockModel(const BlockModel &) = delete;
-    BlockModel &
-    operator=(const BlockModel &)
-            = delete;
-    BlockModel(BlockModel &&other) = delete;
-    BlockModel &
-    operator=(BlockModel &&other)
-            = delete;
-
-    void
-    initDynamicPorts() const {
-        if (!_dynamicPortsLoaded) _dynamicPortsLoader();
-    }
-
-    MsgPortInNamed<"__Builtin">  *msgIn;
-    MsgPortOutNamed<"__Builtin"> *msgOut;
-
-    [[nodiscard]] gr::DynamicPort &
-    dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
-        initDynamicPorts();
-        if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument("Need to specify the index in the port collection");
-            } else {
-                return portCollection->ports[subIndex];
-            }
-
-        } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                return *port;
-            } else {
-                throw std::invalid_argument("Specified sub-index for a normal port");
-            }
-        }
-
-        throw std::logic_error("Variant construction failed");
-    }
-
-    [[nodiscard]] gr::DynamicPort &
-    dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
-        initDynamicPorts();
-        if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument("Need to specify the index in the port collection");
-            } else {
-                return portCollection->ports[subIndex];
-            }
-
-        } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                return *port;
-            } else {
-                throw std::invalid_argument("Specified sub-index for a normal port");
-            }
-        }
-
-        throw std::logic_error("Variant construction failed");
-    }
-
-    [[nodiscard]] std::size_t
-    dynamicInputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
-        initDynamicPorts();
-        if (parentIndex == meta::invalid_index) {
-            return _dynamicInputPorts.size();
-        } else {
-            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(parentIndex))) {
-                return portCollection->ports.size();
-            } else {
-                return meta::invalid_index;
-            }
-        }
-    }
-
-    [[nodiscard]] std::size_t
-    dynamicOutputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
-        initDynamicPorts();
-        if (parentIndex == meta::invalid_index) {
-            return _dynamicOutputPorts.size();
-        } else {
-            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(parentIndex))) {
-                return portCollection->ports.size();
-            } else {
-                return meta::invalid_index;
-            }
-        }
-    }
-
-    std::size_t
-    dynamicInputPortIndex(std::string_view name) const {
-        initDynamicPorts();
-        for (std::size_t i = 0; i < _dynamicInputPorts.size(); ++i) {
-            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(i))) {
-                if (portCollection->name == name) {
-                    return i;
-                }
-            } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(i))) {
-                if (port->name == name) {
-                    return i;
-                }
-            }
-        }
-
-        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
-    }
-
-    std::size_t
-    dynamicOutputPortIndex(std::string_view name) const {
-        initDynamicPorts();
-        for (std::size_t i = 0; i < _dynamicOutputPorts.size(); ++i) {
-            if (auto *portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(i))) {
-                if (portCollection->name == name) {
-                    return i;
-                }
-            } else if (auto *port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(i))) {
-                if (port->name == name) {
-                    return i;
-                }
-            }
-        }
-
-        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
-    }
-
-    virtual ~
-    BlockModel()
-            = default;
-
-    /**
-     * @brief to be called by scheduler->graph to initialise block
-     */
-    virtual void
-    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool)
-            = 0;
-
-    /**
-     * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
-     */
-    [[nodiscard]] virtual constexpr bool
-    isBlocking() const noexcept
-            = 0;
-
-    /**
-     * @brief change Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
-     * See enum description for details.
-     */
-    [[nodiscard]] virtual std::expected<void, Error>
-    changeState(lifecycle::State newState) noexcept = 0;
-
-    /**
-     * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
-     * See enum description for details.
-     */
-    [[nodiscard]] virtual lifecycle::State
-    state() const noexcept
-            = 0;
-
-    /**
-     * @brief number of available readable samples at the block's input ports
-     */
-    [[nodiscard]] virtual constexpr std::size_t
-    availableInputSamples(std::vector<std::size_t> &) const noexcept
-            = 0;
-
-    /**
-     * @brief number of available writable samples at the block's output ports
-     */
-    [[nodiscard]] virtual constexpr std::size_t
-    availableOutputSamples(std::vector<std::size_t> &) const noexcept
-            = 0;
-
-    /**
-     * @brief user defined name
-     */
-    [[nodiscard]] virtual std::string_view
-    name() const
-            = 0;
-
-    /**
-     * @brief the type of the node as a string
-     */
-    [[nodiscard]] virtual std::string_view
-    typeName() const
-            = 0;
-
-    /**
-     * @brief user-defined name
-     * N.B. may not be unique -> ::uniqueName
-     */
-    virtual void
-    setName(std::string name) noexcept
-            = 0;
-
-    /**
-     * @brief used to store non-graph-processing information like UI block position etc.
-     */
-    [[nodiscard]] virtual property_map &
-    metaInformation() noexcept
-            = 0;
-
-    [[nodiscard]] virtual const property_map &
-    metaInformation() const
-            = 0;
-
-    /**
-     * @brief process-wide unique name
-     * N.B. can be used to disambiguate in case user provided the same 'name()' for several blocks.
-     */
-    [[nodiscard]] virtual std::string_view
-    uniqueName() const
-            = 0;
-
-    [[nodiscard]] virtual SettingsBase &
-    settings() const
-            = 0;
-
-    [[nodiscard]] virtual work::Result
-    work(std::size_t requested_work)
-            = 0;
-
-    [[nodiscard]] virtual work::Status
-    draw() = 0;
-
-    virtual void
-    processScheduledMessages()
-            = 0;
-
-    virtual UICategory
-    uiCategory() const {
-        return UICategory::None;
-    }
-
-    [[nodiscard]] virtual void *
-    raw() = 0;
-};
-
-namespace detail {
-template<typename T, typename... Ts>
-constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
-}
-
-template<BlockLike T>
-    requires std::is_constructible_v<T, property_map>
-class BlockWrapper : public BlockModel {
-private:
-    static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
-    T           _block;
-    std::string _type_name = gr::meta::type_name<T>();
-
-    [[nodiscard]] constexpr const auto &
-    blockRef() const noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    [[nodiscard]] constexpr auto &
-    blockRef() noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    void
-    initMessagePorts() {
-        msgIn  = std::addressof(_block.msgIn);
-        msgOut = std::addressof(_block.msgOut);
-    }
-
-    template<typename TPort>
-    constexpr static auto &
-    processPort(auto &where, TPort &port) noexcept {
-        where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
-        return where.back();
-    }
-
-    void
-    dynamicPortLoader() {
-        if (_dynamicPortsLoaded) return;
-
-        auto registerPort = [this]<typename Direction, typename ConstIndex, typename CurrentPortType>(DynamicPorts &where, [[maybe_unused]] Direction direction, [[maybe_unused]] ConstIndex index,
-                                                                                                      CurrentPortType &&) noexcept {
-            if constexpr (traits::port::is_port_v<CurrentPortType>) {
-                using PortDescriptor = typename CurrentPortType::ReflDescriptor;
-                if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
-                    auto &port = (blockRef().*(PortDescriptor::pointer));
-                    if (port.name.empty()) {
-                        port.name = refl::descriptor::get_name(PortDescriptor()).data;
-                    }
-                    processPort(where, port);
-                } else {
-                    // We can also have ports defined as template parameters
-                    if constexpr (Direction::value == PortDirection::INPUT) {
-                        processPort(where, gr::inputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
-                    } else {
-                        processPort(where, gr::outputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
-                    }
-                }
-            } else {
-                using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
-                if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
-                    auto               &collection = (blockRef().*(PortCollectionDescriptor::pointer));
-                    NamedPortCollection result;
-                    result.name = refl::descriptor::get_name(PortCollectionDescriptor()).data;
-                    for (auto &port : collection) {
-                        processPort(result.ports, port);
-                    }
-                    where.push_back(std::move(result));
-                } else {
-                    static_assert(meta::always_false<PortCollectionDescriptor>, "Port collections are only supported for member variables");
-                }
-            }
-        };
-
-        using Node = std::remove_cvref_t<decltype(blockRef())>;
-        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
-        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
-
-        _dynamicPortsLoaded = true;
-    }
-
-public:
-    BlockWrapper(const BlockWrapper &other) = delete;
-    BlockWrapper(BlockWrapper &&other)      = delete;
-    BlockWrapper &
-    operator=(const BlockWrapper &other)
-            = delete;
-    BlockWrapper &
-    operator=(BlockWrapper &&other)
-            = delete;
-
-    ~
-    BlockWrapper() override
-            = default;
-
-    explicit
-    BlockWrapper(property_map initParameter = {})
-        : _block(std::move(initParameter)) {
-        initMessagePorts();
-        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
-    }
-
-    void
-    init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
-        return blockRef().init(progress, ioThreadPool);
-    }
-
-    [[nodiscard]] constexpr work::Result
-    work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override {
-        return blockRef().work(requested_work);
-    }
-
-    constexpr work::Status
-    draw() override {
-        if constexpr (requires { blockRef().draw(); }) {
-            return blockRef().draw();
-        }
-        return work::Status::ERROR;
-    }
-
-    UICategory
-    uiCategory() const override {
-        return T::DrawableControl::kCategory;
-    }
-
-    void
-    processScheduledMessages() override {
-        return blockRef().processScheduledMessages();
-    }
-
-    [[nodiscard]] constexpr bool
-    isBlocking() const noexcept override {
-        return blockRef().isBlocking();
-    }
-
-    [[nodiscard]] std::expected<void, Error>
-    changeState(lifecycle::State newState) noexcept override {
-        return blockRef().changeStateTo(newState);
-    }
-
-    [[nodiscard]] lifecycle::State
-    state() const noexcept override {
-        return blockRef().state();
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    availableInputSamples(std::vector<std::size_t> &data) const noexcept override {
-        return blockRef().availableInputSamples(data);
-    }
-
-    [[nodiscard]] constexpr std::size_t
-    availableOutputSamples(std::vector<std::size_t> &data) const noexcept override {
-        return blockRef().availableOutputSamples(data);
-    }
-
-    [[nodiscard]] std::string_view
-    name() const override {
-        return blockRef().name;
-    }
-
-    void
-    setName(std::string name) noexcept override {
-        blockRef().name = std::move(name);
-    }
-
-    [[nodiscard]] std::string_view
-    typeName() const override {
-        return _type_name;
-    }
-
-    [[nodiscard]] property_map &
-    metaInformation() noexcept override {
-        return blockRef().meta_information;
-    }
-
-    [[nodiscard]] const property_map &
-    metaInformation() const override {
-        return blockRef().meta_information;
-    }
-
-    [[nodiscard]] std::string_view
-    uniqueName() const override {
-        return blockRef().unique_name;
-    }
-
-    [[nodiscard]] SettingsBase &
-    settings() const override {
-        return blockRef().settings();
-    }
-
-    [[nodiscard]] void *
-    raw() override {
-        return std::addressof(blockRef());
-    }
-};
-
 template<typename T>
 struct PortIndexDefinition {
     T           topLevel;
     std::size_t subIndex;
 
-    constexpr
-    PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index)
-        : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
+    constexpr PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
 };
 
 class Edge {
 public: // TODO: consider making this private and to use accessors (that can be safely used by users)
     using PortDirection::INPUT;
     using PortDirection::OUTPUT;
-    BlockModel                      *_sourceBlock;
-    BlockModel                      *_destinationBlock;
+    BlockModel*                      _sourceBlock;
+    BlockModel*                      _destinationBlock;
     PortIndexDefinition<std::size_t> _sourcePortDefinition;
     PortIndexDefinition<std::size_t> _destinationPortDefinition;
     std::size_t                      _minBufferSize;
@@ -22598,108 +22636,84 @@ public: // TODO: consider making this private and to use accessors (that can be 
 public:
     Edge() = delete;
 
-    Edge(const Edge &) = delete;
+    Edge(const Edge&) = delete;
 
-    Edge &
-    operator=(const Edge &)
-            = delete;
+    Edge& operator=(const Edge&) = delete;
 
-    Edge(Edge &&) noexcept = default;
+    Edge(Edge&&) noexcept = default;
 
-    Edge &
-    operator=(Edge &&) noexcept
-            = default;
+    Edge& operator=(Edge&&) noexcept = default;
 
-    Edge(BlockModel *sourceBlock, PortIndexDefinition<std::size_t> sourcePortDefinition, BlockModel *destinationBlock, PortIndexDefinition<std::size_t> destinationPortDefinition,
-         std::size_t minBufferSize, std::int32_t weight, std::string_view name)
-        : _sourceBlock(sourceBlock)
-        , _destinationBlock(destinationBlock)
-        , _sourcePortDefinition(sourcePortDefinition)
-        , _destinationPortDefinition(destinationPortDefinition)
-        , _minBufferSize(minBufferSize)
-        , _weight(weight)
-        , _name(name) {}
+    Edge(BlockModel* sourceBlock, PortIndexDefinition<std::size_t> sourcePortDefinition, BlockModel* destinationBlock, PortIndexDefinition<std::size_t> destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string_view name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(name) {}
 
-    [[nodiscard]] constexpr const BlockModel &
-    sourceBlock() const noexcept {
-        return *_sourceBlock;
-    }
+    [[nodiscard]] constexpr const BlockModel& sourceBlock() const noexcept { return *_sourceBlock; }
 
-    [[nodiscard]] constexpr const BlockModel &
-    destinationBlock() const noexcept {
-        return *_destinationBlock;
-    }
+    [[nodiscard]] constexpr const BlockModel& destinationBlock() const noexcept { return *_destinationBlock; }
 
-    [[nodiscard]] constexpr PortIndexDefinition<std::size_t>
-    sourcePortDefinition() const noexcept {
-        return _sourcePortDefinition;
-    }
+    [[nodiscard]] constexpr PortIndexDefinition<std::size_t> sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
 
-    [[nodiscard]] constexpr PortIndexDefinition<std::size_t>
-    destinationPortDefinition() const noexcept {
-        return _destinationPortDefinition;
-    }
+    [[nodiscard]] constexpr PortIndexDefinition<std::size_t> destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
 
-    [[nodiscard]] constexpr std::string_view
-    name() const noexcept {
-        return _name;
-    }
+    [[nodiscard]] constexpr std::string_view name() const noexcept { return _name; }
 
-    [[nodiscard]] constexpr std::size_t
-    minBufferSize() const noexcept {
-        return _minBufferSize;
-    }
+    [[nodiscard]] constexpr std::size_t minBufferSize() const noexcept { return _minBufferSize; }
 
-    [[nodiscard]] constexpr std::int32_t
-    weight() const noexcept {
-        return _weight;
-    }
+    [[nodiscard]] constexpr std::int32_t weight() const noexcept { return _weight; }
 
-    [[nodiscard]] constexpr bool
-    is_connected() const noexcept {
-        return _connected;
-    }
+    [[nodiscard]] constexpr bool is_connected() const noexcept { return _connected; }
 };
+
+namespace graph::property {
+inline static const char* kEmplaceBlock = "EmplaceBlock";
+inline static const char* kRemoveBlock  = "RemoveBlock";
+inline static const char* kReplaceBlock = "ReplaceBlock";
+
+inline static const char* kBlockEmplaced = "BlockEmplaced";
+inline static const char* kBlockRemoved  = "BlockRemoved";
+inline static const char* kBlockReplaced = "BlockReplaced";
+
+inline static const char* kEmplaceEdge = "EmplaceEdge";
+inline static const char* kRemoveEdge  = "RemoveEdge";
+
+inline static const char* kEdgeEmplaced = "EdgeEmplaced";
+inline static const char* kEdgeRemoved  = "EdgeRemoved";
+
+} // namespace graph::property
 
 class Graph : public gr::Block<Graph> {
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>(
-            "graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
 
 private:
-    std::vector<std::function<ConnectionResult(Graph &)>> _connectionDefinitions;
-    std::vector<Edge>                                     _edges;
+    std::vector<std::function<ConnectionResult(Graph&)>> _connectionDefinitions;
+    std::vector<Edge>                                    _edges;
 
     std::vector<std::unique_ptr<BlockModel>> _blocks;
 
     template<typename TBlock>
-    std::unique_ptr<BlockModel> &
-    findBlock(TBlock &what) {
+    std::unique_ptr<BlockModel>& findBlock(TBlock& what) {
         static_assert(!std::is_pointer_v<std::remove_cvref_t<TBlock>>);
         auto it = [&, this] {
             if constexpr (std::is_same_v<TBlock, BlockModel>) {
-                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto &block) { return block.get() == &what; });
+                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto& block) { return block.get() == &what; });
             } else {
-                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto &block) { return block->raw() == &what; });
+                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto& block) { return block->raw() == &what; });
             }
         }();
 
-        if (it == _blocks.end()) throw std::runtime_error(fmt::format("No such block in this graph"));
+        if (it == _blocks.end()) {
+            throw std::runtime_error(fmt::format("No such block in this graph"));
+        }
         return *it;
     }
 
-    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Source, typename SourcePort,
-             typename Destination, typename DestinationPort>
-    [[nodiscard]] ConnectionResult
-    connectImpl(Source &sourceNodeRaw, SourcePort &source_port_or_collection, Destination &destinationNodeRaw, DestinationPort &destinationPort_or_collection, std::size_t minBufferSize = 65536,
-                std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
-        if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(sourceNodeRaw); })
-            || !std::any_of(_blocks.begin(), _blocks.end(), [&](const auto &registeredNode) { return registeredNode->raw() == std::addressof(destinationNodeRaw); })) {
-            throw std::runtime_error(
-                    fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", sourceNodeRaw.name, sourcePortIndex, destinationNodeRaw.name, destinationPortIndex));
+    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Source, typename SourcePort, typename Destination, typename DestinationPort>
+    [[nodiscard]] ConnectionResult connectImpl(Source& sourceNodeRaw, SourcePort& source_port_or_collection, Destination& destinationNodeRaw, DestinationPort& destinationPort_or_collection, std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
+        if (!std::any_of(_blocks.begin(), _blocks.end(), [&](const auto& registeredNode) { return registeredNode->raw() == std::addressof(sourceNodeRaw); }) || !std::any_of(_blocks.begin(), _blocks.end(), [&](const auto& registeredNode) { return registeredNode->raw() == std::addressof(destinationNodeRaw); })) {
+            throw std::runtime_error(fmt::format("Can not connect nodes that are not registered first:\n {}:{} -> {}:{}\n", sourceNodeRaw.name, sourcePortIndex, destinationNodeRaw.name, destinationPortIndex));
         }
 
-        auto *sourcePort = [&] {
+        auto* sourcePort = [&] {
             if constexpr (traits::port::is_port_v<SourcePort>) {
                 return &source_port_or_collection;
             } else {
@@ -22707,7 +22721,7 @@ private:
             }
         }();
 
-        auto *destinationPort = [&] {
+        auto* destinationPort = [&] {
             if constexpr (traits::port::is_port_v<DestinationPort>) {
                 return &destinationPort_or_collection;
             } else {
@@ -22716,17 +22730,15 @@ private:
         }();
 
         if constexpr (!std::is_same_v<typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>) {
-            meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type,
-                              typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
+            meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
         }
 
         auto result = sourcePort->connect(*destinationPort);
         if (result == ConnectionResult::SUCCESS) {
-            auto *sourceNode      = findBlock(sourceNodeRaw).get();
-            auto *destinationNode = findBlock(destinationNodeRaw).get();
+            auto* sourceNode      = findBlock(sourceNodeRaw).get();
+            auto* destinationNode = findBlock(destinationNodeRaw).get();
             // TODO: Rethink edge definition, indices, message port -1 etc.
-            _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{ sourcePortIndex, sourcePortSubIndex }, destinationNode,
-                                PortIndexDefinition<std::size_t>{ destinationPortIndex, destinationPortSubIndex }, minBufferSize, weight, edgeName);
+            _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{sourcePortIndex, sourcePortSubIndex}, destinationNode, PortIndexDefinition<std::size_t>{destinationPortIndex, destinationPortSubIndex}, minBufferSize, weight, edgeName);
         }
 
         return result;
@@ -22737,31 +22749,25 @@ private:
     // connect(source) and .to(destination)
     template<typename Source, typename Port, std::size_t sourcePortIndex = 1UZ, std::size_t sourcePortSubIndex = meta::invalid_index>
     struct SourceConnector {
-        Graph  &self;
-        Source &source;
-        Port   &port;
+        Graph&  self;
+        Source& source;
+        Port&   port;
 
-        SourceConnector(Graph &_self, Source &_source, Port &_port) : self(_self), source(_source), port(_port) {}
+        SourceConnector(Graph& _self, Source& _source, Port& _port) : self(_self), source(_source), port(_port) {}
 
-        static_assert(std::is_same_v<Port, gr::Message> || traits::port::is_port_v<Port> || (sourcePortSubIndex != meta::invalid_index),
-                      "When we have a collection of ports, we need to have an index to access the desired port in the collection");
+        static_assert(std::is_same_v<Port, gr::Message> || traits::port::is_port_v<Port> || (sourcePortSubIndex != meta::invalid_index), "When we have a collection of ports, we need to have an index to access the desired port in the collection");
 
     private:
         template<typename Destination, typename DestinationPort, std::size_t destinationPortIndex = meta::invalid_index, std::size_t destinationPortSubIndex = meta::invalid_index>
-        [[nodiscard]] constexpr ConnectionResult
-        to(Destination &destination, DestinationPort &destinationPort) {
+        [[nodiscard]] constexpr ConnectionResult to(Destination& destination, DestinationPort& destinationPort) {
             // Not overly efficient as the block doesn't know the graph it belongs to,
             // but this is not a frequent operation and the check is important.
-            auto is_block_known = [this](const auto &query_block) {
-                return std::any_of(self._blocks.cbegin(), self._blocks.cend(), [&query_block](const auto &known_block) { return known_block->raw() == std::addressof(query_block); });
-            };
+            auto is_block_known = [this](const auto& query_block) { return std::any_of(self._blocks.cbegin(), self._blocks.cend(), [&query_block](const auto& known_block) { return known_block->raw() == std::addressof(query_block); }); };
             if (!is_block_known(source) || !is_block_known(destination)) {
                 fmt::print("Source {} and/or destination {} do not belong to this graph\n", source.name, destination.name);
                 return ConnectionResult::FAILED;
             }
-            self._connectionDefinitions.push_back([src = &source, source_port = &port, destination = &destination, destinationPort = &destinationPort](Graph &graph) {
-                return graph.connectImpl<sourcePortIndex, sourcePortSubIndex, destinationPortIndex, destinationPortSubIndex>(*src, *source_port, *destination, *destinationPort);
-            });
+            self._connectionDefinitions.push_back([src = &source, source_port = &port, destination = &destination, destinationPort = &destinationPort](Graph& graph) { return graph.connectImpl<sourcePortIndex, sourcePortSubIndex, destinationPortIndex, destinationPortSubIndex>(*src, *source_port, *destination, *destinationPort); });
             return ConnectionResult::SUCCESS;
         }
 
@@ -22769,21 +22775,18 @@ private:
         // connect using the port index
 
         template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard]] auto
-        to_internal(Destination &destination) {
-            auto &destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
+        [[nodiscard]] auto to_internal(Destination& destination) {
+            auto& destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
         }
 
         template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto
-        to(Destination &destination) {
+        [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto to(Destination& destination) {
             return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
         }
 
         template<std::size_t destinationPortIndex, typename Destination>
-        [[nodiscard]] auto
-        to(Destination &destination) {
+        [[nodiscard]] auto to(Destination& destination) {
             if constexpr (destinationPortIndex == gr::meta::default_message_port_index) {
                 return to<Destination, decltype(destination.msgIn)>(destination, destination.msgIn);
 
@@ -22795,111 +22798,214 @@ private:
         // connect using the port name
 
         template<fixed_string destinationPortName, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard]] constexpr auto
-        to(Destination &destination) {
+        [[nodiscard]] constexpr auto to(Destination& destination) {
             using destination_input_ports              = typename traits::block::all_input_ports<Destination>;
             constexpr std::size_t destinationPortIndex = meta::indexForName<destinationPortName, destination_input_ports>();
             if constexpr (destinationPortIndex == meta::invalid_index) {
-                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination block">, Destination, meta::message_type<destinationPortName>,
-                                  meta::message_type<"These are the known names:">, traits::block::all_input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports>
-                        port_not_found_error{};
+                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination block">, Destination, meta::message_type<destinationPortName>, meta::message_type<"These are the known names:">, traits::block::all_input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports> port_not_found_error{};
             }
             return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
         }
 
         template<fixed_string destinationPortName, typename Destination>
-        [[nodiscard]] constexpr auto
-        to(Destination &destination) {
+        [[nodiscard]] constexpr auto to(Destination& destination) {
             return to<destinationPortName, meta::invalid_index, Destination>(destination);
         }
 
-        SourceConnector(const SourceConnector &) = delete;
-        SourceConnector(SourceConnector &&)      = delete;
-        SourceConnector &
-        operator=(const SourceConnector &)
-                = delete;
-        SourceConnector &
-        operator=(SourceConnector &&)
-                = delete;
+        SourceConnector(const SourceConnector&)            = delete;
+        SourceConnector(SourceConnector&&)                 = delete;
+        SourceConnector& operator=(const SourceConnector&) = delete;
+        SourceConnector& operator=(SourceConnector&&)      = delete;
     };
 
 public:
-    Graph(Graph &)  = delete;
-    Graph(Graph &&) = default;
-    Graph()         = default;
-    Graph &
-    operator=(Graph &)
-            = delete;
-    Graph &
-    operator=(Graph &&)
-            = delete;
+    Graph(Graph&)             = delete;
+    Graph(Graph&&)            = default;
+    Graph& operator=(Graph&)  = delete;
+    Graph& operator=(Graph&&) = delete;
+
+    Graph() {
+        _blocks.reserve(100);
+        propertyCallbacks[graph::property::kEmplaceBlock] = &Graph::propertyCallbackEmplaceBlock;
+        propertyCallbacks[graph::property::kRemoveBlock]  = &Graph::propertyCallbackRemoveBlock;
+        propertyCallbacks[graph::property::kReplaceBlock] = &Graph::propertyCallbackReplaceBlock;
+        propertyCallbacks[graph::property::kEmplaceEdge]  = &Graph::propertyCallbackEmplaceEdge;
+        propertyCallbacks[graph::property::kRemoveEdge]   = &Graph::propertyCallbackRemoveEdge;
+    }
 
     /**
      * @return a list of all blocks contained in this graph
      * N.B. some 'blocks' may be (sub-)graphs themselves
      */
-    [[nodiscard]] std::span<std::unique_ptr<BlockModel>>
-    blocks() noexcept {
-        return { _blocks };
-    }
+    [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {_blocks}; }
 
     /**
      * @return a list of all edges in this graph connecting blocks
      */
-    [[nodiscard]] std::span<Edge>
-    edges() noexcept {
-        return { _edges };
-    }
+    [[nodiscard]] std::span<Edge> edges() noexcept { return {_edges}; }
 
-    BlockModel &
-    addBlock(std::unique_ptr<BlockModel> block) {
-        auto &new_block_ref = _blocks.emplace_back(std::move(block));
+    BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
+        auto& new_block_ref = _blocks.emplace_back(std::move(block));
         new_block_ref->init(progress, ioThreadPool);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *new_block_ref.get();
     }
 
     template<BlockLike TBlock, typename... Args>
-        requires std::is_constructible_v<TBlock, property_map>
-    auto &
-    emplaceBlock(Args &&...args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
+    requires std::is_constructible_v<TBlock, property_map>
+    auto& emplaceBlock(Args&&... args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::forward<Args>(args)...));
-        auto  raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
+        auto& new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::forward<Args>(args)...));
+        auto  raw_ref       = static_cast<TBlock*>(new_block_ref->raw());
         raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
 
     template<BlockLike TBlock>
-        requires std::is_constructible_v<TBlock, property_map>
-    auto &
-    emplaceBlock(property_map initialSettings) {
+    requires std::is_constructible_v<TBlock, property_map>
+    auto& emplaceBlock(property_map initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto      &new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
-        auto       raw_ref       = static_cast<TBlock *>(new_block_ref->raw());
+        auto&      new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
+        auto       raw_ref       = static_cast<TBlock*>(new_block_ref->raw());
         const auto failed        = raw_ref->settings().set(initialSettings);
         raw_ref->init(progress, ioThreadPool);
         return *raw_ref;
     }
 
+    auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
+        auto block_load = loader.instantiate(type, parameters, initialSettings);
+        if (!block_load) {
+            throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+        }
+        return addBlock(std::move(block_load));
+    }
+
+    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view propertyName, Message message) {
+        const auto&         data       = message.data.value();
+        const std::string&  type       = std::get<std::string>(data.at("type"s));
+        const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
+        const property_map& properties = std::get<property_map>(data.at("properties"s));
+
+        auto& newBlock = emplaceBlock(type, parameters, properties);
+
+        std::optional<Message> result = gr::Message{};
+        result->endpoint              = graph::property::kBlockEmplaced;
+        result->data                  = property_map{{"uniqueName"s, std::string(newBlock.uniqueName())}};
+
+        return result;
+    }
+
+    std::optional<Message> propertyCallbackRemoveBlock(std::string_view propertyName, Message message) {
+        const auto&        data       = message.data.value();
+        const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
+        auto               it         = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
+
+        if (it == _blocks.end()) {
+            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+        }
+
+        _blocks.erase(it);
+        message.endpoint = graph::property::kBlockRemoved;
+
+        return {message};
+    }
+
+    std::optional<Message> propertyCallbackReplaceBlock(std::string_view propertyName, Message message) {
+        const auto&         data       = message.data.value();
+        const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
+        const std::string&  type       = std::get<std::string>(data.at("type"s));
+        const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
+        const property_map& properties = std::get<property_map>(data.at("properties"s));
+
+        auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
+        if (it == _blocks.end()) {
+            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+        }
+
+        auto block_load = gr::globalPluginLoader().instantiate(type, parameters, properties);
+        if (!block_load) {
+            throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+        }
+
+        _blocks.erase(it);
+        const auto newName = block_load->uniqueName();
+        addBlock(std::move(block_load));
+
+        std::optional<Message> result = gr::Message{};
+        result->endpoint              = graph::property::kBlockEmplaced;
+        result->data                  = property_map{{"uniqueName"s, std::string(newName)}};
+
+        return result;
+    }
+
+    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view propertyName, Message message) {
+        const auto&        data             = message.data.value();
+        const std::string& sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string& sourcePort       = std::get<std::string>(data.at("sourcePort"s));
+        const std::string& destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
+        const std::string& destinationPort  = std::get<std::string>(data.at("destinationPort"s));
+
+        auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
+        if (sourceBlockIt == _blocks.end()) {
+            throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+        }
+
+        auto destinationBlockIt = std::ranges::find_if(_blocks, [&destinationBlock](const auto& block) { return block->uniqueName() == destinationBlock; });
+        if (destinationBlockIt == _blocks.end()) {
+            throw gr::exception(fmt::format("Block {} was not found in {}", destinationBlock, this->unique_name));
+        }
+
+        auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
+        auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(destinationPort);
+
+        if (sourcePortRef.defaultValue().type() != destinationPortRef.defaultValue().type()) {
+            throw gr::exception(fmt::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
+        }
+
+        auto connectionResult = sourcePortRef.connect(destinationPortRef);
+
+        if (connectionResult != ConnectionResult::SUCCESS) {
+            throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
+        }
+
+        // _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, edgeName);
+
+        message.endpoint = graph::property::kEdgeEmplaced;
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackRemoveEdge(std::string_view propertyName, Message message) {
+        const auto&        data        = message.data.value();
+        const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
+
+        auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
+        if (sourceBlockIt == _blocks.end()) {
+            throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+        }
+
+        auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
+
+        sourcePortRef.disconnect();
+        message.endpoint = graph::property::kEdgeRemoved;
+        return message;
+    }
+
     // connect using the port index
 
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto
-    connect_internal(Source &source) {
-        auto &port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
+    [[nodiscard]] auto connect_internal(Source& source) {
+        auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
     }
 
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard, deprecated("The connect with the port name should be used")]] auto
-    connect(Source &source) {
+    [[nodiscard, deprecated("The connect with the port name should be used")]] auto connect(Source& source) {
         return connect_internal<sourcePortIndex, sourcePortSubIndex, Source>(source);
     }
 
     template<std::size_t sourcePortIndex, typename Source>
-    [[nodiscard]] auto
-    connect(Source &source) {
+    [[nodiscard]] auto connect(Source& source) {
         if constexpr (sourcePortIndex == meta::default_message_port_index) {
             return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut);
         } else {
@@ -22910,63 +23016,51 @@ public:
     // connect using the port name
 
     template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto
-    connect(Source &source) {
+    [[nodiscard]] auto connect(Source& source) {
         using source_output_ports             = typename traits::block::all_output_ports<Source>;
         constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
         if constexpr (sourcePortIndex == meta::invalid_index) {
-            meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>,
-                              meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports>
-                    port_not_found_error{};
+            meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>, meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports> port_not_found_error{};
         }
         return connect_internal<sourcePortIndex, sourcePortSubIndex, Source>(source);
     }
 
     template<fixed_string sourcePortName, typename Source>
-    [[nodiscard]] auto
-    connect(Source &source) {
+    [[nodiscard]] auto connect(Source& source) {
         return connect<sourcePortName, meta::invalid_index, Source>(source);
     }
 
     // dynamic/runtime connections
 
     template<typename Source, typename Destination>
-        requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
-    ConnectionResult
-    connect(Source &sourceBlockRaw, PortIndexDefinition<std::size_t> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::size_t> destinationPortDefinition,
-            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
-        auto result = findBlock(sourceBlockRaw)
-                              ->dynamicOutputPort(sourcePortDefinition.topLevel, sourcePortDefinition.subIndex)
-                              .connect(findBlock(destinationBlockRaw)->dynamicInputPort(destinationPortDefinition.topLevel, destinationPortDefinition.subIndex));
+    requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
+    ConnectionResult connect(Source& sourceBlockRaw, PortIndexDefinition<std::size_t> sourcePortDefinition, Destination& destinationBlockRaw, PortIndexDefinition<std::size_t> destinationPortDefinition, std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
+        auto result = findBlock(sourceBlockRaw)->dynamicOutputPort(sourcePortDefinition.topLevel, sourcePortDefinition.subIndex).connect(findBlock(destinationBlockRaw)->dynamicInputPort(destinationPortDefinition.topLevel, destinationPortDefinition.subIndex));
         if (result == ConnectionResult::SUCCESS) {
-            auto *sourceBlock      = findBlock(sourceBlockRaw).get();
-            auto *destinationBlock = findBlock(destinationBlockRaw).get();
+            auto* sourceBlock      = findBlock(sourceBlockRaw).get();
+            auto* destinationBlock = findBlock(destinationBlockRaw).get();
             _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, edgeName);
         }
         return result;
     }
 
     template<typename Source, typename Destination>
-        requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
-    ConnectionResult
-    connect(Source &sourceBlockRaw, PortIndexDefinition<std::string> sourcePortDefinition, Destination &destinationBlockRaw, PortIndexDefinition<std::string> destinationPortDefinition,
-            std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
+    requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
+    ConnectionResult connect(Source& sourceBlockRaw, PortIndexDefinition<std::string> sourcePortDefinition, Destination& destinationBlockRaw, PortIndexDefinition<std::string> destinationPortDefinition, std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string_view edgeName = "unnamed edge") {
         auto sourcePortIndex      = this->findBlock(sourceBlockRaw)->dynamicOutputPortIndex(sourcePortDefinition.topLevel);
         auto destinationPortIndex = this->findBlock(destinationBlockRaw)->dynamicInputPortIndex(destinationPortDefinition.topLevel);
-        return connect(sourceBlockRaw, { sourcePortIndex, sourcePortDefinition.subIndex }, destinationBlockRaw, { destinationPortIndex, destinationPortDefinition.subIndex }, minBufferSize, weight,
-                       edgeName);
+        return connect(sourceBlockRaw, {sourcePortIndex, sourcePortDefinition.subIndex}, destinationBlockRaw, {destinationPortIndex, destinationPortDefinition.subIndex}, minBufferSize, weight, edgeName);
     }
 
+    using Block<Graph>::processMessages;
+
     template<typename Anything>
-    void
-    processMessages(MsgPortInNamed<"__FromChildren"> & /*port*/, std::span<const Anything> /*input*/) {
+    void processMessages(MsgPortInNamed<"__FromChildren">& /*port*/, std::span<const Anything> /*input*/) {
         static_assert(meta::always_false<Anything>, "This is not called, children are processed in processScheduledMessages");
     }
 
-    bool
-    performConnections() {
-        auto result = std::all_of(_connectionDefinitions.begin(), _connectionDefinitions.end(),
-                                  [this](auto &connection_definition) { return connection_definition(*this) == ConnectionResult::SUCCESS; });
+    bool performConnections() {
+        auto result = std::all_of(_connectionDefinitions.begin(), _connectionDefinitions.end(), [this](auto& connection_definition) { return connection_definition(*this) == ConnectionResult::SUCCESS; });
         if (result) {
             _connectionDefinitions.clear();
         }
@@ -22974,15 +23068,13 @@ public:
     }
 
     template<typename F> // TODO: F must be constraint by a descriptive concept
-    void
-    forEachBlock(F &&f) const {
-        std::ranges::for_each(_blocks, [f](const auto &block_ptr) { std::invoke(f, *block_ptr.get()); });
+    void forEachBlock(F&& f) const {
+        std::ranges::for_each(_blocks, [f](const auto& block_ptr) { std::invoke(f, *block_ptr.get()); });
     }
 
     template<typename F> // TODO: F must be constraint by a descriptive concept
-    void
-    forEachEdge(F &&f) const {
-        std::ranges::for_each(_edges, [f](const auto &edge) { std::invoke(f, edge); });
+    void forEachEdge(F&& f) const {
+        std::ranges::for_each(_edges, [f](const auto& edge) { std::invoke(f, edge); });
     }
 };
 
@@ -23041,9 +23133,7 @@ concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block:
 static_assert(not SinkBlockLike<int>);
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-class MergedGraph
-    : public Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>,
-                   meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>> {
+class MergedGraph : public Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>, meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>> {
     static std::atomic_size_t _unique_id_counter;
 
 public:
@@ -23052,8 +23142,7 @@ public:
 
 private:
     // copy-paste from above, keep in sync
-    using base = Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>,
-                       meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>>;
+    using base = Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>, meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>>;
 
     Left  left;
     Right right;
@@ -23065,8 +23154,7 @@ private:
     friend class MergedGraph;
 
     // returns the minimum of all internal max_samples port template parameters
-    static constexpr std::size_t
-    merged_work_chunk_size() noexcept {
+    static constexpr std::size_t merged_work_chunk_size() noexcept {
         constexpr std::size_t left_size = []() {
             if constexpr (requires {
                               { Left::merged_work_chunk_size() } -> std::same_as<std::size_t>;
@@ -23085,27 +23173,21 @@ private:
                 return std::dynamic_extent;
             }
         }();
-        return std::min({ traits::block::stream_input_ports<Right>::template apply<traits::port::max_samples>::value,
-                          traits::block::stream_output_ports<Left>::template apply<traits::port::max_samples>::value, left_size, right_size });
+        return std::min({traits::block::stream_input_ports<Right>::template apply<traits::port::max_samples>::value, traits::block::stream_output_ports<Left>::template apply<traits::port::max_samples>::value, left_size, right_size});
     }
 
     template<std::size_t I>
-    constexpr auto
-    apply_left(std::size_t offset, auto &&input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return invokeProcessOneWithOrWithoutOffset(left, offset, std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...);
-        }(std::make_index_sequence<I>());
+    constexpr auto apply_left(std::size_t offset, auto&& input_tuple) noexcept {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return invokeProcessOneWithOrWithoutOffset(left, offset, std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
     }
 
     template<std::size_t I, std::size_t J>
-    constexpr auto
-    apply_right(std::size_t offset, auto &&input_tuple, auto &&tmp) noexcept {
+    constexpr auto apply_right(std::size_t offset, auto&& input_tuple, auto&& tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
             constexpr std::size_t first_offset  = traits::block::stream_input_port_types<Left>::size;
             constexpr std::size_t second_offset = traits::block::stream_input_port_types<Left>::size + sizeof...(Is);
             static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return invokeProcessOneWithOrWithoutOffset(right, offset, std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp),
-                                                       std::get<second_offset + Js>(input_tuple)...);
+            return invokeProcessOneWithOrWithoutOffset(right, offset, std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
         }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
@@ -23114,38 +23196,32 @@ public:
     using TOutputPortTypes = typename traits::block::stream_output_port_types<base>;
     using TReturnType      = typename traits::block::stream_return_type<base>;
 
-    constexpr
-    MergedGraph(Left l, Right r)
-        : left(std::move(l)), right(std::move(r)) {}
+    constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
     // if the left block (source) implements available_samples (a customization point), then pass the call through
-    friend constexpr std::size_t
-    available_samples(const MergedGraph &self) noexcept
-        requires requires(const Left &l) {
-            { available_samples(l) } -> std::same_as<std::size_t>;
-        }
+    friend constexpr std::size_t available_samples(const MergedGraph& self) noexcept
+    requires requires(const Left& l) {
+        { available_samples(l) } -> std::same_as<std::size_t>;
+    }
     {
         return available_samples(self.left);
     }
 
     template<meta::any_simd... Ts>
-        requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr meta::simdize<TReturnType, meta::simdize_size_v<std::tuple<Ts...>>>
-    processOne(std::size_t offset, const Ts &...inputs) {
+    requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
+    constexpr meta::simdize<TReturnType, meta::simdize_size_v<std::tuple<Ts...>>> processOne(std::size_t offset, const Ts&... inputs) {
         static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...),
-                                                                                                   apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::tie(inputs...)));
+        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::tie(inputs...)));
     }
 
-    constexpr auto
-    processOne_simd(std::size_t offset, auto N)
-        requires traits::block::can_processOne_simd<Right>
+    constexpr auto processOne_simd(std::size_t offset, auto N)
+    requires traits::block::can_processOne_simd<Right>
     {
-        if constexpr (requires(Left &l) {
+        if constexpr (requires(Left& l) {
                           { l.processOne_simd(offset, N) };
                       }) {
             return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(offset, N));
-        } else if constexpr (requires(Left &l) {
+        } else if constexpr (requires(Left& l) {
                                  { l.processOne_simd(N) };
                              }) {
             return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(N));
@@ -23162,23 +23238,19 @@ public:
 
     template<typename... Ts>
     // Nicer error messages for the following would be good, but not at the expense of breaking can_processOne_simd.
-        requires(TInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr TReturnType
-    processOne(std::size_t offset, Ts &&...inputs) {
+    requires(TInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
+    constexpr TReturnType processOne(std::size_t offset, Ts&&... inputs) {
         // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
         if constexpr (traits::block::stream_output_port_types<Left>::size == 1) {
             // only the result from the right block needs to be returned
-            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId
-                                             - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                  apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
             auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
-            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...),
-                                                                                                                 std::move(std::get<OutId>(left_out)));
+            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
@@ -23187,15 +23259,10 @@ public:
                 return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Right>::size == 1) {
-                return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
-                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out));
-                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
+                return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
 
             } else {
-                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) {
-                    return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...));
-                }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>(),
-                       std::make_index_sequence<Right::output_port_types::size>());
+                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
             }
         }
     } // end:: processOne
@@ -23207,7 +23274,7 @@ public:
 };
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_counter{ 0UZ };
+inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_counter{0UZ};
 
 /**
  * This methods can merge simple blocks that are defined via a single `auto processOne(..)` producing a
@@ -23232,17 +23299,13 @@ inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_coun
  * @endcode
  */
 template<std::size_t OutId, std::size_t InId, SourceBlockLike A, SinkBlockLike B>
-constexpr auto
-mergeByIndex(A &&a, B &&b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
-    if constexpr (!std::is_same_v<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
-                                  typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-        gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>,
-                              typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
+constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
+    if constexpr (!std::is_same_v<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
+        gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
 
-                              gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>,
-                              typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+            gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
-    return { std::forward<A>(a), std::forward<B>(b) };
+    return {std::forward<A>(a), std::forward<B>(b)};
 }
 
 /**
@@ -23268,18 +23331,15 @@ mergeByIndex(A &&a, B &&b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cv
  * @endcode
  */
 template<fixed_string OutName, fixed_string InName, SourceBlockLike A, SinkBlockLike B>
-constexpr auto
-merge(A &&a, B &&b) {
+constexpr auto merge(A&& a, B&& b) {
     constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
     constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::stream_input_ports<B>>();
     static_assert(OutIdUnchecked != -1);
     static_assert(InIdUnchecked != -1);
     constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
     constexpr auto InId  = static_cast<std::size_t>(InIdUnchecked);
-    static_assert(std::same_as<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
-                               typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>,
-                  "Port types do not match");
-    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{ std::forward<A>(a), std::forward<B>(b) };
+    static_assert(std::same_as<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>, "Port types do not match");
+    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{std::forward<A>(a), std::forward<B>(b)};
 }
 
 /*******************************************************************************************************/
@@ -23287,38 +23347,16 @@ merge(A &&a, B &&b) {
 /*******************************************************************************************************/
 
 // TODO: add nicer enum formatter
-inline std::ostream &
-operator<<(std::ostream &os, const ConnectionResult &value) {
-    return os << static_cast<int>(value);
-}
+inline std::ostream& operator<<(std::ostream& os, const ConnectionResult& value) { return os << static_cast<int>(value); }
 
-inline std::ostream &
-operator<<(std::ostream &os, const PortType &value) {
-    return os << static_cast<int>(value);
-}
+inline std::ostream& operator<<(std::ostream& os, const PortType& value) { return os << static_cast<int>(value); }
 
-inline std::ostream &
-operator<<(std::ostream &os, const PortDirection &value) {
-    return os << static_cast<int>(value);
-}
+inline std::ostream& operator<<(std::ostream& os, const PortDirection& value) { return os << static_cast<int>(value); }
 
 template<PortDomainLike T>
-inline std::ostream &
-operator<<(std::ostream &os, const T &value) {
+inline std::ostream& operator<<(std::ostream& os, const T& value) {
     return os << value.Name;
 }
-
-#if HAVE_SOURCE_LOCATION
-inline auto
-this_source_location(std::source_location l = std::source_location::current()) {
-    return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column());
-}
-#else
-inline auto
-this_source_location() {
-    return "not yet implemented";
-}
-#endif // HAVE_SOURCE_LOCATION
 
 } // namespace gr
 

@@ -16,10 +16,7 @@ Ideal for scenarios that require a simple, low-overhead source of consistent val
 
     gr::PortOut<T> out;
 
-    [[nodiscard]] constexpr T
-    processOne() const noexcept {
-        return T{};
-    }
+    [[nodiscard]] constexpr T processOne() const noexcept { return T{}; }
 };
 
 static_assert(gr::BlockLike<NullSource<float>>);
@@ -36,13 +33,9 @@ Commonly used for testing and simulations where consistent output and finite exe
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    void
-    reset() {
-        count = 0U;
-    }
+    void reset() { count = 0U; }
 
-    [[nodiscard]] constexpr T
-    processOne() noexcept {
+    [[nodiscard]] constexpr T processOne() noexcept {
         count++;
         if (n_samples_max > 0 && count >= n_samples_max) {
             this->requestStop();
@@ -54,7 +47,32 @@ Commonly used for testing and simulations where consistent output and finite exe
 static_assert(gr::BlockLike<ConstantSource<float>>);
 
 template<typename T>
-    requires(std::is_arithmetic_v<T>)
+struct SlowSource : public gr::Block<SlowSource<T>> {
+    using Description = Doc<R""(A source block that emits a constant default value every n miliseconds)"">;
+
+    gr::PortOut<T>                                                                  out;
+    Annotated<T, "default value", Visible, Doc<"default value for each sample">>    default_value{};
+    Annotated<gr::Size_t, "delay", Doc<"how many milliseconds between each value">> n_delay = 100U;
+
+    std::optional<std::chrono::time_point<std::chrono::system_clock>> lastEventAt;
+
+    [[nodiscard]] gr::work::Status processBulk(PublishableSpan auto& output) {
+        if (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(n_delay)) {
+            lastEventAt = std::chrono::system_clock::now();
+
+            output[0] = default_value;
+            output.publish(1);
+            return gr::work::Status::OK;
+        }
+
+        return gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
+    }
+};
+
+static_assert(gr::BlockLike<SlowSource<float>>);
+
+template<typename T>
+requires(std::is_arithmetic_v<T>)
 struct CountingSource : public gr::Block<CountingSource<T>> {
     using Description = Doc<R""(A source block that emits an increasing sequence starting from a specified default value.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
@@ -66,13 +84,9 @@ Commonly used for testing and simulations where consistent output and finite exe
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    void
-    reset() {
-        count = 0U;
-    }
+    void reset() { count = 0U; }
 
-    [[nodiscard]] constexpr T
-    processOne() noexcept {
+    [[nodiscard]] constexpr T processOne() noexcept {
         count++;
         if (n_samples_max > 0 && count >= n_samples_max) {
             this->requestStop();
@@ -92,8 +106,7 @@ Commonly used used to isolate parts of a flowgraph, manage buffer sizes, or simp
     gr::PortOut<T> out;
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(V input) const noexcept {
+    [[nodiscard]] constexpr auto processOne(V input) const noexcept {
         return input;
     }
 };
@@ -111,13 +124,9 @@ Commonly used to control data flow in systems where precise sample counts are cr
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    void
-    reset() {
-        count = 0U;
-    }
+    void reset() { count = 0U; }
 
-    [[nodiscard]] constexpr auto
-    processOne(T input) noexcept {
+    [[nodiscard]] constexpr auto processOne(T input) noexcept {
         count++;
         if (n_samples_max > 0 && count >= n_samples_max) {
             this->requestStop();
@@ -137,8 +146,7 @@ Commonly used for testing, performance benchmarking, and in scenarios where sign
     gr::PortIn<T> in;
 
     template<gr::meta::t_or_simd<T> V>
-    void
-    processOne(V) const noexcept {}
+    void processOne(V) const noexcept {}
 };
 
 static_assert(gr::BlockLike<NullSink<float>>);
@@ -154,14 +162,10 @@ Commonly used for testing scenarios and signal termination where output is unnec
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    void
-    reset() {
-        count = 0U;
-    }
+    void reset() { count = 0U; }
 
     template<gr::meta::t_or_simd<T> V>
-    void
-    processOne(V) noexcept {
+    void processOne(V) noexcept {
         if constexpr (stdx::is_simd_v<V>) {
             count += V::size();
         } else {
@@ -180,24 +184,13 @@ static_assert(gr::BlockLike<CountingSink<float>>);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::NullSource, out);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::ConstantSource, out, n_samples_max, count);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::CountingSource, out, n_samples_max, count);
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::SlowSource, out, n_delay);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::Copy, in, out);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::HeadBlock, in, out, n_samples_max, count);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::NullSink, in);
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::CountingSink, in, n_samples_max, count);
 
-const inline auto registerNullSources
-        = gr::registerBlock<gr::testing::NullSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string,
-                            gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry())
-        | gr::registerBlock<gr::testing::ConstantSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>,
-                            std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry())
-        | gr::registerBlock<gr::testing::CountingSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>(gr::globalBlockRegistry())
-        | gr::registerBlock<gr::testing::Copy, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string,
-                            gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry())
-        | gr::registerBlock<gr::testing::HeadBlock, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string,
-                            gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry())
-        | gr::registerBlock<gr::testing::NullSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string,
-                            gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry())
-        | gr::registerBlock<gr::testing::CountingSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string,
-                            gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry());
+const inline auto registerNullSources = gr::registerBlock<gr::testing::NullSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::ConstantSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::CountingSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::Copy, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::HeadBlock, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::NullSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) |
+                                        gr::registerBlock<gr::testing::CountingSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_NULLSOURCES_HPP
