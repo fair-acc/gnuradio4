@@ -355,7 +355,7 @@ public:
         addBlock(std::move(block_load));
 
         std::optional<Message> result = gr::Message{};
-        result->endpoint              = graph::property::kBlockEmplaced;
+        result->endpoint              = graph::property::kBlockReplaced;
         result->data                  = property_map{{"uniqueName"s, std::string(newName)}};
 
         return result;
