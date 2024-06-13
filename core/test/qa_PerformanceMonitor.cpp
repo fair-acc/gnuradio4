@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
         watchdogThread.join();
     }
 
-    expect(approx(monitorPerformance.n_updates_res, sinkRes.n_samples_produced, 2));
-    expect(approx(monitorPerformance.n_updates_rate, sinkRate.n_samples_produced, 2));
+    expect(approx(monitorPerformance.n_updates_res, sinkRes.n_samples_produced, 2U));
+    expect(approx(monitorPerformance.n_updates_rate, sinkRate.n_samples_produced, 2U));
     //   expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
 }

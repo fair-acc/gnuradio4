@@ -186,10 +186,8 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     // controls automatic (if set) or manual update of above parameters
     std::set<std::string, std::less<>> auto_update{"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"};
 
-    PortMetaInfo() noexcept(true) : PortMetaInfo({}) {}
-
+    constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
-
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
 
     void reset() { auto_update = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"}; }
@@ -352,8 +350,8 @@ struct Port {
         ConsumablePortInputRange(std::size_t nSamples, ReaderType& streamReader, TagReaderSpanType _tags, Tag::signed_index_type _currentStreamOffset) : ReaderSpanType<spanReleasePolicy>(streamReader.template get<spanReleasePolicy>(nSamples)), tags(_tags), streamIndex{_currentStreamOffset} {};
 
         ~ConsumablePortInputRange() {
-            if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (tags.isConsumeRequested()) {                           // the user has already manually consumed tags
+            if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
+                if (tags.isConsumeRequested()) {                             // the user has already manually consumed tags
                     return;
                 }
                 if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::getConsumeRequested() == 0) || this->empty()) {
@@ -367,7 +365,7 @@ struct Port {
                         break;
                     }
                 }
-                bool result = tags.tryConsume(tagsToConsume);
+                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitely and implicitly consumed
             }
         }
     };
@@ -400,16 +398,12 @@ private:
 
 public:
     constexpr Port() noexcept = default;
-
     Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : name(std::move(port_name)), priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} { static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter"); }
-
     constexpr Port(Port&& other) noexcept : name(std::move(other.name)), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
-
     Port(const Port&)                       = delete;
     auto            operator=(const Port&)  = delete;
     constexpr Port& operator=(Port&& other) = delete;
-
-    ~Port() = default;
+    ~Port()                                 = default;
 
     [[nodiscard]] constexpr bool initBuffer(std::size_t nSamples = 0) noexcept {
         if constexpr (kIsOutput) {
@@ -763,6 +757,9 @@ static_assert(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message"
 static_assert(PortIn<float>::kPortType == PortType::STREAM);
 static_assert(PortIn<Message>::kPortType == PortType::STREAM);
 static_assert(MsgPortIn::kPortType == PortType::MESSAGE);
+
+static_assert(std::is_default_constructible_v<PortIn<float>>);
+static_assert(std::is_default_constructible_v<PortOut<float>>);
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime

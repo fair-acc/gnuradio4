@@ -534,19 +534,19 @@ const boost::ut::suite AnnotationTests = [] {
 
     "annotated forwarding member functions"_test = [] {
         Annotated<std::string> annotatedString = "hello";
-        expect(annotatedString->size() == 5);  // operator-> forwarding
-        expect(annotatedString[1] == 'e');     // operator[]
-        expect(annotatedString->at(1) == 'e'); // operator->*
+        expect(annotatedString->size() == 5);    // operator-> forwarding
+        expect(annotatedString[1UZ] == 'e');     // operator[]
+        expect(annotatedString->at(1UZ) == 'e'); // operator->*
 
-        annotatedString[1] = 'a';
+        annotatedString[1UZ] = 'a';
         expect(annotatedString == "hallo"); // check modified string
     };
 
     "const correctness"_test = [] {
         const Annotated<std::string> annotatedString = "hello";
-        expect(annotatedString->size() == 5);  // const operator->
-        expect(annotatedString[1] == 'e');     // const operator[]
-        expect(annotatedString->at(1) == 'e'); // const operator->*
+        expect(annotatedString->size() == 5);    // const operator->
+        expect(annotatedString[1UZ] == 'e');     // const operator[]
+        expect(annotatedString->at(1UZ) == 'e'); // const operator->*
 
         // Ensure the original string is not modified
         expect(annotatedString == "hello");

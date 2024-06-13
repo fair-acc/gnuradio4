@@ -370,7 +370,7 @@ inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and re
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : public lifecycle::StateMachine<Derived>, protected std::tuple<Arguments...> {
+class Block : public lifecycle::StateMachine<Derived>, public std::tuple<Arguments...> {
     static std::atomic_size_t _uniqueIdCounter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -496,10 +496,10 @@ protected:
     }
 
 public:
+    Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-
-    Block(property_map initParameter = {}) noexcept(false)                                  // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameter) noexcept(false)                                                                                                       // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
@@ -818,9 +818,9 @@ public:
      * @param untilOffset defaults to 0, if bigger merges all tags from samples 0...untilOffset for each port before merging
      *                    them
      */
-    constexpr void updateInputAndOutputTags(std::size_t untilOffset = 0) noexcept {
+    constexpr void updateInputAndOutputTags(std::size_t /*untilOffset*/ = 0UZ) noexcept {
         for_each_port(
-            [untilOffset, this]<PortLike TPort>(TPort& input_port) noexcept {
+            [this]<PortLike TPort>(TPort& input_port) noexcept {
                 auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                     assert(&sourceMap != &destinationMap);
                     for (const auto& [key, value] : sourceMap) {
@@ -905,7 +905,7 @@ public:
 
     inline constexpr void publishEoS() noexcept {
         const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
-        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, outPort.streamWriter().nSamplesPublished()); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nSamplesPublished())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -974,36 +974,46 @@ protected:
         assert(propertyName == block::property::kLifeCycleState);
 
         if (message.cmd == Set) {
-            if (!message.data.has_value() && !message.data.value().contains("state")) {
+            if (!message.data.has_value() || !message.data.value().contains("state")) { // Changed '&&' to '||'
                 throw gr::exception(fmt::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
             }
 
-            std::string stateStr;
-            try {
-                stateStr = std::get<std::string>(message.data.value().at("state"));
-            } catch (const std::exception& e) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws {}, msg: {}", e.what(), message));
-            } catch (...) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws unknown exception, msg: {}", message));
+            const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
+            auto        it      = dataMap.find("state");
+            if (it == dataMap.end()) {
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
             }
-            auto state = magic_enum::enum_cast<lifecycle::State>(stateStr);
+
+            const std::string* stateStr = std::get_if<std::string>(&it->second); // Used std::get_if instead of std::get and try-catch block
+            if (!stateStr) {
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
+            }
+
+            auto state = magic_enum::enum_cast<lifecycle::State>(*stateStr); // Changed to dereference stateStr
             if (!state.has_value()) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
             }
+
             if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", //
-                    e.error().message, e.error().sourceLocation, e.error().errorTime));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
+
             return std::nullopt;
-        } else if (message.cmd == Get) {
+        }
+
+        if (message.cmd == Get) { // Merged 'else if' with 'if'
             message.data = {{"state", std::string(magic_enum::enum_name(this->state()))}};
             return message;
-        } else if (message.cmd == Subscribe) {
+        }
+
+        if (message.cmd == Subscribe) { // Merged 'else if' with 'if'
             if (!message.clientRequestID.empty()) {
                 propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
             }
             return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
+        }
+
+        if (message.cmd == Unsubscribe) { // Merged 'else if' with 'if'
             propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
@@ -1883,25 +1893,21 @@ template<BlockLike TBlock>
     });
     ret += fmt::format("\n**Parameters:**\n");
     if constexpr (refl::is_reflectable<DerivedBlock>()) {
-        for_each(refl::reflect<DerivedBlock>().members, [&](auto member) {
-            using RawType = std::remove_cvref_t<typename decltype(member)::value_type>;
+        for_each(refl::reflect<DerivedBlock>().members, [&]<typename TFieldMeta>(TFieldMeta member) {
+            using RawType = std::remove_cvref_t<typename TFieldMeta::value_type>;
             using Type    = unwrap_if_wrapped_t<RawType>;
 
             if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
-                    const std::string type_name   = refl::detail::get_type_name<Type>().str();
-                    const std::string member_name = get_display_name_const(member).str();
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                         RawType::visible() ? "" : "_", //
-                        type_name,
-                        member_name, //
+                        refl::detail::get_type_name<Type>().c_str(),
+                        get_display_name_const(member).c_str(), //
                         RawType::description(), RawType::unit(),
                         RawType::documentation(), //
                         RawType::visible() ? "" : "_");
                 } else {
-                    const std::string type_name   = refl::detail::get_type_name<Type>().str();
-                    const std::string member_name = get_display_name_const(member).str();
-                    ret += fmt::format("_{:10} {}_\n", type_name, member_name);
+                    ret += fmt::format("_{:10} {}_\n", refl::detail::get_type_name<Type>().c_str(), get_display_name_const(member).c_str());
                 }
             }
         });

@@ -274,36 +274,25 @@ public:
         return *new_block_ref.get();
     }
 
-    template<BlockLike TBlock, typename... Args>
-    requires std::is_constructible_v<TBlock, property_map>
-    auto& emplaceBlock(Args&&... args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
-        static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto& new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::forward<Args>(args)...));
-        auto  raw_ref       = static_cast<TBlock*>(new_block_ref->raw());
-        raw_ref->init(progress, ioThreadPool);
-        return *raw_ref;
-    }
-
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    auto& emplaceBlock(property_map initialSettings) {
+    auto& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto&      new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
-        auto       raw_ref       = static_cast<TBlock*>(new_block_ref->raw());
-        const auto failed        = raw_ref->settings().set(initialSettings);
+        auto  new_block = std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings));
+        auto* raw_ref   = static_cast<TBlock*>(new_block->raw());
         raw_ref->init(progress, ioThreadPool);
+        _blocks.push_back(std::move(new_block));
         return *raw_ref;
     }
 
-    auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
-        auto block_load = loader.instantiate(type, parameters, initialSettings);
-        if (!block_load) {
-            throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+    [[maybe_unused]] auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
+        if (auto block_load = loader.instantiate(type, parameters, std::move(initialSettings)); block_load) {
+            return addBlock(std::move(block_load));
         }
-        return addBlock(std::move(block_load));
+        throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
     }
 
-    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view /*propertyName*/, Message message) {
         const auto&         data       = message.data.value();
         const std::string&  type       = std::get<std::string>(data.at("type"s));
         const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
@@ -318,7 +307,7 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackRemoveBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRemoveBlock(std::string_view /*propertyName*/, Message message) {
         const auto&        data       = message.data.value();
         const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
         auto               it         = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
@@ -333,7 +322,7 @@ public:
         return {message};
     }
 
-    std::optional<Message> propertyCallbackReplaceBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackReplaceBlock(std::string_view /*propertyName*/, Message message) {
         const auto&         data       = message.data.value();
         const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
         const std::string&  type       = std::get<std::string>(data.at("type"s));
@@ -361,7 +350,7 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view /*propertyName*/, Message message) {
         const auto&        data             = message.data.value();
         const std::string& sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
         const std::string& sourcePort       = std::get<std::string>(data.at("sourcePort"s));
@@ -397,7 +386,7 @@ public:
         return message;
     }
 
-    std::optional<Message> propertyCallbackRemoveEdge(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRemoveEdge(std::string_view /*propertyName*/, Message message) {
         const auto&        data        = message.data.value();
         const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
         const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
@@ -409,13 +398,14 @@ public:
 
         auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
 
-        sourcePortRef.disconnect();
+        if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
+            throw gr::exception(fmt::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
+        }
         message.endpoint = graph::property::kEdgeRemoved;
         return message;
     }
 
     // connect using the port index
-
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard]] auto connect_internal(Source& source) {
         auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
