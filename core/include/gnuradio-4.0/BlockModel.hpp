@@ -346,17 +346,19 @@ private:
     }
 
 public:
+    BlockWrapper() : BlockWrapper(gr::property_map()) {}
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers" // GCC14 has an issue w.r.t. detecting that the derived field members (notably Port<...>) are initialised
+    explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
+    }
+#pragma GCC diagnostic pop
     BlockWrapper(const BlockWrapper& other)            = delete;
     BlockWrapper(BlockWrapper&& other)                 = delete;
     BlockWrapper& operator=(const BlockWrapper& other) = delete;
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
-
-    ~BlockWrapper() override = default;
-
-    explicit BlockWrapper(property_map initParameter = {}) : _block(std::move(initParameter)) {
-        initMessagePorts();
-        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
-    }
+    ~BlockWrapper() override                           = default;
 
     void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
 
@@ -369,35 +371,21 @@ public:
         return work::Status::ERROR;
     }
 
-    UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
-
-    void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
-
-    [[nodiscard]] constexpr bool isBlocking() const noexcept override { return blockRef().isBlocking(); }
-
+    UICategory                               uiCategory() const override { return T::DrawableControl::kCategory; }
+    void                                     processScheduledMessages() override { return blockRef().processScheduledMessages(); }
+    [[nodiscard]] constexpr bool             isBlocking() const noexcept override { return blockRef().isBlocking(); }
     [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
-
-    [[nodiscard]] lifecycle::State state() const noexcept override { return blockRef().state(); }
-
-    [[nodiscard]] constexpr std::size_t availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
-
-    [[nodiscard]] constexpr std::size_t availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
-
-    [[nodiscard]] std::string_view name() const override { return blockRef().name; }
-
-    void setName(std::string name) noexcept override { blockRef().name = std::move(name); }
-
-    [[nodiscard]] std::string_view typeName() const override { return _type_name; }
-
-    [[nodiscard]] property_map& metaInformation() noexcept override { return blockRef().meta_information; }
-
-    [[nodiscard]] const property_map& metaInformation() const override { return blockRef().meta_information; }
-
-    [[nodiscard]] std::string_view uniqueName() const override { return blockRef().unique_name; }
-
-    [[nodiscard]] SettingsBase& settings() const override { return blockRef().settings(); }
-
-    [[nodiscard]] void* raw() override { return std::addressof(blockRef()); }
+    [[nodiscard]] lifecycle::State           state() const noexcept override { return blockRef().state(); }
+    [[nodiscard]] constexpr std::size_t      availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
+    [[nodiscard]] constexpr std::size_t      availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
+    [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
+    void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
+    [[nodiscard]] std::string_view           typeName() const override { return _type_name; }
+    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; }
+    [[nodiscard]] const property_map&        metaInformation() const override { return blockRef().meta_information; }
+    [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
+    [[nodiscard]] SettingsBase&              settings() const override { return blockRef().settings(); }
+    [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 };
 
 } // namespace gr

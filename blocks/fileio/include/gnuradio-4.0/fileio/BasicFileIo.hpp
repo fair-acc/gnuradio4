@@ -106,7 +106,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
         std::size_t nBytesMax = dataIn.size() * sizeof(T);
         if (max_bytes_per_file.value != 0U) {
-            nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(max_bytes_per_file.value - _totalBytesWrittenFile));
+            nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(max_bytes_per_file.value) - _totalBytesWrittenFile);
         }
         _file.write(reinterpret_cast<const char*>(dataIn.data()), static_cast<std::streamsize>(nBytesMax));
         if (!dataIn.consume(nBytesMax / sizeof(T))) {
