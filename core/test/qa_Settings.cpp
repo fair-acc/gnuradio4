@@ -721,10 +721,11 @@ const boost::ut::suite TransactionTests = [] {
     "CtxSettings autoUpdate settings"_test = [&] {
         using namespace gr::testing;
 
-        gr::Size_t         n_samples = 1024;
+        gr::Size_t         n_samples      = 1024;
+        bool               verboseConsole = true;
         Graph              testGraph;
-        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}};
-        auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>(srcParameter);
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", verboseConsole}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         const auto         timeNow      = std::chrono::system_clock::now();
 
         src._tags.push_back({50, {{"sample_rate", 50.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(30))}, //
@@ -741,49 +742,57 @@ const boost::ut::suite TransactionTests = [] {
             src._tags.push_back(gr::Tag(static_cast<gr::Tag::signed_index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
         }
 
-        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}});
-        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}});
-        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}, {"n_samples_expected", n_samples}});
+        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& sinkOne     = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
 
+        //                                  -> sinkOne
         // src -> monitorBulk -> monitorOne -> sinkBulk
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorBulk)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
+
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
 
-        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(monitorBulk.n_samples_produced, n_samples)) << "monitorBulk did not consume enough input samples";
-        expect(eq(monitorOne.n_samples_produced, n_samples)) << "monitorOne did not consume enough input samples";
-        expect(eq(sinkBulk.n_samples_produced, n_samples)) << "sink did not consume enough input samples";
+        expect(eq(src.n_samples_produced, n_samples)) << src.name.value;
+        expect(eq(monitorBulk.n_samples_produced, n_samples)) << monitorBulk.name.value;
+        expect(eq(monitorOne.n_samples_produced, n_samples)) << monitorOne.name.value;
+        expect(eq(sinkBulk.n_samples_produced, n_samples)) << sinkBulk.name.value;
+        expect(eq(sinkOne.n_samples_produced, n_samples)) << sinkOne.name.value;
 
-        expect(eq(src.sample_rate, 1000.0f)); // default value (set in the class)
-        expect(eq(monitorBulk.sample_rate, static_cast<float>(n_samples - 1)));
-        expect(eq(monitorOne.sample_rate, static_cast<float>(n_samples - 1)));
-        expect(eq(sinkBulk.sample_rate, static_cast<float>(n_samples - 1)));
+        expect(eq(src.sample_rate, 1000.0f)) << src.name.value; // default value (set in the class)
+        expect(eq(monitorBulk.sample_rate, static_cast<float>(n_samples - 1))) << monitorBulk.name.value;
+        expect(eq(monitorOne.sample_rate, static_cast<float>(n_samples - 1))) << monitorOne.name.value;
+        expect(eq(sinkBulk.sample_rate, static_cast<float>(n_samples - 1))) << sinkBulk.name.value;
+        expect(eq(sinkOne.sample_rate, static_cast<float>(n_samples - 1))) << sinkOne.name.value;
 
-        expect(eq(src.settings().getNStoredParameters(), 0UZ));
-        expect(eq(monitorBulk.settings().getNStoredParameters(), 3UZ));
-        expect(eq(monitorOne.settings().getNStoredParameters(), 3UZ));
-        expect(eq(sinkBulk.settings().getNStoredParameters(), 3UZ));
+        expect(eq(src.settings().getNStoredParameters(), 0UZ)) << src.name.value;
+        expect(eq(monitorBulk.settings().getNStoredParameters(), 3UZ)) << monitorBulk.name.value;
+        expect(eq(monitorOne.settings().getNStoredParameters(), 3UZ)) << monitorOne.name.value;
+        expect(eq(sinkBulk.settings().getNStoredParameters(), 3UZ)) << sinkBulk.name.value;
+        expect(eq(sinkOne.settings().getNStoredParameters(), 3UZ)) << sinkOne.name.value;
 
         auto testStored = [&](BlockLike auto& block) {
             const auto& stored = block.settings().getStoredAll();
-            expect(stored.contains("")); // empty string is default context
+            expect(stored.contains("")) << block.name.value; // empty string is default context
             const auto& vec = stored.at("");
-            expect(eq(vec.size(), 3UZ));
+            expect(eq(vec.size(), 3UZ)) << block.name.value;
 
-            expect(eq(vec[0].second.size(), 1UZ));
-            expect(eq(vec[1].second.size(), 1UZ));
-            expect(eq(vec[2].second.size(), 1uZ));
+            expect(eq(vec[0].second.size(), 1UZ)) << block.name.value;
+            expect(eq(vec[1].second.size(), 1UZ)) << block.name.value;
+            expect(eq(vec[2].second.size(), 1uZ)) << block.name.value;
 
-            expect(eq(pmtv::cast<float>(vec[0].second.at("sample_rate")), 560.f));
-            expect(eq(pmtv::cast<float>(vec[1].second.at("sample_rate")), 550.f));
-            expect(eq(pmtv::cast<float>(vec[2].second.at("sample_rate")), 50.f));
+            expect(eq(pmtv::cast<float>(vec[0].second.at("sample_rate")), 560.f)) << block.name.value;
+            expect(eq(pmtv::cast<float>(vec[1].second.at("sample_rate")), 550.f)) << block.name.value;
+            expect(eq(pmtv::cast<float>(vec[2].second.at("sample_rate")), 50.f)) << block.name.value;
         };
         testStored(monitorBulk);
         testStored(monitorOne);
         testStored(sinkBulk);
+        testStored(sinkOne);
     };
 
     "CtxSettings supported context types"_test = [&] {
