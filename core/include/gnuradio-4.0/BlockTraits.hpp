@@ -312,6 +312,12 @@ public:
 static_assert(ConsumableSpan<DummyConsumableSpan<int>>);
 
 template<typename T>
+struct DummyConsumablePortSpan: public DummyConsumableSpan<T> {
+    DummyConsumableSpan<gr::Tag> tags{};
+};
+static_assert(ConsumablePortSpan<DummyConsumablePortSpan<int>>);
+
+template<typename T>
 struct DummyPublishableSpan {
     using value_type = typename std::remove_cv_t<T>;
     using iterator = typename std::span<T>::iterator;
@@ -379,7 +385,7 @@ port_to_processBulk_argument_helper() {
             if constexpr (isVectorOfSpansReturned) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>> *>(nullptr);
             } else {
-                return static_cast<std::span<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyConsumablePortSpan<typename Port::value_type::value_type>> *>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
             if constexpr (isVectorOfSpansReturned) {
@@ -391,7 +397,7 @@ port_to_processBulk_argument_helper() {
 
     } else { // single port
         if constexpr (Port::kIsInput) {
-            return static_cast<DummyConsumableSpan<typename Port::value_type> *>(nullptr);
+            return static_cast<DummyConsumablePortSpan<typename Port::value_type> *>(nullptr);
         } else if constexpr (Port::kIsOutput) {
             return static_cast<DummyPublishableSpan<typename Port::value_type> *>(nullptr);
         }
@@ -440,7 +446,7 @@ concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_process
 template<typename TDerived, std::size_t I>
 concept processBulk_requires_ith_output_as_span
         = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0)
-       && requires(TDerived &d, typename meta::transform_types<detail::DummyConsumableSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
+       && requires(TDerived &d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
                    typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan,
                                                         traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
                            outputs,

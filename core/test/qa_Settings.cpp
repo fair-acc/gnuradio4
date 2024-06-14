@@ -724,7 +724,7 @@ const boost::ut::suite TransactionTests = [] {
         gr::Size_t         n_samples = 1024;
         Graph              testGraph;
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}};
-        auto&              src          = testGraph.emplaceBlock<TagSource<float>>(srcParameter);
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>(srcParameter);
         const auto         timeNow      = std::chrono::system_clock::now();
 
         src._tags.push_back({50, {{"sample_rate", 50.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(30))}, //

@@ -9654,7 +9654,7 @@ using std::hardware_destructive_interference_size;
 inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
+static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -10566,8 +10566,7 @@ using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY
 namespace gr {
 
 namespace util {
-constexpr std::size_t
-round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
+constexpr std::size_t round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
     if (multiple == 0) {
         return num_to_round;
     }
@@ -10579,7 +10578,6 @@ round_up(std::size_t num_to_round, std::size_t multiple) noexcept {
 }
 } // namespace util
 
-// clang-format off
 class double_mapped_memory_resource : public std::pmr::memory_resource {
     [[nodiscard]] void* do_allocate(const std::size_t required_size, std::size_t alignment) override {
         // the 2nd double mapped memory call mmap may fail and/or return an unsuitable return address which is unavoidable
@@ -10596,42 +10594,40 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         return do_allocate_internal(required_size, alignment);
     }
 #ifdef HAS_POSIX_MAP_INTERFACE
-    [[nodiscard]] static void* do_allocate_internal(const std::size_t required_size, std::size_t alignment) { //NOSONAR
+    [[nodiscard]] static void* do_allocate_internal(const std::size_t required_size, std::size_t alignment) { // NOSONAR
 
         const std::size_t size = 2 * required_size;
         if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
             throw std::invalid_argument(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
-        const std::size_t size_half = size/2;
+        const std::size_t size_half = size / 2;
 
         static std::size_t _counter;
-        const auto buffer_name = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
-        const auto memfd_create = [name = buffer_name.c_str()](unsigned int flags) {
-            return syscall(__NR_memfd_create, name, flags);
-        };
-        auto shm_fd = static_cast<int>(memfd_create(0));
+        const auto         buffer_name  = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        const auto         memfd_create = [name = buffer_name.c_str()](unsigned int flags) { return syscall(__NR_memfd_create, name, flags); };
+        auto               shm_fd       = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
-            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         // unmap the 2nd half
         if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}",  buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         // Map the first half into the now available hole.
@@ -10639,42 +10635,41 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         // mapping somewhere else: "If addr is not NULL, then the kernel takes it as  a hint about
         // where to place the mapping". The returned pointer therefore must equal second_copy_addr
         // for our contiguous mapping to work as intended.
-        void* second_copy_addr = static_cast<char*> (first_copy) + size_half;
-        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t> (0)); result != second_copy_addr) {
+        void* second_copy_addr = static_cast<char*>(first_copy) + size_half;
+        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0)); result != second_copy_addr) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
             if (result == MAP_FAILED) {
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}",  buffer_name, errno, strerror(errno)));
+                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno)));
             } else {
                 ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
                 ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}",
-                                                     buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2*size_half));
+                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2 * size_half));
             }
         }
 
         close(shm_fd); // file-descriptor is no longer needed. The mapping is retained.
         return first_copy;
-}
+    }
 #else
-    [[nodiscard]] static void* do_allocate_internal(const std::size_t, std::size_t) { //NOSONAR
+    [[nodiscard]] static void* do_allocate_internal(const std::size_t, std::size_t) { // NOSONAR
         throw std::invalid_argument("OS does not provide POSIX interface for mmap(...) and munmao(...)");
         // static_assert(false, "OS does not provide POSIX interface for mmap(...) and munmao(...)");
     }
 #endif
 
 #ifdef HAS_POSIX_MAP_INTERFACE
-    void  do_deallocate(void* p, std::size_t size, std::size_t alignment) override { //NOSONAR
+    void do_deallocate(void* p, std::size_t size, std::size_t alignment) override { // NOSONAR
 
         if (munmap(p, size) == -1) {
             throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
         }
     }
 #else
-    void  do_deallocate(void*, std::size_t, size_t) override { }
+    void do_deallocate(void*, std::size_t, size_t) override {}
 #endif
 
-    bool  do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
+    [[nodiscard]] bool do_is_equal(const memory_resource& other) const noexcept override { return this == &other; }
 
 public:
     static inline double_mapped_memory_resource* defaultAllocator() {
@@ -10683,8 +10678,7 @@ public:
     }
 
     template<typename T>
-    static inline std::pmr::polymorphic_allocator<T> allocator()
-    {
+    static inline std::pmr::polymorphic_allocator<T> allocator() {
         return std::pmr::polymorphic_allocator<T>(gr::double_mapped_memory_resource::defaultAllocator());
     }
 };
@@ -10693,7 +10687,7 @@ public:
  * The enum determines how to handle samples if consume() or publish() was not called by the user in `processBulk` function.
  */
 enum class SpanReleasePolicy {
-    Terminate, //  terminates the program
+    Terminate,  //  terminates the program
     ProcessAll, // consume/publish all samples
     ProcessNone // consume/publish zero samples
 };
@@ -10728,9 +10722,8 @@ enum class SpanReleasePolicy {
  *
  * for more details see
  */
-template <typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
-class CircularBuffer
-{
+template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
+class CircularBuffer {
     using Allocator         = std::pmr::polymorphic_allocator<T>;
     using BufferType        = CircularBuffer<T, SIZE, producer_type, WAIT_STRATEGY>;
     using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
@@ -10738,26 +10731,24 @@ class CircularBuffer
     using signed_index_type = Sequence::signed_index_type;
 
     struct buffer_impl {
-        Sequence                    _cursor;
-        Allocator                   _allocator{};
-        const bool                  _isMmapAllocated;
-        const std::size_t             _size; // pre-condition: std::has_single_bit(_size)
-        std::vector<T, Allocator>   _data;
-        WAIT_STRATEGY               _wait_strategy = WAIT_STRATEGY();
-        ClaimType                   _claimStrategy;
+        Sequence                  _cursor;
+        Allocator                 _allocator{};
+        const bool                _isMmapAllocated;
+        const std::size_t         _size; // pre-condition: std::has_single_bit(_size)
+        std::vector<T, Allocator> _data;
+        WAIT_STRATEGY             _wait_strategy = WAIT_STRATEGY();
+        ClaimType                 _claimStrategy;
         // list of dependent reader indices
-        DependendsType              _read_indices{ std::make_shared<std::vector<std::shared_ptr<Sequence>>>() };
-        std::atomic<std::size_t>    _writer_count{0UZ};
+        DependendsType           _read_indices{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
+        std::atomic<std::size_t> _writer_count{0UZ};
 
         buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _isMmapAllocated(dynamic_cast<double_mapped_memory_resource *>(_allocator.resource())),
-            _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)), _data(buffer_size(_size, _isMmapAllocated), _allocator), _claimStrategy(ClaimType(_cursor, _wait_strategy, _size)) {
-        }
+        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)), _data(buffer_size(_size, _isMmapAllocated), _allocator), _claimStrategy(ClaimType(_cursor, _wait_strategy, _size)) {}
 
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
             if (_isMmapAllocated) {
-                const std::size_t pageSize = static_cast<std::size_t>(getpagesize());
+                const std::size_t pageSize    = static_cast<std::size_t>(getpagesize());
                 const std::size_t elementSize = sizeof(T);
                 // least common multiple (lcm) of elementSize and pageSize
                 std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
@@ -10793,121 +10784,102 @@ class CircularBuffer
         buffer_writer<U>* _parent = nullptr;
 
     public:
-    using element_type = T;
-    using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<T>::iterator;
-    using reverse_iterator = typename std::span<T>::reverse_iterator;
-    using pointer = typename std::span<T>::reverse_iterator;
+        using element_type     = T;
+        using value_type       = typename std::remove_cv_t<T>;
+        using iterator         = typename std::span<T>::iterator;
+        using reverse_iterator = typename std::span<T>::reverse_iterator;
+        using pointer          = typename std::span<T>::reverse_iterator;
 
-    PublishableOutputRange() = delete;
-    explicit PublishableOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {
-        _parent->_index = 0UZ;
-        _parent->_offset = 0;
-        _parent->_internalSpan = std::span<T>();
-    #ifndef NDEBUG
-        _parent->_rangesCounter++;
-    #endif
-    };
-    explicit constexpr PublishableOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept :
-        _parent(parent) {
-        _parent->_index = index;
-        _parent->_offset = sequence - static_cast<signed_index_type>(nSlotsToClaim);
-        _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
-    #ifndef NDEBUG
-        _parent->_rangesCounter++;
-    #endif
-    }
-    PublishableOutputRange(const PublishableOutputRange& other):_parent(other._parent) {
-    #ifndef NDEBUG
-        _parent->_rangesCounter++;
-    #endif
-    }
-    PublishableOutputRange& operator=(const PublishableOutputRange& other) {
-        if (this != &other) {
-            _parent = other._parent;
-    #ifndef NDEBUG
+        PublishableOutputRange() = delete;
+        explicit PublishableOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {
+            _parent->_index        = 0UZ;
+            _parent->_offset       = 0;
+            _parent->_internalSpan = std::span<T>();
+#ifndef NDEBUG
             _parent->_rangesCounter++;
-    #endif
+#endif
+        };
+        explicit constexpr PublishableOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+            _parent->_index        = index;
+            _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
+            _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
+            _parent->_rangesCounter++;
         }
-       return *this;
-    }
-
-    ~PublishableOutputRange() {
-    #ifndef NDEBUG
-        _parent->_rangesCounter--;
-
-        if constexpr (isMultiThreadedStrategy()) {
-            if (_parent->_rangesCounter == 0 && !isFullyPublished()) {
-                fmt::print(stderr, "CircularBuffer::multiple_writer::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
-                std::abort();
+        PublishableOutputRange(const PublishableOutputRange& other) : _parent(other._parent) { _parent->_rangesCounter++; }
+        PublishableOutputRange& operator=(const PublishableOutputRange& other) {
+            if (this != &other) {
+                _parent = other._parent;
+#ifndef NDEBUG
+                _parent->_rangesCounter++;
+#endif
             }
-
-        } else {
-            if (_parent->_rangesCounter == 0 && !_parent->_internalSpan.empty() && !isPublished()) {
-                fmt::print(stderr, "CircularBuffer::single_writer::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
-                std::abort();
-            }
+            return *this;
         }
-    #endif
-    }
 
-    [[nodiscard]] constexpr bool
-    isPublished() const noexcept {
-        return _parent->_isRangePublished;
-    }
+        ~PublishableOutputRange() {
+            _parent->_rangesCounter--;
+            if (_parent->_rangesCounter == 0) {
+                if (!_parent->_isMmapAllocated) {
+                    const std::size_t size = _parent->_size;
+                    // mirror samples below/above the buffer's wrap-around point
+                    const size_t nFirstHalf  = std::min(size - _parent->_index, _parent->nSamplesPublished());
+                    const size_t nSecondHalf = _parent->nSamplesPublished() - nFirstHalf;
 
-    [[nodiscard]] constexpr bool
-    isFullyPublished() const noexcept {
-        return _parent->_internalSpan.size() == _parent->_nSamplesPublished;
-    }
+                    auto& data = _parent->_buffer->_data;
+                    std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
+                    std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+                }
+                _parent->_claimStrategy->publish(_parent->_offset, _parent->nSamplesPublished());
+                _parent->_offset += static_cast<signed_index_type>(_parent->nSamplesPublished());
+#ifndef NDEBUG
+                if constexpr (isMultiThreadedStrategy()) {
+                    if (!isFullyPublished()) {
+                        fmt::print(stderr, "CircularBuffer::multiple_writer::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                        std::abort();
+                    }
 
-    [[nodiscard]] constexpr static bool
-    isMultiThreadedStrategy() noexcept {
-        return std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>;
-    }
-
-    [[nodiscard]] constexpr static SpanReleasePolicy
-    spanReleasePolicy() noexcept {
-        return policy;
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return _parent->_internalSpan.size(); };
-    [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); };
-    [[nodiscard]] constexpr bool empty() const noexcept { return _parent->_internalSpan.empty(); }
-    [[nodiscard]] constexpr iterator cbegin() const noexcept { return _parent->_internalSpan.cbegin(); }
-    [[nodiscard]] constexpr iterator begin() const noexcept { return _parent->_internalSpan.begin(); }
-    [[nodiscard]] constexpr iterator cend() const noexcept { return _parent->_internalSpan.cend(); }
-    [[nodiscard]] constexpr iterator end() const noexcept { return _parent->_internalSpan.end(); }
-    [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _parent->_internalSpan.rbegin(); }
-    [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _parent->_internalSpan.rend(); }
-    [[nodiscard]] constexpr T* data() const noexcept { return _parent->_internalSpan.data(); }
-    T& operator [](std::size_t i) const noexcept  {return _parent->_internalSpan[i]; }
-    T& operator [](std::size_t i) noexcept { return _parent->_internalSpan[i]; }
-    explicit(false) operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
-    operator std::span<T>&() noexcept { return _parent->_internalSpan; }
-
-    constexpr void publish(std::size_t nSamplesToPublish) noexcept {
-        assert(nSamplesToPublish <= _parent->_internalSpan.size() - _parent->_nSamplesPublished && "n_produced must be <= than unpublished samples");
-        if (!_parent->_isMmapAllocated) {
-            const std::size_t size = _parent->_size;
-            // mirror samples below/above the buffer's wrap-around point
-            const size_t nFirstHalf = std::min(size - _parent->_index, nSamplesToPublish);
-            const size_t nSecondHalf = nSamplesToPublish - nFirstHalf;
-
-            auto &data = _parent->_buffer->_data;
-            std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
-            std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+                } else {
+                    if (!_parent->_internalSpan.empty() && !isPublished()) {
+                        fmt::print(stderr, "CircularBuffer::single_writer::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        std::abort();
+                    }
+                }
+#endif
+                _parent->_nSamplesPublished = 0;
+                _parent->_internalSpan      = {};
+            };
         }
-        _parent->_claimStrategy->publish(_parent->_offset, nSamplesToPublish);
-        _parent->_offset += static_cast<signed_index_type>(nSamplesToPublish);
-        _parent->_nSamplesPublished += nSamplesToPublish;
-        _parent->_isRangePublished = true;
-    }
+
+        [[nodiscard]] constexpr std::size_t      size() const noexcept { return _parent->_internalSpan.size(); };
+        [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); };
+        [[nodiscard]] constexpr bool             empty() const noexcept { return _parent->_internalSpan.empty(); }
+        [[nodiscard]] constexpr iterator         cbegin() const noexcept { return _parent->_internalSpan.cbegin(); }
+        [[nodiscard]] constexpr iterator         begin() const noexcept { return _parent->_internalSpan.begin(); }
+        [[nodiscard]] constexpr iterator         cend() const noexcept { return _parent->_internalSpan.cend(); }
+        [[nodiscard]] constexpr iterator         end() const noexcept { return _parent->_internalSpan.end(); }
+        [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _parent->_internalSpan.rbegin(); }
+        [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _parent->_internalSpan.rend(); }
+        [[nodiscard]] constexpr T*               data() const noexcept { return _parent->_internalSpan.data(); }
+        T&                                       operator[](std::size_t i) const noexcept { return _parent->_internalSpan[i]; }
+        T&                                       operator[](std::size_t i) noexcept { return _parent->_internalSpan[i]; }
+        explicit(false) operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
+        explicit(false) operator std::span<T>&() noexcept { return _parent->_internalSpan; }
+        [[nodiscard]] constexpr std::size_t              samplesToPublish() const noexcept { return _parent->_nSamplesPublished; }
+        [[nodiscard]] constexpr bool                     isPublished() const noexcept { return _parent->_isRangePublished; }
+        [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nSamplesPublished; }
+        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>; }
+        [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
+
+        constexpr void publish(std::size_t nSamplesToPublish) noexcept {
+            assert(nSamplesToPublish <= _parent->_internalSpan.size() - _parent->_nSamplesPublished && "n_produced must be <= than unpublished samples");
+            _parent->_nSamplesPublished += nSamplesToPublish;
+            _parent->_isRangePublished = true;
+        }
     }; // class PublishableOutputRange
 
     static_assert(PublishableSpan<PublishableOutputRange<T>>);
 
-    template <typename U>
+    template<typename U>
     class buffer_writer {
         friend class PublishableOutputRange<U, SpanReleasePolicy::Terminate>;
         friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessAll>;
@@ -10922,37 +10894,23 @@ class CircularBuffer
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
         // These are the parameters for PublishableOutputRange, only one PublishableOutputRange can be reserved per writer
-        std::size_t       _nSamplesPublished {0UZ}; // controls how many samples were already published, multiple publish() calls are allowed
-        bool              _isRangePublished {true};// controls if publish() was invoked
-        std::size_t       _index {0UZ};
-        signed_index_type _offset {0};
-        std::span<T> _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
-
-#ifndef NDEBUG
-        std::size_t _rangesCounter{0}; // this counter is used only in debug mode to check if publish() was invoked correctly
-#endif
+        std::size_t       _nSamplesPublished{0UZ}; // controls how many samples were already published, multiple publish() calls are allowed
+        bool              _isRangePublished{true}; // controls if publish() was invoked
+        std::size_t       _index{0UZ};
+        signed_index_type _offset{0};
+        std::span<T>      _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
+        std::size_t       _rangesCounter{0};
 
     public:
         buffer_writer() = delete;
-        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept :
-            _buffer(std::move(buffer)), _isMmapAllocated(_buffer->_isMmapAllocated),
-            _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(std::move(buffer)), _isMmapAllocated(_buffer->_isMmapAllocated), _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
 
-        buffer_writer(buffer_writer&& other) noexcept
-            : _buffer(std::move(other._buffer))
-            , _isMmapAllocated(_buffer->_isMmapAllocated)
-            , _size(_buffer->_size)
-            , _claimStrategy(std::addressof(_buffer->_claimStrategy))
-            , _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ))
-            , _isRangePublished(std::exchange(other._isRangePublished, true))
-            , _index(std::exchange(other._index, 0UZ))
-            , _offset(std::exchange(other._offset, 0))
-            , _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) { };
+        buffer_writer(buffer_writer&& other) noexcept : _buffer(std::move(other._buffer)), _isMmapAllocated(_buffer->_isMmapAllocated), _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)), _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ)), _isRangePublished(std::exchange(other._isRangePublished, true)), _index(std::exchange(other._index, 0UZ)), _offset(std::exchange(other._offset, 0)), _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {};
 
         buffer_writer& operator=(buffer_writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
             _isMmapAllocated = _buffer->_isMmapAllocated;
-            _size = _buffer->_size;
+            _size            = _buffer->_size;
             std::swap(_nSamplesPublished, tmp._nSamplesPublished);
             std::swap(_isRangePublished, tmp._isRangePublished);
             _claimStrategy = std::addressof(_buffer->_claimStrategy);
@@ -10965,18 +10923,18 @@ class CircularBuffer
 
         ~buffer_writer() {
             if (_buffer) {
-                _buffer.get()->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
+                _buffer->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
             }
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] constexpr std::size_t nSamplesPublished() const noexcept {return _nSamplesPublished;};
+        [[nodiscard]] constexpr std::size_t nSamplesPublished() const noexcept { return _nSamplesPublished; };
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
-            _isRangePublished = false;
+            _isRangePublished  = false;
             _nSamplesPublished = 0UZ;
 
             if (nSamples == 0) {
@@ -10984,18 +10942,16 @@ class CircularBuffer
             }
 
             try {
-                const auto sequence = _claimStrategy->next(*_buffer->_read_indices, nSamples); // alt: try_next
-                const std::size_t index = (static_cast<std::size_t>(sequence) + _size - nSamples) % _size;
+                const auto        sequence = _claimStrategy->next(*_buffer->_read_indices, nSamples); // alt: try_next
+                const std::size_t index    = (static_cast<std::size_t>(sequence) + _size - nSamples) % _size;
                 return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
-            } catch (const NoCapacityException &) {
+            } catch (const NoCapacityException&) {
                 return PublishableOutputRange<U, policy>(this);
             }
         }
 
-        template <typename... Args, WriterCallback<U, Args...> Translator>
+        template<typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void publish(Translator&& translator, std::size_t nSamples = 1, Args&&... args) {
-            _isRangePublished = true;
-            _nSamplesPublished += nSamples;
             if (nSamples <= 0 || _buffer->_read_indices->empty()) {
                 return;
             }
@@ -11003,10 +10959,8 @@ class CircularBuffer
             translate_and_publish(std::forward<Translator>(translator), nSamples, sequence, std::forward<Args>(args)...);
         } // blocks until elements are available
 
-        template <typename... Args, WriterCallback<U, Args...> Translator>
+        template<typename... Args, WriterCallback<U, Args...> Translator>
         constexpr bool try_publish(Translator&& translator, std::size_t nSamples = 1, Args&&... args) {
-            _isRangePublished = true;
-            _nSamplesPublished += nSamples;
             if (nSamples <= 0 || _buffer->_read_indices->empty()) {
                 return true;
             }
@@ -11014,24 +10968,26 @@ class CircularBuffer
                 const auto sequence = _claimStrategy->tryNext(*_buffer->_read_indices, nSamples);
                 translate_and_publish(std::forward<Translator>(translator), nSamples, sequence, std::forward<Args>(args)...);
                 return true;
-            } catch (const NoCapacityException &) {
+            } catch (const NoCapacityException&) {
                 return false;
             }
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
 
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices));
-        }
+        [[nodiscard]] constexpr std::size_t available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
 
-        private:
-        template <typename... Args, WriterCallback<U, Args...> Translator>
+        [[nodiscard]] constexpr bool isPublished() const noexcept { return _isRangePublished; }
+
+        [[nodiscard]] constexpr std::size_t samplesPublished() const noexcept { return _nSamplesPublished; }
+
+    private:
+        template<typename... Args, WriterCallback<U, Args...> Translator>
         constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
             try {
-                auto& data = _buffer->_data;
+                auto&             data  = _buffer->_data;
                 const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
-                std::span<U> writable_data(&data[index], n_slots_to_claim);
+                std::span<U>      writable_data(&data[index], n_slots_to_claim);
                 if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
                     std::invoke(std::forward<Translator>(translator), writable_data, publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
                 } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
@@ -11042,11 +10998,11 @@ class CircularBuffer
 
                 if (!_isMmapAllocated) {
                     // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf = std::min(_size - index, n_slots_to_claim);
-                    const size_t nSecondHalf = n_slots_to_claim  - nFirstHalf;
+                    const size_t nFirstHalf  = std::min(_size - index, n_slots_to_claim);
+                    const size_t nSecondHalf = n_slots_to_claim - nFirstHalf;
 
-                    std::copy(&data[index], &data[index + nFirstHalf], &data[index+ _size]);
-                    std::copy(&data[_size],  &data[_size + nSecondHalf], &data[0]);
+                    std::copy(&data[index], &data[index + nFirstHalf], &data[index + _size]);
+                    std::copy(&data[_size], &data[_size + nSecondHalf], &data[0]);
                 }
                 _claimStrategy->publish(publishSequence - static_cast<signed_index_type>(n_slots_to_claim), n_slots_to_claim);
             } catch (const std::exception&) {
@@ -11059,21 +11015,25 @@ class CircularBuffer
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
             if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
                 if (_internalSpan.size() - _nSamplesPublished != 0) {
-                    fmt::print(stderr, "An error occurred: The method CircularBuffer::multiple_writer::reserve() was invoked for the second time in succession, "
-                                    "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.", _internalSpan.size() - _nSamplesPublished);
+                    fmt::print(stderr,
+                        "An error occurred: The method CircularBuffer::multiple_writer::reserve() was invoked for the second time in succession, "
+                        "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.",
+                        _internalSpan.size() - _nSamplesPublished);
                     std::abort();
                 }
 
             } else {
                 if (!_internalSpan.empty() && not _isRangePublished) {
-                    fmt::print(stderr, "An error occurred: The method CircularBuffer::single_writer::reserve() was invoked for the second time in succession "
-                                    "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.", _internalSpan.size());
+                    fmt::print(stderr,
+                        "An error occurred: The method CircularBuffer::single_writer::reserve() was invoked for the second time in succession "
+                        "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.",
+                        _internalSpan.size());
                     std::abort();
                 }
             }
         }
     }; // class buffer_writer
-    //static_assert(BufferWriter<buffer_writer<T>>);
+    // static_assert(BufferWriter<buffer_writer<T>>);
 
     template<typename U = T>
     class buffer_reader;
@@ -11084,174 +11044,150 @@ class CircularBuffer
         std::span<const T>      _internalSpan{};
 
     public:
-    using element_type = T;
-    using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<const T>::iterator;
-    using reverse_iterator = typename std::span<const T>::reverse_iterator;
-    using pointer = typename std::span<const T>::reverse_iterator;
+        using element_type     = T;
+        using value_type       = typename std::remove_cv_t<T>;
+        using iterator         = typename std::span<const T>::iterator;
+        using reverse_iterator = typename std::span<const T>::reverse_iterator;
+        using pointer          = typename std::span<const T>::reverse_iterator;
 
+        explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) { _parent->_rangesCounter++; }
 
-    explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) {
-        _parent->_rangesCounter++;
-    }
+        explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_rangesCounter++; }
 
-    explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept :
-        _parent(parent), _internalSpan({ &_parent->_buffer->_data.data()[index], nRequested }) {
-        _parent->_rangesCounter++;
-    }
+        ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_rangesCounter++; }
 
-    ConsumableInputRange(const ConsumableInputRange& other)
-        : _parent(other._parent),
-          _internalSpan(other._internalSpan) {
-        _parent->_rangesCounter++;
-    }
-
-    ConsumableInputRange& operator=(const ConsumableInputRange& other) {
-        if (this != &other) {
-            _parent = other._parent;
-            _internalSpan = other._internalSpan;
-            _parent->_rangesCounter++;
+        ConsumableInputRange& operator=(const ConsumableInputRange& other) {
+            if (this != &other) {
+                _parent       = other._parent;
+                _internalSpan = other._internalSpan;
+                _parent->_rangesCounter++;
+            }
+            return *this;
         }
-        return *this;
-    }
 
-    ~ConsumableInputRange() {
-        _parent->_rangesCounter--;
+        virtual ~ConsumableInputRange() {
+            _parent->_rangesCounter--;
 
-        if (_parent->_rangesCounter == 0) {
-            if (_parent->isConsumeRequested()) {
-                std::ignore = performConsume(_parent->_nSamplesToConsume);
-            } else {
-                if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                     assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
-                     std::abort();
-                 } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
-                     std::ignore = performConsume(_parent->_nSamplesFirstGet);
-                 } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone){
-                     std::ignore = performConsume(0UZ);
-                 }
+            if (_parent->_rangesCounter == 0) {
+                if (_parent->isConsumeRequested()) {
+                    std::ignore = performConsume(_parent->_nSamplesToConsume);
+                } else {
+                    if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
+                        assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
+                        std::abort();
+                    } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                        std::ignore = performConsume(_parent->_nSamplesFirstGet);
+                    } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
+                        std::ignore = performConsume(0UZ);
+                    }
+                }
             }
         }
-    }
 
-    [[nodiscard]] constexpr static SpanReleasePolicy
-    spanReleasePolicy() noexcept {
-        return policy;
-    }
+        [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
 
-    [[nodiscard]] constexpr bool
-     isConsumeRequested() const noexcept {
-         return _parent->isConsumeRequested();
-     }
+        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept { return _parent->isConsumeRequested(); }
 
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return _internalSpan.size(); }
-    [[nodiscard]] constexpr std::size_t size_bytes() const noexcept { return size() * sizeof(T); }
-    [[nodiscard]] constexpr bool empty() const noexcept { return _internalSpan.empty(); }
-    [[nodiscard]] constexpr iterator cbegin() const noexcept { return _internalSpan.cbegin(); }
-    [[nodiscard]] constexpr iterator begin() const noexcept { return _internalSpan.begin(); }
-    [[nodiscard]] constexpr iterator cend() const noexcept { return _internalSpan.cend(); }
-    [[nodiscard]] constexpr iterator end() const noexcept { return _internalSpan.end(); }
-    [[nodiscard]] constexpr const T& front() const noexcept { return _internalSpan.front(); }
-    [[nodiscard]] constexpr const T& back() const noexcept { return _internalSpan.back(); }
-    [[nodiscard]] constexpr auto first(std::size_t count) const noexcept { return _internalSpan.first(count); }
-    [[nodiscard]] constexpr auto last(std::size_t count) const noexcept { return _internalSpan.last(count); }
-    [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _internalSpan.rbegin(); }
-    [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _internalSpan.rend(); }
-    [[nodiscard]] constexpr const T* data() const noexcept { return _internalSpan.data(); }
-    const T& operator [](std::size_t i) const noexcept  {return _internalSpan[i]; }
-    const T& operator [](std::size_t i) noexcept { return _internalSpan[i]; }
-    operator const std::span<const T>&() const noexcept { return _internalSpan; }
-    operator std::span<const T>&() noexcept { return _internalSpan; }
-    operator std::span<const T>&&() = delete;
+        [[nodiscard]] constexpr std::size_t instanceCount() { return _parent->_rangesCounter; }
 
-    template <bool strict_check = true>
-    [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
-         if (isConsumeRequested()) {
-            assert(false && "An error occurred: The method CircularBuffer::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
+        [[nodiscard]] constexpr std::size_t getConsumeRequested() const { return _parent->getConsumeRequested(); }
+
+        [[nodiscard]] constexpr std::size_t      size() const noexcept { return _internalSpan.size(); }
+        [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); }
+        [[nodiscard]] constexpr bool             empty() const noexcept { return _internalSpan.empty(); }
+        [[nodiscard]] constexpr iterator         cbegin() const noexcept { return _internalSpan.cbegin(); }
+        [[nodiscard]] constexpr iterator         begin() const noexcept { return _internalSpan.begin(); }
+        [[nodiscard]] constexpr iterator         cend() const noexcept { return _internalSpan.cend(); }
+        [[nodiscard]] constexpr iterator         end() const noexcept { return _internalSpan.end(); }
+        [[nodiscard]] constexpr const T&         front() const noexcept { return _internalSpan.front(); }
+        [[nodiscard]] constexpr const T&         back() const noexcept { return _internalSpan.back(); }
+        [[nodiscard]] constexpr auto             first(std::size_t count) const noexcept { return _internalSpan.first(count); }
+        [[nodiscard]] constexpr auto             last(std::size_t count) const noexcept { return _internalSpan.last(count); }
+        [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _internalSpan.rbegin(); }
+        [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _internalSpan.rend(); }
+        [[nodiscard]] constexpr const T*         data() const noexcept { return _internalSpan.data(); }
+        const T&                                 operator[](std::size_t i) const noexcept { return _internalSpan[i]; }
+        const T&                                 operator[](std::size_t i) noexcept { return _internalSpan[i]; }
+        explicit(false) operator const std::span<const T>&() const noexcept { return _internalSpan; }
+        explicit(false) operator std::span<const T>&() noexcept { return _internalSpan; }
+        operator std::span<const T>&&() = delete;
+
+        template<bool strict_check = true>
+        [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
+            if (isConsumeRequested()) {
+                assert(false && "An error occurred: The method CircularBuffer::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
+            }
+            return tryConsume<strict_check>(nSamples);
         }
-        return tryConsume<strict_check>(nSamples);
-    }
 
-    template <bool strict_check = true>
-    [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
-        if (isConsumeRequested()) {
-            return false;
-        }
-        if constexpr (strict_check) {
-            if (nSamples > _parent->available()) {
+        template<bool strict_check = true>
+        [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
+            if (isConsumeRequested()) {
                 return false;
             }
+            if constexpr (strict_check) {
+                if (nSamples > _parent->available()) {
+                    return false;
+                }
+            }
+            _parent->_nSamplesToConsume = nSamples;
+            return true;
         }
-        _parent->_nSamplesToConsume = nSamples;
-        return true;
-    }
 
     private:
-    template <bool strict_check = true>
-    [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
-        _parent->_nSamplesFirstGet = std::numeric_limits<std::size_t>::max();
-        _parent->_nSamplesToConsume = std::numeric_limits<std::size_t>::max();
-        if constexpr (strict_check) {
-            if (nSamples <= 0) {
-                return true;
-            }
+        template<bool strict_check = true>
+        [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
+            _parent->_nSamplesFirstGet  = std::numeric_limits<std::size_t>::max();
+            _parent->_nSamplesToConsume = std::numeric_limits<std::size_t>::max();
+            if constexpr (strict_check) {
+                if (nSamples <= 0) {
+                    return true;
+                }
 
-            if (nSamples > _parent->available()) {
-                return false;
+                if (nSamples > _parent->available()) {
+                    return false;
+                }
             }
+            _parent->_readIndexCached  = _parent->_readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
+            _parent->_nSamplesConsumed = nSamples;
+            return true;
         }
-        _parent->_readIndexCached = _parent->_readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
-        _parent->_nSamplesConsumed = nSamples;
-        return true;
-    }
 
     }; // class ConsumableInputRange
     static_assert(ConsumableSpan<ConsumableInputRange<T>>);
 
     template<typename U>
-    class buffer_reader
-    {
+    class buffer_reader {
         friend class ConsumableInputRange<U, SpanReleasePolicy::Terminate>;
         friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessAll>;
         friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<buffer_impl>;
 
-        std::shared_ptr<Sequence>    _readIndex = std::make_shared<Sequence>();
-        mutable signed_index_type    _readIndexCached;
-        BufferTypeLocal              _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        std::size_t                  _size; // pre-condition: std::has_single_bit(_size)
-        mutable std::size_t          _nSamplesFirstGet {std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
-        mutable std::size_t          _rangesCounter {0UZ}; // reference counter for number of ConsumableSpanRanges
+        std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
+        mutable signed_index_type _readIndexCached;
+        BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
+        std::size_t               _size;                                                      // pre-condition: std::has_single_bit(_size)
+        mutable std::size_t       _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
+        mutable std::size_t       _rangesCounter{0UZ};                                        // reference counter for number of ConsumableSpanRanges
 
         // Samples are now consumed in a delayed manner. When the consume() method is called, the actual consumption does not happen immediately.
         // Instead, the real consume() operation is invoked in the destructor, when the last ConsumableInputRange is destroyed.
-        mutable std::size_t          _nSamplesToConsume {std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
-        mutable std::size_t          _nSamplesConsumed {0UZ}; // The number of samples actually consumed.
+        mutable std::size_t _nSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
+        mutable std::size_t _nSamplesConsumed{0UZ};                                      // The number of samples actually consumed.
 
-        std::size_t
-        buffer_index() const noexcept {
+        std::size_t buffer_index() const noexcept {
             const auto bitmask = _size - 1;
             return static_cast<std::size_t>(_readIndexCached) & bitmask;
         }
 
     public:
         buffer_reader() = delete;
-        explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept :
-            _buffer(buffer), _size(buffer->_size){
+        explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(buffer), _size(buffer->_size) {
             gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_readIndex});
             _readIndexCached = _readIndex->value();
         }
-        buffer_reader(buffer_reader&& other) noexcept
-            : _readIndex(std::move(other._readIndex))
-            , _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value()))
-            , _buffer(other._buffer)
-            , _size(_buffer->_size)
-            , _nSamplesFirstGet(std::move(other._nSamplesFirstGet))
-            , _rangesCounter(std::move(other._rangesCounter))
-            , _nSamplesToConsume(std::move(other._nSamplesToConsume))
-            , _nSamplesConsumed(std::move(other._nSamplesConsumed)){
-        }
+        buffer_reader(buffer_reader&& other) noexcept : _readIndex(std::move(other._readIndex)), _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), _buffer(other._buffer), _size(_buffer->_size), _nSamplesFirstGet(std::move(other._nSamplesFirstGet)), _rangesCounter(std::move(other._rangesCounter)), _nSamplesToConsume(std::move(other._nSamplesToConsume)), _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
         buffer_reader& operator=(buffer_reader tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
@@ -11263,15 +11199,15 @@ class CircularBuffer
             _size = _buffer->_size;
             return *this;
         };
-        ~buffer_reader() { gr::detail::removeSequence( _buffer->_read_indices, _readIndex); }
+        ~buffer_reader() { gr::detail::removeSequence(_buffer->_read_indices, _readIndex); }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] constexpr std::size_t nSamplesConsumed() const noexcept {return _nSamplesConsumed;};
+        [[nodiscard]] constexpr std::size_t nSamplesConsumed() const noexcept { return _nSamplesConsumed; };
 
-        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept {
-            return _nSamplesToConsume != std::numeric_limits<std::size_t>::max();
-        }
+        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept { return _nSamplesToConsume != std::numeric_limits<std::size_t>::max(); }
+
+        [[nodiscard]] constexpr std::size_t getConsumeRequested() const noexcept { return _nSamplesToConsume; }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
@@ -11279,14 +11215,13 @@ class CircularBuffer
                 assert(false && "An error occurred: The method CircularBuffer::buffer_reader::get() was invoked after consume() methods was explicitly invoked.");
             }
 
-            std::size_t nSamples { nRequested };
+            std::size_t nSamples{nRequested};
             if (nSamples == std::numeric_limits<std::size_t>::max()) {
                 nSamples = available();
             } else {
                 assert(nSamples <= available() && "Number of required samples is more than number of available samples.");
             }
-
-           if (_nSamplesFirstGet == std::numeric_limits<std::size_t>::max() ) {
+            if (_nSamplesFirstGet == std::numeric_limits<std::size_t>::max()) {
                 _nSamplesFirstGet = nSamples;
                 _nSamplesConsumed = 0UZ;
             } else {
@@ -11303,7 +11238,7 @@ class CircularBuffer
         }
     }; // class buffer_reader
 
-    //static_assert(BufferReader<buffer_reader<T>>);
+    // static_assert(BufferReader<buffer_reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
         if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
@@ -11318,8 +11253,7 @@ class CircularBuffer
 
 public:
     CircularBuffer() = delete;
-    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator())
-        : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) { }
+    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator()) : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) {}
     ~CircularBuffer() = default;
 
     [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
@@ -11329,13 +11263,11 @@ public:
     // implementation specific interface -- not part of public Buffer / production-code API
     [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
     [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_read_indices->size(); }
-    [[nodiscard]] const auto &claim_strategy()  { return _shared_buffer_ptr->_claimStrategy; }
-    [[nodiscard]] const auto &wait_strategy()   { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] const auto &cursor_sequence() { return _shared_buffer_ptr->_cursor; }
-
+    [[nodiscard]] const auto& claim_strategy() { return _shared_buffer_ptr->_claimStrategy; }
+    [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_wait_strategy; }
+    [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_cursor; }
 };
 static_assert(Buffer<CircularBuffer<int32_t>>);
-// clang-format on
 
 } // namespace gr
 #endif // GNURADIO_CIRCULARBUFFER_HPP
@@ -15017,6 +14949,12 @@ namespace gr {
  */
 struct Async {};
 
+template<typename T>
+concept ConsumablePortSpan = ConsumableSpan<T> && requires(T span) {
+    requires ConsumableSpan<std::remove_cvref_t<decltype(span.tags)>>;
+    { *span.tags.begin() } -> std::same_as<const gr::Tag&>;
+};
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -15066,12 +15004,13 @@ struct Port {
     static constexpr fixed_string  Name       = portName;
 
     // dependent types
-    using ReaderType    = decltype(std::declval<BufferType>().new_reader());
-    using WriterType    = decltype(std::declval<BufferType>().new_writer());
-    using IoType        = std::conditional_t<kIsInput, ReaderType, WriterType>;
-    using TagReaderType = decltype(std::declval<TagBufferType>().new_reader());
-    using TagWriterType = decltype(std::declval<TagBufferType>().new_writer());
-    using TagIoType     = std::conditional_t<kIsInput, TagReaderType, TagWriterType>;
+    using ReaderType        = decltype(std::declval<BufferType>().new_reader());
+    using WriterType        = decltype(std::declval<BufferType>().new_writer());
+    using IoType            = std::conditional_t<kIsInput, ReaderType, WriterType>;
+    using TagReaderType     = decltype(std::declval<TagBufferType>().new_reader());
+    using TagWriterType     = decltype(std::declval<TagBufferType>().new_writer());
+    using TagIoType         = std::conditional_t<kIsInput, TagReaderType, TagWriterType>;
+    using TagReaderSpanType = decltype(std::declval<TagReaderType>().get());
 
     // public properties
     constexpr static bool kIsSynch      = !std::disjunction_v<std::is_same<Async, Attributes>...>;
@@ -15087,10 +15026,46 @@ struct Port {
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
     PortMetaInfo metaInfo{};
 
+    template<SpanReleasePolicy spanReleasePolicy>
+    using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
+
+    template<SpanReleasePolicy spanReleasePolicy>
+    struct ConsumablePortInputRange : public ReaderSpanType<spanReleasePolicy> {
+        TagReaderSpanType      tags;
+        Tag::signed_index_type streamIndex;
+
+        ConsumablePortInputRange(std::size_t nSamples, ReaderType& streamReader, TagReaderSpanType _tags, Tag::signed_index_type _currentStreamOffset) : ReaderSpanType<spanReleasePolicy>(streamReader.template get<spanReleasePolicy>(nSamples)), tags(_tags), streamIndex{_currentStreamOffset} {};
+
+        ~ConsumablePortInputRange() {
+            if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
+                if (tags.isConsumeRequested()) {                           // the user has already manually consumed tags
+                    return;
+                }
+                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::getConsumeRequested() == 0) || this->empty()) {
+                    return; // no samples to be consumed -> do not consume any tags
+                }
+                std::size_t tagsToConsume = 0;
+                for (auto& t : tags) {
+                    if (t.index <= streamIndex) {
+                        tagsToConsume++;
+                    } else {
+                        break;
+                    }
+                }
+                bool result = tags.tryConsume(tagsToConsume);
+            }
+        }
+    };
+
+    static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
+
+    std::span<const Tag>   tags;        // Range of tags for the currently processed stream range; only used in input ports
+    Tag::signed_index_type streamIndex; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
+
 private:
     IoType    _ioHandler    = newIoHandler();
     TagIoType _tagIoHandler = newTagIoHandler();
-    Tag       _cachedTag{};
+    Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
     [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 65536) const noexcept {
         if constexpr (kIsInput) {
@@ -15297,6 +15272,23 @@ public:
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
     }
 
+    template<SpanReleasePolicy spanReleasePolicy>
+    ConsumablePortInputRange<spanReleasePolicy> get(std::size_t nSamples)
+    requires(kIsInput)
+    {
+        auto taggedStream = ConsumablePortInputRange<spanReleasePolicy>(nSamples, streamReader(), getTags(static_cast<gr::Tag::signed_index_type>(nSamples)), streamReader().position());
+        tags              = std::span(taggedStream.tags.data(), taggedStream.tags.size());
+        streamIndex       = streamReader().position();
+        return taggedStream;
+    }
+
+    template<SpanReleasePolicy TSpanReleasePolicy>
+    auto reserve(std::size_t n_samples)
+    requires(kIsOutput)
+    {
+        return streamWriter().template reserve<TSpanReleasePolicy>(n_samples);
+    }
+
     /**
      * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
      */
@@ -15304,13 +15296,13 @@ public:
     requires(kIsInput)
     {
         const auto  readPos           = streamReader().position();
-        const auto  tags              = tagReader().get(); // N.B. returns all old/available/pending tags
+        const auto  inputTags         = tagReader().get(); // N.B. returns all old/available/pending tags
         std::size_t nTagsProcessed    = 0UZ;
         bool        properTagDistance = false;
 
-        for (const Tag& tag : tags) {
+        for (const Tag& tag : inputTags) {
             const auto relativeTagPosition = (tag.index - readPos); // w.r.t. present stream reader position
-            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition <= untilOffset;
+            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition < untilOffset;
             if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
                 nTagsProcessed++;
                 if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
@@ -15323,14 +15315,8 @@ public:
         return tagReader().get(nTagsProcessed);
     }
 
-    inline const Tag getTag(Tag::signed_index_type untilOffset = 0)
-    requires(kIsInput)
-    {
-        const auto readPos = streamReader().position();
-        if (_cachedTag.index == readPos && readPos >= 0) {
-            return _cachedTag;
-        }
-        _cachedTag.reset();
+    inline const Tag getMergedTag() {
+        Tag result{};
 
         auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
             assert(&sourceMap != &destinationMap);
@@ -15339,12 +15325,14 @@ public:
             }
         };
 
-        const auto tags  = getTags(untilOffset);
-        _cachedTag.index = readPos;
-        std::ranges::for_each(tags, [&mergeSrcMapInto, this](const Tag& tag) { mergeSrcMapInto(tag.map, _cachedTag.map); });
-        std::ignore = tags.consume(tags.size());
+        result.index = -1;
+        std::ranges::for_each(tags, [&mergeSrcMapInto, &result, this](const Tag& tag) {
+            if (tag.index <= streamIndex) {
+                mergeSrcMapInto(tag.map, result.map);
+            }
+        });
 
-        return _cachedTag;
+        return result;
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
@@ -15365,10 +15353,12 @@ public:
         if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
             return false;
         }
-        auto outTags     = tagWriter().reserve(1UZ);
-        outTags[0].index = _cachedTag.index;
-        outTags[0].map   = _cachedTag.map;
-        outTags.publish(1UZ);
+        {
+            auto outTags     = tagWriter().reserve(1UZ);
+            outTags[0].index = _cachedTag.index;
+            outTags[0].map   = _cachedTag.map;
+            outTags.publish(1UZ);
+        }
 
         _cachedTag.reset();
         return true;
@@ -15376,10 +15366,12 @@ public:
 
 private:
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::signed_index_type tagOffset) noexcept {
+    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::signed_index_type tagOffset) noexcept
+    requires(kIsOutput)
+    {
         const auto newTagIndex = tagOffset < 0 ? tagOffset : streamWriter().position() + tagOffset;
 
-        if (tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
+        if (isConnected() && tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
             publishPendingTags();
         }
         _cachedTag.index = newTagIndex;
@@ -15393,7 +15385,7 @@ private:
             }
         }
 
-        if (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM)) { // force tag publishing for explicitly published tags or EOS
+        if (isConnected() && (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM))) { // force tag publishing for explicitly published tags or EOS
             publishPendingTags();
         }
     }
@@ -16114,6 +16106,12 @@ public:
 static_assert(ConsumableSpan<DummyConsumableSpan<int>>);
 
 template<typename T>
+struct DummyConsumablePortSpan: public DummyConsumableSpan<T> {
+    DummyConsumableSpan<gr::Tag> tags{};
+};
+static_assert(ConsumablePortSpan<DummyConsumablePortSpan<int>>);
+
+template<typename T>
 struct DummyPublishableSpan {
     using value_type = typename std::remove_cv_t<T>;
     using iterator = typename std::span<T>::iterator;
@@ -16181,7 +16179,7 @@ port_to_processBulk_argument_helper() {
             if constexpr (isVectorOfSpansReturned) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>> *>(nullptr);
             } else {
-                return static_cast<std::span<DummyConsumableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyConsumablePortSpan<typename Port::value_type::value_type>> *>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
             if constexpr (isVectorOfSpansReturned) {
@@ -16193,7 +16191,7 @@ port_to_processBulk_argument_helper() {
 
     } else { // single port
         if constexpr (Port::kIsInput) {
-            return static_cast<DummyConsumableSpan<typename Port::value_type> *>(nullptr);
+            return static_cast<DummyConsumablePortSpan<typename Port::value_type> *>(nullptr);
         } else if constexpr (Port::kIsOutput) {
             return static_cast<DummyPublishableSpan<typename Port::value_type> *>(nullptr);
         }
@@ -16242,7 +16240,7 @@ concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_process
 template<typename TDerived, std::size_t I>
 concept processBulk_requires_ith_output_as_span
         = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0)
-       && requires(TDerived &d, typename meta::transform_types<detail::DummyConsumableSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
+       && requires(TDerived &d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
                    typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan,
                                                         traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
                            outputs,
@@ -16338,7 +16336,7 @@ using std::hardware_destructive_interference_size;
 inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = -1L;
+static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -20197,7 +20195,7 @@ public:
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
                 if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                    publishTag(applyResult.forwardParameters);
+                    publishTag(applyResult.forwardParameters, 0);
                 }
                 notifyListeners(block::property::kSetting, settings().get());
             }
@@ -20341,14 +20339,12 @@ public:
                     auto processOneRange = [nSamples]<typename Out>(Out& out) {
                         if constexpr (Out::isMultiThreadedStrategy()) {
                             if (!out.isFullyPublished()) {
-                                fmt::print(stderr, "Block::publishSamples - did not publish all samples for MultiThreadedStrategy\n");
                                 std::abort();
                             }
                         }
                         if (!out.isPublished()) {
                             using enum gr::SpanReleasePolicy;
                             if constexpr (Out::spanReleasePolicy() == Terminate) {
-                                fmt::print(stderr, "Block::publishSamples - samples were not published, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                 std::abort();
                             } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
                                 out.publish(nSamples);
@@ -20378,7 +20374,6 @@ public:
                         if (!in.isConsumeRequested()) {
                             using enum gr::SpanReleasePolicy;
                             if constexpr (In::spanReleasePolicy() == Terminate) {
-                                fmt::print(stderr, "Block::consumeReaders - samples were not consumed, default SpanReleasePolicy is {}\n", magic_enum::enum_name(Terminate));
                                 std::abort();
                             } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
                                 success = success && in.consume(nSamples);
@@ -20430,6 +20425,12 @@ public:
 
     constexpr void forwardTags() noexcept {
         if (input_tags_present()) {
+            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                for_each_port([this](PortLike auto& outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
+            }
+            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
+                requestStop();
+            }
             // clear temporary cached input tags after processing - won't be needed after this
             _mergedInputTag.map.clear();
         }
@@ -20446,7 +20447,7 @@ public:
      */
     constexpr void updateInputAndOutputTags(std::size_t untilOffset = 0) noexcept {
         for_each_port(
-            [untilOffset, this]<typename Port>(Port& input_port) noexcept {
+            [untilOffset, this]<PortLike TPort>(TPort& input_port) noexcept {
                 auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                     assert(&sourceMap != &destinationMap);
                     for (const auto& [key, value] : sourceMap) {
@@ -20454,16 +20455,12 @@ public:
                     }
                 };
 
-                const Tag mergedPortTags = input_port.getTag(static_cast<gr::Tag::signed_index_type>(untilOffset));
-                mergeSrcMapInto(mergedPortTags.map, _mergedInputTag.map);
+                mergeSrcMapInto(input_port.getMergedTag().map, _mergedInputTag.map);
             },
             inputPorts<PortType::STREAM>(&self()));
 
         if (!mergedInputTag().map.empty()) {
             settings().autoUpdate(mergedInputTag()); // apply tags as new settings if matching
-            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                for_each_port([this](PortLike auto& outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
-            }
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
                 requestStop();
             }
@@ -20479,7 +20476,9 @@ public:
             checkBlockParameterConsistency();
 
             if (!applyResult.forwardParameters.empty()) {
-                publishTag(applyResult.forwardParameters, 0);
+                for (auto& [key, value] : applyResult.forwardParameters) {
+                    _mergedInputTag.insert_or_assign(key, value);
+                }
             }
 
             settings()._changed.store(false);
@@ -20496,18 +20495,18 @@ public:
             [sync_samples]<typename PortOrCollection>(PortOrCollection& output_port_or_collection) noexcept {
                 auto process_single_port = [&sync_samples]<typename Port>(Port&& port) {
                     using enum gr::SpanReleasePolicy;
-                    if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                        if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                            return std::forward<Port>(port).streamReader().template get<ProcessAll>(sync_samples);
-                        } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                            return std::forward<Port>(port).streamWriter().template reserve<ProcessAll>(sync_samples);
+                    if constexpr (std::remove_cvref_t<Port>::kIsInput) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                            return std::forward<Port>(port).template get<ProcessAll>(sync_samples);
+                        } else {
+                            // return std::forward<Port>(port).template get<ProcessNone>(std::max(port.min_samples, std::min(port.streamReader().available(), port.max_samples)));
+                            return std::forward<Port>(port).template get<ProcessNone>(port.streamReader().available());
                         }
-                    } else {
-                        // for the Async port get/reserve all available samples
-                        if constexpr (std::remove_cvref_t<Port>::kIsInput) {
-                            return std::forward<Port>(port).streamReader().template get<ProcessNone>(port.streamReader().available());
-                        } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
-                            return std::forward<Port>(port).streamWriter().template reserve<ProcessNone>(port.streamWriter().available());
+                    } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
+                        if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                            return std::forward<Port>(port).template reserve<ProcessAll>(sync_samples);
+                        } else {
+                            return std::forward<Port>(port).template reserve<ProcessNone>(port.streamWriter().available());
                         }
                     }
                 };
@@ -20529,6 +20528,11 @@ public:
 
     inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
         for_each_port([&tag_data, tagOffset](PortLike auto& outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
+    }
+
+    inline constexpr void publishEoS() noexcept {
+        const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, outPort.streamWriter().nSamplesPublished()); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -20845,10 +20849,16 @@ protected:
 
         if constexpr (!Resampling::kEnabled) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
+            if (n < minSyncIn) {
+                return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+            }
             return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
         }
         if (denominator == 1UL && numerator == 1UL) { // no resampling
             std::size_t n = std::min(maxSyncIn, maxSyncOut);
+            if (n < minSyncIn) {
+                return ResamplingResult{.decimatedIn = 0UZ, .decimatedOut = 0UZ};
+            }
             return ResamplingResult{.decimatedIn = n, .decimatedOut = n};
         }
         std::size_t nResamplingChunks;
@@ -20884,7 +20894,17 @@ protected:
 
     template<typename TIn, typename TOut>
     gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple) {
-        auto tempInputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, inputReaderTuple);
+        auto tempInputSpanStorage = std::apply(
+            []<typename... PortReader>(PortReader&... args) {
+                return std::tuple{([](auto& a) {
+                    if constexpr (gr::meta::array_or_vector_type<PortReader>) {
+                        return std::span{a.data(), a.size()};
+                    } else {
+                        return a;
+                    }
+                }(args))...};
+            },
+            inputReaderTuple);
 
         auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, outputReaderTuple);
 
@@ -21071,9 +21091,11 @@ protected:
         auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
         std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
         const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), (nextTag - inputSkipBefore), (nextEosTag - inputSkipBefore)});
+        const auto  nextTagLimit                                              = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
+        const auto  ensureMinimalDecimation                                   = nextTagLimit >= denominator ? nextTagLimit : static_cast<long unsigned int>(denominator); // ensure to process at least one denominator (may shift tags)
+        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
         const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
-        const auto [resampledIn, resampledOut]                                = computeResampling(minSyncIn, availableToProcess, minSyncOut, availableToPublish);
+        const auto [resampledIn, resampledOut]                                = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish);
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
             updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
@@ -21082,27 +21104,14 @@ protected:
         }
         // return if there is no work to be performed // todo: add eos policy
         if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
-            if (asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
+            if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state()) || asyncEoS || (nextEosTag - inputSkipBefore <= minSyncIn) || (nextEosTag - inputSkipBefore <= denominator) || (nextEosTag - inputSkipBefore) / denominator <= minSyncOut / numerator) {
                 emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
-                updateInputAndOutputTags();
-                forwardTags();
+                publishEoS();
                 this->setAndNotifyState(lifecycle::State::STOPPED);
-                return {requested_work, 0UZ, work::Status::DONE};
-            }
-            if (nextEosTag <= 0 || lifecycle::isShuttingDown(this->state())) {
-                emitErrorMessageIfAny("workInternal(): REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                updateInputAndOutputTags();
-                applyChangedSettings();
-                forwardTags();
                 return {requested_work, 0UZ, work::Status::DONE};
             }
             return {requested_work, 0UZ, resampledOut == 0 ? INSUFFICIENT_OUTPUT_ITEMS : INSUFFICIENT_INPUT_ITEMS};
         }
-        // process stream tags
-        updateInputAndOutputTags();
-        applyChangedSettings();
-        // TODO: handle tag propagation to next or previous chunk if there are multiple tags inside min samples, special case EOS -> additional parameter for kAllowIncompleteFinalUpdate
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
         const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
@@ -21113,10 +21122,44 @@ protected:
         std::size_t  processedOut = limitByFirstTag ? 1 : resampledOut;
         const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+
+        updateInputAndOutputTags();
+        applyChangedSettings();
+
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&ret, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) {
                 ret = invokeProcessBulk(inputSpans, outputSpans); // todo: evaluate how many were really produced...
             });
+            meta::tuple_for_each(
+                [&processedIn]<typename TIn>(TIn& in) {
+                    if constexpr (ConsumableSpan<TIn>) {
+                        if (in.isConsumeRequested()) {
+                            processedIn = std::min(processedIn, in.getConsumeRequested());
+                        }
+                    } else if constexpr (ConsumableSpan<typename TIn::value_type>) {
+                        for (auto& span : in) {
+                            if (span.isConsumeRequested()) {
+                                processedIn = std::min(processedIn, span.getConsumeRequested());
+                            }
+                        }
+                    }
+                },
+                inputSpans);
+            meta::tuple_for_each(
+                [&processedOut]<typename TOut>(TOut& out) {
+                    if constexpr (PublishableSpan<TOut>) {
+                        if (out.isPublished()) {
+                            processedOut = std::min(processedOut, out.samplesToPublish());
+                        }
+                    } else if constexpr (PublishableSpan<typename TOut::value_type>) {
+                        for (auto& span : out) {
+                            if (span.isPublished()) {
+                                processedOut = std::min(processedOut, span.samplesToPublish());
+                            }
+                        }
+                    }
+                },
+                outputSpans);
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
                 emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
@@ -21150,10 +21193,11 @@ protected:
         } else { // block does not define any valid processing function
             static_assert(gr::meta::always_false<gr::traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
         }
-        forwardTags();
+        if (processedIn > 0 && processedOut > 0) {
+            forwardTags();
+        }
         if (lifecycle::isShuttingDown(this->state())) {
             emitErrorMessageIfAny("isShuttingDown -> STOPPED", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-            updateInputAndOutputTags(processedIn);
             applyChangedSettings();
             ret         = work::Status::DONE;
             processedIn = 0UZ;
@@ -21163,7 +21207,6 @@ protected:
         const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
         bool       success;
         if (inputSamplesToConsume > 0) {
-            updateInputAndOutputTags(inputSamplesToConsume); // apply all tags in the skipped data range
             success = consumeReaders(inputSamplesToConsume, inputSpans);
         } else {
             success = consumeReaders(processedIn, inputSpans);
@@ -21171,8 +21214,9 @@ protected:
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (ret == work::Status::DONE) {
             this->setAndNotifyState(lifecycle::State::STOPPED);
-            publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
+            publishEoS();
         }
+        for_each_port([](PortLike auto& outPort) { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
         return {requested_work, processedIn, success ? ret : work::Status::ERROR};
     } // end: work_return_t workInternal() noexcept { ..}
 
@@ -21234,7 +21278,7 @@ public:
             if constexpr (!useIoThread) {
                 const bool blockIsActive = lifecycle::isActive(this->state());
                 if (!blockIsActive) {
-                    publishTag({{gr::tag::END_OF_STREAM, true}}, 0);
+                    publishEoS();
                     ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
                 }
             }
@@ -21375,7 +21419,6 @@ inline void checkBlockContracts() {
     if constexpr (requires { &TDerived::work; }) {
         // N.B. implementing this is still allowed for workaround but should be discouraged as default API since this often leads to
         // important variants not being implemented such as lifecycle::State handling, Tag forwarding, etc.
-        fmt::println(stderr, "DEPRECATION WARNING: block {} implements a raw 'gr::work::Result work(std::size_t requested_work)' ", shortTypeName.template operator()<TDecayedBlock>());
         return;
     }
 
@@ -22927,7 +22970,7 @@ public:
         addBlock(std::move(block_load));
 
         std::optional<Message> result = gr::Message{};
-        result->endpoint              = graph::property::kBlockEmplaced;
+        result->endpoint              = graph::property::kBlockReplaced;
         result->data                  = property_map{{"uniqueName"s, std::string(newName)}};
 
         return result;
