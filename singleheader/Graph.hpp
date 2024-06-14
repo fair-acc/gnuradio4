@@ -14670,6 +14670,40 @@ struct Annotated {
     visible() noexcept {
         return gr::meta::typelist<Arguments...>::template contains<Visible>;
     }
+
+    // forwarding member functions
+    template<typename... Args>
+    constexpr auto operator()(Args&&... args) -> decltype(auto) {
+        return value(std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    constexpr auto operator()(Args&&... args) const -> decltype(auto) {
+        return value(std::forward<Args>(args)...);
+    }
+
+    template<typename Arg>
+    constexpr auto operator[](Arg&& arg) -> decltype(auto) {
+        return value[std::forward<Arg>(arg)];
+    }
+
+    template<typename Arg>
+    constexpr auto operator[](Arg&& arg) const -> decltype(auto) {
+        return value[std::forward<Arg>(arg)];
+    }
+
+    template<typename Arg>
+    constexpr auto operator->*(Arg&& arg) -> decltype(auto) {
+        return value.*std::forward<Arg>(arg);
+    }
+
+    template<typename Arg>
+    constexpr auto operator->*(Arg&& arg) const -> decltype(auto) {
+        return value.*std::forward<Arg>(arg);
+    }
+
+    constexpr T* operator->() noexcept { return &value; }
+    constexpr const T* operator->() const noexcept { return &value; }
 };
 
 template<typename T>

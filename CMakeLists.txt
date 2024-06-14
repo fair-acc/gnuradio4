@@ -22,10 +22,6 @@ if (EMSCRIPTEN)
     set(ENABLE_BLOCK_PLUGINS OFF)
 endif ()
 
-if (ENABLE_BLOCK_PLUGINS)
-    set(ENABLE_BLOCK_REGISTRY ON)
-endif ()
-
 message(STATUS "Is block registry enabled? (faster compile-times and when runtime or Python wrapping APIs are not required) ${ENABLE_BLOCK_REGISTRY}")
 message(STATUS "Is plugin system enabled? ${ENABLE_BLOCK_PLUGINS}")
 
@@ -224,6 +220,11 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd cpp-httplib)
+
+# Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
+if (CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
+    find_package(SoapySDR CONFIG)
+endif ()
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
