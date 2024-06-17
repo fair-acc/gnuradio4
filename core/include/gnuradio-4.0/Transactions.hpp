@@ -91,8 +91,8 @@ public:
             }
 
             // handle meta-information for UI and other non-processing-related purposes
-            auto processOneMember = [&](auto member) {
-                using RawType         = std::remove_cvref_t<decltype(member(*_block))>;
+            auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
+                using RawType         = std::remove_cvref_t<typename TFieldMeta::value_type>;
                 using Type            = unwrap_if_wrapped_t<RawType>;
                 const auto memberName = std::string(get_display_name(member));
 
@@ -168,8 +168,8 @@ public:
 
             for (const auto& [key, value] : parameters) {
                 bool isSet            = false;
-                auto processOneMember = [&, this](auto member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+                auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
                         const auto fieldName = std::string_view(get_display_name(member));
                         if (fieldName == key && std::holds_alternative<Type>(value)) {
@@ -241,10 +241,10 @@ public:
             const property_map& parameters    = tag.map;
             bool                wasChanged    = false;
             for (const auto& [key, value] : parameters) {
-                auto processOneMember = [&, this](auto member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+                auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
-                        if (autoUpdateParameters.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                        if (std::string_view(get_display_name(member)) == key && autoUpdateParameters.contains(key) && std::holds_alternative<Type>(value)) {
                             newParameters.insert_or_assign(key, value);
                             wasChanged = true;
                         }
@@ -356,8 +356,8 @@ public:
             // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto& [key, stagedValue] : bestMatchParameters) {
-                auto applyOneMemberChanges = [&key, &staged, &result, &stagedValue, this](auto member) {
-                    using RawType = std::remove_cvref_t<decltype(member(*_block))>;
+                auto applyOneMemberChanges = [&key, &staged, &result, &stagedValue, this]<typename TFieldMeta>(TFieldMeta member) {
+                    using RawType = std::remove_cvref_t<typename TFieldMeta::value_type>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(stagedValue)) {
@@ -403,8 +403,8 @@ public:
             }
 
             // update active parameters
-            auto updateActive = [this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+            auto updateActive = [this]<typename TFieldMeta>(TFieldMeta member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                 if constexpr (settings::isReadableMember<Type>(member)) {
                     _activeParameters.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
@@ -439,8 +439,8 @@ public:
     void updateActiveParameters() noexcept override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
-            auto            processOneMember = [&, this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+            auto            processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                 if constexpr (settings::isReadableMember<Type>(member)) {
                     _activeParameters.insert_or_assign(get_display_name_const(member).str(), member(*_block));
                 }
@@ -594,8 +594,8 @@ private:
     void storeDefaultSettings(property_map& oldSettings) {
         // take a copy of the field -> map value of the old settings
         if constexpr (refl::is_reflectable<TBlock>()) {
-            auto processOneMember = [&, this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+            auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
 
                 if constexpr (settings::isReadableMember<Type>(member)) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));

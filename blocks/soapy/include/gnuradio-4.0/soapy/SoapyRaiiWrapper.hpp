@@ -218,7 +218,7 @@ public:
      * \return a list of argument maps, each unique to a device
      */
     static SoapySDR::KwargsList enumerate(const SoapySDR::Kwargs& args = SoapySDR::Kwargs()) {
-        std::size_t length;
+        std::size_t length = 0UZ;
         return detail::convertToCpp(SoapySDRDevice_enumerate(detail::KwargsWrapper(args), &length), length);
     }
 

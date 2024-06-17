@@ -14871,10 +14871,8 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     // controls automatic (if set) or manual update of above parameters
     std::set<std::string, std::less<>> auto_update{"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"};
 
-    PortMetaInfo() noexcept(true) : PortMetaInfo({}) {}
-
+    constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
-
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
 
     void reset() { auto_update = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"}; }
@@ -15037,8 +15035,8 @@ struct Port {
         ConsumablePortInputRange(std::size_t nSamples, ReaderType& streamReader, TagReaderSpanType _tags, Tag::signed_index_type _currentStreamOffset) : ReaderSpanType<spanReleasePolicy>(streamReader.template get<spanReleasePolicy>(nSamples)), tags(_tags), streamIndex{_currentStreamOffset} {};
 
         ~ConsumablePortInputRange() {
-            if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (tags.isConsumeRequested()) {                           // the user has already manually consumed tags
+            if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
+                if (tags.isConsumeRequested()) {                             // the user has already manually consumed tags
                     return;
                 }
                 if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::getConsumeRequested() == 0) || this->empty()) {
@@ -15052,7 +15050,7 @@ struct Port {
                         break;
                     }
                 }
-                bool result = tags.tryConsume(tagsToConsume);
+                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitely and implicitly consumed
             }
         }
     };
@@ -15085,16 +15083,12 @@ private:
 
 public:
     constexpr Port() noexcept = default;
-
     Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : name(std::move(port_name)), priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} { static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter"); }
-
     constexpr Port(Port&& other) noexcept : name(std::move(other.name)), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
-
     Port(const Port&)                       = delete;
     auto            operator=(const Port&)  = delete;
     constexpr Port& operator=(Port&& other) = delete;
-
-    ~Port() = default;
+    ~Port()                                 = default;
 
     [[nodiscard]] constexpr bool initBuffer(std::size_t nSamples = 0) noexcept {
         if constexpr (kIsOutput) {
@@ -15448,6 +15442,9 @@ static_assert(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message"
 static_assert(PortIn<float>::kPortType == PortType::STREAM);
 static_assert(PortIn<Message>::kPortType == PortType::STREAM);
 static_assert(MsgPortIn::kPortType == PortType::MESSAGE);
+
+static_assert(std::is_default_constructible_v<PortIn<float>>);
+static_assert(std::is_default_constructible_v<PortOut<float>>);
 
 /**
  *  Runtime capable wrapper to be used within a block. It's primary purpose is to allow the runtime
@@ -18856,8 +18853,8 @@ public:
             }
 
             // handle meta-information for UI and other non-processing-related purposes
-            auto processOneMember = [&](auto member) {
-                using RawType         = std::remove_cvref_t<decltype(member(*_block))>;
+            auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
+                using RawType         = std::remove_cvref_t<typename TFieldMeta::value_type>;
                 using Type            = unwrap_if_wrapped_t<RawType>;
                 const auto memberName = std::string(get_display_name(member));
 
@@ -18933,8 +18930,8 @@ public:
 
             for (const auto& [key, value] : parameters) {
                 bool isSet            = false;
-                auto processOneMember = [&, this](auto member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+                auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
                         const auto fieldName = std::string_view(get_display_name(member));
                         if (fieldName == key && std::holds_alternative<Type>(value)) {
@@ -19006,10 +19003,10 @@ public:
             const property_map& parameters    = tag.map;
             bool                wasChanged    = false;
             for (const auto& [key, value] : parameters) {
-                auto processOneMember = [&, this](auto member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+                auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
+                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
-                        if (autoUpdateParameters.contains(key) && std::string(get_display_name(member)) == key && std::holds_alternative<Type>(value)) {
+                        if (std::string_view(get_display_name(member)) == key && autoUpdateParameters.contains(key) && std::holds_alternative<Type>(value)) {
                             newParameters.insert_or_assign(key, value);
                             wasChanged = true;
                         }
@@ -19121,8 +19118,8 @@ public:
             // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto& [key, stagedValue] : bestMatchParameters) {
-                auto applyOneMemberChanges = [&key, &staged, &result, &stagedValue, this](auto member) {
-                    using RawType = std::remove_cvref_t<decltype(member(*_block))>;
+                auto applyOneMemberChanges = [&key, &staged, &result, &stagedValue, this]<typename TFieldMeta>(TFieldMeta member) {
+                    using RawType = std::remove_cvref_t<typename TFieldMeta::value_type>;
                     using Type    = unwrap_if_wrapped_t<RawType>;
                     if constexpr (settings::isWritableMember<Type>(member)) {
                         if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(stagedValue)) {
@@ -19168,8 +19165,8 @@ public:
             }
 
             // update active parameters
-            auto updateActive = [this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+            auto updateActive = [this]<typename TFieldMeta>(TFieldMeta member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                 if constexpr (settings::isReadableMember<Type>(member)) {
                     _activeParameters.insert_or_assign(get_display_name(member), static_cast<Type>(member(*_block)));
                 }
@@ -19204,8 +19201,8 @@ public:
     void updateActiveParameters() noexcept override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_lock);
-            auto            processOneMember = [&, this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+            auto            processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
                 if constexpr (settings::isReadableMember<Type>(member)) {
                     _activeParameters.insert_or_assign(get_display_name_const(member).str(), member(*_block));
                 }
@@ -19359,8 +19356,8 @@ private:
     void storeDefaultSettings(property_map& oldSettings) {
         // take a copy of the field -> map value of the old settings
         if constexpr (refl::is_reflectable<TBlock>()) {
-            auto processOneMember = [&, this](auto member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(member(*_block))>>;
+            auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
+                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
 
                 if constexpr (settings::isReadableMember<Type>(member)) {
                     oldSettings.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
@@ -19997,7 +19994,7 @@ inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and re
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : public lifecycle::StateMachine<Derived>, protected std::tuple<Arguments...> {
+class Block : public lifecycle::StateMachine<Derived>, public std::tuple<Arguments...> {
     static std::atomic_size_t _uniqueIdCounter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -20123,10 +20120,10 @@ protected:
     }
 
 public:
+    Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-
-    Block(property_map initParameter = {}) noexcept(false)                                  // N.B. throws in case of on contract violations
-        : _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameter) noexcept(false)                                                                                                       // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
@@ -20445,9 +20442,9 @@ public:
      * @param untilOffset defaults to 0, if bigger merges all tags from samples 0...untilOffset for each port before merging
      *                    them
      */
-    constexpr void updateInputAndOutputTags(std::size_t untilOffset = 0) noexcept {
+    constexpr void updateInputAndOutputTags(std::size_t /*untilOffset*/ = 0UZ) noexcept {
         for_each_port(
-            [untilOffset, this]<PortLike TPort>(TPort& input_port) noexcept {
+            [this]<PortLike TPort>(TPort& input_port) noexcept {
                 auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                     assert(&sourceMap != &destinationMap);
                     for (const auto& [key, value] : sourceMap) {
@@ -20532,7 +20529,7 @@ public:
 
     inline constexpr void publishEoS() noexcept {
         const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
-        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, outPort.streamWriter().nSamplesPublished()); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nSamplesPublished())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -20601,36 +20598,46 @@ protected:
         assert(propertyName == block::property::kLifeCycleState);
 
         if (message.cmd == Set) {
-            if (!message.data.has_value() && !message.data.value().contains("state")) {
+            if (!message.data.has_value() || !message.data.value().contains("state")) { // Changed '&&' to '||'
                 throw gr::exception(fmt::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
             }
 
-            std::string stateStr;
-            try {
-                stateStr = std::get<std::string>(message.data.value().at("state"));
-            } catch (const std::exception& e) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws {}, msg: {}", e.what(), message));
-            } catch (...) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state conversion throws unknown exception, msg: {}", message));
+            const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
+            auto        it      = dataMap.find("state");
+            if (it == dataMap.end()) {
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
             }
-            auto state = magic_enum::enum_cast<lifecycle::State>(stateStr);
+
+            const std::string* stateStr = std::get_if<std::string>(&it->second); // Used std::get_if instead of std::get and try-catch block
+            if (!stateStr) {
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
+            }
+
+            auto state = magic_enum::enum_cast<lifecycle::State>(*stateStr); // Changed to dereference stateStr
             if (!state.has_value()) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
             }
+
             if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", //
-                    e.error().message, e.error().sourceLocation, e.error().errorTime));
+                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
+
             return std::nullopt;
-        } else if (message.cmd == Get) {
+        }
+
+        if (message.cmd == Get) { // Merged 'else if' with 'if'
             message.data = {{"state", std::string(magic_enum::enum_name(this->state()))}};
             return message;
-        } else if (message.cmd == Subscribe) {
+        }
+
+        if (message.cmd == Subscribe) { // Merged 'else if' with 'if'
             if (!message.clientRequestID.empty()) {
                 propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
             }
             return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
+        }
+
+        if (message.cmd == Unsubscribe) { // Merged 'else if' with 'if'
             propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
             return std::nullopt;
         }
@@ -21510,25 +21517,21 @@ template<BlockLike TBlock>
     });
     ret += fmt::format("\n**Parameters:**\n");
     if constexpr (refl::is_reflectable<DerivedBlock>()) {
-        for_each(refl::reflect<DerivedBlock>().members, [&](auto member) {
-            using RawType = std::remove_cvref_t<typename decltype(member)::value_type>;
+        for_each(refl::reflect<DerivedBlock>().members, [&]<typename TFieldMeta>(TFieldMeta member) {
+            using RawType = std::remove_cvref_t<typename TFieldMeta::value_type>;
             using Type    = unwrap_if_wrapped_t<RawType>;
 
             if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
-                    const std::string type_name   = refl::detail::get_type_name<Type>().str();
-                    const std::string member_name = get_display_name_const(member).str();
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                         RawType::visible() ? "" : "_", //
-                        type_name,
-                        member_name, //
+                        refl::detail::get_type_name<Type>().c_str(),
+                        get_display_name_const(member).c_str(), //
                         RawType::description(), RawType::unit(),
                         RawType::documentation(), //
                         RawType::visible() ? "" : "_");
                 } else {
-                    const std::string type_name   = refl::detail::get_type_name<Type>().str();
-                    const std::string member_name = get_display_name_const(member).str();
-                    ret += fmt::format("_{:10} {}_\n", type_name, member_name);
+                    ret += fmt::format("_{:10} {}_\n", refl::detail::get_type_name<Type>().c_str(), get_display_name_const(member).c_str());
                 }
             }
         });
@@ -22082,17 +22085,19 @@ private:
     }
 
 public:
+    BlockWrapper() : BlockWrapper(gr::property_map()) {}
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers" // GCC14 has an issue w.r.t. detecting that the derived field members (notably Port<...>) are initialised
+    explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
+    }
+#pragma GCC diagnostic pop
     BlockWrapper(const BlockWrapper& other)            = delete;
     BlockWrapper(BlockWrapper&& other)                 = delete;
     BlockWrapper& operator=(const BlockWrapper& other) = delete;
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
-
-    ~BlockWrapper() override = default;
-
-    explicit BlockWrapper(property_map initParameter = {}) : _block(std::move(initParameter)) {
-        initMessagePorts();
-        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
-    }
+    ~BlockWrapper() override                           = default;
 
     void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
 
@@ -22105,35 +22110,21 @@ public:
         return work::Status::ERROR;
     }
 
-    UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
-
-    void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
-
-    [[nodiscard]] constexpr bool isBlocking() const noexcept override { return blockRef().isBlocking(); }
-
+    UICategory                               uiCategory() const override { return T::DrawableControl::kCategory; }
+    void                                     processScheduledMessages() override { return blockRef().processScheduledMessages(); }
+    [[nodiscard]] constexpr bool             isBlocking() const noexcept override { return blockRef().isBlocking(); }
     [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
-
-    [[nodiscard]] lifecycle::State state() const noexcept override { return blockRef().state(); }
-
-    [[nodiscard]] constexpr std::size_t availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
-
-    [[nodiscard]] constexpr std::size_t availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
-
-    [[nodiscard]] std::string_view name() const override { return blockRef().name; }
-
-    void setName(std::string name) noexcept override { blockRef().name = std::move(name); }
-
-    [[nodiscard]] std::string_view typeName() const override { return _type_name; }
-
-    [[nodiscard]] property_map& metaInformation() noexcept override { return blockRef().meta_information; }
-
-    [[nodiscard]] const property_map& metaInformation() const override { return blockRef().meta_information; }
-
-    [[nodiscard]] std::string_view uniqueName() const override { return blockRef().unique_name; }
-
-    [[nodiscard]] SettingsBase& settings() const override { return blockRef().settings(); }
-
-    [[nodiscard]] void* raw() override { return std::addressof(blockRef()); }
+    [[nodiscard]] lifecycle::State           state() const noexcept override { return blockRef().state(); }
+    [[nodiscard]] constexpr std::size_t      availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
+    [[nodiscard]] constexpr std::size_t      availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
+    [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
+    void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
+    [[nodiscard]] std::string_view           typeName() const override { return _type_name; }
+    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; }
+    [[nodiscard]] const property_map&        metaInformation() const override { return blockRef().meta_information; }
+    [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
+    [[nodiscard]] SettingsBase&              settings() const override { return blockRef().settings(); }
+    [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 };
 
 } // namespace gr
@@ -22889,36 +22880,25 @@ public:
         return *new_block_ref.get();
     }
 
-    template<BlockLike TBlock, typename... Args>
-    requires std::is_constructible_v<TBlock, property_map>
-    auto& emplaceBlock(Args&&... args) { // TODO for review: do we still need this factory method or allow only pmt-map-type constructors (see below)
-        static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto& new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::forward<Args>(args)...));
-        auto  raw_ref       = static_cast<TBlock*>(new_block_ref->raw());
-        raw_ref->init(progress, ioThreadPool);
-        return *raw_ref;
-    }
-
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    auto& emplaceBlock(property_map initialSettings) {
+    auto& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto&      new_block_ref = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
-        auto       raw_ref       = static_cast<TBlock*>(new_block_ref->raw());
-        const auto failed        = raw_ref->settings().set(initialSettings);
+        auto  new_block = std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings));
+        auto* raw_ref   = static_cast<TBlock*>(new_block->raw());
         raw_ref->init(progress, ioThreadPool);
+        _blocks.push_back(std::move(new_block));
         return *raw_ref;
     }
 
-    auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
-        auto block_load = loader.instantiate(type, parameters, initialSettings);
-        if (!block_load) {
-            throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+    [[maybe_unused]] auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
+        if (auto block_load = loader.instantiate(type, parameters, std::move(initialSettings)); block_load) {
+            return addBlock(std::move(block_load));
         }
-        return addBlock(std::move(block_load));
+        throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
     }
 
-    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view /*propertyName*/, Message message) {
         const auto&         data       = message.data.value();
         const std::string&  type       = std::get<std::string>(data.at("type"s));
         const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
@@ -22933,7 +22913,7 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackRemoveBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRemoveBlock(std::string_view /*propertyName*/, Message message) {
         const auto&        data       = message.data.value();
         const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
         auto               it         = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
@@ -22948,7 +22928,7 @@ public:
         return {message};
     }
 
-    std::optional<Message> propertyCallbackReplaceBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackReplaceBlock(std::string_view /*propertyName*/, Message message) {
         const auto&         data       = message.data.value();
         const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
         const std::string&  type       = std::get<std::string>(data.at("type"s));
@@ -22976,7 +22956,7 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view /*propertyName*/, Message message) {
         const auto&        data             = message.data.value();
         const std::string& sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
         const std::string& sourcePort       = std::get<std::string>(data.at("sourcePort"s));
@@ -23012,7 +22992,7 @@ public:
         return message;
     }
 
-    std::optional<Message> propertyCallbackRemoveEdge(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRemoveEdge(std::string_view /*propertyName*/, Message message) {
         const auto&        data        = message.data.value();
         const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
         const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
@@ -23024,13 +23004,14 @@ public:
 
         auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
 
-        sourcePortRef.disconnect();
+        if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
+            throw gr::exception(fmt::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
+        }
         message.endpoint = graph::property::kEdgeRemoved;
         return message;
     }
 
     // connect using the port index
-
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard]] auto connect_internal(Source& source) {
         auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
