@@ -240,8 +240,8 @@ const boost::ut::suite TagPropagation = [] {
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(sink.n_samples_produced, n_samples)) << "sinkOne did not consume enough input samples";
-        expect(eq(sink._tags.size(), 4UZ));
+        expect(eq(sink.n_samples_produced, 1008)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
+        expect(eq(sink._tags.size(), 3UZ));                                                          // default policy is to drop epilogue samples
     };
 };
 
