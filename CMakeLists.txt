@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
+add_library(gnuradio-options INTERFACE)
+
 if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
     message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
     set(EMSCRIPTEN ON)
@@ -17,6 +19,7 @@ option(TIMETRACE "Enable clang's -ftime-trace" OFF)
 option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
 option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
+option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 
 if (EMSCRIPTEN)
     set(ENABLE_BLOCK_PLUGINS OFF)
@@ -106,6 +109,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's li
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-fdiagnostics-color=always)
+    if (ENABLE_TBB)
+        find_package(TBB REQUIRED)
+        target_link_libraries(gnuradio-options INTERFACE TBB::tbb)
+    else ()
+        target_compile_definitions(gnuradio-options INTERFACE _GLIBCXX_USE_TBB_PAR_BACKEND=0)
+    endif ()
 endif ()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
@@ -139,7 +148,6 @@ endif ()
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-add_library(gnuradio-options INTERFACE)
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(gnuradio-options)
 
@@ -270,7 +278,6 @@ target_link_libraries(fftw INTERFACE fftw3 INTERFACE fftw3f INTERFACE m)
 target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include ${PROJECT_BINARY_DIR})
 target_link_directories(fftw INTERFACE ${FFTW_PREFIX}/install/lib ${FFTW_PREFIX}/install/lib64)
 add_dependencies(fftw fftw_ext)
-
 
 ## check for CPython and Numpy dependencies
 set(PYTHON_FORCE_INCLUDE OFF)
