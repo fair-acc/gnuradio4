@@ -118,16 +118,15 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, SyncBlockDoc> {
 
     gr::Annotated<gr::Size_t, "n_ports", gr::Visible, gr::Doc<"variable number of in/out ports">, gr::Limits<1U, 32U>> n_ports = 0U;
 
-    void
-    settingsChanged(const property_map &old_settings, const property_map &new_settings) {
+    void settingsChanged(const property_map& old_settings, const property_map& new_settings) {
         if (new_settings.contains("n_ports") && old_settings.at("n_ports") != new_settings.at("n_ports")) {
             // if one of the port is already connected and n_ports was changed then throw
-            bool inConnected  = std::any_of(inputs.begin(), inputs.end(), [](const auto &port) { return port.isConnected(); });
-            bool outConnected = std::any_of(outputs.begin(), outputs.end(), [](const auto &port) { return port.isConnected(); });
+            bool inConnected  = std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); });
+            bool outConnected = std::any_of(outputs.begin(), outputs.end(), [](const auto& port) { return port.isConnected(); });
             if (inConnected || outConnected) {
                 // TODO: for the moment keep both: throw exception and emit message
                 using namespace gr::message;
-                std::string messageError{ "Number of input/output ports cannot be changed after Graph initialization." };
+                std::string messageError{"Number of input/output ports cannot be changed after Graph initialization."};
                 // this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, messageError } });
                 throw std::range_error(messageError);
             }
@@ -138,8 +137,7 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, SyncBlockDoc> {
     }
 
     template<ConsumableSpan TInput, PublishableSpan TOutput>
-    gr::work::Status
-    processBulk(const std::span<TInput> &ins, std::span<TOutput> &outs) {
+    gr::work::Status processBulk(const std::span<TInput>& ins, std::span<TOutput>& outs) {
         fmt::println("SyncBlock::processBulk ins.size:{}, outs.size:{}", ins.size(), outs.size());
         std::size_t nPorts = ins.size();
         for (std::size_t i = 0; i < nPorts; i++) {
