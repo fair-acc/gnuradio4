@@ -18,8 +18,7 @@ struct copy : public Block<copy> {
 
 public:
     template<meta::t_or_simd<float> V>
-    [[nodiscard]] constexpr V
-    processOne(const V &a) const noexcept {
+    [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
         return a;
     }
 };
@@ -54,8 +53,7 @@ template<typename T>
 struct BlockSignaturesVoid : public gr::Block<BlockSignaturesVoid<T>> {
     T value;
 
-    void
-    processOne() {}
+    void processOne() {}
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesVoid, value);
@@ -65,10 +63,7 @@ template<typename T>
 struct BlockSignaturesVoid2 : public gr::Block<BlockSignaturesVoid2<T>> {
     T value;
 
-    gr::work::Status
-    processBulk() {
-        return gr::work::Status::OK;
-    }
+    gr::work::Status processBulk() { return gr::work::Status::OK; }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesVoid2, value);
@@ -79,10 +74,7 @@ struct BlockSignaturesProcessOne : public gr::Block<BlockSignaturesProcessOne<T>
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    T
-    processOne(T) {
-        return T();
-    }
+    T processOne(T) { return T(); }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesProcessOne, in, out);
@@ -96,10 +88,7 @@ struct BlockSignaturesProcessOneConst : public gr::Block<BlockSignaturesProcessO
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    T
-    processOne(T) const {
-        return T();
-    }
+    T processOne(T) const { return T(); }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesProcessOneConst, in, out);
@@ -115,57 +104,50 @@ struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessB
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
-    gr::work::Status
-    processBulk(std::span<const T>, std::span<T>)
-        requires(processVariant == ProcessBulkVariant::SPAN_SPAN)
+    gr::work::Status processBulk(std::span<const T>, std::span<T>)
+    requires(processVariant == ProcessBulkVariant::SPAN_SPAN)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(std::span<const T>, gr::PublishableSpan auto &)
-        requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE)
+    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&)
+    requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(std::span<const T>, gr::PublishableSpan auto)
-        requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE2)
+    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto)
+    requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE2)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(gr::ConsumableSpan auto, std::span<T>)
-        requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN)
+    gr::work::Status processBulk(gr::ConsumableSpan auto, std::span<T>)
+    requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(gr::ConsumableSpan auto &, std::span<T>)
-        requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN2)
+    gr::work::Status processBulk(gr::ConsumableSpan auto&, std::span<T>)
+    requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN2)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(gr::ConsumableSpan auto &, gr::PublishableSpan auto &)
-        requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE)
+    gr::work::Status processBulk(gr::ConsumableSpan auto&, gr::PublishableSpan auto&)
+    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(gr::ConsumableSpan auto, gr::PublishableSpan auto)
-        requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE2)
+    gr::work::Status processBulk(gr::ConsumableSpan auto, gr::PublishableSpan auto)
+    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE2)
     {
         // do some bulk-type processing
         return gr::work::Status::OK;
@@ -196,30 +178,26 @@ struct BlockSignaturesProcessBulkTwoOuts : public gr::Block<BlockSignaturesProce
     gr::PortOut<T> out1{};
     gr::PortOut<T> out2{};
 
-    gr::work::Status
-    processBulk(std::span<const T>, std::span<T>, std::span<T>)
-        requires(processVariant == ProcessBulkTwoOutsVariant::SPAN_SPAN)
+    gr::work::Status processBulk(std::span<const T>, std::span<T>, std::span<T>)
+    requires(processVariant == ProcessBulkTwoOutsVariant::SPAN_SPAN)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(std::span<const T>, gr::PublishableSpan auto &, std::span<T>)
-        requires(processVariant == ProcessBulkTwoOutsVariant::PUBLISHABLE_SPAN)
+    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&, std::span<T>)
+    requires(processVariant == ProcessBulkTwoOutsVariant::PUBLISHABLE_SPAN)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(std::span<const T>, gr::PublishableSpan auto &, gr::PublishableSpan auto &)
-        requires(processVariant == ProcessBulkTwoOutsVariant::PUBLISHABLE_PUBLISHABLE)
+    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&, gr::PublishableSpan auto&)
+    requires(processVariant == ProcessBulkTwoOutsVariant::PUBLISHABLE_PUBLISHABLE)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(std::span<const T>, std::span<T>, gr::PublishableSpan auto &)
-        requires(processVariant == ProcessBulkTwoOutsVariant::SPAN_PUBLISHABLE)
+    gr::work::Status processBulk(std::span<const T>, std::span<T>, gr::PublishableSpan auto&)
+    requires(processVariant == ProcessBulkTwoOutsVariant::SPAN_PUBLISHABLE)
     {
         return gr::work::Status::OK;
     }
@@ -244,48 +222,42 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
     std::array<gr::PortIn<T>, 3>  inputs{};
     std::array<gr::PortOut<T>, 6> outputs{};
 
-    gr::work::Status
-    processBulk(const std::span<std::span<const T>> &, std::span<std::span<T>> &)
-        requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN)
+    gr::work::Status processBulk(const std::span<std::span<const T>>&, std::span<std::span<T>>&)
+    requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status
-    processBulk(std::span<std::span<const T>>, std::span<std::span<T>>)
-        requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN2)
+    gr::work::Status processBulk(std::span<std::span<const T>>, std::span<std::span<T>>)
+    requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN2)
     {
         return gr::work::Status::OK;
     }
 
     template<gr::ConsumableSpan TInput>
-    gr::work::Status
-    processBulk(const std::span<TInput> &, std::span<std::span<T>> &)
-        requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_SPAN)
+    gr::work::Status processBulk(const std::span<TInput>&, std::span<std::span<T>>&)
+    requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_SPAN)
     {
         return gr::work::Status::OK;
     }
 
     template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
-    gr::work::Status
-    processBulk(const std::span<TInput> &, std::span<TOutput> &)
-        requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE)
+    gr::work::Status processBulk(const std::span<TInput>&, std::span<TOutput>&)
+    requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE)
     {
         return gr::work::Status::OK;
     }
 
     template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
-    gr::work::Status
-    processBulk(std::span<TInput>, std::span<TOutput>)
-        requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2)
+    gr::work::Status processBulk(std::span<TInput>, std::span<TOutput>)
+    requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2)
     {
         return gr::work::Status::OK;
     }
 
     template<gr::PublishableSpan TOutput>
-    gr::work::Status
-    processBulk(const std::span<std::span<const T>> &, std::span<TOutput> &)
-        requires(processVariant == ProcessBulkVectorVariant::SPAN_PUBLISHABLE)
+    gr::work::Status processBulk(const std::span<std::span<const T>>&, std::span<TOutput>&)
+    requires(processVariant == ProcessBulkVectorVariant::SPAN_PUBLISHABLE)
     {
         return gr::work::Status::OK;
     }
@@ -328,8 +300,7 @@ struct MissingProcessSignature3 : gr::Block<MissingProcessSignature3> {
     std::array<gr::PortOut<float>, 2> outB;
 
     template<typename PublishableSpan2>
-    gr::work::Status
-    processBulk(std::span<std::vector<float>> &, PublishableSpan2 &) { // TODO: needs proper explicit signature
+    gr::work::Status processBulk(std::span<std::vector<float>>&, PublishableSpan2&) { // TODO: needs proper explicit signature
         return gr::work::Status::OK;
     }
 };
@@ -337,11 +308,11 @@ struct MissingProcessSignature3 : gr::Block<MissingProcessSignature3> {
 ENABLE_REFLECTION(MissingProcessSignature3, outA, outB);
 
 struct ProcessStatus {
-    std::size_t      n_inputs{ 0 };
-    std::size_t      n_outputs{ 0 };
-    std::size_t      process_counter{ 0 };
-    std::size_t      total_in{ 0 };
-    std::size_t      total_out{ 0 };
+    std::size_t      n_inputs{0};
+    std::size_t      n_outputs{0};
+    std::size_t      process_counter{0};
+    std::size_t      total_in{0};
+    std::size_t      total_out{0};
     std::vector<int> in_vector{};
 };
 
@@ -349,38 +320,30 @@ struct IntDecTestData {
     gr::Size_t  n_samples{};
     gr::Size_t  numerator{};
     gr::Size_t  denominator{};
-    int         out_port_min{ -1 }; // -1 for not used
-    int         out_port_max{ -1 }; // -1 for not used
+    int         out_port_min{-1}; // -1 for not used
+    int         out_port_max{-1}; // -1 for not used
     std::size_t exp_in{};
     std::size_t exp_out{};
     std::size_t exp_counter{};
 
-    std::string
-    to_string() const {
-        return fmt::format("n_samples: {}, numerator: {}, denominator: {}, out_port_min: {}, out_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}", n_samples, numerator, denominator,
-                           out_port_min, out_port_max, exp_in, exp_out, exp_counter);
-    }
+    std::string to_string() const { return fmt::format("n_samples: {}, numerator: {}, denominator: {}, out_port_min: {}, out_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}", n_samples, numerator, denominator, out_port_min, out_port_max, exp_in, exp_out, exp_counter); }
 };
 
 struct StrideTestData {
     gr::Size_t       n_samples{};
-    gr::Size_t       numerator{ 1U };
-    gr::Size_t       denominator{ 1U };
+    gr::Size_t       numerator{1U};
+    gr::Size_t       denominator{1U};
     gr::Size_t       stride{};
-    int              in_port_min{ -1 }; // -1 for not used
-    int              in_port_max{ -1 }; // -1 for not used
+    int              in_port_min{-1}; // -1 for not used
+    int              in_port_max{-1}; // -1 for not used
     std::size_t      exp_in{};
     std::size_t      exp_out{};
     std::size_t      exp_counter{};
-    std::size_t      exp_total_in{ 0 };
-    std::size_t      exp_total_out{ 0 };
+    std::size_t      exp_total_in{0};
+    std::size_t      exp_total_out{0};
     std::vector<int> exp_in_vector{};
 
-    std::string
-    to_string() const {
-        return fmt::format("n_samples: {}, numerator: {}, denominator: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}",
-                           n_samples, numerator, denominator, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out);
-    }
+    std::string to_string() const { return fmt::format("n_samples: {}, numerator: {}, denominator: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}", n_samples, numerator, denominator, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out); }
 };
 
 template<typename T>
@@ -389,44 +352,45 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr:
     gr::PortOut<T> out{};
 
     ProcessStatus status{};
-    bool          write_to_vector{ false };
+    bool          write_to_vector{false};
 
-    gr::work::Status
-    processBulk(std::span<const T> input, std::span<T> output) noexcept {
+    gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         status.n_inputs  = input.size();
         status.n_outputs = output.size();
         status.process_counter++;
         status.total_in += input.size();
         status.total_out += output.size();
-        if (write_to_vector) status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
+        if (write_to_vector) {
+            status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
+        }
 
         return gr::work::Status::OK;
     }
 };
 
-template<typename T>
-struct AsyncBlock : gr::Block<AsyncBlock<T>> {
-    gr::PortIn<T, gr::Async>  in{};
-    gr::PortOut<T, gr::Async> out{};
+// This block is used to test different combination of Sync/Async input/output ports
+template<typename T, bool isInputAsync, bool isOutputAsync>
+struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAsync>> {
 
-    gr::work::Status
-    processBulk(const gr::ConsumableSpan auto &inSpan, gr::PublishableSpan auto &outSpan) {
-        auto available = std::min(inSpan.size(), outSpan.size());
-        if (available == 0) {
-            outSpan.publish(available);
-            boost::ut::expect(inSpan.tryConsume(available)) << "Samples were not consumed";
-            return gr::work::Status::OK;
+    using InputPortType  = std::conditional_t<isInputAsync, gr::PortIn<T, gr::Async>, gr::PortIn<T>>;
+    using OutputPortType = std::conditional_t<isOutputAsync, gr::PortOut<T, gr::Async>, gr::PortOut<T>>;
+    InputPortType  in{};
+    OutputPortType out{};
+
+    gr::work::Status processBulk(const gr::ConsumableSpan auto& inSpan, gr::PublishableSpan auto& outSpan) {
+        const auto available = std::min(inSpan.size(), outSpan.size());
+        if (available != 0) {
+            std::copy(inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(available)), outSpan.begin());
         }
-        std::copy(inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(available)), outSpan.begin());
         outSpan.publish(available);
         boost::ut::expect(inSpan.tryConsume(available)) << "Samples were not consumed";
         return gr::work::Status::OK;
     }
 };
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool isInputAsync, bool isOututAsync), (SyncOrAsyncBlock<T, isInputAsync, isOututAsync>), in, out);
+static_assert(gr::HasProcessBulkFunction<SyncOrAsyncBlock<float, true, true>>);
 
 ENABLE_REFLECTION_FOR_TEMPLATE(IntDecBlock, in, out);
-ENABLE_REFLECTION_FOR_TEMPLATE(AsyncBlock, in, out);
-static_assert(gr::HasProcessBulkFunction<AsyncBlock<float>>);
 
 template<typename T>
 struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
@@ -436,8 +400,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
     std::array<gr::PortOut<T, gr::Async>, nPorts> outputs;
 
     template<typename TInSpan, typename TOutSpan>
-    gr::work::Status
-    processBulk(const std::span<TInSpan> &ins, const std::span<TOutSpan> &outs) {
+    gr::work::Status processBulk(const std::span<TInSpan>& ins, const std::span<TOutSpan>& outs) {
         for (std::size_t channelIndex = 0; channelIndex < ins.size(); ++channelIndex) {
             gr::ConsumableSpan auto  inputSpan  = ins[channelIndex];
             gr::PublishableSpan auto outputSpan = outs[channelIndex];
@@ -465,7 +428,7 @@ const boost::ut::suite _block_signature = [] {
         try {
             std::ignore = InvalidSettingBlock();
             expect(false) << "unsupported std::tuple setting not caught";
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
@@ -475,7 +438,7 @@ const boost::ut::suite _block_signature = [] {
         try {
             std::ignore = BlockSignaturesNone<float>();
             expect(false) << "missing process function not caught";
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
@@ -485,7 +448,7 @@ const boost::ut::suite _block_signature = [] {
         try {
             std::ignore = MissingProcessSignature1();
             expect(false) << "missing process function not caught";
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
@@ -495,7 +458,7 @@ const boost::ut::suite _block_signature = [] {
         try {
             std::ignore = MissingProcessSignature2();
             expect(false) << "missing process function not caught";
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
@@ -505,7 +468,7 @@ const boost::ut::suite _block_signature = [] {
         try {
             std::ignore = MissingProcessSignature3();
             expect(false) << "missing process function not caught";
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
@@ -514,20 +477,23 @@ const boost::ut::suite _block_signature = [] {
     };
 };
 
-void
-interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
+void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
     using namespace gr::testing;
     using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
-    auto     &source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
-    auto     &int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator } });
-    auto     &sink = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+    auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
+    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"numerator", data.numerator}, {"denominator", data.denominator}});
+    auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
-    if (data.out_port_max >= 0) int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
-    if (data.out_port_min >= 0) int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
+    if (data.out_port_max >= 0) {
+        int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
+    }
+    if (data.out_port_min >= 0) {
+        int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
+    }
 
     auto sched = scheduler(std::move(flow), std::move(thread_pool));
     expect(sched.runAndWait().has_value());
@@ -537,24 +503,26 @@ interpolation_decimation_test(const IntDecTestData &data, std::shared_ptr<gr::th
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
 }
 
-void
-stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
+void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
     using namespace gr::testing;
     using scheduler = gr::scheduler::Simple<>;
 
-    const bool write_to_vector{ data.exp_in_vector.size() != 0 };
+    const bool write_to_vector{data.exp_in_vector.size() != 0};
 
     gr::Graph flow;
-    auto     &source = flow.emplaceBlock<TagSource<int>>({ { "n_samples_max", data.n_samples }, { "mark_tag", false } });
-    auto &int_dec_block           = flow.emplaceBlock<IntDecBlock<int>>({ { "numerator", data.numerator }, { "denominator", data.denominator }, { "stride", data.stride } });
-    auto     &sink = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+    auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
+    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"numerator", data.numerator}, {"denominator", data.denominator}, {"stride", data.stride}});
+    auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
     int_dec_block.write_to_vector = write_to_vector;
-    if (data.in_port_max >= 0) int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
-    if (data.in_port_min >= 0) int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
-
+    if (data.in_port_max >= 0) {
+        int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
+    }
+    if (data.in_port_min >= 0) {
+        int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
+    }
 
     auto sched = scheduler(std::move(flow), std::move(thread_pool));
     expect(sched.runAndWait().has_value());
@@ -567,6 +535,33 @@ stride_test(const StrideTestData &data, std::shared_ptr<gr::thread_pool::BasicTh
     if (write_to_vector) {
         expect(eq(int_dec_block.status.in_vector, data.exp_in_vector)) << "in vector of samples, parameters = " << data.to_string();
     }
+}
+
+template<bool isInputAsync, bool isOutputAsync>
+void syncOrAsyncTest() {
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace boost::ut;
+    constexpr gr::Size_t n_samples = 100;
+
+    using BlockType = SyncOrAsyncBlock<float, isInputAsync, isOutputAsync>;
+
+    Graph testGraph;
+    auto& tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", n_samples}});
+    auto& asyncBlock = testGraph.emplaceBlock<BlockType>();
+    auto& sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+
+    const std::string testInfo = fmt::format("syncOrAsyncTest<{}, {}>", isInputAsync, isOutputAsync);
+
+    expect(asyncBlock.in.kIsSynch == !isInputAsync) << testInfo;
+    expect(asyncBlock.out.kIsSynch == !isOutputAsync) << testInfo;
+
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock))) << testInfo;
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).template to<"in">(sink))) << testInfo;
+
+    scheduler::Simple sched{std::move(testGraph)};
+    expect(sched.runAndWait().has_value()) << testInfo;
+    expect(eq(n_samples, sink.n_samples_produced)) << testInfo;
 }
 
 const boost::ut::suite _stride_tests = [] {
@@ -658,65 +653,51 @@ const boost::ut::suite _stride_tests = [] {
         expect(eq(testBlock.stride, 2LU));
     };
 
-    // clang-format off
     "Interpolation/Decimation"_test = [&thread_pool] {
-        interpolation_decimation_test({ .n_samples = 1024, .numerator =   1, .denominator =   1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples = 1024, .numerator =   1, .denominator =   2, .exp_in = 1024, .exp_out =  512, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples = 1024, .numerator =   2, .denominator =   1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples = 1000, .numerator =   5, .denominator =   6, .exp_in =  996, .exp_out =  830, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =  549, .numerator =   1, .denominator =  50, .exp_in =  500, .exp_out =   10, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =  100, .numerator =   3, .denominator =   7, .exp_in =   98, .exp_out =   42, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =  100, .numerator = 100, .denominator = 100, .exp_in =  100, .exp_out =  100, .exp_counter = 1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples = 1000, .numerator =     10, .denominator = 1100, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
-        interpolation_decimation_test({ .n_samples = 1000, .numerator =      1, .denominator = 1001, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =  100, .numerator =    101, .denominator =  101, .exp_in = 0 , .exp_out = 0, .exp_counter = 0 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =  100, .numerator = 5, .denominator = 11, .out_port_min = 10 , .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter =  1 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =   80, .numerator = 2, .denominator =  4, .out_port_min = 20 , .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter =  2 }, thread_pool);
-        interpolation_decimation_test({ .n_samples =  100, .numerator = 7, .denominator =  3, .out_port_min = 10 , .out_port_max = 20, .exp_in =  6, .exp_out = 14, .exp_counter = 16 }, thread_pool);
+        interpolation_decimation_test({.n_samples = 1024, .numerator = 1, .denominator = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1024, .numerator = 1, .denominator = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1024, .numerator = 2, .denominator = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1000, .numerator = 5, .denominator = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 549, .numerator = 1, .denominator = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .numerator = 3, .denominator = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .numerator = 100, .denominator = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1000, .numerator = 10, .denominator = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1000, .numerator = 1, .denominator = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .numerator = 101, .denominator = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .numerator = 5, .denominator = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 80, .numerator = 2, .denominator = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .numerator = 7, .denominator = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16}, thread_pool);
     };
 
     "Stride tests"_test = [&thread_pool] {
-        stride_test( {.n_samples = 1024 , .stride =   0 , .in_port_max = 1024 , .exp_in = 1024 , .exp_out = 1024 , .exp_counter =  1 , .exp_total_in = 1024 , .exp_total_out = 1024 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 50 , .denominator = 50, .stride = 100 ,                       .exp_in =   50 , .exp_out =   50 , .exp_counter = 10 , .exp_total_in =  500 , .exp_total_out =  500 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 50 , .denominator = 50, .stride = 133 ,                       .exp_in =   50 , .exp_out =   50 , .exp_counter =  8 , .exp_total_in =  400 , .exp_total_out =  400 }, thread_pool);
+        stride_test({.n_samples = 1024, .stride = 0, .in_port_max = 1024, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1, .exp_total_in = 1024, .exp_total_out = 1024}, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 50, .denominator = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 50, .denominator = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
         // the original test assumes that the incomplete chunk is also processed, currently we drop that. todo: switch to last sample update type incomplete
-      //stride_test( {.n_samples = 1000 ,                                        .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 100 , .denominator = 100, .stride =  50 ,                       .exp_in =100 , .exp_out =  100 , .exp_counter = 19 , .exp_total_in = 1900 , .exp_total_out = 1900 }, thread_pool);
+        // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 }, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 100, .denominator = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900}, thread_pool);
         // this one is tricky, it assumes that there are multiple incomplete last chunks :/ not sure what to do here...
-      //stride_test( {.n_samples = 1000 ,                                        .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 100 , .denominator = 100, .stride =  33 ,                      .exp_in =  100 , .exp_out =  100 , .exp_counter = 28 , .exp_total_in = 2800 , .exp_total_out = 2800 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 50 , .denominator = 100 , .stride = 50,                    .exp_in = 100, .exp_out = 50 , .exp_counter = 19 , .exp_total_in = 1900 , .exp_total_out = 950 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 25 , .denominator = 50,.stride = 50 ,                      .exp_in = 1000 , .exp_out = 500 , .exp_counter = 1 , .exp_total_in =  1000, .exp_total_out = 500 }, thread_pool);
-        stride_test( {.n_samples = 1000 , .numerator = 24 , .denominator = 48,.stride = 50 ,                      .exp_in = 48,  .exp_out = 24, .exp_counter = 20 , .exp_total_in =  960, .exp_total_out = 480}, thread_pool);
-      //std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
-      //stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 }, thread_pool);
+        // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 }, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 100, .denominator = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800}, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 50, .denominator = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950}, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 25, .denominator = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000, .numerator = 24, .denominator = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480}, thread_pool);
+        // std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
+        // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 }, thread_pool);
         std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13};
-        stride_test( {.n_samples = 15, .numerator = 5, .denominator = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1 }, thread_pool);
+        stride_test({.n_samples = 15, .numerator = 5, .denominator = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1}, thread_pool);
         std::vector<int> exp_v2 = {0, 1, 2, 5, 6, 7, 10, 11, 12};
-        stride_test( {.n_samples = 15, .numerator = 3, .denominator = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2 }, thread_pool);
+        stride_test({.n_samples = 15, .numerator = 3, .denominator = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2}, thread_pool);
         // assuming buffer size is approx 65k
-        stride_test( {.n_samples = 1000000, .numerator = 100, .denominator = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400 }, thread_pool);
-        stride_test( {.n_samples = 1000000, .numerator = 100, .denominator = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500 }, thread_pool);
+        stride_test({.n_samples = 1000000, .numerator = 100, .denominator = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
+        stride_test({.n_samples = 1000000, .numerator = 100, .denominator = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
     };
-    // clang-format on
 
-    "Async ports tests"_test = [] {
-        using namespace gr;
-        using namespace gr::testing;
-        constexpr gr::Size_t n_samples   = 1000;
-        constexpr float      sample_rate = 1000.f;
-        Graph                testGraph;
-        auto                &tagSrc     = testGraph.emplaceBlock<TagSource<float>>({ { "sample_rate", sample_rate }, { "n_samples_max", n_samples }, { "name", "TagSource" } });
-        auto                &asyncBlock = testGraph.emplaceBlock<AsyncBlock<float>>({ { "name", "AsyncBlock" } });
-        auto                &sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({ { "name", "TagSink" }, { "verbose_console", true } });
-
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).to<"in">(sink)));
-
-        scheduler::Simple sched{ std::move(testGraph) };
-        expect(sched.runAndWait().has_value());
-
-        expect(eq(n_samples, static_cast<gr::Size_t>(sink.n_samples_produced))) << "Number of samples does not match";
+    "SyncOrAsync ports tests"_test = [] {
+        syncOrAsyncTest<true, true>();
+        syncOrAsyncTest<false, true>();
+        syncOrAsyncTest<true, false>();
+        syncOrAsyncTest<false, false>();
     };
 
     "basic ports in arrays"_test = [] {
@@ -727,16 +708,16 @@ const boost::ut::suite _stride_tests = [] {
 
         const gr::Size_t nSamples = 5;
 
-        gr::Graph                                                          graph;
-        std::array<TagSource<double> *, 4>                                 sources;
-        std::array<TagSink<double, ProcessFunction::USE_PROCESS_ONE> *, 4> sinks;
+        gr::Graph                                                         graph;
+        std::array<TagSource<double>*, 4>                                 sources;
+        std::array<TagSink<double, ProcessFunction::USE_PROCESS_ONE>*, 4> sinks;
 
-        auto *testNode = std::addressof(graph.emplaceBlock<TestNode>());
+        auto* testNode = std::addressof(graph.emplaceBlock<TestNode>());
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 0. } } }));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 1. } } }));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 2. } } }));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({ { "n_samples_max", nSamples }, { "values", std::vector{ 3. } } }));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -749,15 +730,15 @@ const boost::ut::suite _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"inputs", 3UZ>(*testNode)));
 
         // test also different connect API
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, { "outputs", 0 }, *sinks[0], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, { "outputs", 1 }, *sinks[1], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, { "outputs", 2 }, *sinks[2], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, { "outputs", 3 }, *sinks[3], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 0}, *sinks[0], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 1}, *sinks[1], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 2}, *sinks[2], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 3}, *sinks[3], "in"s)));
 
-        gr::scheduler::Simple sched{ std::move(graph) };
+        gr::scheduler::Simple sched{std::move(graph)};
         expect(sched.runAndWait().has_value());
 
-        std::vector<std::vector<double>> expected_values{ { 0., 0., 0., 0., 0. }, { 1., 1., 1., 1., 1. }, { 2., 2., 2., 2., 2. }, { 3., 3., 3., 3., 3. } };
+        std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
         for (std::size_t i = 0UZ; i < sinks.size(); i++) {
             expect(sinks[i]->n_samples_produced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
             expect(std::ranges::equal(sinks[i]->samples, expected_values[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
@@ -775,13 +756,10 @@ const boost::ut::suite _drawableAnnotations = [] {
         expect(!testBlock0.meta_information.value.contains("Drawable")) << "not drawable";
 
         struct TestBlock1 : gr::Block<TestBlock1, gr::Drawable<gr::UICategory::Toolbar, "console">> {
-            gr::work::Status
-            draw() {
-                return gr::work::Status::OK;
-            }
+            gr::work::Status draw() { return gr::work::Status::OK; }
         } testBlock1;
         expect(testBlock1.meta_information.value.contains("Drawable")) << "drawable";
-        const auto &drawableConfigMap = std::get<gr::property_map>(testBlock1.meta_information.value.at("Drawable"s));
+        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock1.meta_information.value.at("Drawable"s));
         expect(drawableConfigMap.contains("Category"));
         expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
@@ -796,12 +774,8 @@ const boost::ut::suite _portMetaInfoTests = [] {
 
     "constructor test"_test = [] {
         // Test the initializer list constructor
-        PortMetaInfo portMetaInfo({ { "sample_rate", 48000.f }, //
-                                    { "signal_name", "TestSignal" },
-                                    { "signal_quantity", "voltage" },
-                                    { "signal_unit", "V" },
-                                    { "signal_min", -1.f },
-                                    { "signal_max", 1.f } });
+        PortMetaInfo portMetaInfo({{"sample_rate", 48000.f}, //
+            {"signal_name", "TestSignal"}, {"signal_quantity", "voltage"}, {"signal_unit", "V"}, {"signal_min", -1.f}, {"signal_max", 1.f}});
 
         expect(eq(48000.f, portMetaInfo.sample_rate.value));
         expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
@@ -829,7 +803,7 @@ const boost::ut::suite _portMetaInfoTests = [] {
 
     "update test"_test = [] {
         PortMetaInfo portMetaInfo;
-        property_map updateProps{ { "sample_rate", 96000.f }, { "signal_name", "UpdatedSignal" } };
+        property_map updateProps{{"sample_rate", 96000.f}, {"signal_name", "UpdatedSignal"}};
         portMetaInfo.update(updateProps);
 
         expect(eq(96000.f, portMetaInfo.sample_rate));
@@ -837,7 +811,7 @@ const boost::ut::suite _portMetaInfoTests = [] {
     };
 
     "get test"_test = [] {
-        PortMetaInfo portMetaInfo({ { "sample_rate", 48000.f }, { "signal_name", "TestSignal" } });
+        PortMetaInfo portMetaInfo({{"sample_rate", 48000.f}, {"signal_name", "TestSignal"}});
         const auto   props = portMetaInfo.get();
 
         expect(eq(48000.f, std::get<float>(props.at("sample_rate"))));
@@ -845,6 +819,4 @@ const boost::ut::suite _portMetaInfoTests = [] {
     };
 };
 
-int
-main() { /* not needed for UT */
-}
+int main() { /* not needed for UT */ }
