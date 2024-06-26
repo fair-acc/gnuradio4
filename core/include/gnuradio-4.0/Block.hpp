@@ -227,21 +227,21 @@ inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and re
  * As the base class for all user-defined blocks, it implements common convenience functions and a default public API
  * through the Curiously-Recurring-Template-Pattern (CRTP). For example:
  * @code
- * struct user_defined_block : Block<user_defined_block> {
- *   IN<float> in;
- *   OUT<float> out;
- *   // implement one of the possible work or abstracted functions
+ * struct UserDefinedBlock : Block<UserDefinedBlock> {
+ *   PortIn<float> in;
+ *   PortOut<float> out;
+ *   // implement one of the possible processOne or processBulk functions
  * };
- * ENABLE_REFLECTION(user_defined_block, in, out);
+ * ENABLE_REFLECTION_FOR_TEMPLATE(UserDefinedBlock, in, out);
  * @endcode
- * The macro `ENABLE_REFLECTION` since it relies on a template specialisation needs to be declared on the global scope.
+ * The macro `ENABLE_REFLECTION_FOR_TEMPLATE` since it relies on a template specialisation needs to be declared on the global scope.
  *
- * As an alternative definition that does not require the 'ENABLE_REFLECTION' macro and that also supports arbitrary
+ * As an alternative definition that does not require the 'ENABLE_REFLECTION_FOR_TEMPLATE' macro and that also supports arbitrary
  * types for input 'T' and for the return 'R':
  * @code
  * template<typename T, typename R>
- * struct user_defined_block : Block<user_defined_block, IN<T, 0, N_MAX, "in">, OUT<R, 0, N_MAX, "out">> {
- *   // implement one of the possible work or abstracted functions
+ * struct UserDefinedBlock : Block<UserDefinedBlock, PortInNamed<T, "in">, PortInNamed<R, "out">> {
+ *   // implement one of the possible processOne or processBulk functions
  * };
  * @endcode
  * This implementation provides efficient compile-time static polymorphism (i.e. access to the ports, settings, etc. does
@@ -250,12 +250,12 @@ inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and re
  *
  * The 'Block<Derived>' implementation provides simple defaults for users who want to focus on generic signal-processing
  * algorithms and don't need full flexibility (and complexity) of using the generic `work_return_t work() {...}`.
- * The following defaults are defined for one of the two 'user_defined_block' block definitions (WIP):
+ * The following defaults are defined for one of the two 'UserDefinedBlock' block definitions (WIP):
  * <ul>
  * <li> <b>case 1a</b> - non-decimating N-in->N-out mechanic and automatic handling of streaming tags and settings changes:
  * @code
- *  gr::IN<T> in;
- *  gr::OUT<R> out;
+ *  gr::PortIn<T> in;
+ *  gr::PortOut<R> out;
  *  T _factor = T{1.0};
  *
  *  [[nodiscard]] constexpr auto processOne(T a) const noexcept {
@@ -270,38 +270,17 @@ inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and re
  *      std::ranges::copy(input, output | std::views::transform([a = this->_factor](T x) { return static_cast<R>(x * a); }));
  *  }
  * @endcode
- * <li> <b>case 2a</b>: N-in->M-out -> processBulk(<ins...>, <outs...>) N,M fixed -> aka. interpolator (M>N) or decimator (M<N) (to-be-done)
+ * <li> <b>case 2a</b>: N-in->M-out -> processBulk(<ins...>, <outs...>) N,M fixed -> aka. interpolator (M>N) or decimator (M<N)
+ * Two fields define the resampling ratio are `input_chunk_size` and `output_chunk_size`.
+ * For each `input_chunk_size` input samples, `output_chunk_size` output samples are published.
+ * Thus the total number of input/output samples can be calculated as `n_input = k * input_chunk_size` and `n_output = k * output_chunk_size`.
+ * They also act as constraints for the minimum number of input samples (`input_chunk_size`)  and output samples (`output_chunk_size`).
+ *
+ * │input_chunk_size│...│input_chunk_size│ ───► │output_chunk_size│...│output_chunk_size│
+ * └────────────────┘   └────────────────┘      └─────────────────┘   └─────────────────┘
+ *    n_inputs = k * input_chunk_size              n_outputs = k * output_chunk_size
+ *
  * <li> <b>case 2b</b>: N-in->M-out -> processBulk(<{ins,tag-IO}...>, <{outs,tag-IO}...>) user-level tag handling (to-be-done)
- * <li> <b>case 3</b> -- generic `work()` providing full access/logic capable of handling any N-in->M-out tag-handling case:
- * @code
- * [[nodiscard]] constexpr work_return_t work() const noexcept {
- *     auto &out_port = outputPort<"out">(this);
- *     auto &in_port = inputPort<"in">(this);
- *
- *     auto &reader = in_port.streamReader();
- *     auto &writer = out_port.streamWriter();
- *     const auto n_readable = std::min(reader.available(), in_port.max_buffer_size());
- *     const auto n_writable = std::min(writer.available(), out_port.max_buffer_size());
- *     if (n_readable == 0) {
- *         return { 0, gr::work::Status::INSUFFICIENT_INPUT_ITEMS };
- *     } else if (n_writable == 0) {
- *         return { 0, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS };
- *     }
- *     const std::size_t n_to_publish = std::min(n_readable, n_writable); // N.B. here enforcing N_input == N_output
- *
- *     writer.publish([&reader, n_to_publish, this](std::span<T> output) {
- *         const auto input = reader.get(n_to_publish);
- *         for (; i < n_to_publish; i++) {
- *             output[i] = input[i] * value;
- *         }
- *     }, n_to_publish);
- *
- *     if (!reader.consume(n_to_publish)) {
- *         return { n_to_publish, gr::work::Status::ERROR };
- *     }
- *     return { n_to_publish, gr::work::Status::OK };
- * }
- * @endcode
  * <li> <b>case 4</b>:  Python -> map to cases 1-3 and/or dedicated callback (to-be-implemented)
  * <li> <b>special cases<b>: (to-be-implemented)
  *     * case sources: HW triggered vs. generating data per invocation (generators via Port::MIN)
@@ -380,7 +359,7 @@ public:
     using derived_t                  = Derived;
     using ArgumentsTypeList          = typename gr::meta::typelist<Arguments...>;
     using block_template_parameters  = meta::typelist<Arguments...>;
-    using Resampling                 = ArgumentsTypeList::template find_or_default<is_resampling_ratio, ResamplingRatio<1UL, 1UL, true>>;
+    using ResamplingControl          = ArgumentsTypeList::template find_or_default<is_resampling, Resampling<1UL, 1UL, true>>;
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
@@ -406,12 +385,15 @@ public:
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
-    using RatioValue                                                                                                                                                                = std::conditional_t<Resampling::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<RatioValue, "numerator", Doc<"Top of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>>      numerator   = Resampling::kNumerator;
-    A<RatioValue, "denominator", Doc<"Bottom of resampling ratio (<1: Decimate, >1: Interpolate, =1: No change)">, Limits<1UL, std::numeric_limits<RatioValue>::max()>> denominator = Resampling::kDenominator;
-    using StrideValue                                                                                                                                                               = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
-    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>                               stride                        = StrideControl::kStride;
-    A<bool, "disconnect on done", Doc<"if block has no downstream consumers, it declares itself 'DONE', and severs connections to upstream blocks.">> disconnect_on_done            = true;
+    using RasamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
+    using ResamplingLimit = Limits<1UL, std::numeric_limits<RasamplingValue>::max()>;
+    using ReasmplingDoc   = Doc<"For each `input_chunk_size` input samples, `output_chunk_size` output samples are published (in>out: Decimate, in<out: Interpolate, in==out: No change)">;
+
+    A<RasamplingValue, "input_chunk_size", ReasmplingDoc, ResamplingLimit>  input_chunk_size                                                     = ResamplingControl::kInputChunkSize;
+    A<RasamplingValue, "output_chunk_size", ReasmplingDoc, ResamplingLimit> output_chunk_size                                                    = ResamplingControl::kOutputChunkSize;
+    using StrideValue                                                                                                                            = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
+    A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>       stride             = StrideControl::kStride;
+    A<bool, "disconnect on done", Doc<"If no downstream blocks, declare itself 'DONE' and disconnect from upstream blocks.">> disconnect_on_done = true;
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
@@ -511,7 +493,7 @@ public:
         }
     }
 
-    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), std::tuple<Arguments...>(std::move(other)), numerator(std::move(other.numerator)), denominator(std::move(other.denominator)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _outputTagsChanged(std::move(other._outputTagsChanged)), _mergedInputTag(std::move(other._mergedInputTag)), _settings(std::move(other._settings)) {}
+    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), std::tuple<Arguments...>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _outputTagsChanged(std::move(other._outputTagsChanged)), _mergedInputTag(std::move(other._mergedInputTag)), _settings(std::move(other._settings)) {}
 
     // There are a few const or conditionally const member variables,
     // we can not have a move-assignment that is equivalent to
@@ -659,13 +641,13 @@ public:
         constexpr bool kIsSourceBlock = traits::block::stream_input_port_types<Derived>::size == 0;
         constexpr bool kIsSinkBlock   = traits::block::stream_output_port_types<Derived>::size == 0;
 
-        if constexpr (Resampling::kEnabled) {
-            static_assert(!kIsSinkBlock, "Decimation/interpolation is not available for sink blocks. Remove 'ResamplingRatio<>' from the block definition.");
-            static_assert(!kIsSourceBlock, "Decimation/interpolation is not available for source blocks. Remove 'ResamplingRatio<>' from the block definition.");
-            static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow decimation/interpolation must implement processBulk(...) method. Remove 'ResamplingRatio<>' from the block definition.");
+        if constexpr (ResamplingControl::kEnabled) {
+            static_assert(!kIsSinkBlock, "input_chunk_size and output_chunk_size are not available for sink blocks. Remove 'Resampling<>' from the block definition.");
+            static_assert(!kIsSourceBlock, "input_chunk_size and output_chunk_size are not available for source blocks. Remove 'Resampling<>' from the block definition.");
+            static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow input_chunk_size and output_chunk_size must implement processBulk(...) method. Remove 'Resampling<>' from the block definition.");
         } else {
-            if (numerator != 1ULL || denominator != 1ULL) {
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `ResamplingRatio<>`, but numerator = {}, denominator = {}, they both must equal to 1.", numerator, denominator));
+            if (input_chunk_size != 1ULL || output_chunk_size != 1ULL) {
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `Resampling<>`, but input_chunk_size = {}, output_chunk_size = {}, they both must equal to 1.", input_chunk_size, output_chunk_size));
                 requestStop();
                 return;
             }
@@ -693,13 +675,13 @@ public:
             requestStop();
             return;
         }
-        if (denominator > maxSyncIn) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling denominator ({}) is larger then max samples for input ports ({})", denominator, maxSyncIn));
+        if (input_chunk_size > maxSyncIn) {
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling input_chunk_size ({}) is larger then max samples for input ports ({})", input_chunk_size, maxSyncIn));
             requestStop();
             return;
         }
-        if (numerator > maxSyncOut) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling numerator ({}) is larger then max samples for output ports ({})", numerator, maxSyncOut));
+        if (output_chunk_size > maxSyncOut) {
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling output_chunk_size ({}) is larger then max samples for output ports ({})", output_chunk_size, maxSyncOut));
             requestStop();
             return;
         }
@@ -1196,7 +1178,7 @@ protected:
      */
     std::size_t inputSamplesToSkipBeforeNextChunk(std::size_t availableSamples) {
         if constexpr (StrideControl::kEnabled) { // check if stride was removed at compile time
-            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != input_chunk_size;
             std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter > 0) {
                 toSkip = std::min(static_cast<std::size_t>(strideCounter), availableSamples);
@@ -1213,7 +1195,7 @@ protected:
      */
     std::size_t inputSamplesToConsumeAdjustedWithStride(std::size_t remainingSamples) {
         if constexpr (StrideControl::kEnabled) {
-            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != denominator;
+            const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != input_chunk_size;
             std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter == 0 && remainingSamples > 0) {
                 toSkip        = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
@@ -1231,7 +1213,7 @@ protected:
             work::Status status = work::Status::OK;
         };
 
-        if constexpr (!Resampling::kEnabled) { // no resampling
+        if constexpr (!ResamplingControl::kEnabled) { // no resampling
             const std::size_t n = std::min(maxSyncIn, maxSyncOut);
             if (n < minSyncIn) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
@@ -1241,7 +1223,7 @@ protected:
             }
             return ResamplingResult{.resampledIn = n, .resampledOut = n};
         }
-        if (denominator == 1UL && numerator == 1UL) { // no resampling
+        if (input_chunk_size == 1UL && output_chunk_size == 1UL) { // no resampling
             const std::size_t n = std::min(maxSyncIn, maxSyncOut);
             if (n < minSyncIn) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
@@ -1253,21 +1235,21 @@ protected:
         }
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
-            if (stride.value != 0 && stride.value != denominator) {
-                nResamplingChunks = denominator <= maxSyncIn && numerator <= maxSyncOut ? 1 : 0;
+            if (stride.value != 0 && stride.value != input_chunk_size) {
+                nResamplingChunks = input_chunk_size <= maxSyncIn && output_chunk_size <= maxSyncOut ? 1 : 0;
             } else {
-                nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
+                nResamplingChunks = std::min(maxSyncIn / input_chunk_size, maxSyncOut / output_chunk_size);
             }
         } else {
-            nResamplingChunks = std::min(maxSyncIn / denominator, maxSyncOut / numerator);
+            nResamplingChunks = std::min(maxSyncIn / input_chunk_size, maxSyncOut / output_chunk_size);
         }
 
-        if (nResamplingChunks * denominator < minSyncIn) {
+        if (nResamplingChunks * input_chunk_size < minSyncIn) {
             return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
-        } else if (nResamplingChunks * numerator < minSyncOut) {
+        } else if (nResamplingChunks * output_chunk_size < minSyncOut) {
             return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_OUTPUT_ITEMS};
         } else {
-            return ResamplingResult{.resampledIn = static_cast<std::size_t>(nResamplingChunks * denominator), .resampledOut = static_cast<std::size_t>(nResamplingChunks * numerator)};
+            return ResamplingResult{.resampledIn = static_cast<std::size_t>(nResamplingChunks * input_chunk_size), .resampledOut = static_cast<std::size_t>(nResamplingChunks * output_chunk_size)};
         }
     }
 
@@ -1485,12 +1467,12 @@ protected:
         std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
         const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
         const auto  nextTagLimit                                              = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
-        const auto  ensureMinimalDecimation                                   = nextTagLimit >= denominator ? nextTagLimit : static_cast<long unsigned int>(denominator); // ensure to process at least one denominator (may shift tags)
+        const auto  ensureMinimalDecimation                                   = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
         const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
         const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
         const auto [resampledIn, resampledOut, resampledStatus]               = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish);
         const auto nextEosTagSkipBefore                                       = nextEosTag - inputSkipBefore;
-        const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < denominator || numerator * (nextEosTagSkipBefore / denominator) < minSyncOut;
+        const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
             updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
@@ -1882,7 +1864,7 @@ template<typename Derived, typename... Arguments>
 inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{0UZ};
 } // namespace gr
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), numerator, denominator, stride, disconnect_on_done, unique_name, name, meta_information);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), input_chunk_size, output_chunk_size, stride, disconnect_on_done, unique_name, name, meta_information);
 
 namespace gr {
 
