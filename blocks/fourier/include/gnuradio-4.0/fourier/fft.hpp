@@ -28,8 +28,8 @@ struct OutputDataSet<T> {
 };
 
 template<typename T, typename U = OutputDataSet<T>::type, template<typename, typename> typename FourierAlgorithm = gr::algorithm::FFT>
-    requires((gr::meta::complex_like<T> || std::floating_point<T>) && (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>) )
-struct FFT : public Block<FFT<T, U, FourierAlgorithm>, ResamplingRatio<1LU, 1024LU>> {
+requires((gr::meta::complex_like<T> || std::floating_point<T>) && (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>))
+struct FFT : public Block<FFT<T, U, FourierAlgorithm>, Resampling<1024LU, 1LU>> {
     using Description = Doc<R""(
 @brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
@@ -102,11 +102,11 @@ On the choice of window (mathematically aka. apodisation) functions
 
     // settings
     const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
-    Annotated<gr::Size_t, "FFT size", Doc<"FFT size">>                               fftSize{ 1024U };
+    Annotated<gr::Size_t, "FFT size", Doc<"FFT size">>                               fftSize{1024U};
     Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(magic_enum::enum_name(_windowType));
-    Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{ false };
-    Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              outputInDeg{ false };
-    Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrapPhase{ false };
+    Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{false};
+    Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              outputInDeg{false};
+    Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrapPhase{false};
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
     Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
@@ -120,8 +120,7 @@ On the choice of window (mathematically aka. apodisation) functions
     std::vector<value_type>  _phaseSpectrum      = std::vector<value_type>(_outData.size(), 0);
     constexpr static bool    computeHalfSpectrum = gr::meta::complex_like<T>;
 
-    void
-    settingsChanged(const property_map & /*old_settings*/, const property_map &newSettings) noexcept {
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& newSettings) noexcept {
         if (!newSettings.contains("fftSize") && !newSettings.contains("window")) {
             // do need to only handle interdependent settings -> can early return
             return;
@@ -130,7 +129,7 @@ On the choice of window (mathematically aka. apodisation) functions
         const std::size_t newSize = fftSize;
         in.max_samples            = newSize;
         in.min_samples            = newSize;
-        this->denominator         = newSize;
+        this->input_chunk_size    = newSize;
         _window.resize(newSize, 0);
 
         _windowType = magic_enum::enum_cast<gr::algorithm::window::Type>(window, magic_enum::case_insensitive).value_or(_windowType);
@@ -143,8 +142,7 @@ On the choice of window (mathematically aka. apodisation) functions
         _phaseSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
     }
 
-    [[nodiscard]] constexpr work::Status
-    processBulk(std::span<const T> input, std::span<U> output) {
+    [[nodiscard]] constexpr work::Status processBulk(std::span<const T> input, std::span<U> output) {
         if constexpr (std::is_same_v<T, InDataType>) {
             std::copy_n(input.begin(), fftSize, _inData.begin());
         } else {
@@ -162,65 +160,50 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         _outData           = _fftImpl.compute(_inData);
-        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum,
-                                                                          algorithm::fft::ConfigMagnitude{ .computeHalfSpectrum = computeHalfSpectrum, .outputInDb = outputInDb });
-        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum,
-                                                                      algorithm::fft::ConfigPhase{ .computeHalfSpectrum = computeHalfSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase });
+        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = computeHalfSpectrum, .outputInDb = outputInDb});
+        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum, algorithm::fft::ConfigPhase{.computeHalfSpectrum = computeHalfSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase});
 
         output[0] = createDataset();
 
         return work::Status::OK;
     }
 
-    constexpr U
-    createDataset() {
+    constexpr U createDataset() {
         U ds{};
         ds.timestamp = 0;
-        const std::size_t N{ _magnitudeSpectrum.size() };
+        const std::size_t N{_magnitudeSpectrum.size()};
         const std::size_t dim = 5;
 
-        ds.axis_names   = { "Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase" };
-        ds.axis_units   = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
-        ds.extents      = { dim, static_cast<int32_t>(N) };
+        ds.axis_names   = {"Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase"};
+        ds.axis_units   = {"Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad"};
+        ds.extents      = {dim, static_cast<int32_t>(N)};
         ds.layout       = gr::LayoutRight{};
-        ds.signal_names = { signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name),
-                            fmt::format("Phase({})", signal_name) };
-        ds.signal_units = { "Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad" };
+        ds.signal_names = {signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name), fmt::format("Phase({})", signal_name)};
+        ds.signal_units = {"Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad"};
 
         ds.signal_values.resize(dim * N);
         auto const freqWidth = static_cast<value_type>(sample_rate) / static_cast<value_type>(fftSize);
         if constexpr (gr::meta::complex_like<T>) {
             auto const freqOffset = static_cast<value_type>(N / 2) * freqWidth;
-            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values),
-                                   [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
+            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
         } else {
             std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth](const auto i) { return static_cast<value_type>(i) * freqWidth; });
         }
-        std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(N)), [](const auto &c) { return c.real(); });
-        std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(2U * N)), [](const auto &c) { return c.imag(); });
+        std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(N)), [](const auto& c) { return c.real(); });
+        std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(2U * N)), [](const auto& c) { return c.imag(); });
         std::copy_n(_magnitudeSpectrum.begin(), N, std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(3U * N)));
         std::copy_n(_phaseSpectrum.begin(), N, std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(4U * N)));
 
         ds.signal_ranges.resize(dim);
         for (std::size_t i = 0; i < dim; i++) {
-            const auto mm = std::minmax_element(std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
-            ds.signal_ranges[i] = { *mm.first, *mm.second };
+            const auto mm       = std::minmax_element(std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
+            ds.signal_ranges[i] = {*mm.first, *mm.second};
         }
 
         ds.signal_errors    = {};
-        ds.meta_information = { { { "sample_rate", sample_rate },
-                                  { "signal_name", signal_name },
-                                  { "signal_unit", signal_unit },
-                                  { "signal_min", signal_min },
-                                  { "signal_max", signal_max },
-                                  { "fft_size", fftSize },
-                                  { "window", window },
-                                  { "output_in_db", outputInDb },
-                                  { "output_in_deg", outputInDeg },
-                                  { "unwrap_phase", unwrapPhase },
-                                  { "numerator", this->numerator },
-                                  { "denominator", this->denominator },
-                                  { "stride", this->stride } } };
+        ds.meta_information = {{{"sample_rate", sample_rate}, {"signal_name", signal_name}, {"signal_unit", signal_unit}, {"signal_min", signal_min}, {"signal_max", signal_max}, //
+            {"fft_size", fftSize}, {"window", window}, {"output_in_db", outputInDb}, {"output_in_deg", outputInDeg}, {"unwrap_phase", unwrapPhase},                               //
+            {"input_chunk_size", this->input_chunk_size}, {"output_chunk_size", this->output_chunk_size}, {"stride", this->stride}}};
 
         return ds;
     }
@@ -232,7 +215,7 @@ using DefaultFFT = FFT<T, typename OutputDataSet<T>::type, gr::algorithm::FFT>;
 } // namespace gr::blocks::fft
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename U, template<typename, typename> typename FourierAlgoImpl), (gr::blocks::fft::FFT<T, U, FourierAlgoImpl>), //
-                                    in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+    in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
 auto registerFFT = gr::registerBlock<gr::blocks::fft::DefaultFFT, float, double>(gr::globalBlockRegistry());
 

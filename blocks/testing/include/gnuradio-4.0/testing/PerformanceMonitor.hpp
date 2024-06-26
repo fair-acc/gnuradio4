@@ -58,7 +58,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
 } // namespace details
 
 template<typename T>
-struct PerformanceMonitor : public Block<PerformanceMonitor<T>, ResamplingRatio<1UL, 1UL, false>> {
+struct PerformanceMonitor : public Block<PerformanceMonitor<T>> {
     using Description = Doc<R""(The `PerformanceMonitor` block is used to track and report on performance metrics.
 Specifically, it monitors memory usage, including resident and virtual memory, as well as the sample rate.
 The results of this monitoring can be printed to the console or saved to a CSV file for further analysis.
