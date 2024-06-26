@@ -144,35 +144,35 @@ static_assert(BlockLike<TestBlock<float>>);
 static_assert(BlockLike<TestBlock<double>>);
 
 template<typename T, bool Average = false>
-struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, double>, ResamplingRatio<>> {
+struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, double>, Resampling<>> {
     using Description = Doc<R""(
-@brief reduces sample rate by given fraction controlled by denominator
+@brief reduces sample rate by given fraction controlled by input_chunk_size
 )"">;
     PortIn<T>                        in{};
     PortOut<T>                       out{};
     A<float, "sample rate", Visible> sample_rate = 1.f;
 
     void settingsChanged(const property_map& /*old_settings*/, property_map& new_settings, property_map& fwd_settings) noexcept {
-        if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("denominator")) {
-            const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->denominator);
+        if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("input_chunk_size")) {
+            const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->input_chunk_size);
             fwd_settings[std::string(gr::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
-            fmt::println("change sample_rate for {} --- {} / {} -> {}", this->name, sample_rate, this->denominator, fwdSampleRate);
+            fmt::println("change sample_rate for {} --- {} / {} -> {}", this->name, sample_rate, this->input_chunk_size, fwdSampleRate);
         }
     }
 
     constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
-        assert(this->numerator == gr::Size_t(1) && "block implements only basic decimation");
-        assert(this->denominator != gr::Size_t(0) && "denominator must be non-zero");
+        assert(this->output_chunk_size == gr::Size_t(1) && "block implements only basic decimation");
+        assert(this->input_chunk_size != gr::Size_t(0) && "input_chunk_size must be non-zero");
 
         auto outputIt = output.begin();
         if constexpr (Average) {
-            for (std::size_t start = 0; start < input.size(); start += this->denominator) {
+            for (std::size_t start = 0; start < input.size(); start += this->input_chunk_size) {
                 constexpr auto chunk_begin = input.begin() + start;
-                constexpr auto chunk_end   = chunk_begin + std::min(this->denominator, std::distance(chunk_begin, input.end()));
-                *outputIt++                = std::reduce(chunk_begin, chunk_end, T(0)) / static_cast<T>(this->denominator);
+                constexpr auto chunk_end   = chunk_begin + std::min(this->input_chunk_size, std::distance(chunk_begin, input.end()));
+                *outputIt++                = std::reduce(chunk_begin, chunk_end, T(0)) / static_cast<T>(this->input_chunk_size);
             }
         } else {
-            for (std::size_t i = 0; i < input.size(); i += this->denominator) {
+            for (std::size_t i = 0; i < input.size(); i += this->input_chunk_size) {
                 *outputIt++ = input[i];
             }
         }
@@ -416,13 +416,13 @@ const boost::ut::suite SettingsTests = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         auto&                src       = testGraph.emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {"sample_rate", 1000.0f}});
-        auto&                block1    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"denominator", gr::Size_t(2)}});
-        auto&                block2    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate2"}, {"denominator", gr::Size_t(5)}});
+        auto&                block1    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"input_chunk_size", gr::Size_t(2)}});
+        auto&                block2    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate2"}, {"input_chunk_size", gr::Size_t(5)}});
         auto&                sink      = testGraph.emplaceBlock<Sink<float>>();
 
-        // check denominator
-        expect(eq(block1.denominator, std::size_t(2)));
-        expect(eq(block2.denominator, std::size_t(5)));
+        // check input_chunk_size
+        expect(eq(block1.input_chunk_size, std::size_t(2)));
+        expect(eq(block2.input_chunk_size, std::size_t(5)));
 
         // src -> block1 -> block2 -> sink
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));

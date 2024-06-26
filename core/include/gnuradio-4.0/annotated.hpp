@@ -70,39 +70,46 @@ struct BlockingIO {
 };
 
 /**
- * @brief Annotates block, indicating to perform resampling based on the provided ratio.
+ * @brief Annotates block, indicating to perform resampling based on the provided `inputChunkSize` and `outputChunkSize`.
+ * For each `inputChunkSize` input samples, `outputChunkSize` output samples are published.
+ * Thus the total number of input/output samples can be calculated as `nInput = k * inputChunkSize` and `nOutput = k * outputChunkSize`.
+ * They also act as constraints for the minimum number of input samples (`inputChunkSize`)  and output samples (`outputChunkSize`).
  *
- * The ratio between numerator and denominator defines the number of samples to be interpolated or decimated.
- * - If the ratio is greater than 1, interpolation occurs.
- * - If the ratio is less than 1, decimation occurs.
- * - If the ratio is 1, no effect on the sampling rate.
+ * │inputChunkSize│...│inputChunkSize│ ───► │outputChunkSize│...│outputChunkSize│
+ * └──────────────┘   └──────────────┘      └───────────────┘   └───────────────┘
+ *    nInputs = k * inputChunkSize              nOutputs = k * outputChunkSize
  *
- * @tparam numerator Top number in the input-to-output sample ratio.
- * @tparam denominator Bottom number in the input-to-output sample ratio.
- * @tparam isConst Specifies if the resampling ratio is constant or can be modified during run-time.
+ * The comparison between `inputChunkSize` and `outputChunkSize` determines whether to perform interpolation or decimation.
+ * - If `inputChunkSize` > `outputChunkSize`, decimation occurs.
+ * - If `inputChunkSize` < `outputChunkSize`, interpolation occurs.
+ * - If `inputChunkSize` == `outputChunkSize`, there is no effect on the sampling rate.
+ *
+ * @tparam inputChunkSize input chunk size.
+ * @tparam outputChunkSize output chunk size.
+ * @tparam isConst Specifies if the resampling is constant or can be modified during run-time.
  */
-template<gr::Size_t numerator = 1U, gr::Size_t denominator = 1U, bool isConst = false>
-struct ResamplingRatio {
-    static_assert(numerator > 0, "Numerator in ResamplingRatio must be >= 0");
-    static constexpr gr::Size_t kNumerator   = numerator;
-    static constexpr gr::Size_t kDenominator = denominator;
-    static constexpr bool       kIsConst     = isConst;
-    static constexpr bool       kEnabled     = !isConst || (kNumerator != 1LU) || (kDenominator != 1LU);
+template<gr::Size_t inputChunkSize = 1U, gr::Size_t outputChunkSize = 1U, bool isConst = false>
+struct Resampling {
+    static_assert(outputChunkSize > 0, "outputChunkSize in ResamplingRatio must be >= 0");
+    static constexpr gr::Size_t kInputChunkSize  = inputChunkSize;
+    static constexpr gr::Size_t kOutputChunkSize = outputChunkSize;
+    static constexpr bool       kIsConst         = isConst;
+    static constexpr bool       kEnabled         = !isConst || (kOutputChunkSize != 1LU) || (kInputChunkSize != 1LU);
 };
 
 template<typename T>
-concept IsResamplingRatio = requires {
-    T::kNumerator;
-    T::kDenominator;
+concept IsResampling = requires {
+    T::kInputChunkSize;
+    T::kOutputChunkSize;
     T::kIsConst;
     T::kEnabled;
-} && std::is_base_of_v<ResamplingRatio<T::kNumerator, T::kDenominator, T::kIsConst>, T>;
+} && std::is_base_of_v<Resampling<T::kInputChunkSize, T::kOutputChunkSize, T::kIsConst>, T>;
 
 template<typename T>
-using is_resampling_ratio = std::bool_constant<IsResamplingRatio<T>>;
+using is_resampling = std::bool_constant<IsResampling<T>>;
 
-static_assert(is_resampling_ratio<ResamplingRatio<1, 1024>>::value);
-static_assert(!is_resampling_ratio<int>::value);
+static_assert(is_resampling<Resampling<1024, 1>>::value);
+static_assert(!is_resampling<int>::value);
 
 /**
  * @brief Annotates block, indicating the stride control for data processing.
@@ -216,17 +223,16 @@ static_assert(gr::meta::is_instantiation_of<SupportedTypes<float, double>, Suppo
  * ```
  */
 template<auto LowerLimit, decltype(LowerLimit) UpperLimit, auto Validator = nullptr>
-    requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
-        { f(v) } -> std::same_as<bool>;
-    } || Validator == nullptr)
+requires(requires(decltype(Validator) f, decltype(LowerLimit) v) {
+    { f(v) } -> std::same_as<bool>;
+} || Validator == nullptr)
 struct Limits {
     using ValueType                                    = decltype(LowerLimit);
     static constexpr ValueType           MinRange      = LowerLimit;
     static constexpr ValueType           MaxRange      = UpperLimit;
     static constexpr decltype(Validator) ValidatorFunc = Validator;
 
-    static constexpr bool
-    validate(const ValueType &value) noexcept {
+    static constexpr bool validate(const ValueType& value) noexcept {
         if constexpr (LowerLimit == UpperLimit) { // ignore range checks
             if constexpr (Validator != nullptr) {
                 try {
@@ -278,35 +284,24 @@ struct Annotated {
     Annotated() = default;
 
     template<typename U>
-        requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
-    explicit(false) Annotated(U &&input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(static_cast<T>(std::forward<U>(input))) {}
+    requires std::constructible_from<T, U> && (!std::same_as<std::remove_cvref_t<U>, Annotated>)
+    explicit(false) Annotated(U&& input) noexcept(std::is_nothrow_constructible_v<T, U>) : value(static_cast<T>(std::forward<U>(input))) {}
 
     template<typename U>
-        requires std::assignable_from<T &, U>
-    Annotated &
-    operator=(U &&input) noexcept(std::is_nothrow_assignable_v<T, U>) {
+    requires std::assignable_from<T&, U>
+    Annotated& operator=(U&& input) noexcept(std::is_nothrow_assignable_v<T, U>) {
         value = static_cast<T>(std::forward<U>(input));
         return *this;
     }
 
-    inline explicit(false) constexpr
-    operator T &() noexcept {
-        return value;
-    }
+    inline explicit(false) constexpr operator T&() noexcept { return value; }
 
-    inline explicit(false) constexpr
-    operator const T &() const noexcept {
-        return value;
-    }
+    inline explicit(false) constexpr operator const T&() const noexcept { return value; }
 
-    constexpr bool
-    operator==(const Annotated &other) const noexcept {
-        return value == other.value;
-    }
+    constexpr bool operator==(const Annotated& other) const noexcept { return value == other.value; }
 
     template<typename U>
-    constexpr bool
-    operator==(const U &other) const noexcept {
+    constexpr bool operator==(const U& other) const noexcept {
         if constexpr (requires { other.value; }) {
             return value == other.value;
         } else {
@@ -315,9 +310,8 @@ struct Annotated {
     }
 
     template<typename U>
-        requires std::is_same_v<std::remove_cvref_t<U>, T>
-    [[nodiscard]] constexpr bool
-    validate_and_set(U &&value_) {
+    requires std::is_same_v<std::remove_cvref_t<U>, T>
+    [[nodiscard]] constexpr bool validate_and_set(U&& value_) {
         if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
             value = std::forward<U>(value_);
             return true;
@@ -332,33 +326,25 @@ struct Annotated {
     }
 
     operator std::string_view() const noexcept
-        requires std::is_same_v<T, std::string>
+    requires std::is_same_v<T, std::string>
     {
         return std::string_view(value); // Convert from std::string to std::string_view
     }
 
     // meta-information
-    inline static constexpr std::string_view
-    description() noexcept {
-        return std::string_view{ description_ };
-    }
+    inline static constexpr std::string_view description() noexcept { return std::string_view{description_}; }
 
-    inline static constexpr std::string_view
-    documentation() noexcept {
+    inline static constexpr std::string_view documentation() noexcept {
         using Documentation = typename gr::meta::typelist<Arguments...>::template find_or_default<is_doc, EmptyDoc>;
-        return std::string_view{ Documentation::value };
+        return std::string_view{Documentation::value};
     }
 
-    inline static constexpr std::string_view
-    unit() noexcept {
+    inline static constexpr std::string_view unit() noexcept {
         using PhysicalUnit = typename gr::meta::typelist<Arguments...>::template find_or_default<is_unit, EmptyUnit>;
-        return std::string_view{ PhysicalUnit::value };
+        return std::string_view{PhysicalUnit::value};
     }
 
-    inline static constexpr bool
-    visible() noexcept {
-        return gr::meta::typelist<Arguments...>::template contains<Visible>;
-    }
+    inline static constexpr bool visible() noexcept { return gr::meta::typelist<Arguments...>::template contains<Visible>; }
 
     // forwarding member functions
     template<typename... Args>
@@ -391,7 +377,7 @@ struct Annotated {
         return value.*std::forward<Arg>(arg);
     }
 
-    constexpr T* operator->() noexcept { return &value; }
+    constexpr T*       operator->() noexcept { return &value; }
     constexpr const T* operator->() const noexcept { return &value; }
 };
 
@@ -432,14 +418,12 @@ struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
     fmt::formatter<Type> value_formatter;
 
     template<typename FormatContext>
-    constexpr auto
-    parse(FormatContext &ctx) {
+    constexpr auto parse(FormatContext& ctx) {
         return value_formatter.parse(ctx);
     }
 
     template<typename FormatContext>
-    constexpr auto
-    format(const gr::Annotated<T, description, Arguments...> &annotated, FormatContext &ctx) {
+    constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) {
         // TODO: add switch for printing only brief and/or meta-information
         return value_formatter.format(annotated.value, ctx);
     }
@@ -447,8 +431,7 @@ struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
 
 namespace gr {
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
-inline std::ostream &
-operator<<(std::ostream &os, const gr::Annotated<T, description, Arguments...> &v) {
+inline std::ostream& operator<<(std::ostream& os, const gr::Annotated<T, description, Arguments...>& v) {
     // TODO: add switch for printing only brief and/or meta-information
     return os << fmt::format("{}", v.value);
 }

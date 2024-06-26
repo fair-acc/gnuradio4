@@ -318,21 +318,21 @@ struct ProcessStatus {
 
 struct IntDecTestData {
     gr::Size_t  n_samples{};
-    gr::Size_t  numerator{};
-    gr::Size_t  denominator{};
+    gr::Size_t  output_chunk_size{};
+    gr::Size_t  input_chunk_size{};
     int         out_port_min{-1}; // -1 for not used
     int         out_port_max{-1}; // -1 for not used
     std::size_t exp_in{};
     std::size_t exp_out{};
     std::size_t exp_counter{};
 
-    std::string to_string() const { return fmt::format("n_samples: {}, numerator: {}, denominator: {}, out_port_min: {}, out_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}", n_samples, numerator, denominator, out_port_min, out_port_max, exp_in, exp_out, exp_counter); }
+    std::string to_string() const { return fmt::format("n_samples: {}, output_chunk_size: {}, input_chunk_size: {}, out_port_min: {}, out_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}", n_samples, output_chunk_size, input_chunk_size, out_port_min, out_port_max, exp_in, exp_out, exp_counter); }
 };
 
 struct StrideTestData {
     gr::Size_t       n_samples{};
-    gr::Size_t       numerator{1U};
-    gr::Size_t       denominator{1U};
+    gr::Size_t       output_chunk_size{1U};
+    gr::Size_t       input_chunk_size{1U};
     gr::Size_t       stride{};
     int              in_port_min{-1}; // -1 for not used
     int              in_port_max{-1}; // -1 for not used
@@ -343,11 +343,11 @@ struct StrideTestData {
     std::size_t      exp_total_out{0};
     std::vector<int> exp_in_vector{};
 
-    std::string to_string() const { return fmt::format("n_samples: {}, numerator: {}, denominator: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}", n_samples, numerator, denominator, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out); }
+    std::string to_string() const { return fmt::format("n_samples: {}, output_chunk_size: {}, input_chunk_size: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}", n_samples, output_chunk_size, input_chunk_size, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out); }
 };
 
 template<typename T>
-struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::ResamplingRatio<>, gr::Stride<>> {
+struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::Resampling<>, gr::Stride<>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
@@ -484,7 +484,7 @@ void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<g
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"numerator", data.numerator}, {"denominator", data.denominator}});
+    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -512,7 +512,7 @@ void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::Ba
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"numerator", data.numerator}, {"denominator", data.denominator}, {"stride", data.stride}});
+    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -567,74 +567,75 @@ void syncOrAsyncTest() {
 const boost::ut::suite _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
+    using namespace gr;
 
     auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
-    "ResamplingRatio"_test = [] {
-        static_assert(gr::ResamplingRatio<>::kNumerator == 1LU);
-        static_assert(gr::ResamplingRatio<>::kDenominator == 1LU);
-        static_assert(gr::ResamplingRatio<>::kIsConst == false);
-        static_assert(gr::ResamplingRatio<>::kEnabled == true);
+    "Resampling"_test = [] {
+        static_assert(Resampling<>::kInputChunkSize == 1LU);
+        static_assert(Resampling<>::kOutputChunkSize == 1LU);
+        static_assert(Resampling<>::kIsConst == false);
+        static_assert(Resampling<>::kEnabled == true);
 
-        static_assert(gr::ResamplingRatio<2LU>::kNumerator == 2LU);
-        static_assert(gr::ResamplingRatio<2LU>::kDenominator == 1LU);
-        static_assert(gr::ResamplingRatio<2LU>::kIsConst == false);
-        static_assert(gr::ResamplingRatio<2LU>::kEnabled == true);
+        static_assert(Resampling<2LU>::kInputChunkSize == 2LU);
+        static_assert(Resampling<2LU>::kOutputChunkSize == 1LU);
+        static_assert(Resampling<2LU>::kIsConst == false);
+        static_assert(Resampling<2LU>::kEnabled == true);
 
-        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kNumerator == 1LU);
-        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kDenominator == 1LU);
-        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kIsConst == true);
-        static_assert(gr::ResamplingRatio<1LU, 1LU, true>::kEnabled == false);
+        static_assert(Resampling<1LU, 1LU, true>::kInputChunkSize == 1LU);
+        static_assert(Resampling<1LU, 1LU, true>::kOutputChunkSize == 1LU);
+        static_assert(Resampling<1LU, 1LU, true>::kIsConst == true);
+        static_assert(Resampling<1LU, 1LU, true>::kEnabled == false);
 
-        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kNumerator == 2LU);
-        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kDenominator == 1LU);
-        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kIsConst == true);
-        static_assert(gr::ResamplingRatio<2LU, 1LU, true>::kEnabled == true);
+        static_assert(Resampling<2LU, 1LU, true>::kInputChunkSize == 2LU);
+        static_assert(Resampling<2LU, 1LU, true>::kOutputChunkSize == 1LU);
+        static_assert(Resampling<2LU, 1LU, true>::kIsConst == true);
+        static_assert(Resampling<2LU, 1LU, true>::kEnabled == true);
 
-        struct TestBlock0 : gr::Block<TestBlock0> {
+        struct TestBlock0 : Block<TestBlock0> {
         } testBlock0;
-        static_assert(std::is_const_v<decltype(testBlock0.numerator.value)>);
-        static_assert(std::is_const_v<decltype(testBlock0.denominator.value)>);
+        static_assert(std::is_const_v<decltype(testBlock0.input_chunk_size.value)>);
+        static_assert(std::is_const_v<decltype(testBlock0.output_chunk_size.value)>);
 
-        struct TestBlock1 : gr::Block<TestBlock1, gr::ResamplingRatio<>> {
+        struct TestBlock1 : Block<TestBlock1, Resampling<>> {
         } testBlock1;
-        static_assert(!std::is_const_v<decltype(testBlock1.numerator.value)>);
-        static_assert(!std::is_const_v<decltype(testBlock1.denominator.value)>);
+        static_assert(!std::is_const_v<decltype(testBlock1.input_chunk_size.value)>);
+        static_assert(!std::is_const_v<decltype(testBlock1.output_chunk_size.value)>);
 
-        struct TestBlock2 : gr::Block<TestBlock2, gr::ResamplingRatio<2LU, 1LU, true>> {
+        struct TestBlock2 : Block<TestBlock2, Resampling<2LU, 1LU, true>> {
         } testBlock2;
-        static_assert(std::is_const_v<decltype(testBlock2.numerator.value)>);
-        static_assert(std::is_const_v<decltype(testBlock2.denominator.value)>);
-        expect(eq(testBlock2.numerator, 2LU));
-        expect(eq(testBlock2.denominator, 1LU));
+        static_assert(std::is_const_v<decltype(testBlock2.input_chunk_size.value)>);
+        static_assert(std::is_const_v<decltype(testBlock2.output_chunk_size.value)>);
+        expect(eq(testBlock2.input_chunk_size, 2LU));
+        expect(eq(testBlock2.output_chunk_size, 1LU));
     };
 
     "Stride"_test = [] {
-        static_assert(gr::Stride<>::kStride == 0LU);
-        static_assert(gr::Stride<>::kIsConst == false);
-        static_assert(gr::Stride<>::kEnabled == true);
+        static_assert(Stride<>::kStride == 0LU);
+        static_assert(Stride<>::kIsConst == false);
+        static_assert(Stride<>::kEnabled == true);
 
-        static_assert(gr::Stride<2LU>::kStride == 2LU);
-        static_assert(gr::Stride<2LU>::kIsConst == false);
-        static_assert(gr::Stride<2LU>::kEnabled == true);
+        static_assert(Stride<2LU>::kStride == 2LU);
+        static_assert(Stride<2LU>::kIsConst == false);
+        static_assert(Stride<2LU>::kEnabled == true);
 
-        static_assert(gr::Stride<0LU, true>::kStride == 0LU);
-        static_assert(gr::Stride<0LU, true>::kIsConst == true);
-        static_assert(gr::Stride<0LU, true>::kEnabled == false);
+        static_assert(Stride<0LU, true>::kStride == 0LU);
+        static_assert(Stride<0LU, true>::kIsConst == true);
+        static_assert(Stride<0LU, true>::kEnabled == false);
 
-        static_assert(gr::Stride<1LU, true>::kStride == 1LU);
-        static_assert(gr::Stride<1LU, true>::kIsConst == true);
-        static_assert(gr::Stride<1LU, true>::kEnabled == true);
+        static_assert(Stride<1LU, true>::kStride == 1LU);
+        static_assert(Stride<1LU, true>::kIsConst == true);
+        static_assert(Stride<1LU, true>::kEnabled == true);
 
-        struct TestBlock0 : gr::Block<TestBlock0> {
+        struct TestBlock0 : Block<TestBlock0> {
         } testBlock0;
         static_assert(std::is_const_v<decltype(testBlock0.stride.value)>);
 
-        struct TestBlock1 : gr::Block<TestBlock1, gr::Stride<>> {
+        struct TestBlock1 : Block<TestBlock1, gr::Stride<>> {
         } testBlock1;
         static_assert(!std::is_const_v<decltype(testBlock1.stride.value)>);
 
-        struct TestBlock2 : gr::Block<TestBlock2, gr::Stride<2LU, true>> {
+        struct TestBlock2 : Block<TestBlock2, gr::Stride<2LU, true>> {
         } testBlock2;
         static_assert(std::is_const_v<decltype(testBlock2.stride.value)>);
         expect(eq(testBlock2.stride, 2LU));
@@ -643,54 +644,54 @@ const boost::ut::suite _stride_tests = [] {
     "User ResamplingRatio & Stride"_test = [] {
         using namespace gr;
 
-        struct TestBlock : gr::Block<TestBlock, gr::ResamplingRatio<2LU, 1LU, true>, gr::Stride<2LU, false>> {
+        struct TestBlock : gr::Block<TestBlock, gr::Resampling<2LU, 1LU, true>, gr::Stride<2LU, false>> {
         } testBlock;
-        static_assert(std::is_const_v<decltype(testBlock.numerator.value)>);
-        static_assert(std::is_const_v<decltype(testBlock.denominator.value)>);
+        static_assert(std::is_const_v<decltype(testBlock.input_chunk_size.value)>);
+        static_assert(std::is_const_v<decltype(testBlock.output_chunk_size.value)>);
         static_assert(!std::is_const_v<decltype(testBlock.stride.value)>);
-        expect(eq(testBlock.numerator, 2LU));
-        expect(eq(testBlock.denominator, 1LU));
+        expect(eq(testBlock.input_chunk_size, 2LU));
+        expect(eq(testBlock.output_chunk_size, 1LU));
         expect(eq(testBlock.stride, 2LU));
     };
 
     "Interpolation/Decimation"_test = [&thread_pool] {
-        interpolation_decimation_test({.n_samples = 1024, .numerator = 1, .denominator = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1024, .numerator = 1, .denominator = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1024, .numerator = 2, .denominator = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .numerator = 5, .denominator = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 549, .numerator = 1, .denominator = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .numerator = 3, .denominator = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .numerator = 100, .denominator = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .numerator = 10, .denominator = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .numerator = 1, .denominator = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .numerator = 101, .denominator = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .numerator = 5, .denominator = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 80, .numerator = 2, .denominator = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .numerator = 7, .denominator = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 2, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 5, .input_chunk_size = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 549, .output_chunk_size = 1, .input_chunk_size = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 3, .input_chunk_size = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 100, .input_chunk_size = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 10, .input_chunk_size = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 1, .input_chunk_size = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 101, .input_chunk_size = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 5, .input_chunk_size = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1}, thread_pool);
+        interpolation_decimation_test({.n_samples = 80, .output_chunk_size = 2, .input_chunk_size = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2}, thread_pool);
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 7, .input_chunk_size = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16}, thread_pool);
     };
 
     "Stride tests"_test = [&thread_pool] {
         stride_test({.n_samples = 1024, .stride = 0, .in_port_max = 1024, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1, .exp_total_in = 1024, .exp_total_out = 1024}, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 50, .denominator = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 50, .denominator = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
         // the original test assumes that the incomplete chunk is also processed, currently we drop that. todo: switch to last sample update type incomplete
         // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 }, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 100, .denominator = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900}, thread_pool);
         // this one is tricky, it assumes that there are multiple incomplete last chunks :/ not sure what to do here...
         // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 }, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 100, .denominator = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800}, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 50, .denominator = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950}, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 25, .denominator = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500}, thread_pool);
-        stride_test({.n_samples = 1000, .numerator = 24, .denominator = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 25, .input_chunk_size = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000, .output_chunk_size = 24, .input_chunk_size = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480}, thread_pool);
         // std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
         // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 }, thread_pool);
         std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13};
-        stride_test({.n_samples = 15, .numerator = 5, .denominator = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1}, thread_pool);
+        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1}, thread_pool);
         std::vector<int> exp_v2 = {0, 1, 2, 5, 6, 7, 10, 11, 12};
-        stride_test({.n_samples = 15, .numerator = 3, .denominator = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2}, thread_pool);
+        stride_test({.n_samples = 15, .output_chunk_size = 3, .input_chunk_size = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2}, thread_pool);
         // assuming buffer size is approx 65k
-        stride_test({.n_samples = 1000000, .numerator = 100, .denominator = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
-        stride_test({.n_samples = 1000000, .numerator = 100, .denominator = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
+        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
     };
 
     "SyncOrAsync ports tests"_test = [] {
