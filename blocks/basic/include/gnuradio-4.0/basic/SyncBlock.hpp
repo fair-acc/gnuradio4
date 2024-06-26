@@ -113,13 +113,25 @@ New synchronization occurs with `s8`, prior samples (`s6-s7`) are NOT included t
 
 template<typename T>
 struct SyncBlock : public gr::Block<SyncBlock<T>, SyncBlockDoc> {
-    std::vector<gr::PortIn<T, gr::Async>>  inputs;
-    std::vector<gr::PortOut<T, gr::Async>> outputs; // Output ports labeled as "Async" but they still produce an equal number of output samples.
+    std::vector<gr::PortIn<T, gr::Async>> inputs;
+    std::vector<gr::PortOut<T>>           outputs;
 
-    gr::Annotated<gr::Size_t, "n_ports", gr::Visible, gr::Doc<"variable number of in/out ports">, gr::Limits<1U, 32U>> n_ports = 0U;
+    // settings
+    Annotated<gr::Size_t, "n_ports", gr::Visible, gr::Doc<"variable number of in/out ports">, gr::Limits<1U, 32U>> n_ports     = 0U;
+    Annotated<gr::Size_t, "buffer_size", Doc<"Size of history buffer">>                                            buffer_size = 65536;
 
-    void settingsChanged(const property_map& old_settings, const property_map& new_settings) {
-        if (new_settings.contains("n_ports") && old_settings.at("n_ports") != new_settings.at("n_ports")) {
+    std::vector<HistoryBuffer<T>> _inBuffer{};
+
+    struct SyncTagData {
+        std::uint64_t          time;
+        Tag::signed_index_type index;
+    };
+    std::vector<std::queue<SyncTagData>> _syncTagData;
+
+    int processBulkCounter = 0;
+
+    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
+        if (newSettings.contains("n_ports") && oldSettings.at("n_ports") != newSettings.at("n_ports")) {
             // if one of the port is already connected and n_ports was changed then throw
             bool inConnected  = std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); });
             bool outConnected = std::any_of(outputs.begin(), outputs.end(), [](const auto& port) { return port.isConnected(); });
@@ -130,23 +142,50 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, SyncBlockDoc> {
                 // this->emitMessage(this->msgOut, { { key::Kind, kind::Error }, { key::ErrorInfo, messageError } });
                 throw std::range_error(messageError);
             }
-            fmt::print("{}: configuration changed: n_ports {} -> {}\n", this->name, old_settings.at("n_ports"), new_settings.at("n_ports"));
+            fmt::print("{}: configuration changed: n_ports {} -> {}\n", this->name, oldSettings.at("n_ports"), newSettings.at("n_ports"));
             inputs.resize(n_ports);
             outputs.resize(n_ports);
+            _inBuffer.resize(n_ports);
+            for (std::size_t i = 0; i < _inBuffer.size(); i++) {
+                _inBuffer[i].reset();
+                _inBuffer[i] = HistoryBuffer<T>(buffer_size);
+            }
+        }
+
+        if (newSettings.contains("buffer_size")) {
+            for (std::size_t i = 0; i < _inBuffer.size(); i++) {
+                auto newBuffer = HistoryBuffer<T>(buffer_size);
+                newBuffer.push_back_bulk(_inBuffer[i]);
+                _inBuffer[i] = std::move(newBuffer);
+            }
         }
     }
 
-    template<ConsumableSpan TInput, PublishableSpan TOutput>
+    template<ConsumablePortSpan TInput, PublishableSpan TOutput>
     gr::work::Status processBulk(const std::span<TInput>& ins, std::span<TOutput>& outs) {
-        fmt::println("SyncBlock::processBulk ins.size:{}, outs.size:{}", ins.size(), outs.size());
+        fmt::println("SyncBlock::processBulk ins.size:{}, outs.size:{}, processBulkCounter:{}", ins.size(), outs.size(), processBulkCounter++);
         std::size_t nPorts = ins.size();
         for (std::size_t i = 0; i < nPorts; i++) {
-            fmt::println("SyncBlock::processBulk ins[{}].size:{}, outs[{}].size:{}", i, ins[i].size(), i, outs[i].size());
+            fmt::println("SyncBlock::processBulk ins[{}].size:{}, outs[{}].size:{}, ins.tags.size():{}", i, ins[i].size(), i, outs[i].size(), ins[i].tags.size());
             ins[i].consume(ins[i].size());
             outs[i].publish(ins[i].size());
         }
 
         return gr::work::Status::OK;
+    }
+
+private:
+    template<ConsumablePortSpan TInput>
+    void processInputTags(const std::span<TInput>& ins) {
+        for (std::size_t i = 0; i < ins.size(); i++) {
+            for (const Tag& tag : ins[i].tags) {
+                if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
+                    const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
+                    if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
+                    }
+                }
+            }
+        }
     }
 };
 

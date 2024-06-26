@@ -806,7 +806,7 @@ public:
      */
     constexpr void updateInputAndOutputTags(std::size_t /*untilOffset*/ = 0UZ) noexcept {
         for_each_port(
-            [this]<PortLike TPort>(TPort& input_port) noexcept {
+            [this]<PortLike TPort>(TPort& inPort) noexcept {
                 auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                     assert(&sourceMap != &destinationMap);
                     for (const auto& [key, value] : sourceMap) {
@@ -814,7 +814,7 @@ public:
                     }
                 };
 
-                mergeSrcMapInto(input_port.getMergedTag().map, _mergedInputTag.map);
+                mergeSrcMapInto(inPort.getMergedTag().map, _mergedInputTag.map);
             },
             inputPorts<PortType::STREAM>(&self()));
 

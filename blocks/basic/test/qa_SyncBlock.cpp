@@ -26,6 +26,8 @@ struct TestSyncBlock : public gr::Block<TestSyncBlock<T>> {
     gr::PortIn<T>                          in; // The input is assumed to be ClockSource block
     std::vector<gr::PortOut<T, gr::Async>> outputs;
 
+    int processBulkCounter = 0;
+
     gr::Annotated<gr::Size_t, "n_output_ports", gr::Visible, gr::Doc<"variable number of out ports">, gr::Limits<1U, 32U>> n_output_ports = 0U;
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
@@ -40,7 +42,7 @@ struct TestSyncBlock : public gr::Block<TestSyncBlock<T>> {
 
     template<gr::PublishableSpan TOutput>
     gr::work::Status processBulk(gr::ConsumableSpan auto& inSpan, std::span<TOutput>& outSpans) noexcept {
-        fmt::println("TestSyncBlock::processBulk inSpan.size:{}", inSpan.size());
+        fmt::println("TestSyncBlock::processBulk inSpan.size:{}, processBulkCounter:{}", inSpan.size(), processBulkCounter++);
         inSpan.consume(inSpan.size());
         for (std::size_t i = 0; i < outSpans.size(); i++) {
             outSpans[i].publish(inSpan.size());
@@ -60,7 +62,7 @@ const boost::ut::suite SyncBlockTests = [] {
     "SyncBlock_test"_test = [] {
         gr::Graph graph;
 
-        gr::Size_t nPorts     = 3U;
+        gr::Size_t nPorts     = 2U;
         gr::Size_t nSamples   = 1000U;
         float      sampleRate = 1000.f;
 
