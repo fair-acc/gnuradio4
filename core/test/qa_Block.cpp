@@ -546,13 +546,11 @@ void syncOrAsyncTest() {
 
     using BlockType = SyncOrAsyncBlock<float, isInputAsync, isOutputAsync>;
 
-    Graph testGraph;
-    auto& tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", n_samples}});
-    auto& asyncBlock = testGraph.emplaceBlock<BlockType>();
-    auto& sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
-
-    const std::string testInfo = fmt::format("syncOrAsyncTest<{}, {}>", isInputAsync, isOutputAsync);
-
+    Graph             testGraph;
+    auto&             tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", n_samples}});
+    auto&             asyncBlock = testGraph.emplaceBlock<BlockType>();
+    auto&             sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+    const std::string testInfo   = fmt::format("syncOrAsyncTest<{}, {}>", isInputAsync, isOutputAsync);
     expect(asyncBlock.in.kIsSynch == !isInputAsync) << testInfo;
     expect(asyncBlock.out.kIsSynch == !isOutputAsync) << testInfo;
 

@@ -22,8 +22,7 @@ using namespace gr;
 #include <pthread.h>
 #include <sched.h>
 
-void
-setCpuAffinity(const int cpuID) // N.B. pthread is not portable
+void setCpuAffinity(const int cpuID) // N.B. pthread is not portable
 {
     const std::size_t nCPU = std::thread::hardware_concurrency();
     // fmt::print("set CPU affinity to core {}\n", cpuID % nCPU);
@@ -38,23 +37,18 @@ setCpuAffinity(const int cpuID) // N.B. pthread is not portable
     std::this_thread::sleep_for(std::chrono::milliseconds(20)); // to force re-scheduling
 }
 #else
-void
-setCpuAffinity(const int cpuID) {}
+void setCpuAffinity(const int cpuID) {}
 #endif
 #else
-void
-setCpuAffinity(const int /*cpuID*/) {}
+void setCpuAffinity(const int /*cpuID*/) {}
 #endif
 
-enum class WriteApi { via_lambda, via_split_request_publish_RAII };
-
-template<WriteApi PublisherAPI = WriteApi::via_lambda, typename T = int>
-void
-testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size_t min_samples, const std::size_t nProducer, const std::size_t nConsumer, const std::string_view name) {
+template<typename T = int>
+void runTest(BufferLike auto& buffer, const std::size_t vectorLength, const std::size_t minSamples, const std::size_t nProducer, const std::size_t nConsumer, const std::string_view name) {
     gr::meta::precondition(nProducer > 0);
     gr::meta::precondition(nConsumer > 0);
 
-    constexpr int n_repeat = 8;
+    constexpr int nRepeat = 8;
 
     std::barrier barrier(static_cast<std::ptrdiff_t>(nProducer + nConsumer + 1));
 
@@ -66,21 +60,19 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
             // set thread affinity
             setCpuAffinity(threadID++);
             barrier.arrive_and_wait();
-            for (int rep = 0; rep < n_repeat; ++rep) {
-                BufferWriter auto writer           = buffer.new_writer();
-                std::size_t       nSamplesProduced = 0;
+            for (int rep = 0; rep < nRepeat; ++rep) {
+                BufferWriterLike auto writer           = buffer.new_writer();
+                std::size_t           nSamplesProduced = 0;
                 barrier.arrive_and_wait();
-                while (nSamplesProduced <= (min_samples + nProducer - 1) / nProducer) {
-                    if constexpr (PublisherAPI == WriteApi::via_lambda) {
-                        writer.publish([](auto &) {}, vector_length);
-                    } else if constexpr (PublisherAPI == WriteApi::via_split_request_publish_RAII) {
-                        auto data = writer.reserve(vector_length);
-
-                        data.publish(vector_length);
+                while (nSamplesProduced <= (minSamples + nProducer - 1) / nProducer) {
+                    PublishableSpan auto data = writer.reserve(vectorLength);
+                    if (!data.empty()) {
+                        data.publish(vectorLength);
+                        nSamplesProduced += vectorLength;
                     } else {
-                        static_assert(gr::meta::always_false<T>, "unknown PublisherAPI case");
+                        // std::this_thread::yield();
+                        // std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
-                    nSamplesProduced += vector_length;
                 }
                 barrier.arrive_and_wait();
             }
@@ -93,15 +85,15 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
         consumers.emplace_back([&]() {
             setCpuAffinity(threadID++);
             barrier.arrive_and_wait();
-            for (int rep = 0; rep < n_repeat; ++rep) {
-                BufferReader auto reader           = buffer.new_reader();
-                std::size_t       nSamplesConsumed = 0;
+            for (int rep = 0; rep < nRepeat; ++rep) {
+                BufferReaderLike auto reader           = buffer.new_reader();
+                std::size_t           nSamplesConsumed = 0;
                 barrier.arrive_and_wait();
-                while (nSamplesConsumed < min_samples) {
-                    if (reader.available() < vector_length) {
+                while (nSamplesConsumed < minSamples) {
+                    if (reader.available() < vectorLength) {
                         continue;
                     }
-                    const ConsumableSpan auto &input = reader.get(vector_length);
+                    const ConsumableSpan auto& input = reader.get(vectorLength);
                     nSamplesConsumed += input.size();
 
                     if (!input.consume(input.size())) {
@@ -115,49 +107,51 @@ testNewAPI(Buffer auto &buffer, const std::size_t vector_length, const std::size
 
     // all producers and consumer are ready, waiting to give the sign
     barrier.arrive_and_wait();
-    ::benchmark::benchmark<n_repeat>(fmt::format("{:>8}: {} producers -<{:^4}>-> {} consumers", name, nProducer, vector_length, nConsumer), min_samples) = [&]() {
+    ::benchmark::benchmark<nRepeat>(fmt::format("{:>8}: {} producers -<{:^4}>-> {} consumers", name, nProducer, vectorLength, nConsumer), minSamples) = [&]() {
         barrier.arrive_and_wait();
         barrier.arrive_and_wait();
     };
 
     // clean up
-    for (std::thread &thread : producers) thread.join();
-    for (std::thread &thread : consumers) thread.join();
+    for (std::thread& thread : producers) {
+        thread.join();
+    }
+    for (std::thread& thread : consumers) {
+        thread.join();
+    }
 }
 
 inline const boost::ut::suite _buffer_tests = [] {
-    const std::size_t samples = 10'000'000; // minimum number of samples
     enum class BufferStrategy { posix, portable };
 
-    for (WriteApi writerAPI : { WriteApi::via_lambda, WriteApi::via_split_request_publish_RAII }) {
-        for (BufferStrategy strategy : { BufferStrategy::posix, BufferStrategy::portable }) {
-            for (std::size_t veclen : { 1UL, 1024UL }) {
-                if (not(strategy == BufferStrategy::posix and veclen == 1UL)) {
-                    benchmark::results::add_separator();
-                }
-                for (std::size_t nP = 1; nP <= 4; nP *= 2) {
-                    for (std::size_t nR = 1; nR <= 4; nR *= 2) {
-                        const std::size_t size      = std::max(4096UL, veclen) * nR * 10UL;
-                        auto              allocator = std::pmr::polymorphic_allocator<int32_t>();
-                        const bool        is_posix  = strategy == BufferStrategy::posix;
-                        auto              invoke    = [&](auto buffer) {
-                            switch (writerAPI) {
-                            case WriteApi::via_split_request_publish_RAII:
-                                testNewAPI<WriteApi::via_split_request_publish_RAII>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX - RAII writer" : "portable - RAII writer");
-                                break;
-                            case WriteApi::via_lambda:
-                            default: testNewAPI<WriteApi::via_lambda>(buffer, veclen, samples, nP, nR, is_posix ? "POSIX" : "portable"); break;
-                            }
-                        };
-                        if (nP == 1) {
-                            using BufferType   = CircularBuffer<int32_t, std::dynamic_extent, ProducerType::Single>;
-                            Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
-                            invoke(buffer);
-                        } else {
-                            using BufferType   = CircularBuffer<int32_t, std::dynamic_extent, ProducerType::Multi>;
-                            Buffer auto buffer = is_posix ? BufferType(size) : BufferType(size, allocator);
-                            invoke(buffer);
-                        }
+    // Test parameters
+    const std::size_t samples             = 1'000'000; // minimum number of samples
+    const std::size_t maxProducers        = 4;         // maximum number of producers to test, 1-2-4-8 ....
+    const std::size_t maxConsumers        = 4;         // maximum number of consumers to test, 1-2-4-8 ....
+    const std::vector bufferStrategyTests = {
+#ifdef HAS_POSIX_MAP_INTERFACE
+        BufferStrategy::posix,
+#endif
+        BufferStrategy::portable};
+    const std::vector vecLengthTests = {1UL, 1024UL};
+
+    for (const BufferStrategy strategy : bufferStrategyTests) {
+        for (const std::size_t veclen : vecLengthTests) {
+            benchmark::results::add_separator();
+            for (std::size_t nP = 1; nP <= maxProducers; nP *= 2) {
+                for (std::size_t nC = 1; nC <= maxConsumers; nC *= 2) {
+                    const std::size_t size      = std::max(4096UL, veclen) * nC * 10UL;
+                    const bool        isPosix   = strategy == BufferStrategy::posix;
+                    const auto        allocator = (isPosix) ? gr::double_mapped_memory_resource::allocator<int32_t>() : std::pmr::polymorphic_allocator<int32_t>();
+                    auto              invoke    = [&](auto buffer) { runTest(buffer, veclen, samples, nP, nC, isPosix ? "POSIX" : "portable"); };
+                    if (nP == 1) {
+                        using BufferType       = CircularBuffer<int32_t, std::dynamic_extent, ProducerType::Single>;
+                        BufferLike auto buffer = BufferType(size, allocator);
+                        invoke(buffer);
+                    } else {
+                        using BufferType       = CircularBuffer<int32_t, std::dynamic_extent, ProducerType::Multi>;
+                        BufferLike auto buffer = BufferType(size, allocator);
+                        invoke(buffer);
                     }
                 }
             }
@@ -165,6 +159,4 @@ inline const boost::ut::suite _buffer_tests = [] {
     }
 };
 
-int
-main() { /* not needed by the UT framework */
-}
+int main() { /* not needed by the UT framework */ }
