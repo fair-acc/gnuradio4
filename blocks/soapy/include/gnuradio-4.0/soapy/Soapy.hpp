@@ -8,7 +8,7 @@
 
 #include <SoapySDR/Device.hpp> // needed for existing C++ return types that are ABI stable (i.e. header-only defined)
 
-#include <gnuradio-4.0/Profiler.hpp>
+#include <fmt/ranges.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -16,6 +16,12 @@
 #include "SoapyRaiiWrapper.hpp" // using SoapySDR's C-API as intermediate interface to mitigate ABI-issues between stdlibc++ and libc++
 
 namespace gr::blocks::soapy {
+
+namespace detail {
+bool equalWithinOnePercent(const std::vector<double>& a, const std::vector<double>& b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](double x, double y) { return std::abs(x - y) <= 0.01 * std::max(std::abs(x), std::abs(y)); });
+}
+} // namespace detail
 
 template<typename T, std::size_t nPorts = std::dynamic_extent>
 struct SoapyBlock : public Block<SoapyBlock<T, nPorts> /*, BlockingIO<false>*/> {
@@ -78,11 +84,8 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     }
 
     void start() { reinitDevice(); }
-
     void pause() { _rxStream.deactivate(); }
-
     void resume() { _rxStream.activate(); }
-
     void stop() { _device.reset(); }
 
     constexpr work::Status processBulk(PublishableSpan auto& output)
@@ -179,6 +182,15 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         for (std::size_t i = 0UZ; i < nChannels; i++) {
             _device.setSampleRate(SOAPY_SDR_RX, rx_channels->at(i), static_cast<double>(sample_rate));
         }
+
+        std::vector<double> actualSampleRates;
+        for (std::size_t i = 0UZ; i < nChannels; i++) {
+            actualSampleRates.push_back(_device.getSampleRate(SOAPY_SDR_RX, rx_channels->at(i)));
+        }
+
+        if (!detail::equalWithinOnePercent(actualSampleRates, std::vector<double>(nChannels, static_cast<double>(sample_rate)))) {
+            throw gr::exception(fmt::format("sample rate mismatch:\nSet: {} vs. Actual: {}\n", sample_rate, fmt::join(actualSampleRates, ", ")));
+        }
     }
 
     void setAntennae() {
@@ -200,6 +212,14 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         std::size_t nFrequency = rx_center_frequency->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
             _device.setCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i), rx_center_frequency->at(std::min(i, nFrequency - 1UZ)));
+        }
+        std::vector<double> rx_center_frequency_actual;
+        for (std::size_t i = 0UZ; i < nChannels; i++) {
+            rx_center_frequency_actual.push_back(_device.getCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i)));
+        }
+
+        if (!detail::equalWithinOnePercent(rx_center_frequency_actual, rx_center_frequency.value)) {
+            throw gr::exception(fmt::format("center frequency mismatch:\nSet: {} vs. Actual: {}\n", fmt::join(rx_center_frequency.value, ", "), fmt::join(rx_center_frequency_actual, ", ")));
         }
     }
 
