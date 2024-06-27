@@ -217,7 +217,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         for (std::size_t i = 0UZ; i < nChannels; i++) {
             rx_center_frequency_actual.push_back(_device.getCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i)));
         }
-        auto equalWithinOnepercent = [](const std::vector<double>& a, const std::vector<double>& b) { return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](double x, double y) { return std::abs(x - y) <= 0.01 * std::max(std::abs(x), std::abs(y)); }); };
+
         if (!detail::equalWithinOnePercent(rx_center_frequency_actual, rx_center_frequency.value)) {
             throw gr::exception(fmt::format("center frequency mismatch:\nSet: {} vs. Actual: {}\n", fmt::join(rx_center_frequency.value, ", "), fmt::join(rx_center_frequency_actual, ", ")));
         }
