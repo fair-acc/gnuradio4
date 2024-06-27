@@ -184,17 +184,17 @@ const boost::ut::suite TagTests = [] {
 
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
-        expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
+        expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
         expect(eq(sink._tags.size(), clockSrc.tags.size())) << [&]() {
-          std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
-          for (const auto &tag : sink._tags) {
-              ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
-          }
-          return ret;
+            std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
+            for (const auto& tag : sink._tags) {
+                ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+            }
+            return ret;
         }();
 
         std::vector<double> xValues(N);
-        std::vector<double> yValues(sink.samples.begin(), sink.samples.end());
+        std::vector<double> yValues(sink._samples.begin(), sink._samples.end());
         std::iota(xValues.begin(), xValues.end(), 0);
         auto chart = gr::graphs::ImChart<128, 32>({{0., static_cast<double>(N)}, {0., 35.}});
         chart.draw(xValues, yValues, "Signal");
@@ -266,17 +266,17 @@ const boost::ut::suite TagTests = [] {
 
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
-        expect(eq(N, static_cast<std::uint32_t>(sink.samples.size()))) << "Number of samples does not match";
+        expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
         expect(eq(sink._tags.size(), 9UZ)) << [&]() {
-          std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
-          for (const auto &tag : sink._tags) {
-              ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
-          }
-          return ret;
+            std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
+            for (const auto& tag : sink._tags) {
+                ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+            }
+            return ret;
         }();
 
         std::vector<double> xValues(N);
-        std::vector<double> yValues(sink.samples.begin(), sink.samples.end());
+        std::vector<double> yValues(sink._samples.begin(), sink._samples.end());
         std::iota(xValues.begin(), xValues.end(), 0);
         auto chart = gr::graphs::ImChart<128, 32>({{0., static_cast<double>(N)}, {0., 35.}});
         chart.draw(xValues, yValues, "Signal");

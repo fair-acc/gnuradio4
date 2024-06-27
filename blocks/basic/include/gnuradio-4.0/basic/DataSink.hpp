@@ -7,6 +7,7 @@
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/TriggerMatcher.hpp>
 
 #include <any>
 #include <chrono>
@@ -16,12 +17,6 @@
 namespace gr::basic {
 
 enum class BlockingMode { NonBlocking, Blocking };
-
-enum class TriggerMatchResult {
-    Matching,    ///< Start a new dataset
-    NotMatching, ///< Finish dataset
-    Ignore       ///< Ignore tag
-};
 
 template<typename T>
 class DataSink;
@@ -37,53 +32,6 @@ concept DataSetCallback = std::invocable<T, DataSet<V>>;
  */
 template<typename T, typename V>
 concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const Tag>> || std::invocable<T, std::span<const V>, std::span<const Tag>, const DataSink<V>&>;
-
-/**
- * Used for testing whether a tag should trigger data acquisition.
- *
- * For the 'Triggered' (data window) and 'Snapshot' (single sample) acquisition modes:
- * Stateless predicate to check whether a tag matches the trigger criteria.
- *
- * @code
- * auto matcher = [](const auto &tag) {
- *     const auto isTrigger = ...check if tag is trigger...;
- *     return isTrigger ? TriggerMatchResult::Matching : TriggerMatchResult::Ignore;
- * };
- * @endcode
- *
- * For the 'Multiplexed' acquisition mode: Possibly stateful object checking all incoming tags to control which data should be sent
- * to the listener.
- *
- * A new dataset is started when the matcher returns @c Start or @c StopAndStart.
- * A dataset is closed and sent when @c Stop or @StopAndStart is returned.
- *
- * For the multiplexed case, the matcher might be stateful and can rely on being called with each incoming tag exactly once, in the order they arrive.
- *
- * Example:
- *
- * @code
- * // matcher observing three possible tag values, "green", "yellow", "red".
- * // starting a dataset when seeing "green", stopping on "red", starting a new dataset on "yellow"
- * struct ColorMatcher {
- *     TriggerMatcherResult operator()(const Tag &tag) {
- *         if (tag == green || tag == yellow) {
- *             return TriggerMatchResult::Matching;
- *         }
- *         if (tag == red) {
- *             return TriggerMatchResult::NotMatching;
- *         }
- *
- *         return TriggerMatchResult::Ignore;
- *     }
- * };
- * @endcode
- *
- * @see TriggerMatchResult
- */
-template<typename T>
-concept TriggerMatcher = requires(T matcher, Tag tag) {
-    { matcher(tag) } -> std::convertible_to<TriggerMatchResult>;
-};
 
 // clang-format on
 
@@ -151,7 +99,7 @@ public:
         return sink ? sink->getStreamingPoller(block) : nullptr;
     }
 
-    template<typename T, TriggerMatcher M>
+    template<typename T, trigger::Matcher M>
     std::shared_ptr<typename DataSink<T>::DataSetPoller>
     getTriggerPoller(const DataSinkQuery &query, M &&matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{ _mutex };
@@ -159,7 +107,7 @@ public:
         return sink ? sink->getTriggerPoller(std::forward<M>(matcher), preSamples, postSamples, block) : nullptr;
     }
 
-    template<typename T, TriggerMatcher M>
+    template<typename T, trigger::Matcher M>
     std::shared_ptr<typename DataSink<T>::DataSetPoller>
     getMultiplexedPoller(const DataSinkQuery &query, M &&matcher, std::size_t maximumWindowSize, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{ _mutex };
@@ -167,7 +115,7 @@ public:
         return sink ? sink->getMultiplexedPoller(std::forward<M>(matcher), maximumWindowSize, block) : nullptr;
     }
 
-    template<typename T, TriggerMatcher M>
+    template<typename T, trigger::Matcher M>
     std::shared_ptr<typename DataSink<T>::DataSetPoller>
     getSnapshotPoller(const DataSinkQuery &query, M &&matcher, std::chrono::nanoseconds delay, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{ _mutex };
@@ -188,7 +136,7 @@ public:
         return true;
     }
 
-    template<typename T, DataSetCallback<T> Callback, TriggerMatcher M>
+    template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
     bool
     registerTriggerCallback(const DataSinkQuery &query, M &&matcher, std::size_t preSamples, std::size_t postSamples, Callback &&callback) {
         std::lock_guard lg{ _mutex };
@@ -201,7 +149,7 @@ public:
         return true;
     }
 
-    template<typename T, DataSetCallback<T> Callback, TriggerMatcher M>
+    template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
     bool
     registerMultiplexedCallback(const DataSinkQuery &query, M &&matcher, std::size_t maximumWindowSize, Callback &&callback) {
         std::lock_guard lg{ _mutex };
@@ -214,7 +162,7 @@ public:
         return true;
     }
 
-    template<typename T, DataSetCallback<T> Callback, TriggerMatcher M>
+    template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
     bool
     registerSnapshotCallback(const DataSinkQuery &query, M &&matcher, std::chrono::nanoseconds delay, Callback &&callback) {
         std::lock_guard lg{ _mutex };
@@ -498,7 +446,7 @@ public:
         return handler;
     }
 
-    template<TriggerMatcher M>
+    template<trigger::Matcher M>
     std::shared_ptr<DataSetPoller>
     getTriggerPoller(M &&matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode blockMode = BlockingMode::Blocking) {
         const auto      block   = blockMode == BlockingMode::Blocking;
@@ -510,7 +458,7 @@ public:
         return handler;
     }
 
-    template<TriggerMatcher M>
+    template<trigger::Matcher M>
     std::shared_ptr<DataSetPoller>
     getMultiplexedPoller(M &&matcher, std::size_t maximumWindowSize, BlockingMode blockMode = BlockingMode::Blocking) {
         std::lock_guard lg(_listener_mutex);
@@ -520,7 +468,7 @@ public:
         return handler;
     }
 
-    template<TriggerMatcher M>
+    template<trigger::Matcher M>
     std::shared_ptr<DataSetPoller>
     getSnapshotPoller(M &&matcher, std::chrono::nanoseconds delay, BlockingMode blockMode = BlockingMode::Blocking) {
         const auto      block   = blockMode == BlockingMode::Blocking;
@@ -536,21 +484,21 @@ public:
         addListener(std::make_unique<ContinuousListener<Callback>>(maxChunkSize, std::forward<Callback>(callback), *this), false);
     }
 
-    template<TriggerMatcher M, DataSetCallback<T> Callback>
+    template<trigger::Matcher M, DataSetCallback<T> Callback>
     void
     registerTriggerCallback(M &&matcher, std::size_t preSamples, std::size_t postSamples, Callback &&callback) {
         addListener(std::make_unique<TriggerListener<Callback, M>>(std::forward<M>(matcher), preSamples, postSamples, std::forward<Callback>(callback)), false);
         ensureHistorySize(preSamples);
     }
 
-    template<TriggerMatcher M, DataSetCallback<T> Callback>
+    template<trigger::Matcher M, DataSetCallback<T> Callback>
     void
     registerMultiplexedCallback(M &&matcher, std::size_t maximumWindowSize, Callback &&callback) {
         std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<MultiplexedListener<Callback, M>>(std::forward<M>(matcher), maximumWindowSize, std::forward<Callback>(callback)), false);
     }
 
-    template<TriggerMatcher M, DataSetCallback<T> Callback>
+    template<trigger::Matcher M, DataSetCallback<T> Callback>
     void
     registerSnapshotCallback(M &&matcher, std::chrono::nanoseconds delay, Callback &&callback) {
         std::lock_guard lg(_listener_mutex);
@@ -787,24 +735,24 @@ private:
         std::size_t pending_post_samples = 0;
     };
 
-    template<typename Callback, TriggerMatcher M>
+    template<typename Callback, trigger::Matcher TMatcher>
     struct TriggerListener : public AbstractListener {
         bool        block       = false;
         std::size_t preSamples  = 0;
         std::size_t postSamples = 0;
 
         DataSet<T>                   dataset_template;
-        M                            trigger_matcher = {};
+        TMatcher                     trigger_matcher = {};
         std::deque<PendingWindow>    pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<DataSetPoller> polling_handler = {};
 
         Callback callback;
 
-        template<TriggerMatcher Matcher>
+        template<trigger::Matcher Matcher>
         explicit TriggerListener(Matcher &&matcher, std::shared_ptr<DataSetPoller> handler, std::size_t pre, std::size_t post, bool doBlock)
             : block(doBlock), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{ std::move(handler) } {}
 
-        template<typename CallbackFW, TriggerMatcher Matcher>
+        template<typename CallbackFW, trigger::Matcher Matcher>
         explicit TriggerListener(Matcher &&matcher, std::size_t pre, std::size_t post, CallbackFW &&cb)
             : preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), callback{ std::forward<CallbackFW>(cb) } {}
 
@@ -841,7 +789,7 @@ private:
 
         void
         process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher(Tag{ 0, *tagData0 }) == TriggerMatchResult::Matching) {
+            if (tagData0 && trigger_matcher("", Tag{ 0, *tagData0 }, {}) == trigger::MatchResult::Matching) {
                 DataSet<T> dataset = dataset_template;
                 dataset.signal_values.reserve(preSamples + postSamples); // TODO maybe make the circ. buffer smaller but preallocate these
 
@@ -881,7 +829,7 @@ private:
         }
     };
 
-    template<typename Callback, TriggerMatcher M>
+    template<typename Callback, trigger::Matcher M>
     struct MultiplexedListener : public AbstractListener {
         bool                         block = false;
         M                            matcher;
@@ -891,11 +839,11 @@ private:
         std::weak_ptr<DataSetPoller> polling_handler = {};
         Callback                     callback;
 
-        template<typename CallbackFW, TriggerMatcher Matcher>
+        template<typename CallbackFW, trigger::Matcher Matcher>
         explicit MultiplexedListener(Matcher &&matcher_, std::size_t maxWindowSize, CallbackFW &&cb)
             : matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), callback(std::forward<CallbackFW>(cb)) {}
 
-        template<TriggerMatcher Matcher>
+        template<trigger::Matcher Matcher>
         explicit MultiplexedListener(Matcher &&matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller> handler, bool doBlock)
             : block(doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), polling_handler{ std::move(handler) } {}
 
@@ -933,17 +881,17 @@ private:
         void
         process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0) {
-                const auto obsr = matcher(Tag{ 0, *tagData0 });
-                if (obsr == TriggerMatchResult::NotMatching || obsr == TriggerMatchResult::Matching) {
+                const auto obsr = matcher("", Tag{ 0, *tagData0 }, {});
+                if (obsr == trigger::MatchResult::NotMatching || obsr == trigger::MatchResult::Matching) {
                     if (pending_dataset) {
-                        if (obsr == TriggerMatchResult::NotMatching) {
+                        if (obsr == trigger::MatchResult::NotMatching) {
                             pending_dataset->timing_events[0].push_back({ static_cast<Tag::signed_index_type>(pending_dataset->signal_values.size()), *tagData0 });
                         }
                         this->publishDataSet(std::move(*pending_dataset));
                         pending_dataset.reset();
                     }
                 }
-                if (obsr == TriggerMatchResult::Matching) {
+                if (obsr == trigger::MatchResult::Matching) {
                     pending_dataset = dataset_template;
                     pending_dataset->signal_values.reserve(maximumWindowSize); // TODO might be too much?
                     pending_dataset->timing_events = { { { 0, *tagData0 } } };
@@ -979,7 +927,7 @@ private:
         std::size_t  pending_samples = 0;
     };
 
-    template<typename Callback, TriggerMatcher M>
+    template<typename Callback, trigger::Matcher M>
     struct SnapshotListener : public AbstractListener {
         bool                         block = false;
         std::chrono::nanoseconds     time_delay;
@@ -990,11 +938,11 @@ private:
         std::weak_ptr<DataSetPoller> polling_handler = {};
         Callback                     callback;
 
-        template<TriggerMatcher Matcher>
+        template<trigger::Matcher Matcher>
         explicit SnapshotListener(Matcher &&matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller> poller, bool doBlock)
             : block(doBlock), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{ std::move(poller) } {}
 
-        template<typename CallbackFW, TriggerMatcher Matcher>
+        template<typename CallbackFW, trigger::Matcher Matcher>
         explicit SnapshotListener(Matcher &&matcher, std::chrono::nanoseconds delay, CallbackFW &&cb)
             : time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), callback(std::forward<CallbackFW>(cb)) {}
 
@@ -1032,7 +980,7 @@ private:
 
         void
         process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher({ 0, *tagData0 }) == TriggerMatchResult::Matching) {
+            if (tagData0 && trigger_matcher("", { 0, *tagData0 }, {}) == trigger::MatchResult::Matching) {
                 auto new_pending = PendingSnapshot{ *tagData0, sample_delay, sample_delay };
                 // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased)
                 auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });

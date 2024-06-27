@@ -742,7 +742,7 @@ const boost::ut::suite _stride_tests = [] {
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
         for (std::size_t i = 0UZ; i < sinks.size(); i++) {
             expect(sinks[i]->n_samples_produced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
-            expect(std::ranges::equal(sinks[i]->samples, expected_values[i])) << fmt::format("sinks[{}]->samples does not match to expected values", i);
+            expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << fmt::format("sinks[{}]->_samples does not match to expected values", i);
         }
     };
 };

@@ -4,6 +4,7 @@ add_ut_test(qa_DataSink)
 if (NOT NOPLUGINS)
     add_ut_test(qa_BasicKnownBlocks)
 endif ()
+add_ut_test(qa_StreamToDataSet)
 
 message(STATUS "###Python Include Dirs: ${Python3_INCLUDE_DIRS}")
 if (PYTHON_AVAILABLE)

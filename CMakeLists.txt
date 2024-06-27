@@ -124,8 +124,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
     endif ()
 
     if (ADDRESS_SANITIZER)
-        add_compile_options(-fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer)
+        add_compile_options(-fsanitize=address -fsanitize-address-use-after-scope -fsanitize=leak -fno-omit-frame-pointer -fstack-protector-strong -fstack-clash-protection) # additional flags: -D_GLIBCXX_DEBUG -D_FORTIFY_SOURCE=2
+        add_link_options(-fsanitize=address -fsanitize-address-use-after-scope -fsanitize=leak -fno-omit-frame-pointer -fstack-protector-strong -fstack-clash-protection) # additional flags: -D_GLIBCXX_DEBUG -D_FORTIFY_SOURCE=2
         message(STATUS "Enable ADDRESS_SANITIZER: ${ADDRESS_SANITIZER}")
     elseif (UB_SANITIZER)
         add_compile_options(-fsanitize=undefined)

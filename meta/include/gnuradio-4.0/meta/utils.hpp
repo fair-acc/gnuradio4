@@ -58,7 +58,7 @@ struct fixed_string {
 
     [[nodiscard]] explicit operator std::string() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] explicit operator const char*() const noexcept { return _data; }
+    [[nodiscard]] explicit(false) operator const char*() const noexcept { return _data; }
 
     [[nodiscard]] constexpr bool operator==(const fixed_string& other) const noexcept { return std::string_view{_data, N} == std::string_view(other); }
 

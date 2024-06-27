@@ -24,7 +24,7 @@ inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #define EM_CONSTEXPR
 #define EM_CONSTEXPR_STATIC static const
 #else
-#define EM_CONSTEXPR constexpr
+#define EM_CONSTEXPR        constexpr
 #define EM_CONSTEXPR_STATIC constexpr
 #endif
 
@@ -69,61 +69,44 @@ concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
  */
 struct alignas(hardware_constructive_interference_size) Tag {
     using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{ 0 };
+    signed_index_type index{0};
     property_map      map{};
 
     Tag() = default; // TODO: remove -- needed only for Clang <=15
 
     Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
 
-    bool
-    operator==(const Tag &other) const
-            = default;
+    bool operator==(const Tag& other) const = default;
 
     // TODO: do we need the convenience methods below?
-    void
-    reset() noexcept {
+    void reset() noexcept {
         index = 0;
         map.clear();
     }
 
-    [[nodiscard]] pmtv::pmt &
-    at(const std::string &key) {
-        return map.at(key);
-    }
+    [[nodiscard]] pmtv::pmt& at(const std::string& key) { return map.at(key); }
 
-    [[nodiscard]] const pmtv::pmt &
-    at(const std::string &key) const {
-        return map.at(key);
-    }
+    [[nodiscard]] const pmtv::pmt& at(const std::string& key) const { return map.at(key); }
 
-    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>>
-    get(const std::string &key) const noexcept {
+    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>> get(const std::string& key) const noexcept {
         try {
             return map.at(key);
-        } catch (const std::out_of_range &e) {
+        } catch (const std::out_of_range& e) {
             return std::nullopt;
         }
     }
 
-    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>>
-    get(const std::string &key) noexcept {
+    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>> get(const std::string& key) noexcept {
         try {
             return map.at(key);
-        } catch (const std::out_of_range &) {
+        } catch (const std::out_of_range&) {
             return std::nullopt;
         }
     }
 
-    void
-    insert_or_assign(const std::pair<std::string, pmtv::pmt> &value) {
-        map[value.first] = value.second;
-    }
+    void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
 
-    void
-    insert_or_assign(const std::string &key, const pmtv::pmt &value) {
-        map[key] = value;
-    }
+    void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
 };
 
 } // namespace gr
@@ -133,9 +116,8 @@ ENABLE_REFLECTION(gr::Tag, index, map);
 namespace gr {
 using meta::fixed_string;
 
-inline void
-updateMaps(const property_map &src, property_map &dest) {
-    for (const auto &[key, value] : src) {
+inline void updateMaps(const property_map& src, property_map& dest) {
+    for (const auto& [key, value] : src) {
         if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
             // If it's a nested map
             if (auto it = dest.find(key); it != dest.end()) {
@@ -150,7 +132,7 @@ updateMaps(const property_map &src, property_map &dest) {
                 }
             } else {
                 // If the key doesn't exist, just insert
-                dest.insert({ key, value });
+                dest.insert({key, value});
             }
         } else {
             // If it's not a nested map, insert/replace the value
@@ -168,39 +150,22 @@ class DefaultTag {
 public:
     using value_type = PMT_TYPE;
 
-    [[nodiscard]] constexpr std::string_view
-    key() const noexcept {
-        return std::string_view{ _key };
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    shortKey() const noexcept {
-        return std::string_view(Key);
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    unit() const noexcept {
-        return std::string_view(Unit);
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    description() const noexcept {
-        return std::string_view(Description);
-    }
+    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
+    [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
+    [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
+    [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
 
     [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
 
     template<typename T>
-        requires std::is_same_v<value_type, T>
-    [[nodiscard]] std::pair<std::string, pmtv::pmt>
-    operator()(const T &newValue) const noexcept {
-        return { std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue)) };
+    requires std::is_same_v<value_type, T>
+    [[nodiscard]] std::pair<std::string, pmtv::pmt> operator()(const T& newValue) const noexcept {
+        return {std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue))};
     }
 };
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering
-operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOtherString &str) noexcept {
+inline constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
     if ((dt.shortKey() <=> str) == 0) {
         return std::strong_ordering::equal; // shortKeys are equal
     } else {
@@ -209,8 +174,7 @@ operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOther
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering
-operator<=>(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt) noexcept {
+inline constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
     if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
         return std::strong_ordering::equal; // shortKeys are equal
     } else {
@@ -219,14 +183,12 @@ operator<=>(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Descr
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool
-operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOtherString &str) noexcept {
+inline constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
     return (dt <=> std::string_view(str)) == 0;
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool
-operator==(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt) noexcept {
+inline constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
     return (std::string_view(str) <=> dt) == 0;
 }
 
@@ -246,8 +208,7 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block st
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::array<std::string_view, 14> kDefaultTags = { "sample_rate",  "signal_name",    "signal_quantity",   "signal_unit", "signal_min",    "signal_max",    "trigger_name",
-                                                                   "trigger_time", "trigger_offset", "trigger_meta_info", "context",     "reset_default", "store_default", "end_of_stream" };
+inline constexpr std::array<std::string_view, 14> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "reset_default", "store_default", "end_of_stream"};
 
 } // namespace tag
 

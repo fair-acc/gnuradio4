@@ -36,7 +36,7 @@ namespace gr::basic::data_sink_test {
 constexpr auto kProcessingDelayMs = 600u;
 
 /**
- * Example tag matcher (TriggerMatcher implementation) for the multiplexed listener case (interleaved data). As a toy example, we use
+ * Example tag matcher (trigger::Matcher implementation) for the multiplexed listener case (interleaved data). As a toy example, we use
  * data tagged as Year/Month/Day.
  *
  * For each of year, month, day, the user can specify whether:
@@ -60,12 +60,13 @@ struct Matcher {
 
     static inline bool changed(int x, std::optional<int> other) { return !same(x, other); }
 
-    TriggerMatchResult operator()(const Tag& tag) {
+    [[nodiscard]] trigger::MatchResult
+    operator()(std::string_view /* filterSpec */, const Tag &tag, const property_map & /* filter state */) {
         const auto ty = tag.get("YEAR");
         const auto tm = tag.get("MONTH");
         const auto td = tag.get("DAY");
         if (!ty || !tm || !td) {
-            return TriggerMatchResult::Ignore;
+            return trigger::MatchResult::Ignore;
         }
 
         const auto tup        = std::make_tuple(std::get<int>(ty->get()), std::get<int>(tm->get()), std::get<int>(td->get()));
@@ -83,12 +84,12 @@ struct Matcher {
         const auto matches      = yearMatches && monthMatches && dayMatches;
         const auto restart      = yearRestart || monthRestart || dayRestart;
 
-        auto r = TriggerMatchResult::Ignore;
+        auto r = trigger::MatchResult::Ignore;
 
         if (!matches) {
-            r = TriggerMatchResult::NotMatching;
+            r = trigger::MatchResult::NotMatching;
         } else if (!last_matched || restart) {
-            r = TriggerMatchResult::Matching;
+            r = trigger::MatchResult::Matching;
         }
 
         last_seen    = tup;
@@ -112,33 +113,33 @@ static std::vector<Tag> makeTestTags(Tag::signed_index_type firstIndex, Tag::sig
     return tags;
 }
 
-static std::string toAsciiArt(std::span<TriggerMatchResult> states) {
+static std::string toAsciiArt(std::span<trigger::MatchResult> states) {
     bool        started = false;
     std::string r;
     for (auto s : states) {
         switch (s) {
-        case TriggerMatchResult::Matching:
+        case trigger::MatchResult::Matching:
             r += started ? "||#" : "|#";
             started = true;
             break;
-        case TriggerMatchResult::NotMatching:
+        case trigger::MatchResult::NotMatching:
             r += started ? "|_" : "_";
             started = false;
             break;
-        case TriggerMatchResult::Ignore: r += started ? "#" : "_"; break;
+        case trigger::MatchResult::Ignore: r += started ? "#" : "_"; break;
         }
     };
     return r;
 }
 
-template<TriggerMatcher M>
-std::string runMatcherTest(std::span<const Tag> tags, M o) {
-    std::vector<TriggerMatchResult> r;
-    r.reserve(tags.size());
-    for (const auto& tag : tags) {
-        r.push_back(o(tag));
+template<trigger::Matcher TMatcher>
+std::string runMatcherTest(std::span<const Tag> tags, TMatcher matcher) {
+    std::vector<trigger::MatchResult> result;
+    result.reserve(tags.size());
+    for (const auto &tag : tags) {
+        result.push_back(matcher("", tag, {}));
     }
-    return toAsciiArt(r);
+    return toAsciiArt(result);
 }
 
 std::pair<std::vector<Tag>, std::vector<Tag>> extractMetadataTags(const std::vector<Tag>& tags) {
@@ -457,9 +458,9 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            auto isTrigger = [](const Tag& tag) {
+            auto isTrigger = [](std::string_view /* filterSpec */, const Tag &tag, const property_map & /* filter state */) {
                 const auto v = tag.get("TYPE");
-                return v && std::get<std::string>(v->get()) == "TRIGGER" ? TriggerMatchResult::Matching : TriggerMatchResult::Ignore;
+                return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
 
             std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
@@ -520,10 +521,10 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            std::vector<int32_t>                              receivedData;
-            std::vector<Tag>                                  receivedTags;
-            bool                                              seenFinished = false;
-            auto                                              isTrigger    = [](const Tag&) { return TriggerMatchResult::Matching; };
+            std::vector<int32_t> receivedData;
+            std::vector<Tag>     receivedTags;
+            bool                 seenFinished = false;
+            auto                 isTrigger    = [](std::string_view /* filterSpec */, const Tag &, const property_map                    &/* filter state */) { return trigger::MatchResult::Matching; };
             std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
             expect(spinUntil(4s, [&] {
                 poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 0UZ, 2UZ, BlockingMode::Blocking);
@@ -581,9 +582,9 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto callback = [&receivedDataCb](const auto& dataset) { receivedDataCb.insert(receivedDataCb.end(), dataset.signal_values.begin(), dataset.signal_values.end()); };
 
-        auto isTrigger = [](const Tag& tag) {
+        auto isTrigger = [](std::string_view /* filterSpec */, const Tag &tag, const property_map & /* filter state */) {
             const auto v = tag.get("TYPE");
-            return (v && std::get<std::string>(v->get()) == "TRIGGER") ? TriggerMatchResult::Matching : TriggerMatchResult::Ignore;
+            return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
         };
 
         auto registerThread = std::thread([&] { expect(spinUntil(4s, [&] { return DataSinkRegistry::instance().registerSnapshotCallback<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, callback); })) << boost::ut::fatal; });
@@ -738,7 +739,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            auto isTrigger = [](const Tag&) { return TriggerMatchResult::Matching; };
+            auto isTrigger = [](std::string_view /* filterSpec */, const Tag &, const property_map & /* filter state */) { return trigger::MatchResult::Matching; };
 
             std::shared_ptr<DataSink<float>::DataSetPoller> poller;
             expect(spinUntil(4s, [&] {
@@ -794,7 +795,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
-        auto isTrigger = [](const Tag&) { return TriggerMatchResult::Matching; };
+        auto isTrigger = [](std::string_view /* filterSpec */, const Tag &, const property_map & /* filter state */) { return trigger::MatchResult::Matching; };
 
         std::mutex         m;
         std::vector<float> receivedData;

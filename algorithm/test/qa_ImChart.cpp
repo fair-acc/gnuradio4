@@ -4,6 +4,7 @@
 
 #include <fmt/format.h>
 
+#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 
 const boost::ut::suite<"ImChart"> windowTests = [] {
@@ -219,8 +220,28 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
 
         expect(nothrow([&] { chart.draw(); }));
     };
+
+    "DataSet chart"_test = []() {
+        using namespace gr::dataset;
+        constexpr std::size_t kLength       = 1024UZ;
+        constexpr float       kSamplingRate = 1000.f;
+        constexpr float       kFrequency    = 5.f;
+        constexpr float       kAmplitude    = 1.f;
+        constexpr float       kOffset       = 0.2f;
+
+        auto sinDataSet    = generate::waveform<float>(generate::WaveType::Sine, kLength, kSamplingRate, kFrequency, kAmplitude, +kOffset);
+        auto cosDataSet    = generate::waveform<float>(generate::WaveType::Cosine, kLength, kSamplingRate, kFrequency, kAmplitude, -kOffset);
+        auto mergedDataSet = merge(sinDataSet, cosDataSet);
+
+        expect(eq(sinDataSet.signal_values.size(), kLength));
+        expect(eq(cosDataSet.signal_values.size(), kLength));
+        expect(eq(mergedDataSet.signal_values.size(), 2UZ * kLength));
+
+        draw(sinDataSet);
+        draw(cosDataSet);
+        draw(mergedDataSet);
+    };
 };
 
 int
-main() { /* not needed for UT */
-}
+main() { /* not needed for UT */ }

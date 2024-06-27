@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/basic/PythonBlock.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/basic/PythonBlock.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -24,8 +24,8 @@ const boost::ut::suite<"python::<C-API abstraction interfaces>"> pythonInterface
         expect(numpyType<double>() == NPY_DOUBLE);
         expect(numpyType<std::complex<float>>() == NPY_CFLOAT);
         expect(numpyType<std::complex<double>>() == NPY_CDOUBLE);
-        expect(numpyType<char *>() == NPY_STRING);
-        expect(numpyType<const char *>() == NPY_STRING);
+        expect(numpyType<char*>() == NPY_STRING);
+        expect(numpyType<const char*>() == NPY_STRING);
         expect(numpyType<void>() == NPY_NOTYPE);
     };
 };
@@ -71,18 +71,18 @@ def process_bulk(ins, outs):
     print('Stop Python processing - time: {} seconds'.format(time.time() - start))
 )";
 
-        PythonBlock<std::int32_t> myBlock({ { "n_inputs", 3U }, { "n_outputs", 3U }, { "pythonScript", pythonScript } });
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
         myBlock.applyChangedSettings(); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
-        std::vector<std::int32_t>                  data1 = { 1, 2, 3 };
-        std::vector<std::int32_t>                  data2 = { 4, 5, 6 };
+        std::vector<std::int32_t>                  data1 = {1, 2, 3};
+        std::vector<std::int32_t>                  data2 = {4, 5, 6};
         std::vector<std::int32_t>                  out1(3);
         std::vector<std::int32_t>                  out2(3);
-        std::vector<std::span<std::int32_t>>       outs    = { out1, out2 };
-        std::vector<std::span<const std::int32_t>> ins     = { data1, data2 };
+        std::vector<std::span<std::int32_t>>       outs    = {out1, out2};
+        std::vector<std::span<const std::int32_t>> ins     = {data1, data2};
         std::span<std::span<const std::int32_t>>   spanIns = ins;
-        for (const auto &span : ins) {
+        for (const auto& span : ins) {
             fmt::println("InPort[{}] : [{}]", count++, fmt::join(span, ", "));
         }
         fmt::println("");
@@ -99,14 +99,14 @@ def process_bulk(ins, outs):
                 } else {
                     myBlock.processBulk(constSpanOuts, spanOuts);
                 }
-            } catch (const std::exception &ex) {
+            } catch (const std::exception& ex) {
                 fmt::println(stderr, "myBlock.processBulk(...) - threw unexpected exception:\n {}", ex.what());
                 expect(false) << "nominal example should not throw";
             }
 
             fmt::println("C++ side got:");
             fmt::println("settings: {}", myBlock._settingsMap);
-            for (const auto &span : outs) {
+            for (const auto& span : outs) {
                 fmt::println("OutPort[{}] : [{}]", count++, fmt::join(span, ", "));
             }
             fmt::println("");
@@ -132,12 +132,12 @@ def process_bulk(ins, outs):
         outs[i][:] = ins[i] * 2
 )";
 
-        PythonBlock<std::int32_t> myBlock({ { "n_inputs", 3U }, { "n_outputs", 3U }, { "pythonScript", pythonScript } });
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
 
         bool throws = false;
         try {
             std::ignore = myBlock.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
-        } catch (const std::exception &ex) {
+        } catch (const std::exception& ex) {
             throws = true;
             fmt::println("myBlock.processBulk(...) - correctly threw SyntaxError exception:\n {}", ex.what());
         }
@@ -153,20 +153,20 @@ def process_bulk(ins, outs):
         outs[i][:] = ins[i] * 2/0 # <- (N.B. division by zero)
 )";
 
-        PythonBlock<float> myBlock({ { "n_inputs", 3U }, { "n_outputs", 3U }, { "pythonScript", pythonScript } });
+        PythonBlock<float> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
         myBlock.applyChangedSettings(); // needed for unit-test only when executed outside a Scheduler/Graph
 
-        std::vector<float>                  data1 = { 1, 2, 3 };
-        std::vector<float>                  data2 = { 4, 5, 6 };
+        std::vector<float>                  data1 = {1, 2, 3};
+        std::vector<float>                  data2 = {4, 5, 6};
         std::vector<float>                  out1(3);
         std::vector<float>                  out2(3);
-        std::vector<std::span<float>>       outs = { out1, out2 };
-        std::vector<std::span<const float>> ins  = { data1, data2 };
+        std::vector<std::span<float>>       outs = {out1, out2};
+        std::vector<std::span<const float>> ins  = {data1, data2};
 
         bool throws = false;
         try {
             myBlock.processBulk(std::span(ins), std::span(outs));
-        } catch (const std::exception &ex) {
+        } catch (const std::exception& ex) {
             throws = true;
             fmt::println("myBlock.processBulk(...) - correctly threw RuntimeWarning as exception:\n {}", ex.what());
         }
@@ -183,25 +183,25 @@ def process_bulk(ins, outs):
 
         using namespace gr::testing;
         Graph graph;
-        auto &src   = graph.emplaceBlock<TagSource<int32_t>>({ { "n_samples_max", 5U }, { "mark_tag", false } });
-        auto &block = graph.emplaceBlock<PythonBlock<int32_t>>({ { "n_inputs", 1U }, { "n_outputs", 1U }, { "pythonScript", pythonScript } });
-        auto &sink  = graph.emplaceBlock<TagSink<int32_t, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_expected", 5U }, { "verbose_console", true } });
+        auto& src   = graph.emplaceBlock<TagSource<int32_t>>({{"n_samples_max", 5U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<int32_t>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        auto& sink  = graph.emplaceBlock<TagSink<int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(src, { "out", gr::meta::invalid_index }, block, { "inputs", 0U }));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(block, { "outputs", 0U }, sink, { "in", gr::meta::invalid_index }));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(src, {"out", gr::meta::invalid_index}, block, {"inputs", 0U}));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(block, {"outputs", 0U}, sink, {"in", gr::meta::invalid_index}));
 
-        scheduler::Simple sched{ std::move(graph) };
-        bool throws = false;
+        scheduler::Simple sched{std::move(graph)};
+        bool              throws = false;
         try {
             expect(sched.runAndWait().has_value());
-        } catch (const std::exception &ex) {
+        } catch (const std::exception& ex) {
             throws = true;
             fmt::println("sched.runAndWait() unexpectedly threw an exception:\n {}", ex.what());
         }
         expect(!throws);
 
         expect(eq(sink.n_samples_produced, 5U)) << "sinkOne did not consume enough input samples";
-        expect(eq(sink.samples, std::vector<std::int32_t>{ 0, 2, 4, 6, 8 })) << fmt::format("mismatch of vector {}", sink.samples);
+        expect(eq(sink._samples, std::vector<std::int32_t>{0, 2, 4, 6, 8})) << fmt::format("mismatch of vector {}", sink._samples);
     };
 
     "Python Execution - Lifecycle method tests"_test = [] {
@@ -244,30 +244,29 @@ def process_bulk(ins, outs):
 
         using namespace gr::testing;
         Graph graph;
-        auto &src   = graph.emplaceBlock<TagSource<float>>({ { "n_samples_max", 5U }, { "mark_tag", false } });
-        auto &block = graph.emplaceBlock<PythonBlock<float>>({ { "n_inputs", 1U }, { "n_outputs", 1U }, { "pythonScript", pythonScript } });
-        auto &sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_expected", 5U }, { "verbose_console", true } });
+        auto& src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", 5U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<float>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        auto& sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(src, { "out", gr::meta::invalid_index }, block, { "inputs", 0U }));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(block, { "outputs", 0U }, sink, { "in", gr::meta::invalid_index }));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(src, {"out", gr::meta::invalid_index}, block, {"inputs", 0U}));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(block, {"outputs", 0U}, sink, {"in", gr::meta::invalid_index}));
 
-        scheduler::Simple sched{ std::move(graph) };
-        block.pause(); // simplified calling
+        scheduler::Simple sched{std::move(graph)};
+        block.pause();  // simplified calling
         block.resume(); // simplified calling
-        block.reset(); // simplified calling
+        block.reset();  // simplified calling
         bool throws = false;
         try {
             expect(sched.runAndWait().has_value());
-        } catch (const std::exception &ex) {
+        } catch (const std::exception& ex) {
             throws = true;
             fmt::println("sched.runAndWait() unexpectedly threw an exception:\n {}", ex.what());
         }
         expect(!throws);
 
         expect(eq(sink.n_samples_produced, 5U)) << "sinkOne did not consume enough input samples";
-        expect(eq(sink.samples, std::vector<float>{ 0.f, 2.f, 4.f, 6.f, 8.f })) << fmt::format("mismatch of vector {}", sink.samples);
+        expect(eq(sink._samples, std::vector<float>{0.f, 2.f, 4.f, 6.f, 8.f})) << fmt::format("mismatch of vector {}", sink._samples);
     };
 };
 
-int
-main() { /* tests are statically executed */ }
+int main() { /* tests are statically executed */ }

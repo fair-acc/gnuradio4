@@ -3330,7 +3330,7 @@ namespace benchmark {
 #define BENCHMARK_ALWAYS_INLINE [[gnu::always_inline]] inline
 #elif defined(_MSC_VER) && !defined(__clang__)
 #define BENCHMARK_ALWAYS_INLINE __forceinline
-#define __func__ __FUNCTION__
+#define __func__                __FUNCTION__
 #else
 #define BENCHMARK_ALWAYS_INLINE
 #endif
@@ -3346,8 +3346,7 @@ namespace benchmark {
  * efficient way possible. This may force a value to memory, but generally tries to avoid doing so.
  */
 template<typename T, typename... Ts>
-BENCHMARK_ALWAYS_INLINE void
-fake_modify(T &x, Ts &...more) {
+BENCHMARK_ALWAYS_INLINE void fake_modify(T& x, Ts&... more) {
 #ifdef __GNUC__
     // GNU compatible compilers need to support this part
     if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
@@ -3371,8 +3370,7 @@ fake_modify(T &x, Ts &...more) {
  * possible. This may force a value to memory, but generally tries to avoid doing so.
  */
 template<typename T, typename... Ts>
-BENCHMARK_ALWAYS_INLINE void
-fake_read(const T &x, const Ts &...more) {
+BENCHMARK_ALWAYS_INLINE void fake_read(const T& x, const Ts&... more) {
 #ifdef __GNUC__
     // GNU compatible compilers need to support this part
     if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
@@ -3395,8 +3393,7 @@ fake_read(const T &x, const Ts &...more) {
  * reloaded before reading.
  */
 template<typename T, typename... Ts>
-BENCHMARK_ALWAYS_INLINE void
-force_to_memory(T &x, Ts &...more) {
+BENCHMARK_ALWAYS_INLINE void force_to_memory(T& x, Ts&... more) {
 #ifdef __GNUC__
     // GNU compatible compilers need to support this part
     // NOLINTNEXTLINE(hicpp-no-assembler)
@@ -3414,8 +3411,7 @@ force_to_memory(T &x, Ts &...more) {
  * Tell the compiler that all arguments to this function must be stored to memory (stack).
  */
 template<typename T, typename... Ts>
-BENCHMARK_ALWAYS_INLINE void
-force_store(const T &x, const Ts &...more) {
+BENCHMARK_ALWAYS_INLINE void force_store(const T& x, const Ts&... more) {
 #ifdef __GNUC__
     // GNU compatible compilers need to support this part
     // NOLINTNEXTLINE(hicpp-no-assembler)
@@ -3431,16 +3427,16 @@ force_store(const T &x, const Ts &...more) {
 #undef SIMD_REG
 
 struct perf_sub_metric {
-    uint64_t misses{ 0 };
-    uint64_t total{ 0 };
-    double   ratio{ 0.0 };
+    uint64_t misses{0};
+    uint64_t total{0};
+    double   ratio{0.0};
 };
 
 struct perf_metric {
     perf_sub_metric cache;
     perf_sub_metric branch;
-    uint64_t        instructions{ 0 };
-    uint64_t        ctx_switches{ 0 };
+    uint64_t        instructions{0};
+    uint64_t        ctx_switches{0};
 };
 
 #ifdef HAS_LINUX_PERFORMANCE_HEADER
@@ -3456,7 +3452,7 @@ class PerformanceCounter {
     int                               _fd_instructions;
     int                               _fd_ctx_switches;
     constexpr static std::string_view _sys_error_message =
-            R"(You may not have permission to collect perf stats data.
+        R"(You may not have permission to collect perf stats data.
 Consider tweaking /proc/sys/kernel/perf_event_paranoid:
  -1 - Not paranoid at all
   0 - Disallow raw tracepoint access for unpriv
@@ -3465,8 +3461,7 @@ Consider tweaking /proc/sys/kernel/perf_event_paranoid:
 quick_fix: sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid'
 for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
 
-    static void
-    print_access_right_msg(std::string_view msg) noexcept {
+    static void print_access_right_msg(std::string_view msg) noexcept {
         fmt::print(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
         _has_required_rights = false;
         std::cerr << std::endl;
@@ -3474,8 +3469,7 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         std::cout << std::endl;
     }
 
-    static int
-    open_perf_event(perf_event_attr &attr, int pid, int cpu, int group_fd, unsigned long flags) {
+    static int open_perf_event(perf_event_attr& attr, int pid, int cpu, int group_fd, unsigned long flags) {
         int fd = static_cast<int>(syscall(SYS_perf_event_open, &attr, pid, cpu, group_fd, flags));
         if (fd == -1) {
             print_access_right_msg("could not open SYS_perf_event_open");
@@ -3483,22 +3477,19 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         return fd;
     }
 
-    static void
-    enable_perf_event(int fd) {
+    static void enable_perf_event(int fd) {
         if (fd != -1 && ioctl(fd, PERF_EVENT_IOC_ENABLE) == -1) {
             print_access_right_msg("could not PERF_EVENT_IOC_ENABLE");
         }
     }
 
-    static void
-    disable_perf_event(int fd) {
+    static void disable_perf_event(int fd) {
         if (fd != -1 && ioctl(fd, PERF_EVENT_IOC_DISABLE) == -1) {
             print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
         }
     }
 
-    static void
-    close_perf_event(int fd) {
+    static void close_perf_event(int fd) {
         if (fd != -1) {
             close(fd);
         }
@@ -3579,25 +3570,18 @@ public:
         close_perf_event(_fd_ctx_switches);
     }
 
-    PerformanceCounter(const PerformanceCounter &) = delete;
-    auto &
-    operator=(const PerformanceCounter &)
-            = delete;
+    PerformanceCounter(const PerformanceCounter&) = delete;
+    auto& operator=(const PerformanceCounter&)    = delete;
 
-    [[nodiscard]] static bool
-    available() noexcept {
-        return _has_required_rights;
-    }
+    [[nodiscard]] static bool available() noexcept { return _has_required_rights; }
 
-    [[nodiscard]] auto
-    results() const noexcept -> perf_metric {
+    [[nodiscard]] auto results() const noexcept -> perf_metric {
         if (!_has_required_rights) {
             return {};
         }
         perf_metric           ret;
-        constexpr static auto read_metric = [](int metric_fd, auto &data) noexcept -> bool { return metric_fd != -1 && read(metric_fd, &data, sizeof(data)) == sizeof(data); };
-        if (!read_metric(_fd_misses, ret.cache.misses) || !read_metric(_fd_accesses, ret.cache.total) || !read_metric(_fd_branch_misses, ret.branch.misses)
-            || !read_metric(_fd_branch, ret.branch.total) || !read_metric(_fd_instructions, ret.instructions) || !read_metric(_fd_ctx_switches, ret.ctx_switches)) {
+        constexpr static auto read_metric = [](int metric_fd, auto& data) noexcept -> bool { return metric_fd != -1 && read(metric_fd, &data, sizeof(data)) == sizeof(data); };
+        if (!read_metric(_fd_misses, ret.cache.misses) || !read_metric(_fd_accesses, ret.cache.total) || !read_metric(_fd_branch_misses, ret.branch.misses) || !read_metric(_fd_branch, ret.branch.total) || !read_metric(_fd_instructions, ret.instructions) || !read_metric(_fd_ctx_switches, ret.ctx_switches)) {
             return {};
         }
         using T          = decltype(ret.cache.ratio);
@@ -3612,18 +3596,12 @@ inline bool PerformanceCounter::_has_required_rights = true;
 
 class PerformanceCounter {
 public:
-    [[nodiscard]] constexpr static bool
-    available() noexcept {
-        return false;
-    }
+    [[nodiscard]] constexpr static bool available() noexcept { return false; }
 
     /**
      * This OS is not supported
      */
-    [[nodiscard]] auto
-    results() const noexcept -> perf_metric {
-        return {};
-    }
+    [[nodiscard]] auto results() const noexcept -> perf_metric { return {}; }
 };
 
 #endif
@@ -3640,43 +3618,27 @@ struct fixed_string {
     CharT                        _data[N + 1] = {};
 
     constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
-        if constexpr (N != 0)
-            for (std::size_t i = 0; i < N; ++i) _data[i] = str[i];
+        if constexpr (N != 0) {
+            for (std::size_t i = 0; i < N; ++i) {
+                _data[i] = str[i];
+            }
+        }
     }
 
-    [[nodiscard]] constexpr std::size_t
-    size() const noexcept {
-        return N;
-    }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
 
-    [[nodiscard]] constexpr bool
-    empty() const noexcept {
-        return N == 0;
-    }
+    [[nodiscard]] constexpr bool empty() const noexcept { return N == 0; }
 
-    [[nodiscard]] constexpr explicit
-    operator std::string_view() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] constexpr explicit operator std::string_view() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] explicit
-    operator std::string() const noexcept {
-        return { _data, N };
-    }
+    [[nodiscard]] explicit operator std::string() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] constexpr
-    operator const char *() const noexcept {
-        return _data;
-    }
+    [[nodiscard]] constexpr operator const char*() const noexcept { return _data; }
 
-    [[nodiscard]] constexpr bool
-    operator==(const fixed_string &other) const noexcept {
-        return std::string_view{ _data, N } == std::string_view(other);
-    }
+    [[nodiscard]] constexpr bool operator==(const fixed_string& other) const noexcept { return std::string_view{_data, N} == std::string_view(other); }
 
     template<std::size_t N2>
-    [[nodiscard]] friend constexpr bool
-    operator==(const fixed_string &, const fixed_string<CharT, N2> &) {
+    [[nodiscard]] friend constexpr bool operator==(const fixed_string&, const fixed_string<CharT, N2>&) {
         return false;
     }
 };
@@ -3697,30 +3659,30 @@ constexpr bool key_not_found = false;
 template<typename Value, fixed_string... Keys>
 class const_key_map {
     constexpr static std::size_t                              SIZE  = sizeof...(Keys);
-    constexpr static std::array<const std::string_view, SIZE> _keys = { std::string_view(Keys)... };
+    constexpr static std::array<const std::string_view, SIZE> _keys = {std::string_view(Keys)...};
     std::array<Value, SIZE>                                   _storage;
 
-    template<fixed_string key>
-    constexpr static std::size_t
-    get_index_by_name() noexcept {
-        if constexpr (constexpr auto itr = std::find_if(_keys.cbegin(), _keys.cend(), [](auto const &v) noexcept { return v == std::string_view(key); }); itr != std::cend(_keys)) {
-            return static_cast<std::size_t>(std::distance(std::cbegin(_keys), itr));
-        } else {
+    template<fixed_string key, std::size_t Index = 0>
+    constexpr static std::size_t get_index_by_name() noexcept {
+        if constexpr (Index == SIZE) {
             static_assert(key_not_found<key>, "key not found");
+            return SIZE; // This line is never reached but added to silence compiler warnings
+        } else if constexpr (_keys[Index] == std::string_view(key)) {
+            return Index;
+        } else {
+            return get_index_by_name<key, Index + 1>();
         }
     }
 
-    constexpr static std::size_t
-    get_index_by_name(std::string_view key) {
-        if (const auto itr = std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto &v) { return v == std::string_view(key); }); itr != std::cend(_keys)) {
+    constexpr static std::size_t get_index_by_name(std::string_view key) {
+        if (const auto itr = std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto& v) { return v == std::string_view(key); }); itr != std::cend(_keys)) {
             return std::distance(std::cbegin(_keys), itr);
         } else {
             throw std::range_error("key not found");
         }
     }
 
-    constexpr static std::size_t
-    get_index_by_ID(const std::size_t key_ID) {
+    constexpr static std::size_t get_index_by_ID(const std::size_t key_ID) {
         if (key_ID < SIZE) {
             return key_ID;
         } else {
@@ -3729,68 +3691,46 @@ class const_key_map {
     }
 
 public:
-    [[nodiscard]] static constexpr std::size_t
-    size() noexcept {
-        return SIZE;
-    }
+    [[nodiscard]] static constexpr std::size_t size() noexcept { return SIZE; }
 
-    [[nodiscard]] std::string_view
-    key(std::size_t key_ID) const {
-        return _keys[get_index_by_ID(key_ID)];
-    }
+    [[nodiscard]] std::string_view key(std::size_t key_ID) const { return _keys[get_index_by_ID(key_ID)]; }
 
     template<fixed_string key>
-    [[nodiscard]] constexpr Value const &
-    at() const {
+    [[nodiscard]] constexpr Value const& at() const {
         return _storage[get_index_by_name<key>()];
     }
 
     template<fixed_string key>
-    [[nodiscard]] constexpr Value &
-    at() {
+    [[nodiscard]] constexpr Value& at() {
         return _storage[get_index_by_name<key>()];
     }
 
-    [[nodiscard]] constexpr Value const &
-    at(const std::string_view key) const {
-        return _storage[get_index_by_name(key)];
-    }
+    [[nodiscard]] constexpr Value const& at(const std::string_view key) const { return _storage[get_index_by_name(key)]; }
 
-    [[nodiscard]] constexpr Value &
-    at(const std::string_view key) {
-        return _storage[get_index_by_name(key)];
-    }
+    [[nodiscard]] constexpr Value& at(const std::string_view key) { return _storage[get_index_by_name(key)]; }
 
-    [[nodiscard]] constexpr Value const &
-    at(const std::size_t key_ID) const {
-        return _storage[get_index_by_ID(key_ID)];
-    }
+    [[nodiscard]] constexpr Value const& at(const std::size_t key_ID) const { return _storage[get_index_by_ID(key_ID)]; }
 
-    [[nodiscard]] constexpr Value &
-    at(const std::size_t key_ID) {
-        return _storage[get_index_by_ID(key_ID)];
-    }
+    [[nodiscard]] constexpr Value& at(const std::size_t key_ID) { return _storage[get_index_by_ID(key_ID)]; }
 
-    [[nodiscard]] constexpr bool
-    contains(const std::string_view key) const {
-        return std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto &v) { return v == key; }) != std::cend(_keys);
+    [[nodiscard]] constexpr bool contains(const std::string_view key) const {
+        return std::find_if(_keys.cbegin(), _keys.cend(), [&key](const auto& v) { return v == key; }) != std::cend(_keys);
     }
 };
 
 template<std::floating_point T>
 struct StatisticsType {
-    T min{ std::numeric_limits<T>::quiet_NaN() };
-    T mean{ std::numeric_limits<T>::quiet_NaN() };
-    T stddev{ std::numeric_limits<T>::quiet_NaN() };
-    T median{ std::numeric_limits<T>::quiet_NaN() };
-    T max{ std::numeric_limits<T>::quiet_NaN() };
+    T min{std::numeric_limits<T>::quiet_NaN()};
+    T mean{std::numeric_limits<T>::quiet_NaN()};
+    T stddev{std::numeric_limits<T>::quiet_NaN()};
+    T median{std::numeric_limits<T>::quiet_NaN()};
+    T max{std::numeric_limits<T>::quiet_NaN()};
 };
 
 struct StringHash {
     using is_transparent = void; // enables heterogeneous lookup
 
-    std::size_t
-    operator()(std::string_view sv) const {
+    std::size_t operator()(std::string_view sv) const {
         std::hash<std::string_view> hasher;
         return hasher(sv);
     }
@@ -3805,22 +3745,17 @@ class results {
     static Data       _data;
 
 public:
-    [[nodiscard]] static ResultMap &
-    add_result(std::string_view name) noexcept {
+    [[nodiscard]] static ResultMap& add_result(std::string_view name) noexcept {
         std::lock_guard guard(_lock);
         return _data.emplace_back(std::string(name), ResultMap()).second;
     }
 
-    static void
-    add_separator() noexcept {
+    static void add_separator() noexcept {
         std::lock_guard guard(_lock);
         _data.emplace_back(std::string{}, ResultMap{});
     }
 
-    [[nodiscard]] static constexpr Data const &
-    data() noexcept {
-        return _data;
-    };
+    [[nodiscard]] static constexpr Data const& data() noexcept { return _data; };
 };
 
 inline results::Data results::_data;
@@ -3832,24 +3767,19 @@ class time_point {
     timePoint _time_point;
 
 public:
-    time_point &
-    now() noexcept {
+    time_point& now() noexcept {
         _time_point = std::chrono::high_resolution_clock::now();
         return *this;
     }
 
-    timeDiff
-    operator-(const time_point &start_marker) const noexcept {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(_time_point - start_marker._time_point);
-    }
+    timeDiff operator-(const time_point& start_marker) const noexcept { return std::chrono::duration_cast<std::chrono::nanoseconds>(_time_point - start_marker._time_point); }
 };
 
 namespace utils {
 
 template<std::size_t N, typename T>
-    requires(N > 0)
-constexpr std::vector<T>
-diff(const std::vector<time_point> &stop, time_point start) {
+requires(N > 0)
+constexpr std::vector<T> diff(const std::vector<time_point>& stop, time_point start) {
     std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9l * static_cast<T>((stop[i] - start).count());
@@ -3859,9 +3789,8 @@ diff(const std::vector<time_point> &stop, time_point start) {
 }
 
 template<std::size_t N, typename T>
-    requires(N > 0)
-constexpr std::vector<T>
-diff(const std::vector<time_point> &stop, const std::vector<time_point> &start) {
+requires(N > 0)
+constexpr std::vector<T> diff(const std::vector<time_point>& stop, const std::vector<time_point>& start) {
     std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
         ret[i] = 1e-9l * static_cast<T>((stop[i] - start[i]).count());
@@ -3870,9 +3799,8 @@ diff(const std::vector<time_point> &stop, const std::vector<time_point> &start) 
 }
 
 template<std::size_t n_iterations, typename MapType>
-    requires(n_iterations > 0)
-auto
-convert(const std::vector<MapType> &in) {
+requires(n_iterations > 0)
+auto convert(const std::vector<MapType>& in) {
     std::vector<std::pair<std::string, std::vector<time_point>>> ret;
     ret.resize(in[0].size());
 
@@ -3887,8 +3815,7 @@ convert(const std::vector<MapType> &in) {
 }
 
 template<typename T>
-[[nodiscard]] StatisticsType<T>
-compute_statistics(const std::vector<T> &values) {
+[[nodiscard]] StatisticsType<T> compute_statistics(const std::vector<T>& values) {
     const std::size_t N = values.size();
     if (N < 1) {
         return {};
@@ -3905,16 +3832,15 @@ compute_statistics(const std::vector<T> &values) {
     std::vector<T> sorted_values(values);
     std::sort(sorted_values.begin(), sorted_values.end());
     const auto median = sorted_values[N / 2];
-    return { *minmax.first, mean, stddev, median, *minmax.second };
+    return {*minmax.first, mean, stddev, median, *minmax.second};
 }
 
 template<typename T>
 concept Numeric = std::integral<T> || std::floating_point<T>;
 
 template<Numeric T>
-std::string
-to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
-    static constexpr std::array  si_prefixes{ 'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q' };
+std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
+    static constexpr std::array  si_prefixes{'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'};
     static constexpr long double base  = 1000.0l;
     long double                  value = value_base;
 
@@ -4000,8 +3926,7 @@ using first_arg_of_t = std::tuple_element_t<0, typename fn_traits<typename std::
 } // namespace detail
 
 template<typename TestFunction>
-constexpr std::size_t
-argument_size() noexcept {
+constexpr std::size_t argument_size() noexcept {
     if constexpr (std::invocable<TestFunction>) {
         return 0;
     } else {
@@ -4018,8 +3943,7 @@ template<fixed_string... meas_marker_names>
 struct MarkerMap : const_key_map<time_point, meas_marker_names...> {};
 
 template<typename TestFunction, std::size_t N>
-[[nodiscard]] constexpr auto
-get_marker_array() {
+[[nodiscard]] constexpr auto get_marker_array() {
     if constexpr (std::invocable<TestFunction>) {
         return std::vector<bool>(N);
     } else {
@@ -4036,10 +3960,10 @@ class benchmark : public ut::detail::test {
 public:
     benchmark() = delete;
 
-    explicit benchmark(std::string_view _name, std::size_t n_scale_results = 1LU) : ut::detail::test{ "benchmark", _name }, _n_scale_results(n_scale_results) {
-        const char *ptr = std::getenv("BM_DIGITS");
+    explicit benchmark(std::string_view _name, std::size_t n_scale_results = 1LU) : ut::detail::test{"benchmark", _name}, _n_scale_results(n_scale_results) {
+        const char* ptr = std::getenv("BM_DIGITS");
         if (ptr != nullptr) {
-            const std::string_view env{ ptr };
+            const std::string_view env{ptr};
             auto [_, ec] = std::from_chars(env.data(), env.data() + env.size(), _precision);
             if (ec == std::errc()) {
                 _precision = std::clamp(_precision, 1, 6) - 1;
@@ -4051,10 +3975,9 @@ public:
 
     template<class TestFunction, std::size_t MARKER_SIZE = argument_size<TestFunction>(), bool has_arguments = MARKER_SIZE != 0>
     // template<fixed_string ...meas_marker, Callback<meas_marker...> Test>
-    constexpr benchmark &
-    operator=(TestFunction &&_test) {
-        static_cast<ut::detail::test &>(*this) = [&_test, this] {
-            auto &result_map = ResultType::add_result(name);
+    constexpr benchmark& operator=(TestFunction&& _test) {
+        static_cast<ut::detail::test&>(*this) = [&_test, this] {
+            auto& result_map = ResultType::add_result(name);
             if constexpr (N_ITERATIONS != 1) {
                 result_map.try_emplace("#N", N_ITERATIONS, "", 0);
             } else {
@@ -4101,7 +4024,7 @@ public:
             const auto        ns                  = stop_iter[N_ITERATIONS - 1] - start;
             const long double duration_s          = 1e-9l * static_cast<long double>(ns.count());
 
-            const auto add_statistics = [&]<typename T>(ResultMap &map, const T &time_diff) {
+            const auto add_statistics = [&]<typename T>(ResultMap& map, const T& time_diff) {
                 if constexpr (N_ITERATIONS != 1) {
                     const auto [min, mean, stddev, median, max] = utils::compute_statistics(time_diff);
                     map.try_emplace("min", min, "s", _precision);
@@ -4131,9 +4054,9 @@ public:
                 for (auto keyID = 0LU; keyID < transposed_map.size(); keyID++) {
                     if (keyID > 0) {
                         const auto meas = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
-                                                      keyID < transposed_map.size() - 1 ? "├" : "└", keyID, transposed_map[0].first, transposed_map[keyID].first);
+                            keyID < transposed_map.size() - 1 ? "├" : "└", keyID, transposed_map[0].first, transposed_map[keyID].first);
 
-                        auto &marker_result_map = ResultType::add_result(meas);
+                        auto& marker_result_map = ResultType::add_result(meas);
                         add_statistics(marker_result_map, utils::diff<N_ITERATIONS, long double>(transposed_map[keyID].second, transposed_map[0].second));
                     }
                 }
@@ -4143,16 +4066,12 @@ public:
     }
 
     template<std::size_t N>
-    auto
-    repeat(std::size_t n_scale_results = 1LU) {
+    auto repeat(std::size_t n_scale_results = 1LU) {
         return ::benchmark::benchmark<N, ResultType, meas_marker_names...>(this->name, n_scale_results);
     }
 };
 
-[[nodiscard]] auto
-operator""_benchmark(const char *name, std::size_t size) {
-    return ::benchmark::benchmark<1LU>{ { name, size } };
-}
+[[nodiscard]] auto operator""_benchmark(const char* name, std::size_t size) { return ::benchmark::benchmark<1LU>{{name, size}}; }
 
 } // namespace benchmark
 
@@ -4173,28 +4092,21 @@ class reporter {
     TPrinter _printer{};
 
 public:
-    constexpr reporter &
-    operator=(TPrinter printer) {
+    constexpr reporter& operator=(TPrinter printer) {
         _printer = std::move(printer);
         return *this;
     }
 
-    constexpr void
-    on(const ut::events::test_begin &) const noexcept { /* not needed */ }
+    constexpr void on(const ut::events::test_begin&) const noexcept { /* not needed */ }
 
-    void
-    on(const ut::events::test_run &test_run) {
-        _printer << "\n \"" << test_run.name << "\"...";
-    }
+    void on(const ut::events::test_run& test_run) { _printer << "\n \"" << test_run.name << "\"..."; }
 
-    constexpr void
-    on(const ut::events::test_skip &bench) const noexcept {
+    constexpr void on(const ut::events::test_skip& bench) const noexcept {
         std::cerr << fmt::format("SKIPPED - {}", bench.name) << std::endl;
-        [[maybe_unused]] const auto &map = benchmark::results::add_result(bench.name);
+        [[maybe_unused]] const auto& map = benchmark::results::add_result(bench.name);
     }
 
-    void
-    on(const ut::events::test_end &test_end) {
+    void on(const ut::events::test_end& test_end) {
         if (_asserts.fail > 0) {
             ++_benchmarks.fail;
             _printer << _printer.colors().fail << fmt::format("... in benchmark '{}'", test_end.name) << _printer.colors().none << '\n';
@@ -4203,37 +4115,30 @@ public:
     }
 
     template<class TMsg>
-    void
-    on(ut::events::log<TMsg> l) {
+    void on(ut::events::log<TMsg> l) {
         _printer << l.msg;
     }
 
-    void
-    on(ut::events::exception exception) {
+    void on(ut::events::exception exception) {
         _printer << fmt::format("\033[31munexpected exception: \"{}\"\n\033[0m", exception.what());
         ++_asserts.fail;
     }
 
     template<class TExpr>
-    void
-    on(ut::events::assertion_pass<TExpr>) {
+    void on(ut::events::assertion_pass<TExpr>) {
         ++_asserts.pass;
     }
 
     template<class TExpr>
-    void
-    on(ut::events::assertion_fail<TExpr> assertion) {
+    void on(ut::events::assertion_fail<TExpr> assertion) {
         constexpr auto short_name = [](std::string_view name) { return name.rfind('/') != std::string_view::npos ? name.substr(name.rfind('/') + 1) : name; };
-        _printer << "\n  " << short_name(assertion.location.file_name()) << ':' << assertion.location.line() << ':' << _printer.colors().fail << "FAILED" << _printer.colors().none << " ["
-                 << std::boolalpha << assertion.expr << _printer.colors().none << ']';
+        _printer << "\n  " << short_name(assertion.location.file_name()) << ':' << assertion.location.line() << ':' << _printer.colors().fail << "FAILED" << _printer.colors().none << " [" << std::boolalpha << assertion.expr << _printer.colors().none << ']';
         ++_asserts.fail;
     }
 
-    void
-    on(const ut::events::fatal_assertion &) const { /* not needed testing interface */ }
+    void on(const ut::events::fatal_assertion&) const { /* not needed testing interface */ }
 
-    void
-    on(const ut::events::summary &) {
+    void on(const ut::events::summary&) {
         if (_benchmarks.fail || _asserts.fail) {
             std::cout << _printer.str() << std::endl;
             std::cout << fmt::format("\033[31m{} micro-benchmark(s) failed:\n\033[m", _benchmarks.fail);
@@ -4246,9 +4151,8 @@ public:
     }
 
     template<std::size_t SIGNIFICANT_DIGITS = 3>
-    static void
-    print() {
-        const auto &data = benchmark::results::data();
+    static void print() {
+        const auto& data = benchmark::results::data();
         if (data.empty()) {
             fmt::print("no benchmark tests executed\n");
         }
@@ -4261,7 +4165,7 @@ public:
         const std::string test_case_label = "benchmark:";
         const std::size_t name_max_size   = std::max(*std::max_element(v.cbegin(), v.cend()), test_case_label.size()) + 1LU;
 
-        const auto format = [](auto &value, const std::string &unit, std::size_t digits) -> std::string {
+        const auto format = [](auto& value, const std::string& unit, std::size_t digits) -> std::string {
             using ::benchmark::utils::to_si_prefix;
             if (std::holds_alternative<std::monostate>(value)) {
                 return "";
@@ -4272,16 +4176,16 @@ public:
             } else if (std::holds_alternative<benchmark::perf_sub_metric>(value)) {
                 const auto stat = std::get<benchmark::perf_sub_metric>(value);
                 return fmt::format("{:>4} / {:>4} = {:4.1f}%", //
-                                   to_si_prefix(stat.misses, unit, 0), to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
+                    to_si_prefix(stat.misses, unit, 0), to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
             }
             throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
         };
 
         // compute minimum colum width for each benchmark case and metric
         std::unordered_map<std::string, std::size_t> metric_keys;
-        for (auto &[test_name, result_map] : data) {
-            for (auto &[metric_key, value] : result_map) {
-                const auto &[value_name, value_unit, value_digits] = value;
+        for (auto& [test_name, result_map] : data) {
+            for (auto& [metric_key, value] : result_map) {
+                const auto& [value_name, value_unit, value_digits] = value;
                 if (!metric_keys.contains(metric_key)) {
                     metric_keys.try_emplace(metric_key, metric_key.size());
                 }
@@ -4292,11 +4196,11 @@ public:
         v.clear();
 
         bool first_row = true;
-        for (auto &[test_name, result_map] : data) {
+        for (auto& [test_name, result_map] : data) {
             if (first_row) {
                 fmt::print("┌{1:─^{0}}", name_max_size + 2UL, test_case_label);
                 fmt::print("┬{1:─^{0}}", sizeof("PASS") + 1UL, "");
-                for (auto const &[metric_key, max_width] : metric_keys) {
+                for (auto const& [metric_key, max_width] : metric_keys) {
                     fmt::print("┬{1:─^{0}}", max_width + 2UL, metric_key);
                 }
                 fmt::print("┐\n");
@@ -4304,7 +4208,7 @@ public:
             } else if (test_name.empty() and result_map.empty()) {
                 fmt::print("├{1:─^{0}}", name_max_size + 2UL, "");
                 fmt::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
-                for (auto const &[metric_key, max_width] : metric_keys) {
+                for (auto const& [metric_key, max_width] : metric_keys) {
                     fmt::print("┼{1:─^{0}}", max_width + 2UL, "");
                 }
                 fmt::print("┤\n");
@@ -4319,9 +4223,9 @@ public:
                 fmt::print("│ \033[32mPASS\033[0m ");
             }
 
-            for (auto &[metric_key, max_width] : metric_keys) {
+            for (auto& [metric_key, max_width] : metric_keys) {
                 if (result_map.contains(metric_key)) {
-                    const auto &[value, unit, digits] = result_map.at(metric_key);
+                    const auto& [value, unit, digits] = result_map.at(metric_key);
                     fmt::print("│ {1:>{0}} ", max_width, format(value, unit, digits));
                 } else {
                     fmt::print("│ {1:>{0}} ", max_width, "");
@@ -4332,7 +4236,7 @@ public:
 
         fmt::print("└{1:─^{0}}", name_max_size + 2UL, "");
         fmt::print("┴{1:─^{0}}", sizeof("PASS") + 1UL, "");
-        for (auto const &[metric_key, max_width] : metric_keys) {
+        for (auto const& [metric_key, max_width] : metric_keys) {
             fmt::print("┴{1:─^{0}}", max_width + 2UL, "");
         }
         fmt::print("┘\n");

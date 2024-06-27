@@ -92,13 +92,14 @@ const boost::ut::suite TagTests = [] {
     };
 
     "DefaultTags"_test = [] {
+        using namespace std::string_view_literals;
         Tag testTag{};
 
         testTag.insert_or_assign(tag::SAMPLE_RATE, pmtv::pmt(3.0f));
         testTag.insert_or_assign(tag::SAMPLE_RATE(4.0f));
         // testTag.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
         expect(testTag.at(tag::SAMPLE_RATE) == 4.0f);
-        expect(tag::SAMPLE_RATE.shortKey() == "sample_rate");
+        expect(tag::SAMPLE_RATE.shortKey() == "sample_rate"sv);
         expect(tag::SAMPLE_RATE.key() == std::string{GR_TAG_PREFIX}.append("sample_rate"));
 
         expect(testTag.get(tag::SAMPLE_RATE).has_value());
@@ -107,20 +108,20 @@ const boost::ut::suite TagTests = [] {
 
         static_assert(std::is_same_v<decltype(tag::SAMPLE_RATE), decltype(tag::SIGNAL_RATE)>);
         // test other tag on key definition only
-        static_assert(tag::SIGNAL_UNIT.shortKey() == "signal_unit");
-        static_assert(tag::SIGNAL_MIN.shortKey() == "signal_min");
-        static_assert(tag::SIGNAL_MAX.shortKey() == "signal_max");
-        static_assert(tag::TRIGGER_NAME.shortKey() == "trigger_name");
-        static_assert(tag::TRIGGER_TIME.shortKey() == "trigger_time");
-        static_assert(tag::TRIGGER_OFFSET.shortKey() == "trigger_offset");
+        static_assert(tag::SIGNAL_UNIT.shortKey() == "signal_unit"sv);
+        static_assert(tag::SIGNAL_MIN.shortKey() == "signal_min"sv);
+        static_assert(tag::SIGNAL_MAX.shortKey() == "signal_max"sv);
+        static_assert(tag::TRIGGER_NAME.shortKey() == "trigger_name"sv);
+        static_assert(tag::TRIGGER_TIME.shortKey() == "trigger_time"sv);
+        static_assert(tag::TRIGGER_OFFSET.shortKey() == "trigger_offset"sv);
 
         // test other tag on key definition only
-        static_assert(tag::SIGNAL_UNIT.key() == "gr:signal_unit");
-        static_assert(tag::SIGNAL_MIN.key() == "gr:signal_min");
-        static_assert(tag::SIGNAL_MAX.key() == "gr:signal_max");
-        static_assert(tag::TRIGGER_NAME.key() == "gr:trigger_name");
-        static_assert(tag::TRIGGER_TIME.key() == "gr:trigger_time");
-        static_assert(tag::TRIGGER_OFFSET.key() == "gr:trigger_offset");
+        static_assert(tag::SIGNAL_UNIT.key() == "gr:signal_unit"sv);
+        static_assert(tag::SIGNAL_MIN.key() == "gr:signal_min"sv);
+        static_assert(tag::SIGNAL_MAX.key() == "gr:signal_max"sv);
+        static_assert(tag::TRIGGER_NAME.key() == "gr:trigger_name"sv);
+        static_assert(tag::TRIGGER_TIME.key() == "gr:trigger_time"sv);
+        static_assert(tag::TRIGGER_OFFSET.key() == "gr:trigger_offset"sv);
 
         using namespace std::string_literals;
         using namespace std::string_view_literals;
@@ -196,11 +197,11 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(sinkBulk.n_samples_produced, n_samples)) << "sinkBulk did not consume enough input samples";
         expect(eq(sinkOne.n_samples_produced, n_samples)) << "sinkOne did not consume enough input samples";
 
-        expect(!monitorBulk.log_samples || eq(monitorBulk.samples.size(), n_samples)) << "monitorBulk did not log enough input samples";
-        expect(!monitorOne.log_samples || eq(monitorOne.samples.size(), n_samples)) << "monitorOne did not log enough input samples";
-        expect(!monitorOneSIMD.log_samples || eq(monitorOneSIMD.samples.size(), n_samples)) << "monitorOneSIMD did not log enough input samples";
-        expect(!sinkBulk.log_samples || eq(sinkBulk.samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
-        expect(!sinkOne.log_samples || eq(sinkOne.samples.size(), n_samples)) << "sinkOne did not log enough input samples";
+        expect(!monitorBulk.log_samples || eq(monitorBulk._samples.size(), n_samples)) << "monitorBulk did not log enough input samples";
+        expect(!monitorOne.log_samples || eq(monitorOne._samples.size(), n_samples)) << "monitorOne did not log enough input samples";
+        expect(!monitorOneSIMD.log_samples || eq(monitorOneSIMD._samples.size(), n_samples)) << "monitorOneSIMD did not log enough input samples";
+        expect(!sinkBulk.log_samples || eq(sinkBulk._samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
+        expect(!sinkOne.log_samples || eq(sinkOne._samples.size(), n_samples)) << "sinkOne did not log enough input samples";
 
         expect(equal_tag_lists(src._tags, monitorBulk._tags, "signal_name"s)) << "monitorBulk did not receive the required tags";
         expect(equal_tag_lists(src._tags, monitorOne._tags, "signal_name"s)) << "monitorOne did not receive the required tags";
@@ -240,8 +241,8 @@ const boost::ut::suite TagPropagation = [] {
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(sink.n_samples_produced, 1008)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
-        expect(eq(sink._tags.size(), 3UZ));                                                          // default policy is to drop epilogue samples
+        expect(eq(sink.n_samples_produced, 1008U)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
+        expect(eq(sink._tags.size(), 3UZ));                                                           // default policy is to drop epilogue samples
     };
 };
 

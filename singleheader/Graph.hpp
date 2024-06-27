@@ -8951,7 +8951,7 @@ struct fixed_string {
 
     [[nodiscard]] explicit operator std::string() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] explicit operator const char*() const noexcept { return _data; }
+    [[nodiscard]] explicit(false) operator const char*() const noexcept { return _data; }
 
     [[nodiscard]] constexpr bool operator==(const fixed_string& other) const noexcept { return std::string_view{_data, N} == std::string_view(other); }
 
@@ -9670,50 +9670,29 @@ private:
     alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
 
 public:
-    Sequence(const Sequence &)  = delete;
-    Sequence(const Sequence &&) = delete;
-    void
-    operator=(const Sequence &)
-            = delete;
+    Sequence(const Sequence&)       = delete;
+    Sequence(const Sequence&&)      = delete;
+    void operator=(const Sequence&) = delete;
 
     explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
-    [[nodiscard]] forceinline signed_index_type
-    value() const noexcept {
-        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
-    }
+    [[nodiscard]] forceinline signed_index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
 
-    forceinline void
-    setValue(const signed_index_type value) noexcept {
-        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
-    }
+    forceinline void setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
-    [[nodiscard]] forceinline bool
-    compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
+    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline signed_index_type
-    incrementAndGet() noexcept {
-        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
-    }
+    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
 
-    [[nodiscard]] forceinline signed_index_type
-    addAndGet(signed_index_type value) noexcept {
-        return std::atomic_fetch_add(&_fieldsValue, value) + value;
-    }
+    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
 
-    void
-    wait(signed_index_type oldValue) const noexcept {
-        atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire);
-    }
+    void wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
 
-    void
-    notify_all() noexcept {
-        _fieldsValue.notify_all();
-    }
+    void notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
@@ -9727,11 +9706,10 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type
-getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
+inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
-    for (const auto &s : sequences) {
+    for (const auto& s : sequences) {
         const signed_index_type v = s->value();
         if (v < minimum) {
             minimum = v;
@@ -9740,8 +9718,7 @@ getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, sign
     return minimum;
 }
 
-inline void
-addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &sequencesToAdd) {
+inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
     signed_index_type                                       cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
@@ -9758,8 +9735,8 @@ addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences,
 
         cursorSequence = cursor.value();
 
-        auto index     = currentSequences->size();
-        for (auto &&sequence : sequencesToAdd) {
+        auto index = currentSequences->size();
+        for (auto&& sequence : sequencesToAdd) {
             sequence->setValue(cursorSequence);
             (*updatedSequences)[index] = sequence;
             index++;
@@ -9768,13 +9745,12 @@ addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences,
 
     cursorSequence = cursor.value();
 
-    for (auto &&sequence : sequencesToAdd) {
+    for (auto&& sequence : sequencesToAdd) {
         sequence->setValue(cursorSequence);
     }
 }
 
-inline bool
-removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const std::shared_ptr<Sequence> &sequence) {
+inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence) {
     std::uint32_t                                           numToRemove;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
@@ -9794,7 +9770,7 @@ removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequence
         newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(oldSize - numToRemove);
 
         for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto &testSequence = (*oldSequences)[i];
+            const auto& testSequence = (*oldSequences)[i];
             if (sequence != testSequence) {
                 (*newSequences)[pos] = testSequence;
                 pos++;
@@ -9815,23 +9791,18 @@ removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequence
 template<>
 struct fmt::formatter<gr::Sequence> {
     template<typename ParseContext>
-    constexpr auto
-    parse(ParseContext &ctx) {
+    constexpr auto parse(ParseContext& ctx) {
         return ctx.begin();
     }
 
     template<typename FormatContext>
-    auto
-    format(gr::Sequence const &value, FormatContext &ctx) {
+    auto format(gr::Sequence const& value, FormatContext& ctx) {
         return fmt::format_to(ctx.out(), "{}", value.value());
     }
 };
 
 namespace gr {
-inline std::ostream &
-operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v.value());
-}
+inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << fmt::format("{}", v.value()); }
 } // namespace gr
 
 #endif // GNURADIO_SEQUENCE_HPP
@@ -10740,6 +10711,7 @@ class CircularBuffer {
         ClaimType                 _claimStrategy;
         // list of dependent reader indices
         DependendsType           _read_indices{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
+        std::atomic<std::size_t> _reader_count{0UZ};
         std::atomic<std::size_t> _writer_count{0UZ};
 
         buffer_impl() = delete;
@@ -10974,12 +10946,9 @@ class CircularBuffer {
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
-
-        [[nodiscard]] constexpr std::size_t available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
-
-        [[nodiscard]] constexpr bool isPublished() const noexcept { return _isRangePublished; }
-
-        [[nodiscard]] constexpr std::size_t samplesPublished() const noexcept { return _nSamplesPublished; }
+        [[nodiscard]] constexpr std::size_t       available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
+        [[nodiscard]] constexpr bool              isPublished() const noexcept { return _isRangePublished; }
+        [[nodiscard]] constexpr std::size_t       samplesPublished() const noexcept { return _nSamplesPublished; }
 
     private:
         template<typename... Args, WriterCallback<U, Args...> Translator>
@@ -11185,6 +11154,7 @@ class CircularBuffer {
         buffer_reader() = delete;
         explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(buffer), _size(buffer->_size) {
             gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_readIndex});
+            _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
             _readIndexCached = _readIndex->value();
         }
         buffer_reader(buffer_reader&& other) noexcept : _readIndex(std::move(other._readIndex)), _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), _buffer(other._buffer), _size(_buffer->_size), _nSamplesFirstGet(std::move(other._nSamplesFirstGet)), _rangesCounter(std::move(other._rangesCounter)), _nSamplesToConsume(std::move(other._nSamplesToConsume)), _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
@@ -11199,7 +11169,10 @@ class CircularBuffer {
             _size = _buffer->_size;
             return *this;
         };
-        ~buffer_reader() { gr::detail::removeSequence(_buffer->_read_indices, _readIndex); }
+        ~buffer_reader() {
+            gr::detail::removeSequence(_buffer->_read_indices, _readIndex);
+            _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+        }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
@@ -11262,7 +11235,7 @@ public:
 
     // implementation specific interface -- not part of public Buffer / production-code API
     [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_read_indices->size(); }
+    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_reader_count.load(std::memory_order_relaxed); }
     [[nodiscard]] const auto& claim_strategy() { return _shared_buffer_ptr->_claimStrategy; }
     [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_cursor; }
@@ -13112,7 +13085,7 @@ inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #define EM_CONSTEXPR
 #define EM_CONSTEXPR_STATIC static const
 #else
-#define EM_CONSTEXPR constexpr
+#define EM_CONSTEXPR        constexpr
 #define EM_CONSTEXPR_STATIC constexpr
 #endif
 
@@ -13157,61 +13130,44 @@ concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
  */
 struct alignas(hardware_constructive_interference_size) Tag {
     using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{ 0 };
+    signed_index_type index{0};
     property_map      map{};
 
     Tag() = default; // TODO: remove -- needed only for Clang <=15
 
     Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
 
-    bool
-    operator==(const Tag &other) const
-            = default;
+    bool operator==(const Tag& other) const = default;
 
     // TODO: do we need the convenience methods below?
-    void
-    reset() noexcept {
+    void reset() noexcept {
         index = 0;
         map.clear();
     }
 
-    [[nodiscard]] pmtv::pmt &
-    at(const std::string &key) {
-        return map.at(key);
-    }
+    [[nodiscard]] pmtv::pmt& at(const std::string& key) { return map.at(key); }
 
-    [[nodiscard]] const pmtv::pmt &
-    at(const std::string &key) const {
-        return map.at(key);
-    }
+    [[nodiscard]] const pmtv::pmt& at(const std::string& key) const { return map.at(key); }
 
-    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>>
-    get(const std::string &key) const noexcept {
+    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>> get(const std::string& key) const noexcept {
         try {
             return map.at(key);
-        } catch (const std::out_of_range &e) {
+        } catch (const std::out_of_range& e) {
             return std::nullopt;
         }
     }
 
-    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>>
-    get(const std::string &key) noexcept {
+    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>> get(const std::string& key) noexcept {
         try {
             return map.at(key);
-        } catch (const std::out_of_range &) {
+        } catch (const std::out_of_range&) {
             return std::nullopt;
         }
     }
 
-    void
-    insert_or_assign(const std::pair<std::string, pmtv::pmt> &value) {
-        map[value.first] = value.second;
-    }
+    void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
 
-    void
-    insert_or_assign(const std::string &key, const pmtv::pmt &value) {
-        map[key] = value;
-    }
+    void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
 };
 
 } // namespace gr
@@ -13221,9 +13177,8 @@ ENABLE_REFLECTION(gr::Tag, index, map);
 namespace gr {
 using meta::fixed_string;
 
-inline void
-updateMaps(const property_map &src, property_map &dest) {
-    for (const auto &[key, value] : src) {
+inline void updateMaps(const property_map& src, property_map& dest) {
+    for (const auto& [key, value] : src) {
         if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
             // If it's a nested map
             if (auto it = dest.find(key); it != dest.end()) {
@@ -13238,7 +13193,7 @@ updateMaps(const property_map &src, property_map &dest) {
                 }
             } else {
                 // If the key doesn't exist, just insert
-                dest.insert({ key, value });
+                dest.insert({key, value});
             }
         } else {
             // If it's not a nested map, insert/replace the value
@@ -13256,39 +13211,22 @@ class DefaultTag {
 public:
     using value_type = PMT_TYPE;
 
-    [[nodiscard]] constexpr std::string_view
-    key() const noexcept {
-        return std::string_view{ _key };
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    shortKey() const noexcept {
-        return std::string_view(Key);
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    unit() const noexcept {
-        return std::string_view(Unit);
-    }
-
-    [[nodiscard]] constexpr std::string_view
-    description() const noexcept {
-        return std::string_view(Description);
-    }
+    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
+    [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
+    [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
+    [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
 
     [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
 
     template<typename T>
-        requires std::is_same_v<value_type, T>
-    [[nodiscard]] std::pair<std::string, pmtv::pmt>
-    operator()(const T &newValue) const noexcept {
-        return { std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue)) };
+    requires std::is_same_v<value_type, T>
+    [[nodiscard]] std::pair<std::string, pmtv::pmt> operator()(const T& newValue) const noexcept {
+        return {std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue))};
     }
 };
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering
-operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOtherString &str) noexcept {
+inline constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
     if ((dt.shortKey() <=> str) == 0) {
         return std::strong_ordering::equal; // shortKeys are equal
     } else {
@@ -13297,8 +13235,7 @@ operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOther
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering
-operator<=>(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt) noexcept {
+inline constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
     if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
         return std::strong_ordering::equal; // shortKeys are equal
     } else {
@@ -13307,14 +13244,12 @@ operator<=>(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Descr
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool
-operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt, const TOtherString &str) noexcept {
+inline constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
     return (dt <=> std::string_view(str)) == 0;
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool
-operator==(const TOtherString &str, const DefaultTag<Key, PMT_TYPE, Unit, Description> &dt) noexcept {
+inline constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
     return (std::string_view(str) <=> dt) == 0;
 }
 
@@ -13334,8 +13269,7 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block st
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::array<std::string_view, 14> kDefaultTags = { "sample_rate",  "signal_name",    "signal_quantity",   "signal_unit", "signal_min",    "signal_max",    "trigger_name",
-                                                                   "trigger_time", "trigger_offset", "trigger_meta_info", "context",     "reset_default", "store_default", "end_of_stream" };
+inline constexpr std::array<std::string_view, 14> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "reset_default", "store_default", "end_of_stream"};
 
 } // namespace tag
 
@@ -16332,50 +16266,29 @@ private:
     alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
 
 public:
-    Sequence(const Sequence &)  = delete;
-    Sequence(const Sequence &&) = delete;
-    void
-    operator=(const Sequence &)
-            = delete;
+    Sequence(const Sequence&)       = delete;
+    Sequence(const Sequence&&)      = delete;
+    void operator=(const Sequence&) = delete;
 
     explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
-    [[nodiscard]] forceinline signed_index_type
-    value() const noexcept {
-        return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire);
-    }
+    [[nodiscard]] forceinline signed_index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
 
-    forceinline void
-    setValue(const signed_index_type value) noexcept {
-        std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release);
-    }
+    forceinline void setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
-    [[nodiscard]] forceinline bool
-    compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
+    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline signed_index_type
-    incrementAndGet() noexcept {
-        return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L;
-    }
+    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
 
-    [[nodiscard]] forceinline signed_index_type
-    addAndGet(signed_index_type value) noexcept {
-        return std::atomic_fetch_add(&_fieldsValue, value) + value;
-    }
+    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
 
-    void
-    wait(signed_index_type oldValue) const noexcept {
-        atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire);
-    }
+    void wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
 
-    void
-    notify_all() noexcept {
-        _fieldsValue.notify_all();
-    }
+    void notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
@@ -16389,11 +16302,10 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type
-getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
+inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
-    for (const auto &s : sequences) {
+    for (const auto& s : sequences) {
         const signed_index_type v = s->value();
         if (v < minimum) {
             minimum = v;
@@ -16402,8 +16314,7 @@ getMinimumSequence(const std::vector<std::shared_ptr<Sequence>> &sequences, sign
     return minimum;
 }
 
-inline void
-addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &sequencesToAdd) {
+inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
     signed_index_type                                       cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
@@ -16420,8 +16331,8 @@ addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences,
 
         cursorSequence = cursor.value();
 
-        auto index     = currentSequences->size();
-        for (auto &&sequence : sequencesToAdd) {
+        auto index = currentSequences->size();
+        for (auto&& sequence : sequencesToAdd) {
             sequence->setValue(cursorSequence);
             (*updatedSequences)[index] = sequence;
             index++;
@@ -16430,13 +16341,12 @@ addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences,
 
     cursorSequence = cursor.value();
 
-    for (auto &&sequence : sequencesToAdd) {
+    for (auto&& sequence : sequencesToAdd) {
         sequence->setValue(cursorSequence);
     }
 }
 
-inline bool
-removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequences, const std::shared_ptr<Sequence> &sequence) {
+inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const std::shared_ptr<Sequence>& sequence) {
     std::uint32_t                                           numToRemove;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> oldSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> newSequences;
@@ -16456,7 +16366,7 @@ removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequence
         newSequences = std::make_shared<std::vector<std::shared_ptr<Sequence>>>(oldSize - numToRemove);
 
         for (auto i = 0U, pos = 0U; i < oldSize; ++i) {
-            const auto &testSequence = (*oldSequences)[i];
+            const auto& testSequence = (*oldSequences)[i];
             if (sequence != testSequence) {
                 (*newSequences)[pos] = testSequence;
                 pos++;
@@ -16477,23 +16387,18 @@ removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> &sequence
 template<>
 struct fmt::formatter<gr::Sequence> {
     template<typename ParseContext>
-    constexpr auto
-    parse(ParseContext &ctx) {
+    constexpr auto parse(ParseContext& ctx) {
         return ctx.begin();
     }
 
     template<typename FormatContext>
-    auto
-    format(gr::Sequence const &value, FormatContext &ctx) {
+    auto format(gr::Sequence const& value, FormatContext& ctx) {
         return fmt::format_to(ctx.out(), "{}", value.value());
     }
 };
 
 namespace gr {
-inline std::ostream &
-operator<<(std::ostream &os, const Sequence &v) {
-    return os << fmt::format("{}", v.value());
-}
+inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << fmt::format("{}", v.value()); }
 } // namespace gr
 
 #endif // GNURADIO_SEQUENCE_HPP
