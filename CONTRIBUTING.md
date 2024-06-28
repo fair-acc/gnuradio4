@@ -15,14 +15,6 @@ examples or if you cannot find anything that fits your use-case use GitHub's dis
 ## Contributing code and content
 We welcome all forms of contributions from the community. Please read the following guidelines to maximise the chances of your PR being merged.
 
-### DCO Signing
-
-Any code contributions going into GNU Radio will become part of a LGPL-licensed, open source repository. It is therefore imperative that code submissions belong to the authors, and that submitters have the authority to merge that code into the public GNU Radio codebase.
-
-For that purpose, we use the [Developer's Certificate of Origin](DCO.txt). It is the same document used by other projects. Signing the DCO states that there are no legal reasons to not merge your code.
-
-To sign the DCO, suffix your git commits with a "Signed-off-by" line. When using the command line, you can use `git commit -s` to automatically add this line. If there were multiple authors of the code, or other types of stakeholders, make sure that all are listed, each with a separate Signed-off-by line.
-
 ### Communication
  - Before starting work on a feature, check if there isn't already an examples in the 'samples' sub-module.
    If not, then please open an issue on GitHub describing the proposed feature. We want to make sure any feature work goes smoothly. 
@@ -45,37 +37,48 @@ Please be sure to follow the usual process for submitting PRs:
 
 We reserve the right to close PRs that are not making progress. Closed PRs can be reopened again later and work can resume.
 
-### Contributor License Agreement
-By contributing your code to GNU Radio you grant us a non-exclusive,
-irrevocable, worldwide, royalty-free, sublicenseable, transferable
-license under all of Your relevant intellectual property rights
-(including copyright, patent, and any other rights), to use, copy,
-prepare derivative works of, distribute and publicly perform and
-display the Contributions on any licensing terms, including without limitation:
-(a) open source licenses like the Apache license; and (b) binary,
-proprietary, or commercial licenses. Except for the licenses granted herein,
-You reserve all right, title, and interest in and to the Contribution.
+### DCO Signing & Contributor License Agreement
 
-You confirm that you are able to grant us these rights. You represent
-that You are legally entitled to grant the above license. If Your employer
-has rights to intellectual property that You create, You represent that
-You have received permission to make the Contributions on behalf of that
-employer, or that Your employer has waived such rights for the Contributions.
+Code submitters must have the authority to merge that code into the public GNU Radio codebase.
+In some cases, the rights to exploit the code may belong to the contributor's employer, depending on jurisdiction
+and employment agreements.
 
-You represent that the Contributions are Your original works of
-authorship, and to Your knowledge, no other person claims, or
-has the right to claim, any right in any invention or patent
-related to the Contributions. You also represent that You are
-not legally obligated, whether by entering into an agreement
-or otherwise, in any way that conflicts with the terms of this license.
+For that purpose, we use the [Developer's Certificate of Origin](DCO.txt). It is the same document used by other
+projects.
+Signing the DCO states that there are no legal reasons to not merge your code.
 
-We acknowledge that, except as explicitly described in this
-Agreement, any Contribution which you provide is on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION,
-ANY WARRANTIES OR CONDITIONS OF TITLE, NON-INFRINGEMENT,
-MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+To sign the DCO, suffix your git commits with a "Signed-off-by" line. When using the command line,
+you can use `git commit -s` to automatically add this line. If there were multiple authors of the code, or other types
+of stakeholders, make sure that all are listed, each with a separate Signed-off-by line.
+
+#### Notably, by contributing to GNU Radio:
+
+1. you grant this project a non-exclusive, irrevocable, worldwide, royalty-free, sublicensable, transferable license
+   under all of your relevant intellectual property rights (including copyright, patent, and any other rights), to use,
+   copy, prepare derivative works of, distribute, and publicly perform and display the contributions.
+2. You confirm that you are able to grant us these rights. You represent that you are legally entitled to grant the
+   above license. If Your employer has rights to intellectual property that You create, You represent that You have
+   received permission to make the Contributions on behalf of that employer, or that Your employer has waived such
+   rights for the Contributions.
+3. You represent that the Contributions are Your original works of authorship, and to Your knowledge, no other person
+   claims, or has the right to claim, any right in any invention or patent related to the Contributions.
+   You also represent that You are not legally obligated, whether by entering into an agreement or otherwise, in any way
+   that conflicts with the terms of this license.
+4. We acknowledge that, except as explicitly described in this Agreement, any Contribution which you provide is on an
+   "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, WITHOUT
+   LIMITATION,
+   ANY WARRANTIES OR CONDITIONS OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+
+This above is to ensure that the GNU Radio Project:
+
+* Remains free/libre in the spirit of the open source licenses and [Public-Money-Public-Code](https://publiccode.eu/en/) principles
+  (freedom, right-to-repair, tax savings, collaboration, serving the public, fostering innovation).
+* Stays or can be made compliant under international and national laws if these change (notably U.S. and EU stances on
+  cybersecurity, product liability, GDPR, and use of AI).
+* Encourages public-private/industry partnerships to foster innovation and collaboration, ensuring that all can benefit
+  from and contribute to the project.
 
 ## Code of Conduct
-To ensure an inclusive community, contributors and users in the GNU Radio
-community should follow the [code of conduct](./CODE_OF_CONDUCT.md).
+
+To ensure an inclusive community, contributors and users in the GNU Radio community should follow
+the [code of conduct](./CODE_OF_CONDUCT.md).
