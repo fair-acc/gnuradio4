@@ -104,14 +104,12 @@ inline static const char* kEdgeRemoved  = "EdgeRemoved";
 } // namespace graph::property
 
 class Graph : public gr::Block<Graph> {
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> _progress                         = std::make_shared<gr::Sequence>();
+    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
 
-private:
     std::vector<std::function<ConnectionResult(Graph&)>> _connectionDefinitions;
     std::vector<Edge>                                    _edges;
-
-    std::vector<std::unique_ptr<BlockModel>> _blocks;
+    std::vector<std::unique_ptr<BlockModel>>             _blocks;
 
     template<typename TBlock>
     std::unique_ptr<BlockModel>& findBlock(TBlock& what) {
@@ -267,9 +265,14 @@ public:
      */
     [[nodiscard]] std::span<Edge> edges() noexcept { return {_edges}; }
 
+    /**
+     * @return atomic sequence counter that indicates if any block could process some data or messages
+     */
+    [[nodiscard]] const Sequence& progress() noexcept { return *_progress.get(); }
+
     BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
         auto& new_block_ref = _blocks.emplace_back(std::move(block));
-        new_block_ref->init(progress, ioThreadPool);
+        new_block_ref->init(_progress, _ioThreadPool);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *new_block_ref.get();
     }
@@ -280,7 +283,7 @@ public:
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto  new_block = std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings));
         auto* raw_ref   = static_cast<TBlock*>(new_block->raw());
-        raw_ref->init(progress, ioThreadPool);
+        raw_ref->init(_progress, _ioThreadPool);
         _blocks.push_back(std::move(new_block));
         return *raw_ref;
     }

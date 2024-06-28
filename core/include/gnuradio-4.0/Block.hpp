@@ -504,7 +504,7 @@ public:
         if (lifecycle::isActive(this->state())) {
             emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
-        if (isBlocking()) {
+        if constexpr (blockingIO) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
@@ -890,7 +890,9 @@ public:
         for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nSamplesPublished())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
-    constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
+    constexpr void requestStop() noexcept {
+        emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+    }
 
     constexpr void processScheduledMessages() {
         using namespace std::chrono;
@@ -1579,6 +1581,12 @@ protected:
             ret         = work::Status::DONE;
             processedIn = 0UZ;
         }
+
+        // sanitize input/output samples based on explicit user-defined processBulk(...) return status
+        if (ret == work::Status::INSUFFICIENT_OUTPUT_ITEMS || ret == work::Status::INSUFFICIENT_INPUT_ITEMS || ret == work::Status::ERROR) {
+            processedIn  = 0UZ;
+            processedOut = 0UZ;
+        }
         // publish/consume
         publishSamples(processedOut, outputSpans);
         const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
@@ -1605,8 +1613,10 @@ public:
         ioWorkDone.increment(work_requested, work_done);
         ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
 
-        std::ignore = progress->incrementAndGet();
-        progress->notify_all();
+        if (last_status == work::Status::OK) {
+            progress->incrementAndGet();
+            progress->notify_all();
+        }
         return last_status;
     }
 
@@ -1667,7 +1677,12 @@ public:
 #endif
             return {accumulatedRequestedWork, performedWork, ioLastWorkStatus.load()};
         } else {
-            return workInternal(requested_work);
+            work::Result result = workInternal(requested_work);
+            if (result.status == work::Status::OK) {
+                progress->incrementAndGet();
+                progress->notify_all();
+            }
+            return result;
         }
     }
 

@@ -49,8 +49,7 @@ public:
     explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
     [[nodiscard]] forceinline signed_index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-
-    forceinline void setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    forceinline void                            setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
     [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
@@ -58,13 +57,10 @@ public:
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[nodiscard]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-
-    [[nodiscard]] forceinline signed_index_type addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-
-    void wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-
-    void notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[maybe_unused]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
+    [[nodiscard]] forceinline signed_index_type    addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
+    void                                           wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
+    void                                           notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
