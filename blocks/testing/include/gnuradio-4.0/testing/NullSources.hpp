@@ -61,11 +61,12 @@ struct SlowSource : public gr::Block<SlowSource<T>> {
             lastEventAt = std::chrono::system_clock::now();
 
             output[0] = default_value;
-            output.publish(1);
-            return gr::work::Status::OK;
+            output.publish(1UZ);
+        } else {
+            output.publish(0UZ);
         }
 
-        return gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
+        return gr::work::Status::OK;
     }
 };
 

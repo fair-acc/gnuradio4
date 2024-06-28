@@ -159,12 +159,11 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         Graph graph;
 
         // all times are in nanoseconds
-        constexpr std::uint64_t ms       = 1'000'000;                                                                                             // ms -> ns conversion factor (wish we had a proper C++ units-lib integration)
-        auto&                   clockSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", sample_rate}, //
-                              {"n_samples_max", N_SAMPLES},                                                                                       //
-                              {"name", "TagSource"},                                                                                              //
-                              {"verbose_console", false},                                                                                         //
-                              {"repeat_tags", true}});
+        auto& clockSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", sample_rate}, //
+            {"n_samples_max", N_SAMPLES},                                                                                       //
+            {"name", "TagSource"},                                                                                              //
+            {"verbose_console", false},                                                                                         //
+            {"repeat_tags", true}});
 
         auto genTrigger = [](Tag::signed_index_type index, std::string triggerName, std::string triggerCtx = {}) -> Tag {
             return {index, {{tag::TRIGGER_NAME.shortKey(), triggerName},         //
