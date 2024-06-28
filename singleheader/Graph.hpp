@@ -21968,13 +21968,11 @@ private:
 
 public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers" // GCC14 has an issue w.r.t. detecting that the derived field members (notably Port<...>) are initialised
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
         initMessagePorts();
         _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
     }
-#pragma GCC diagnostic pop
+
     BlockWrapper(const BlockWrapper& other)            = delete;
     BlockWrapper(BlockWrapper&& other)                 = delete;
     BlockWrapper& operator=(const BlockWrapper& other) = delete;

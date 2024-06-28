@@ -70,6 +70,9 @@ jobs:
           - cc: gcc-14
             cxx: g++-14
             cmake_flags: "-DADDRESS_SANITIZER=ON"
+          - cc: gcc-13
+            cxx: g++-13
+            cmake_flags: "-DADDRESS_SANITIZER=OFF"
           - cc: clang-18,
             cxx: clang++-18
             cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-18"
