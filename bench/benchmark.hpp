@@ -164,11 +164,26 @@ quick_fix: sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid'
 for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
 
     static void print_access_right_msg(std::string_view msg) noexcept {
-        fmt::print(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
-        _has_required_rights = false;
-        std::cerr << std::endl;
-        fmt::print(_sys_error_message);
-        std::cout << std::endl;
+        try {
+            if (errno != 0) {
+                fmt::println(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
+            } else {
+                fmt::println(stderr, "PerformanceCounter: {}", msg);
+            }
+            _has_required_rights = false;
+
+            fmt::print(_sys_error_message);
+
+        } catch (const std::system_error& e) {
+            std::cerr << "System error during logging: " << e.what() << '\n';
+        } catch (const std::exception& e) {
+            std::cerr << "Error during logging: " << e.what() << '\n';
+        } catch (...) {
+            std::cerr << "Unknown error during logging\n";
+        }
+
+        std::cerr.flush();
+        std::cout.flush();
     }
 
     static int open_perf_event(perf_event_attr& attr, int pid, int cpu, int group_fd, unsigned long flags) {
@@ -917,7 +932,7 @@ public:
                 continue;
             }
             fmt::print("│ {1:<{0}} ", name_max_size, test_name);
-            if (result_map.size() == 0) {
+            if (result_map.empty()) {
                 fmt::print("│ \033[33mSKIP\033[0m ");
             } else if (result_map.size() == 1) {
                 fmt::print("│ \033[31mFAIL\033[0m ");
