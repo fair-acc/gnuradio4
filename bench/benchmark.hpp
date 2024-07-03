@@ -164,11 +164,25 @@ quick_fix: sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid'
 for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
 
     static void print_access_right_msg(std::string_view msg) noexcept {
-        fmt::print(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
-        _has_required_rights = false;
-        std::cerr << std::endl;
-        fmt::print(_sys_error_message);
-        std::cout << std::endl;
+        try {
+            if (errno != 0) {
+                fmt::println(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
+            } else {
+                fmt::println(stderr, "PerformanceCounter: {}", msg);
+            }
+            _has_required_rights = false;
+
+            fmt::println(_sys_error_message);
+        } catch (const std::system_error& e) {
+            std::cerr << "System error during logging: " << e.what() << '\n';
+        } catch (const std::exception& e) {
+            std::cerr << "Error during logging: " << e.what() << '\n';
+        } catch (...) {
+            std::cerr << "Unknown error during logging\n";
+        }
+
+        std::cerr.flush();
+        std::cout.flush();
     }
 
     static int open_perf_event(perf_event_attr& attr, int pid, int cpu, int group_fd, unsigned long flags) {
@@ -256,20 +270,28 @@ public:
     }
 
     ~PerformanceCounter() {
-        if (_has_required_rights) {
-            disable_perf_event(_fd_misses);
-            disable_perf_event(_fd_accesses);
-            disable_perf_event(_fd_branch_misses);
-            disable_perf_event(_fd_branch);
-            disable_perf_event(_fd_instructions);
-            disable_perf_event(_fd_ctx_switches);
+        try {
+            if (_has_required_rights) {
+                disable_perf_event(_fd_misses);
+                disable_perf_event(_fd_accesses);
+                disable_perf_event(_fd_branch_misses);
+                disable_perf_event(_fd_branch);
+                disable_perf_event(_fd_instructions);
+                disable_perf_event(_fd_ctx_switches);
+            }
+            close_perf_event(_fd_misses);
+            close_perf_event(_fd_accesses);
+            close_perf_event(_fd_branch_misses);
+            close_perf_event(_fd_branch);
+            close_perf_event(_fd_instructions);
+            close_perf_event(_fd_ctx_switches);
+        } catch (const std::system_error& e) {
+            std::cerr << "~PerformanceCounter(): System error during destruction: " << e.what() << '\n';
+        } catch (const std::exception& e) {
+            std::cerr << "~PerformanceCounter(): Error during destruction: " << e.what() << '\n';
+        } catch (...) {
+            std::cerr << "~PerformanceCounter(): Unknown error during destruction\n";
         }
-        close_perf_event(_fd_misses);
-        close_perf_event(_fd_accesses);
-        close_perf_event(_fd_branch_misses);
-        close_perf_event(_fd_branch);
-        close_perf_event(_fd_instructions);
-        close_perf_event(_fd_ctx_switches);
     }
 
     PerformanceCounter(const PerformanceCounter&) = delete;
@@ -803,7 +825,7 @@ public:
 
     void on(const ut::events::test_run& test_run) { _printer << "\n \"" << test_run.name << "\"..."; }
 
-    constexpr void on(const ut::events::test_skip& bench) const noexcept {
+    constexpr void on(const ut::events::test_skip& bench) const {
         std::cerr << fmt::format("SKIPPED - {}", bench.name) << std::endl;
         [[maybe_unused]] const auto& map = benchmark::results::add_result(bench.name);
     }
@@ -917,7 +939,7 @@ public:
                 continue;
             }
             fmt::print("│ {1:<{0}} ", name_max_size, test_name);
-            if (result_map.size() == 0) {
+            if (result_map.empty()) {
                 fmt::print("│ \033[33mSKIP\033[0m ");
             } else if (result_map.size() == 1) {
                 fmt::print("│ \033[31mFAIL\033[0m ");
