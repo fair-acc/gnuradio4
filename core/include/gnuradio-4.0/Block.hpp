@@ -544,7 +544,6 @@ public:
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
         traits::block::all_output_ports<Derived>::for_each(setPortName);
-
         // Handle settings
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
@@ -556,7 +555,6 @@ public:
             }
         });
         checkBlockParameterConsistency();
-
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
         emitErrorMessageIfAny("init(..) -> INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
@@ -652,7 +650,6 @@ public:
                 return;
             }
         }
-
         if constexpr (StrideControl::kEnabled) {
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
@@ -662,7 +659,6 @@ public:
                 return;
             }
         }
-
         const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         if (minSyncIn > maxSyncIn) {
@@ -859,9 +855,9 @@ public:
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template reserve<ProcessAll>(sync_samples);
+                            return std::forward<Port>(port).template tryReserve<ProcessAll>(sync_samples);
                         } else {
-                            return std::forward<Port>(port).template reserve<ProcessNone>(port.streamWriter().available());
+                            return std::forward<Port>(port).template tryReserve<ProcessNone>(port.streamWriter().available());
                         }
                     }
                 };
@@ -875,6 +871,27 @@ public:
                 }
             },
             ports);
+    }
+
+    template<typename TOutTuple>
+    constexpr static bool containsEmptyOutputSpans(TOutTuple& outputTuple) noexcept {
+        bool result = false;
+        meta::tuple_for_each(
+            [&result]<typename TOut>(TOut& out) {
+                if constexpr (PublishableSpan<TOut>) {
+                    if (out.empty()) {
+                        result = true;
+                    }
+                } else if constexpr (PublishableSpan<typename TOut::value_type>) {
+                    for (auto& span : out) {
+                        if (span.empty()) {
+                            result = true;
+                        }
+                    }
+                }
+            },
+            outputTuple);
+        return result;
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
@@ -1117,7 +1134,6 @@ protected:
             std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
             bool        hasAsync     = false;                                   // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
-
         auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
@@ -1500,6 +1516,10 @@ protected:
         const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
+        if (containsEmptyOutputSpans(outputSpans)) {
+            return {requested_work, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
+        }
+
         updateInputAndOutputTags();
         applyChangedSettings();
 
@@ -1715,9 +1735,10 @@ public:
                 continue; // function does not produce any return message
             }
 
-            retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
-            retMessage->serviceName = unique_name;
-            msgOut.streamWriter().publish([&](auto& out) { out[0] = *retMessage; }, 1UZ);
+            retMessage->cmd              = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
+            retMessage->serviceName      = unique_name;
+            PublishableSpan auto msgSpan = msgOut.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            msgSpan[0]                   = *retMessage;
         } // - end - for (const auto &message : messages) { ..
     }
 

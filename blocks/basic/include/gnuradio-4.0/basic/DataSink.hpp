@@ -39,15 +39,9 @@ struct DataSinkQuery {
     std::optional<std::string> _sink_name;
     std::optional<std::string> _signal_name;
 
-    static DataSinkQuery
-    signalName(std::string_view name) {
-        return { {}, std::string{ name } };
-    }
+    static DataSinkQuery signalName(std::string_view name) { return {{}, std::string{name}}; }
 
-    static DataSinkQuery
-    sinkName(std::string_view name) {
-        return { std::string{ name }, {} };
-    }
+    static DataSinkQuery sinkName(std::string_view name) { return {std::string{name}, {}}; }
 };
 
 class DataSinkRegistry {
@@ -58,75 +52,66 @@ class DataSinkRegistry {
 public:
     // TODO this shouldn't be a singleton but associated with the flow graph (?)
     // TODO reconsider mutex usage when moving to the graph
-    static DataSinkRegistry &
-    instance() {
+    static DataSinkRegistry& instance() {
         static DataSinkRegistry s_instance;
         return s_instance;
     }
 
     template<typename T>
-    void
-    registerSink(DataSink<T> *sink) {
-        std::lock_guard lg{ _mutex };
+    void registerSink(DataSink<T>* sink) {
+        std::lock_guard lg{_mutex};
         _sinks.push_back(sink);
         _sink_by_signal_name[sink->signal_name] = sink;
     }
 
     template<typename T>
-    void
-    unregisterSink(DataSink<T> *sink) {
-        std::lock_guard lg{ _mutex };
-        std::erase_if(_sinks, [sink](const std::any &v) -> bool {
-            auto ptr = std::any_cast<DataSink<T> *>(v);
+    void unregisterSink(DataSink<T>* sink) {
+        std::lock_guard lg{_mutex};
+        std::erase_if(_sinks, [sink](const std::any& v) -> bool {
+            auto ptr = std::any_cast<DataSink<T>*>(v);
             return ptr && ptr == sink;
         });
         _sink_by_signal_name.erase(sink->signal_name);
     }
 
     template<typename T>
-    void
-    updateSignalName(DataSink<T> *sink, std::string_view oldName, std::string_view newName) {
-        std::lock_guard lg{ _mutex };
+    void updateSignalName(DataSink<T>* sink, std::string_view oldName, std::string_view newName) {
+        std::lock_guard lg{_mutex};
         _sink_by_signal_name.erase(std::string(oldName));
         _sink_by_signal_name[std::string(newName)] = sink;
     }
 
     template<typename T>
-    std::shared_ptr<typename DataSink<T>::Poller>
-    getStreamingPoller(const DataSinkQuery &query, BlockingMode block = BlockingMode::Blocking) {
-        std::lock_guard lg{ _mutex };
+    std::shared_ptr<typename DataSink<T>::Poller> getStreamingPoller(const DataSinkQuery& query, BlockingMode block = BlockingMode::Blocking) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         return sink ? sink->getStreamingPoller(block) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
-    std::shared_ptr<typename DataSink<T>::DataSetPoller>
-    getTriggerPoller(const DataSinkQuery &query, M &&matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode block = BlockingMode::Blocking) {
-        std::lock_guard lg{ _mutex };
+    std::shared_ptr<typename DataSink<T>::DataSetPoller> getTriggerPoller(const DataSinkQuery& query, M&& matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode block = BlockingMode::Blocking) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         return sink ? sink->getTriggerPoller(std::forward<M>(matcher), preSamples, postSamples, block) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
-    std::shared_ptr<typename DataSink<T>::DataSetPoller>
-    getMultiplexedPoller(const DataSinkQuery &query, M &&matcher, std::size_t maximumWindowSize, BlockingMode block = BlockingMode::Blocking) {
-        std::lock_guard lg{ _mutex };
+    std::shared_ptr<typename DataSink<T>::DataSetPoller> getMultiplexedPoller(const DataSinkQuery& query, M&& matcher, std::size_t maximumWindowSize, BlockingMode block = BlockingMode::Blocking) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         return sink ? sink->getMultiplexedPoller(std::forward<M>(matcher), maximumWindowSize, block) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
-    std::shared_ptr<typename DataSink<T>::DataSetPoller>
-    getSnapshotPoller(const DataSinkQuery &query, M &&matcher, std::chrono::nanoseconds delay, BlockingMode block = BlockingMode::Blocking) {
-        std::lock_guard lg{ _mutex };
+    std::shared_ptr<typename DataSink<T>::DataSetPoller> getSnapshotPoller(const DataSinkQuery& query, M&& matcher, std::chrono::nanoseconds delay, BlockingMode block = BlockingMode::Blocking) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         return sink ? sink->getSnapshotPoller(std::forward<M>(matcher), delay, block) : nullptr;
     }
 
     template<typename T, StreamCallback<T> Callback>
-    bool
-    registerStreamingCallback(const DataSinkQuery &query, std::size_t maxChunkSize, Callback &&callback) {
-        std::lock_guard lg{ _mutex };
+    bool registerStreamingCallback(const DataSinkQuery& query, std::size_t maxChunkSize, Callback&& callback) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         if (!sink) {
             return false;
@@ -137,9 +122,8 @@ public:
     }
 
     template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
-    bool
-    registerTriggerCallback(const DataSinkQuery &query, M &&matcher, std::size_t preSamples, std::size_t postSamples, Callback &&callback) {
-        std::lock_guard lg{ _mutex };
+    bool registerTriggerCallback(const DataSinkQuery& query, M&& matcher, std::size_t preSamples, std::size_t postSamples, Callback&& callback) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         if (!sink) {
             return false;
@@ -150,9 +134,8 @@ public:
     }
 
     template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
-    bool
-    registerMultiplexedCallback(const DataSinkQuery &query, M &&matcher, std::size_t maximumWindowSize, Callback &&callback) {
-        std::lock_guard lg{ _mutex };
+    bool registerMultiplexedCallback(const DataSinkQuery& query, M&& matcher, std::size_t maximumWindowSize, Callback&& callback) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         if (!sink) {
             return false;
@@ -163,9 +146,8 @@ public:
     }
 
     template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
-    bool
-    registerSnapshotCallback(const DataSinkQuery &query, M &&matcher, std::chrono::nanoseconds delay, Callback &&callback) {
-        std::lock_guard lg{ _mutex };
+    bool registerSnapshotCallback(const DataSinkQuery& query, M&& matcher, std::chrono::nanoseconds delay, Callback&& callback) {
+        std::lock_guard lg{_mutex};
         auto            sink = findSink<T>(query);
         if (!sink) {
             return false;
@@ -177,22 +159,21 @@ public:
 
 private:
     template<typename T>
-    DataSink<T> *
-    findSink(const DataSinkQuery &query) {
+    DataSink<T>* findSink(const DataSinkQuery& query) {
         if (query._signal_name) {
             const auto it = _sink_by_signal_name.find(*query._signal_name);
             if (it != _sink_by_signal_name.end()) {
                 try {
-                    return std::any_cast<DataSink<T> *>(it->second);
+                    return std::any_cast<DataSink<T>*>(it->second);
                 } catch (...) {
                     return nullptr;
                 }
             }
             return nullptr;
         }
-        auto sinkNameMatches = [&query](const std::any &v) {
+        auto sinkNameMatches = [&query](const std::any& v) {
             try {
-                const auto sink = std::any_cast<DataSink<T> *>(v);
+                const auto sink = std::any_cast<DataSink<T>*>(v);
                 return query._sink_name == sink->name;
             } catch (...) {
                 return false;
@@ -204,21 +185,20 @@ private:
             return nullptr;
         }
 
-        return std::any_cast<DataSink<T> *>(*it);
+        return std::any_cast<DataSink<T>*>(*it);
     }
 };
 
 namespace detail {
 template<typename U>
-[[nodiscard]] constexpr inline std::optional<U>
-getProperty(const property_map &m, std::string_view key) {
+[[nodiscard]] constexpr inline std::optional<U> getProperty(const property_map& m, std::string_view key) {
     const auto it = m.find(std::string(key));
     if (it == m.end()) {
         return std::nullopt;
     }
     try {
         return std::get<U>(it->second);
-    } catch (const std::bad_variant_access &) {
+    } catch (const std::bad_variant_access&) {
         return std::nullopt;
     }
 };
@@ -230,18 +210,10 @@ struct Metadata {
     float       signalMin;
     float       signalMax;
 
-    property_map
-    toTagMap() const {
-        return { { std::string(tag::SIGNAL_RATE.shortKey()), sampleRate },
-                 { std::string(tag::SIGNAL_NAME.shortKey()), signalName },
-                 { std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit },
-                 { std::string(tag::SIGNAL_MIN.shortKey()), signalMin },
-                 { std::string(tag::SIGNAL_MAX.shortKey()), signalMax } };
-    }
+    property_map toTagMap() const { return {{std::string(tag::SIGNAL_RATE.shortKey()), sampleRate}, {std::string(tag::SIGNAL_NAME.shortKey()), signalName}, {std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit}, {std::string(tag::SIGNAL_MIN.shortKey()), signalMin}, {std::string(tag::SIGNAL_MAX.shortKey()), signalMax}}; }
 };
 
-inline std::optional<property_map>
-tagAndMetadata(const std::optional<property_map> &tagData, const std::optional<Metadata> &metadata) {
+inline std::optional<property_map> tagAndMetadata(const std::optional<property_map>& tagData, const std::optional<Metadata>& metadata) {
     if (!tagData && !metadata) {
         return std::nullopt;
     }
@@ -258,12 +230,11 @@ tagAndMetadata(const std::optional<property_map> &tagData, const std::optional<M
 }
 
 template<typename T>
-[[nodiscard]] inline DataSet<T>
-makeDataSetTemplate(Metadata metadata) {
+[[nodiscard]] inline DataSet<T> makeDataSetTemplate(Metadata metadata) {
     DataSet<T> tmpl;
-    tmpl.signal_names  = { std::move(metadata.signalName) };
-    tmpl.signal_units  = { std::move(metadata.signalUnit) };
-    tmpl.signal_ranges = { { static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax) } };
+    tmpl.signal_names  = {std::move(metadata.signalName)};
+    tmpl.signal_units  = {std::move(metadata.signalUnit)};
+    tmpl.signal_ranges = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
     return tmpl;
 }
 
@@ -373,8 +344,7 @@ public:
         std::atomic<std::size_t>          drop_count   = 0;
 
         template<typename Handler>
-        [[nodiscard]] bool
-        process(Handler fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
+        [[nodiscard]] bool process(Handler fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
             const auto nProcess = std::min(reader.available(), requested);
             if (nProcess == 0) {
                 return false;
@@ -383,9 +353,9 @@ public:
             const auto readData = reader.get(nProcess);
             if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
                 const auto tags         = tag_reader.get();
-                const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto &tag) { return tag.index < until; });
+                const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto& tag) { return tag.index < until; });
                 auto       relevantTags = std::vector<Tag>(tags.begin(), it);
-                for (auto &t : relevantTags) {
+                for (auto& t : relevantTags) {
                     t.index -= static_cast<int64_t>(samples_read);
                 }
                 fnc(readData, std::span<const Tag>(relevantTags));
@@ -410,8 +380,7 @@ public:
         std::atomic<bool>        finished   = false;
         std::atomic<std::size_t> drop_count = 0;
 
-        [[nodiscard]] bool
-        process(std::invocable<std::span<DataSet<T>>> auto fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
+        [[nodiscard]] bool process(std::invocable<std::span<DataSet<T>>> auto fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
             const auto nProcess = std::min(reader.available(), requested);
             if (nProcess == 0) {
                 return false;
@@ -424,20 +393,18 @@ public:
         }
     };
 
-    void
-    settingsChanged(const property_map &oldSettings, const property_map & /*newSettings*/) {
+    void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
         const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
         if (oldSignalName != signal_name && _registered) {
             DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), signal_name);
         }
-        std::lock_guard lg{ _listener_mutex };
-        for (auto &listener : _listeners) {
-            listener->setMetadata(detail::Metadata{ sample_rate, signal_name, signal_unit, signal_min, signal_max });
+        std::lock_guard lg{_listener_mutex};
+        for (auto& listener : _listeners) {
+            listener->setMetadata(detail::Metadata{sample_rate, signal_name, signal_unit, signal_min, signal_max});
         }
     }
 
-    std::shared_ptr<Poller>
-    getStreamingPoller(BlockingMode blockMode = BlockingMode::Blocking) {
+    std::shared_ptr<Poller> getStreamingPoller(BlockingMode blockMode = BlockingMode::Blocking) {
         const auto      block   = blockMode == BlockingMode::Blocking;
         auto            handler = std::make_shared<Poller>();
         std::lock_guard lg(_listener_mutex);
@@ -447,8 +414,7 @@ public:
     }
 
     template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller>
-    getTriggerPoller(M &&matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode blockMode = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller> getTriggerPoller(M&& matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode blockMode = BlockingMode::Blocking) {
         const auto      block   = blockMode == BlockingMode::Blocking;
         auto            handler = std::make_shared<DataSetPoller>();
         std::lock_guard lg(_listener_mutex);
@@ -459,8 +425,7 @@ public:
     }
 
     template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller>
-    getMultiplexedPoller(M &&matcher, std::size_t maximumWindowSize, BlockingMode blockMode = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller> getMultiplexedPoller(M&& matcher, std::size_t maximumWindowSize, BlockingMode blockMode = BlockingMode::Blocking) {
         std::lock_guard lg(_listener_mutex);
         const auto      block   = blockMode == BlockingMode::Blocking;
         auto            handler = std::make_shared<DataSetPoller>();
@@ -469,8 +434,7 @@ public:
     }
 
     template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller>
-    getSnapshotPoller(M &&matcher, std::chrono::nanoseconds delay, BlockingMode blockMode = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller> getSnapshotPoller(M&& matcher, std::chrono::nanoseconds delay, BlockingMode blockMode = BlockingMode::Blocking) {
         const auto      block   = blockMode == BlockingMode::Blocking;
         auto            handler = std::make_shared<DataSetPoller>();
         std::lock_guard lg(_listener_mutex);
@@ -479,51 +443,44 @@ public:
     }
 
     template<StreamCallback<T> Callback>
-    void
-    registerStreamingCallback(std::size_t maxChunkSize, Callback &&callback) {
+    void registerStreamingCallback(std::size_t maxChunkSize, Callback&& callback) {
         addListener(std::make_unique<ContinuousListener<Callback>>(maxChunkSize, std::forward<Callback>(callback), *this), false);
     }
 
     template<trigger::Matcher M, DataSetCallback<T> Callback>
-    void
-    registerTriggerCallback(M &&matcher, std::size_t preSamples, std::size_t postSamples, Callback &&callback) {
+    void registerTriggerCallback(M&& matcher, std::size_t preSamples, std::size_t postSamples, Callback&& callback) {
         addListener(std::make_unique<TriggerListener<Callback, M>>(std::forward<M>(matcher), preSamples, postSamples, std::forward<Callback>(callback)), false);
         ensureHistorySize(preSamples);
     }
 
     template<trigger::Matcher M, DataSetCallback<T> Callback>
-    void
-    registerMultiplexedCallback(M &&matcher, std::size_t maximumWindowSize, Callback &&callback) {
+    void registerMultiplexedCallback(M&& matcher, std::size_t maximumWindowSize, Callback&& callback) {
         std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<MultiplexedListener<Callback, M>>(std::forward<M>(matcher), maximumWindowSize, std::forward<Callback>(callback)), false);
     }
 
     template<trigger::Matcher M, DataSetCallback<T> Callback>
-    void
-    registerSnapshotCallback(M &&matcher, std::chrono::nanoseconds delay, Callback &&callback) {
+    void registerSnapshotCallback(M&& matcher, std::chrono::nanoseconds delay, Callback&& callback) {
         std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<SnapshotListener<Callback, M>>(std::forward<M>(matcher), delay, std::forward<Callback>(callback)), false);
     }
 
-    void
-    start() noexcept {
+    void start() noexcept {
         DataSinkRegistry::instance().registerSink(this);
         _registered = true;
     }
 
-    void
-    stop() noexcept {
+    void stop() noexcept {
         DataSinkRegistry::instance().unregisterSink(this);
         _registered = false;
         std::lock_guard lg(_listener_mutex);
-        for (auto &listener : _listeners) {
+        for (auto& listener : _listeners) {
             listener->stop();
         }
         _listeners_finished = true;
     }
 
-    [[nodiscard]] work::Status
-    processBulk(std::span<const T> inData) noexcept {
+    [[nodiscard]] work::Status processBulk(std::span<const T> inData) noexcept {
         std::optional<property_map> tagData;
         if (this->input_tags_present()) {
             assert(this->mergedInputTag().index == 0);
@@ -533,8 +490,8 @@ public:
         {
             std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
             const auto      historyView = _history ? _history->get_span(0) : std::span<const T>();
-            std::erase_if(_listeners, [](const auto &l) { return l->expired; });
-            for (auto &listener : _listeners) {
+            std::erase_if(_listeners, [](const auto& l) { return l->expired; });
+            for (auto& listener : _listeners) {
                 listener->process(historyView, inData, tagData);
             }
             if (_history) {
@@ -547,9 +504,8 @@ public:
     }
 
 private:
-    void
-    ensureHistorySize(std::size_t new_size) {
-        const auto old_size = _history ? _history->capacity() : std::size_t{ 0 };
+    void ensureHistorySize(std::size_t new_size) {
+        const auto old_size = _history ? _history->capacity() : std::size_t{0};
         if (new_size <= old_size) {
             return;
         }
@@ -566,9 +522,8 @@ private:
         _history = new_history;
     }
 
-    void
-    addListener(std::unique_ptr<AbstractListener> &&l, bool block) {
-        l->setMetadata(detail::Metadata{ sample_rate, signal_name, signal_unit, signal_min, signal_max });
+    void addListener(std::unique_ptr<AbstractListener>&& l, bool block) {
+        l->setMetadata(detail::Metadata{sample_rate, signal_name, signal_unit, signal_min, signal_max});
         if (block) {
             _listeners.push_back(std::move(l));
         } else {
@@ -581,27 +536,20 @@ private:
 
         virtual ~AbstractListener() = default;
 
-        void
-        setExpired() {
-            expired = true;
-        }
+        void setExpired() { expired = true; }
 
         virtual void setMetadata(detail::Metadata) = 0;
 
-        virtual void
-        process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tagData0)
-                = 0;
-        virtual void
-        stop() = 0;
+        virtual void process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tagData0) = 0;
+        virtual void stop()                                                                                             = 0;
     };
 
     template<typename Callback>
     struct ContinuousListener : public AbstractListener {
         static constexpr auto hasCallback       = !std::is_same_v<Callback, gr::meta::null_type>;
-        static constexpr auto callbackTakesTags = std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>
-                                               || std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T> &>;
+        static constexpr auto callbackTakesTags = std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>> || std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>;
 
-        const DataSink<T>              &parent_sink;
+        const DataSink<T>&              parent_sink;
         bool                            block           = false;
         std::size_t                     samples_written = 0;
         std::optional<detail::Metadata> _pendingMetadata;
@@ -616,13 +564,12 @@ private:
         Callback              callback;
 
         template<typename CallbackFW>
-        explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW &&c, const DataSink<T> &parent) : parent_sink(parent), buffer(maxChunkSize), callback{ std::forward<CallbackFW>(c) } {}
+        explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW&& c, const DataSink<T>& parent) : parent_sink(parent), buffer(maxChunkSize), callback{std::forward<CallbackFW>(c)} {}
 
-        explicit ContinuousListener(std::shared_ptr<Poller> poller, bool doBlock, const DataSink<T> &parent) : parent_sink(parent), block(doBlock), polling_handler{ std::move(poller) } {}
+        explicit ContinuousListener(std::shared_ptr<Poller> poller, bool doBlock, const DataSink<T>& parent) : parent_sink(parent), block(doBlock), polling_handler{std::move(poller)} {}
 
-        inline void
-        callCallback(std::span<const T> data, std::span<const Tag> tags) {
-            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T> &>) {
+        inline void callCallback(std::span<const T> data, std::span<const Tag> tags) {
+            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>) {
                 callback(std::move(data), tags, parent_sink);
             } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>) {
                 callback(std::move(data), tags);
@@ -631,13 +578,9 @@ private:
             }
         }
 
-        void
-        setMetadata(detail::Metadata metadata) override {
-            _pendingMetadata = std::move(metadata);
-        }
+        void setMetadata(detail::Metadata metadata) override { _pendingMetadata = std::move(metadata); }
 
-        void
-        process(std::span<const T>, std::span<const T> data, std::optional<property_map> tagData0) override {
+        void process(std::span<const T>, std::span<const T> data, std::optional<property_map> tagData0) override {
             if constexpr (hasCallback) {
                 // if there's pending data, fill buffer and send out
                 if (buffer_fill > 0) {
@@ -701,7 +644,7 @@ private:
                 if (toWrite > 0) {
                     if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
                         auto tw = poller->tag_writer.reserve(1);
-                        tw[0]   = { static_cast<Tag::signed_index_type>(samples_written), std::move(*tag) };
+                        tw[0]   = {static_cast<Tag::signed_index_type>(samples_written), std::move(*tag)};
                         tw.publish(1);
                     }
                     _pendingMetadata.reset();
@@ -714,8 +657,7 @@ private:
             }
         }
 
-        void
-        stop() override {
+        void stop() override {
             if constexpr (hasCallback) {
                 if (buffer_fill > 0) {
                     callCallback(std::span(buffer).first(buffer_fill), std::span(tag_buffer));
@@ -749,20 +691,14 @@ private:
         Callback callback;
 
         template<trigger::Matcher Matcher>
-        explicit TriggerListener(Matcher &&matcher, std::shared_ptr<DataSetPoller> handler, std::size_t pre, std::size_t post, bool doBlock)
-            : block(doBlock), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{ std::move(handler) } {}
+        explicit TriggerListener(Matcher&& matcher, std::shared_ptr<DataSetPoller> handler, std::size_t pre, std::size_t post, bool doBlock) : block(doBlock), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{std::move(handler)} {}
 
         template<typename CallbackFW, trigger::Matcher Matcher>
-        explicit TriggerListener(Matcher &&matcher, std::size_t pre, std::size_t post, CallbackFW &&cb)
-            : preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), callback{ std::forward<CallbackFW>(cb) } {}
+        explicit TriggerListener(Matcher&& matcher, std::size_t pre, std::size_t post, CallbackFW&& cb) : preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)), callback{std::forward<CallbackFW>(cb)} {}
 
-        void
-        setMetadata(detail::Metadata metadata) override {
-            dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
-        }
+        void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
 
-        inline void
-        publishDataSet(DataSet<T> &&data) {
+        inline void publishDataSet(DataSet<T>&& data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {
@@ -787,17 +723,16 @@ private:
             }
         }
 
-        void
-        process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher("", Tag{ 0, *tagData0 }, {}) == trigger::MatchResult::Matching) {
+        void process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
+            if (tagData0 && trigger_matcher("", Tag{0, *tagData0}, {}) == trigger::MatchResult::Matching) {
                 DataSet<T> dataset = dataset_template;
                 dataset.signal_values.reserve(preSamples + postSamples); // TODO maybe make the circ. buffer smaller but preallocate these
 
                 const auto preSampleView = history.subspan(0UZ, std::min(preSamples, history.size()));
                 dataset.signal_values.insert(dataset.signal_values.end(), preSampleView.rbegin(), preSampleView.rend());
 
-                dataset.timing_events = { { { static_cast<Tag::signed_index_type>(preSampleView.size()), *tagData0 } } };
-                pending_trigger_windows.push_back({ .dataset = std::move(dataset), .pending_post_samples = postSamples });
+                dataset.timing_events = {{{static_cast<Tag::signed_index_type>(preSampleView.size()), *tagData0}}};
+                pending_trigger_windows.push_back({.dataset = std::move(dataset), .pending_post_samples = postSamples});
             }
 
             auto window = pending_trigger_windows.begin();
@@ -815,9 +750,8 @@ private:
             }
         }
 
-        void
-        stop() override {
-            for (auto &window : pending_trigger_windows) {
+        void stop() override {
+            for (auto& window : pending_trigger_windows) {
                 if (!window.dataset.signal_values.empty()) {
                     this->publishDataSet(std::move(window.dataset));
                 }
@@ -840,20 +774,14 @@ private:
         Callback                     callback;
 
         template<typename CallbackFW, trigger::Matcher Matcher>
-        explicit MultiplexedListener(Matcher &&matcher_, std::size_t maxWindowSize, CallbackFW &&cb)
-            : matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), callback(std::forward<CallbackFW>(cb)) {}
+        explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, CallbackFW&& cb) : matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), callback(std::forward<CallbackFW>(cb)) {}
 
         template<trigger::Matcher Matcher>
-        explicit MultiplexedListener(Matcher &&matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller> handler, bool doBlock)
-            : block(doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), polling_handler{ std::move(handler) } {}
+        explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller> handler, bool doBlock) : block(doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize), polling_handler{std::move(handler)} {}
 
-        void
-        setMetadata(detail::Metadata metadata) override {
-            dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
-        }
+        void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
 
-        inline void
-        publishDataSet(DataSet<T> &&data) {
+        inline void publishDataSet(DataSet<T>&& data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {
@@ -878,14 +806,13 @@ private:
             }
         }
 
-        void
-        process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
+        void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0) {
-                const auto obsr = matcher("", Tag{ 0, *tagData0 }, {});
+                const auto obsr = matcher("", Tag{0, *tagData0}, {});
                 if (obsr == trigger::MatchResult::NotMatching || obsr == trigger::MatchResult::Matching) {
                     if (pending_dataset) {
                         if (obsr == trigger::MatchResult::NotMatching) {
-                            pending_dataset->timing_events[0].push_back({ static_cast<Tag::signed_index_type>(pending_dataset->signal_values.size()), *tagData0 });
+                            pending_dataset->timing_events[0].push_back({static_cast<Tag::signed_index_type>(pending_dataset->signal_values.size()), *tagData0});
                         }
                         this->publishDataSet(std::move(*pending_dataset));
                         pending_dataset.reset();
@@ -894,7 +821,7 @@ private:
                 if (obsr == trigger::MatchResult::Matching) {
                     pending_dataset = dataset_template;
                     pending_dataset->signal_values.reserve(maximumWindowSize); // TODO might be too much?
-                    pending_dataset->timing_events = { { { 0, *tagData0 } } };
+                    pending_dataset->timing_events = {{{0, *tagData0}}};
                 }
             }
             if (pending_dataset) {
@@ -909,8 +836,7 @@ private:
             }
         }
 
-        void
-        stop() override {
+        void stop() override {
             if (pending_dataset) {
                 this->publishDataSet(std::move(*pending_dataset));
                 pending_dataset.reset();
@@ -939,21 +865,17 @@ private:
         Callback                     callback;
 
         template<trigger::Matcher Matcher>
-        explicit SnapshotListener(Matcher &&matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller> poller, bool doBlock)
-            : block(doBlock), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{ std::move(poller) } {}
+        explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller> poller, bool doBlock) : block(doBlock), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), polling_handler{std::move(poller)} {}
 
         template<typename CallbackFW, trigger::Matcher Matcher>
-        explicit SnapshotListener(Matcher &&matcher, std::chrono::nanoseconds delay, CallbackFW &&cb)
-            : time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), callback(std::forward<CallbackFW>(cb)) {}
+        explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, CallbackFW&& cb) : time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)), callback(std::forward<CallbackFW>(cb)) {}
 
-        void
-        setMetadata(detail::Metadata metadata) override {
+        void setMetadata(detail::Metadata metadata) override {
             sample_delay     = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * metadata.sampleRate));
             dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
         }
 
-        inline void
-        publishDataSet(DataSet<T> &&data) {
+        inline void publishDataSet(DataSet<T>&& data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {
@@ -978,12 +900,11 @@ private:
             }
         }
 
-        void
-        process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher("", { 0, *tagData0 }, {}) == trigger::MatchResult::Matching) {
-                auto new_pending = PendingSnapshot{ *tagData0, sample_delay, sample_delay };
+        void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
+            if (tagData0 && trigger_matcher("", {0, *tagData0}, {}) == trigger::MatchResult::Matching) {
+                auto new_pending = PendingSnapshot{*tagData0, sample_delay, sample_delay};
                 // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased)
-                auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto &other) { return other.pending_samples < delay; });
+                auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto& other) { return other.pending_samples < delay; });
                 pending.insert(rit.base(), std::move(new_pending));
             }
 
@@ -995,16 +916,15 @@ private:
                 }
 
                 DataSet<T> dataset    = dataset_template;
-                dataset.timing_events = { { { -static_cast<Tag::signed_index_type>(it->delay), std::move(it->tag_data) } } };
-                dataset.signal_values = { inData[it->pending_samples] };
+                dataset.timing_events = {{{-static_cast<Tag::signed_index_type>(it->delay), std::move(it->tag_data)}}};
+                dataset.signal_values = {inData[it->pending_samples]};
                 this->publishDataSet(std::move(dataset));
 
                 it = pending.erase(it);
             }
         }
 
-        void
-        stop() override {
+        void stop() override {
             pending.clear();
             if (auto p = polling_handler.lock()) {
                 p->finished = true;

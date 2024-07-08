@@ -9453,9 +9453,10 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <cerrno>
 #include <fcntl.h>
 #if defined __has_include && not __EMSCRIPTEN__
-#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
+#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>) && __has_include(<sys/syscall.h>)
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
@@ -9497,12 +9498,11 @@ struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
 };
 
 template<typename T>
-constexpr auto *
-value_type_helper() {
+constexpr auto* value_type_helper() {
     if constexpr (requires { typename T::value_type; }) {
-        return static_cast<typename T::value_type *>(nullptr);
+        return static_cast<typename T::value_type*>(nullptr);
     } else {
-        return static_cast<typename first_template_arg_helper<T>::value_type *>(nullptr);
+        return static_cast<typename first_template_arg_helper<T>::value_type*>(nullptr);
     }
 }
 
@@ -9526,10 +9526,10 @@ static_assert(std::is_same_v<double, value_type_t<std::array<double, 42>>>);
 
 // TODO: find a better place for these 3 concepts
 template<typename From, typename To>
-concept convertible_from_lvalue_to = std::convertible_to<const std::remove_cvref_t<From> &, To>;
+concept convertible_from_lvalue_to = std::convertible_to<const std::remove_cvref_t<From>&, To>;
 
 template<typename From, typename To>
-concept convertible_from_rvalue_to = std::convertible_to<std::remove_cvref_t<From> &&, To>;
+concept convertible_from_rvalue_to = std::convertible_to<std::remove_cvref_t<From>&&, To>;
 
 template<typename From, typename To>
 concept convertible_from_lvalue_only = convertible_from_lvalue_to<From, To> && !convertible_from_rvalue_to<From, To>;
@@ -9544,16 +9544,16 @@ template<typename T>
 concept ConstSpanLvalueLike = convertible_from_lvalue_only<T, std::span<const std::remove_cvref_t<typename T::value_type>>>;
 
 template<typename T>
-concept ConsumableSpan = std::ranges::contiguous_range<T> && ConstSpanLvalueLike<T> && requires(T &s) { s.consume(0); };
+concept ConsumableSpan = std::ranges::contiguous_range<T> && ConstSpanLvalueLike<T> && requires(T& s) { s.consume(0); };
 
 template<typename T>
-concept PublishableSpan = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T &s) { s.publish(0UZ); };
+concept PublishableSpan = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
 
 // clang-format off
 // disable formatting until clang-format (v16) supporting concepts
 template<class T>
-concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
-    { t.get(n_items) } ; // TODO: get() returns CircularBuffer::buffer_reader::ConsumableInputRange
+concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
+    { t.get(nItems) } ; // TODO: get() returns CircularBuffer::Reader::ConsumableInputRange
     { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
     { t.available() }      -> std::same_as<std::size_t>;
     { t.buffer() };
@@ -9561,27 +9561,21 @@ concept BufferReader = requires(T /*const*/ t, const std::size_t n_items) {
     { t.isConsumeRequested()} -> std::same_as<bool>;
 };
 
-template<class Fn, typename T, typename ...Args>
-concept WriterCallback = std::is_invocable_v<Fn, std::span<T>&, std::make_signed_t<std::size_t>, Args...> || std::is_invocable_v<Fn, std::span<T>&, Args...>;
-
 template<class T, typename ...Args>
-concept BufferWriter = requires(T t, const std::size_t n_items, std::pair<std::size_t, std::make_signed_t<std::size_t>> token, Args ...args) {
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                                 -> std::same_as<void>;
-    { t.publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }   -> std::same_as<void>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, Args ...) { /* */ }, n_items, args...) }                             -> std::same_as<bool>;
-    { t.try_publish([](std::span<util::value_type_t<T>> &/*writable_data*/, std::make_signed_t<std::size_t> /* writePos */, Args ...) { /* */  }, n_items, args...) }-> std::same_as<bool>;
-    { t.reserve(n_items) };// TODO: reserve() returns CircularBuffer::buffer_writer::PublishableOutputRange
+concept BufferWriterLike = requires(T t, const std::size_t nItems) {
+    { t.tryReserve(nItems) };// TODO: tryReserve() returns CircularBuffer::Writer::PublishableOutputRange
+    { t.reserve(nItems) };// TODO: reserve() returns CircularBuffer::Writer::PublishableOutputRange
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
     { t.nSamplesPublished()} -> std::same_as<std::size_t>;
 };
 
 template<class T, typename ...Args>
-concept Buffer = requires(T t, const std::size_t min_size, Args ...args) {
+concept BufferLike = requires(T t, const std::size_t min_size, Args ...args) {
     { T(min_size, args...) };
     { t.size() }       -> std::same_as<std::size_t>;
-    { t.new_reader() } -> BufferReader;
-    { t.new_writer() } -> BufferWriter;
+    { t.new_reader() } -> BufferReaderLike;
+    { t.new_writer() } -> BufferWriterLike;
 };
 
 // compile-time unit-tests
@@ -9595,16 +9589,9 @@ template <typename T, typename... Args>
 using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
 } // namespace test
 
-static_assert(!Buffer<test::non_compliant_class<int>>);
-static_assert(!BufferReader<test::non_compliant_class<int>>);
-static_assert(!BufferWriter<test::non_compliant_class<int>>);
-
-static_assert(WriterCallback<test::WithSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::WithSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::WithSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int>, int>);
-static_assert(!WriterCallback<test::NoSequenceParameter<int>, int, std::span<bool>>);
-static_assert(WriterCallback<test::NoSequenceParameter<int, std::span<bool>>, int, std::span<bool>>);
+static_assert(!BufferLike<test::non_compliant_class<int>>);
+static_assert(!BufferReaderLike<test::non_compliant_class<int>>);
+static_assert(!BufferWriterLike<test::non_compliant_class<int>>);
 // clang-format on
 } // namespace gr
 
@@ -9811,10 +9798,10 @@ inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os
 #ifndef GNURADIO_WAITSTRATEGY_HPP
 #define GNURADIO_WAITSTRATEGY_HPP
 
-#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -9853,7 +9840,7 @@ inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
 static_assert(!hasSignalAllWhenBlocking<int>);
 
 template<typename T>
-concept WaitStrategy = isWaitStrategy<T>;
+concept WaitStrategyLike = isWaitStrategy<T>;
 
 
 
@@ -9889,7 +9876,7 @@ public:
         _conditionVariable.notify_all();
     }
 };
-static_assert(WaitStrategy<BlockingWaitStrategy>);
+static_assert(WaitStrategyLike<BlockingWaitStrategy>);
 
 /**
  * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
@@ -9905,7 +9892,7 @@ struct BusySpinWaitStrategy {
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<BusySpinWaitStrategy>);
+static_assert(WaitStrategyLike<BusySpinWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
 
 /**
@@ -9945,7 +9932,7 @@ public:
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<SleepingWaitStrategy>);
+static_assert(WaitStrategyLike<SleepingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
 
 struct TimeoutException : public std::runtime_error {
@@ -9990,7 +9977,7 @@ public:
         _conditionVariable.notify_all();
     }
 };
-static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
+static_assert(WaitStrategyLike<TimeoutBlockingWaitStrategy>);
 static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
 
 /**
@@ -10021,7 +10008,7 @@ public:
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<YieldingWaitStrategy>);
+static_assert(WaitStrategyLike<YieldingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
 
 struct NoWaitStrategy {
@@ -10030,7 +10017,7 @@ struct NoWaitStrategy {
         return sequence;
     }
 };
-static_assert(WaitStrategy<NoWaitStrategy>);
+static_assert(WaitStrategyLike<NoWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
 
 
@@ -10148,7 +10135,7 @@ struct SpinWaitWaitStrategy {
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<SpinWaitWaitStrategy>);
+static_assert(WaitStrategyLike<SpinWaitWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
 
 struct NO_SPIN_WAIT {};
@@ -10177,149 +10164,172 @@ public:
     void unlock() { _lock.clear(std::memory_order::release); }
 };
 
-
 // clang-format on
 } // namespace gr
-
 
 #endif // GNURADIO_WAITSTRATEGY_HPP
 
 
 namespace gr {
 
-struct NoCapacityException : public std::runtime_error {
-    NoCapacityException() : std::runtime_error("NoCapacityException"){};
+namespace detail {
+
+/*
+ * `AtomicBitset` is a lock-free, thread-safe bitset.
+ * It allows for efficient and thread-safe manipulation of individual bits.
+ */
+template<std::size_t Size = std::dynamic_extent>
+class AtomicBitset {
+    static_assert(Size > 0, "Size must be greater than 0");
+    static constexpr bool isSizeDynamic = Size == std::dynamic_extent;
+
+    static constexpr std::size_t _bitsPerWord  = sizeof(size_t) * 8UZ;
+    static constexpr std::size_t _nStaticWords = isSizeDynamic ? 1UZ : (Size + _bitsPerWord - 1UZ) / _bitsPerWord;
+
+    // using DynamicArrayType = std::unique_ptr<std::atomic<std::size_t>[]>;
+    using DynamicArrayType = std::vector<std::atomic<std::size_t>>;
+    using StaticArrayType  = std::array<std::atomic<std::size_t>, _nStaticWords>;
+    using ArrayType        = std::conditional_t<isSizeDynamic, DynamicArrayType, StaticArrayType>;
+
+    std::size_t _size = Size;
+    ArrayType   _bits;
+
+public:
+    AtomicBitset()
+    requires(!isSizeDynamic)
+    {
+        for (auto& word : _bits) {
+            word.store(0, std::memory_order_relaxed);
+        }
+    }
+
+    explicit AtomicBitset(std::size_t size = 0UZ)
+    requires(isSizeDynamic)
+        : _size(size), _bits(std::vector<std::atomic<std::size_t>>(size)) {
+        // assert(size > 0UZ);
+        for (std::size_t i = 0; i < _size; i++) {
+            _bits[i].store(0, std::memory_order_relaxed);
+        }
+    }
+
+    void set(std::size_t bitPosition) {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = 1UL << bitIndex;
+
+        std::size_t oldBits;
+        std::size_t newBits;
+        do {
+            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            newBits = oldBits | mask;
+        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    void reset(std::size_t bitPosition) {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = ~(1UL << bitIndex);
+
+        std::size_t oldBits;
+        std::size_t newBits;
+        do {
+            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            newBits = oldBits & mask;
+        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    bool test(std::size_t bitPosition) const {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = 1UL << bitIndex;
+
+        return (_bits[wordIndex].load(std::memory_order_acquire) & mask) != 0;
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const { return _size; }
 };
 
-// clang-format off
+} // namespace detail
 
 template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
-        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> offset, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
-    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.publish(offset, n_slots_to_claim) } -> std::same_as<void>;
-    { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
+concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index_type sequence, const Sequence::signed_index_type offset, const std::size_t nSlotsToClaim) {
+    { t.next(nSlotsToClaim) } -> std::same_as<Sequence::signed_index_type>;
+    { t.tryNext(nSlotsToClaim) } -> std::same_as<std::optional<Sequence::signed_index_type>>;
+    { t.getRemainingCapacity() } -> std::same_as<Sequence::signed_index_type>;
+    { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
 
 namespace claim_strategy::util {
-constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-}
+constexpr unsigned floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+} // namespace claim_strategy::util
 
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
     using signed_index_type = Sequence::signed_index_type;
-    const std::size_t _size;
-    Sequence &_cursor;
-    WAIT_STRATEGY &_waitStrategy;
-    signed_index_type _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    mutable signed_index_type _cachedValue{ kInitialCursorValue };
+
+    const std::size_t _size = SIZE;
 
 public:
-    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
-    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
-    void operator=(const SingleThreadedStrategy &) = delete;
+    Sequence                                                _publishCursor;                      // slots are published and ready to be read until _publishCursor
+    signed_index_type                                       _reserveCursor{kInitialCursorValue}; // slots can be reserved starting from _reserveCursor, no need for atomics since this is called by a single publisher
+    TWaitStrategy                                           _waitStrategy;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type/*cursorValue*/) const noexcept {
-        if (const signed_index_type wrapPoint = (_nextValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
-            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
-            _cachedValue     = minSequence;
-            if (wrapPoint > minSequence) {
-                return false;
+    explicit SingleThreadedStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
+    SingleThreadedStrategy(const SingleThreadedStrategy&)  = delete;
+    SingleThreadedStrategy(const SingleThreadedStrategy&&) = delete;
+    void operator=(const SingleThreadedStrategy&)          = delete;
+
+    signed_index_type next(const std::size_t nSlotsToClaim = 1) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+
+        SpinWait spinWait;
+        while (getRemainingCapacity() < nSlotsToClaim) { // while not enough slots in buffer
+            if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
+                _waitStrategy.signalAllWhenBlocking();
             }
+            spinWait.spinOnce();
         }
-        return true;
+        _reserveCursor += nSlotsToClaim;
+        return _reserveCursor;
     }
 
-    signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= _size) && "n_slots_to_claim must be > 0 and <= bufferSize");
+    [[nodiscard]] std::optional<signed_index_type> tryNext(const std::size_t nSlotsToClaim) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+        static_cast<signed_index_type>(_size) < nSlotsToClaim + _reserveCursor - getMinReaderCursor();
 
-        auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
-        auto wrapPoint    = nextSequence - static_cast<signed_index_type>(_size);
-
-        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            SpinWait     spinWait;
-            signed_index_type minSequence;
-            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
-                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                    _waitStrategy.signalAllWhenBlocking();
-                }
-                spinWait.spinOnce();
-            }
-            _cachedValue = minSequence;
+        if (getRemainingCapacity() < nSlotsToClaim) { // not enough slots in buffer
+            return std::nullopt;
         }
-        _nextValue = nextSequence;
-
-        return nextSequence;
+        _reserveCursor += nSlotsToClaim;
+        return _reserveCursor;
     }
 
-    signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+    [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor - getMinReaderCursor()); }
 
-        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
-            throw NoCapacityException();
-        }
-
-        const auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
-        _nextValue              = nextSequence;
-
-        return nextSequence;
-    }
-
-    signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
-        const auto produced = _nextValue;
-
-        return static_cast<signed_index_type>(_size) - (produced - consumed);
-    }
-
-    void publish(signed_index_type offset, std::size_t n_slots_to_claim) {
-        const auto sequence = offset + static_cast<signed_index_type>(n_slots_to_claim);
-        _cursor.setValue(sequence);
-        _nextValue = sequence;
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+    void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
+        const auto sequence = offset + static_cast<signed_index_type>(nSlotsToClaim);
+        _publishCursor.setValue(sequence);
+        _reserveCursor = sequence;
+        if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
             _waitStrategy.signalAllWhenBlocking();
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] signed_index_type getHighestPublishedSequence(signed_index_type /*nextSequence*/, signed_index_type availableSequence) const noexcept { return availableSequence; }
+private:
+    [[nodiscard]] forceinline signed_index_type getMinReaderCursor() const noexcept {
+        if (_readSequences->empty()) {
+            return kInitialCursorValue;
+        }
+        return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
+    }
 };
 
-static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
-
-template <std::size_t Size>
-struct MultiThreadedStrategySizeMembers
-{
-    static_assert(std::has_single_bit(Size));
-    static constexpr std::int32_t _size = Size;
-    static constexpr std::int32_t _indexShift = std::bit_width(Size - 1);
-};
-
-template <>
-struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
-    const std::int32_t _size;
-    const std::int32_t _indexShift;
-
-    #ifdef __clang__
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size - 1))) {} //NOSONAR
-    #else
-    #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
-    #ifndef __clang__
-    #pragma GCC diagnostic ignored "-Wuseless-cast"
-    #endif
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size - 1))) {
-        assert(std::has_single_bit(size));
-    } //NOSONAR
-    #pragma GCC diagnostic pop
-    #endif
-};
+static_assert(ClaimStrategyLike<SingleThreadedStrategy<1024, NoWaitStrategy>>);
 
 /**
  * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
@@ -10329,170 +10339,113 @@ struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
  *
  * The size argument (compile-time and run-time) must be a power-of-2 value.
  */
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
-class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
-: private MultiThreadedStrategySizeMembers<SIZE> {
-    Sequence &_cursor;
-    WAIT_STRATEGY &_waitStrategy;
-#if (__cpp_lib_atomic_ref >= 201806L)
-    std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-#else // clang's libc++ does not yet support std::atomic_ref
-    std::unique_ptr<std::atomic<std::int32_t>[]> _availableBuffer; // tracks the state of each ringbuffer slot
-#endif
-    std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    using MultiThreadedStrategySizeMembers<SIZE>::_size;
-    using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
+requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
+class alignas(hardware_constructive_interference_size) MultiThreadedStrategy {
     using signed_index_type = Sequence::signed_index_type;
 
+    detail::AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
+    const std::size_t          _size = SIZE;
+    const std::size_t          _mask = SIZE - 1;
+
 public:
+    Sequence                                                _reserveCursor; // slots can be reserved starting from _reserveCursor
+    Sequence                                                _publishCursor; // slots are published and ready to be read until _publishCursor
+    TWaitStrategy                                           _waitStrategy;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
+
     MultiThreadedStrategy() = delete;
 
-    explicit
-    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
-    : _cursor(cursor), _waitStrategy(waitStrategy) {
-#if (__cpp_lib_atomic_ref >= 201806L)
-        _availableBuffer = std::vector<std::int32_t>(SIZE, -1);
-#else // clang's libc++ does not yet support std::atomic_ref
-        _availableBuffer = std::make_unique<std::atomic<std::int32_t>[]>(SIZE);
-        std::fill(_availableBuffer.get(), _availableBuffer.get() + SIZE, -1);
-#endif
-    }
+    explicit MultiThreadedStrategy()
+    requires(SIZE != std::dynamic_extent)
+    {}
 
-    explicit
-    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
-    requires (SIZE == std::dynamic_extent)
-    : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
-      _cursor(cursor), _waitStrategy(waitStrategy) {
-#if (__cpp_lib_atomic_ref >= 201806L)
-        _availableBuffer = std::vector<std::int32_t>(buffer_size, -1);
-#else // clang's libc++ does not yet support std::atomic_ref
-        _availableBuffer = std::make_unique<std::atomic<std::int32_t>[]>(buffer_size);
-        std::fill(_availableBuffer.get(), _availableBuffer.get() + buffer_size, -1);
-#endif
-    }
+    explicit MultiThreadedStrategy(std::size_t bufferSize)
+    requires(SIZE == std::dynamic_extent)
+        : _slotStates(detail::AtomicBitset<>(bufferSize)), _size(bufferSize), _mask(bufferSize - 1) {}
 
-    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
-    void               operator=(const MultiThreadedStrategy &) = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy&)  = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy&&) = delete;
+    void operator=(const MultiThreadedStrategy&)         = delete;
 
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size);
+    [[nodiscard]] signed_index_type next(std::size_t nSlotsToClaim = 1) {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
-            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
-            _gatingSequenceCache->setValue(minSequence);
-
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    [[nodiscard]] signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        signed_index_type current;
-        signed_index_type next;
-
-        SpinWait     spinWait;
+        signed_index_type currentReserveCursor;
+        signed_index_type nextReserveCursor;
+        SpinWait          spinWait;
         do {
-            current = _cursor.value();
-            next = current + static_cast<signed_index_type>(n_slots_to_claim);
-
-            signed_index_type wrapPoint            = next - static_cast<signed_index_type>(_size);
-            signed_index_type cachedGatingSequence = _gatingSequenceCache->value();
-
-            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                signed_index_type gatingSequence = detail::getMinimumSequence(dependents, current);
-
-                if (wrapPoint > gatingSequence) {
-                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                        _waitStrategy.signalAllWhenBlocking();
-                    }
-                    spinWait.spinOnce();
-                    continue;
+            currentReserveCursor = _reserveCursor.value();
+            nextReserveCursor    = currentReserveCursor + static_cast<signed_index_type>(nSlotsToClaim);
+            if (nextReserveCursor - getMinReaderCursor() > static_cast<signed_index_type>(_size)) { // not enough slots in buffer
+                if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
+                    _waitStrategy.signalAllWhenBlocking();
                 }
-
-                _gatingSequenceCache->setValue(gatingSequence);
-            } else if (_cursor.compareAndSet(current, next)) {
+                spinWait.spinOnce();
+                continue;
+            } else if (_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor)) {
                 break;
             }
         } while (true);
 
-        return next;
+        return nextReserveCursor;
     }
 
-    [[nodiscard]] signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+    [[nodiscard]] std::optional<signed_index_type> tryNext(std::size_t nSlotsToClaim = 1) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        signed_index_type current;
-        signed_index_type next;
+        signed_index_type currentReserveCursor;
+        signed_index_type nextReserveCursor;
 
         do {
-            current = _cursor.value();
-            next    = current + static_cast<signed_index_type>(n_slots_to_claim);
-
-            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
-                throw NoCapacityException();
+            currentReserveCursor = _reserveCursor.value();
+            nextReserveCursor    = currentReserveCursor + static_cast<signed_index_type>(nSlotsToClaim);
+            if (nextReserveCursor - getMinReaderCursor() > static_cast<signed_index_type>(_size)) { // not enough slots in buffer
+                return std::nullopt;
             }
-        } while (!_cursor.compareAndSet(current, next));
-
-        return next;
+        } while (!_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor));
+        return nextReserveCursor;
     }
 
-    [[nodiscard]] signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto produced = _cursor.value();
-        const auto consumed = detail::getMinimumSequence(dependents, produced);
+    [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor.value() - getMinReaderCursor()); }
 
-        return static_cast<signed_index_type>(_size) - (produced - consumed);
-    }
-
-    void publish(signed_index_type offset, std::size_t n_slots_to_claim) {
-        for (std::size_t i = 0; i < n_slots_to_claim; i++) {
-            setAvailable(offset + static_cast<signed_index_type>(i) + 1);
+    void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
+        for (std::size_t i = 0; i < nSlotsToClaim; i++) {
+            _slotStates.set((offset + i) & _mask); // mark slots as published
         }
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+
+        // ensure publish cursor is only advanced after all prior slots are published
+        signed_index_type currentPublishCursor;
+        signed_index_type nextPublishCursor;
+        do {
+            currentPublishCursor = _publishCursor.value();
+            nextPublishCursor    = currentPublishCursor;
+
+            while (_slotStates.test(nextPublishCursor & _mask) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
+                nextPublishCursor++;
+            }
+        } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
+
+        //  clear completed slots up to the new published cursor
+        for (std::size_t seq = static_cast<std::size_t>(currentPublishCursor); seq < nextPublishCursor; seq++) {
+            _slotStates.reset(seq & _mask);
+        }
+
+        if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
             _waitStrategy.signalAllWhenBlocking();
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
-        const auto index = calculateIndex(sequence);
-        const auto flag  = calculateAvailabilityFlag(sequence);
-#if (__cpp_lib_atomic_ref >= 201806L)
-        return std::atomic_ref{_availableBuffer[index]} == flag;
-#else // clang's libc++ does not yet support std::atomic_ref
-        return _availableBuffer[index] == flag;
-#endif
-    }
-
-    [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
-        for (signed_index_type sequence = lowerBound; sequence <= availableSequence; sequence++) {
-            if (!isAvailable(sequence)) {
-                return sequence - 1;
-            }
-        }
-
-        return availableSequence;
-    }
-
 private:
-    void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept {
-#if (__cpp_lib_atomic_ref >= 201806L)
-        std::atomic_ref{_availableBuffer[index]} = flag;
-#else // clang's libc++ does not yet support std::atomic_ref
-        _availableBuffer[index] = flag;
-#endif
+    [[nodiscard]] forceinline signed_index_type getMinReaderCursor() const noexcept {
+        if (_readSequences->empty()) {
+            return kInitialCursorValue;
+        }
+        return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
     }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(sequence >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
 };
 
-static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
-// clang-format on
+static_assert(ClaimStrategyLike<MultiThreadedStrategy<1024, NoWaitStrategy>>);
 
 enum class ProducerType {
     /**
@@ -10507,21 +10460,21 @@ enum class ProducerType {
 };
 
 namespace detail {
-template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, ProducerType producerType, WaitStrategyLike TWaitStrategy>
 struct producer_type;
 
-template<std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
-    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
+template<std::size_t size, WaitStrategyLike TWaitStrategy>
+struct producer_type<size, ProducerType::Single, TWaitStrategy> {
+    using value_type = SingleThreadedStrategy<size, TWaitStrategy>;
 };
 
-template<std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
-    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
+template<std::size_t size, WaitStrategyLike TWaitStrategy>
+struct producer_type<size, ProducerType::Multi, TWaitStrategy> {
+    using value_type = MultiThreadedStrategy<size, TWaitStrategy>;
 };
 
-template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+template<std::size_t size, ProducerType producerType, WaitStrategyLike TWaitStrategy>
+using producer_type_v = typename producer_type<size, producerType, TWaitStrategy>::value_type;
 
 } // namespace detail
 
@@ -10693,29 +10646,29 @@ enum class SpanReleasePolicy {
  *
  * for more details see
  */
-template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
+template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producerType = ProducerType::Single, WaitStrategyLike TWaitStrategy = SleepingWaitStrategy>
 class CircularBuffer {
     using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = CircularBuffer<T, SIZE, producer_type, WAIT_STRATEGY>;
-    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
-    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
+    using BufferType        = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
+    using ClaimType         = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
     using signed_index_type = Sequence::signed_index_type;
 
-    struct buffer_impl {
-        Sequence                  _cursor;
+    struct BufferImpl {
         Allocator                 _allocator{};
         const bool                _isMmapAllocated;
         const std::size_t         _size; // pre-condition: std::has_single_bit(_size)
         std::vector<T, Allocator> _data;
-        WAIT_STRATEGY             _wait_strategy = WAIT_STRATEGY();
         ClaimType                 _claimStrategy;
-        // list of dependent reader indices
-        DependendsType           _read_indices{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
-        std::atomic<std::size_t> _reader_count{0UZ};
-        std::atomic<std::size_t> _writer_count{0UZ};
+        std::atomic<std::size_t>  _reader_count{0UZ};
+        std::atomic<std::size_t>  _writer_count{0UZ};
 
-        buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)), _data(buffer_size(_size, _isMmapAllocated), _allocator), _claimStrategy(ClaimType(_cursor, _wait_strategy, _size)) {}
+        BufferImpl() = delete;
+        BufferImpl(const std::size_t min_size, Allocator allocator)
+            : _allocator(allocator),                                                                 //
+              _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), //
+              _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)),                //
+              _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
+              _claimStrategy(ClaimType(_size)) {}
 
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
@@ -10749,11 +10702,11 @@ class CircularBuffer {
     }; // struct buffer_impl
 
     template<typename U = T>
-    class buffer_writer;
+    class Writer;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class PublishableOutputRange {
-        buffer_writer<U>* _parent = nullptr;
+        Writer<U>* _parent = nullptr;
 
     public:
         using element_type     = T;
@@ -10763,15 +10716,13 @@ class CircularBuffer {
         using pointer          = typename std::span<T>::reverse_iterator;
 
         PublishableOutputRange() = delete;
-        explicit PublishableOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {
+        explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) {
             _parent->_index        = 0UZ;
             _parent->_offset       = 0;
             _parent->_internalSpan = std::span<T>();
-#ifndef NDEBUG
             _parent->_rangesCounter++;
-#endif
         };
-        explicit constexpr PublishableOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+        explicit constexpr PublishableOutputRange(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
             _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
@@ -10781,9 +10732,7 @@ class CircularBuffer {
         PublishableOutputRange& operator=(const PublishableOutputRange& other) {
             if (this != &other) {
                 _parent = other._parent;
-#ifndef NDEBUG
                 _parent->_rangesCounter++;
-#endif
             }
             return *this;
         }
@@ -10791,8 +10740,19 @@ class CircularBuffer {
         ~PublishableOutputRange() {
             _parent->_rangesCounter--;
             if (_parent->_rangesCounter == 0) {
-                if (!_parent->_isMmapAllocated) {
-                    const std::size_t size = _parent->_size;
+                if (!_parent->isPublished()) {
+                    if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
+                        assert(false && "CircularBuffer::PublishableOutputRange() - omitted publish() call for SpanReleasePolicy::Terminate");
+                        std::abort();
+                    } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                        publish(_parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                    } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
+                        publish(0UZ);
+                    }
+                }
+
+                if (!_parent->_buffer->_isMmapAllocated) {
+                    const std::size_t size = _parent->_buffer->_size;
                     // mirror samples below/above the buffer's wrap-around point
                     const size_t nFirstHalf  = std::min(size - _parent->_index, _parent->nSamplesPublished());
                     const size_t nSecondHalf = _parent->nSamplesPublished() - nFirstHalf;
@@ -10801,7 +10761,7 @@ class CircularBuffer {
                     std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
                     std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
                 }
-                _parent->_claimStrategy->publish(_parent->_offset, _parent->nSamplesPublished());
+                _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->nSamplesPublished());
                 _parent->_offset += static_cast<signed_index_type>(_parent->nSamplesPublished());
 #ifndef NDEBUG
                 if constexpr (isMultiThreadedStrategy()) {
@@ -10819,7 +10779,7 @@ class CircularBuffer {
 #endif
                 _parent->_nSamplesPublished = 0;
                 _parent->_internalSpan      = {};
-            };
+            }
         }
 
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _parent->_internalSpan.size(); };
@@ -10839,7 +10799,7 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t              samplesToPublish() const noexcept { return _parent->_nSamplesPublished; }
         [[nodiscard]] constexpr bool                     isPublished() const noexcept { return _parent->_isRangePublished; }
         [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nSamplesPublished; }
-        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>; }
+        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>; }
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
 
         constexpr void publish(std::size_t nSamplesToPublish) noexcept {
@@ -10852,17 +10812,14 @@ class CircularBuffer {
     static_assert(PublishableSpan<PublishableOutputRange<T>>);
 
     template<typename U>
-    class buffer_writer {
+    class Writer {
         friend class PublishableOutputRange<U, SpanReleasePolicy::Terminate>;
         friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessAll>;
         friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessNone>;
 
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         BufferTypeLocal _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        bool            _isMmapAllocated;
-        std::size_t     _size;
-        ClaimType*      _claimStrategy;
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
         // These are the parameters for PublishableOutputRange, only one PublishableOutputRange can be reserved per writer
@@ -10870,22 +10827,25 @@ class CircularBuffer {
         bool              _isRangePublished{true}; // controls if publish() was invoked
         std::size_t       _index{0UZ};
         signed_index_type _offset{0};
-        std::span<T>      _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
+        std::span<T>      _internalSpan{}; // internal span is managed by Writer and is shared across all PublishableSpans reserved by this Writer
         std::size_t       _rangesCounter{0};
 
     public:
-        buffer_writer() = delete;
-        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(std::move(buffer)), _isMmapAllocated(_buffer->_isMmapAllocated), _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+        Writer() = delete;
+        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
 
-        buffer_writer(buffer_writer&& other) noexcept : _buffer(std::move(other._buffer)), _isMmapAllocated(_buffer->_isMmapAllocated), _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)), _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ)), _isRangePublished(std::exchange(other._isRangePublished, true)), _index(std::exchange(other._index, 0UZ)), _offset(std::exchange(other._offset, 0)), _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {};
+        Writer(Writer&& other) noexcept
+            : _buffer(std::move(other._buffer)),                                //
+              _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ)), //
+              _isRangePublished(std::exchange(other._isRangePublished, true)),  //
+              _index(std::exchange(other._index, 0UZ)),                         //
+              _offset(std::exchange(other._offset, 0)),                         //
+              _internalSpan(std::exchange(other._internalSpan, std::span<T>{})){};
 
-        buffer_writer& operator=(buffer_writer tmp) noexcept {
+        Writer& operator=(Writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
-            _isMmapAllocated = _buffer->_isMmapAllocated;
-            _size            = _buffer->_size;
             std::swap(_nSamplesPublished, tmp._nSamplesPublished);
             std::swap(_isRangePublished, tmp._isRangePublished);
-            _claimStrategy = std::addressof(_buffer->_claimStrategy);
             std::swap(_index, tmp._index);
             std::swap(_offset, tmp._offset);
             std::swap(_internalSpan, tmp._internalSpan);
@@ -10893,7 +10853,7 @@ class CircularBuffer {
             return *this;
         }
 
-        ~buffer_writer() {
+        ~Writer() {
             if (_buffer) {
                 _buffer->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
             }
@@ -10902,6 +10862,25 @@ class CircularBuffer {
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         [[nodiscard]] constexpr std::size_t nSamplesPublished() const noexcept { return _nSamplesPublished; };
+
+        template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
+        [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
+            checkIfCanReserveAndAbortIfNeeded();
+            _isRangePublished  = false;
+            _nSamplesPublished = 0UZ;
+
+            if (nSamples == 0) {
+                return PublishableOutputRange<U, policy>(this);
+            }
+
+            const std::optional<signed_index_type> sequence = _buffer->_claimStrategy.tryNext(nSamples);
+            if (sequence.has_value()) {
+                const std::size_t index = (static_cast<std::size_t>(sequence.value()) + _buffer->_size - nSamples) % _buffer->_size;
+                return PublishableOutputRange<U, policy>(this, index, sequence.value(), nSamples);
+            } else {
+                return PublishableOutputRange<U, policy>(this);
+            }
+        }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
@@ -10913,104 +10892,50 @@ class CircularBuffer {
                 return PublishableOutputRange<U, policy>(this);
             }
 
-            try {
-                const auto        sequence = _claimStrategy->next(*_buffer->_read_indices, nSamples); // alt: try_next
-                const std::size_t index    = (static_cast<std::size_t>(sequence) + _size - nSamples) % _size;
-                return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
-            } catch (const NoCapacityException&) {
-                return PublishableOutputRange<U, policy>(this);
-            }
+            const auto        sequence = _buffer->_claimStrategy.next(nSamples);
+            const std::size_t index    = (static_cast<std::size_t>(sequence) + _buffer->_size - nSamples) % _buffer->_size;
+            return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
         }
 
-        template<typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void publish(Translator&& translator, std::size_t nSamples = 1, Args&&... args) {
-            if (nSamples <= 0 || _buffer->_read_indices->empty()) {
-                return;
-            }
-            const auto sequence = _claimStrategy->next(*_buffer->_read_indices, nSamples);
-            translate_and_publish(std::forward<Translator>(translator), nSamples, sequence, std::forward<Args>(args)...);
-        } // blocks until elements are available
-
-        template<typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr bool try_publish(Translator&& translator, std::size_t nSamples = 1, Args&&... args) {
-            if (nSamples <= 0 || _buffer->_read_indices->empty()) {
-                return true;
-            }
-            try {
-                const auto sequence = _claimStrategy->tryNext(*_buffer->_read_indices, nSamples);
-                translate_and_publish(std::forward<Translator>(translator), nSamples, sequence, std::forward<Args>(args)...);
-                return true;
-            } catch (const NoCapacityException&) {
-                return false;
-            }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
+        [[nodiscard]] constexpr std::size_t       available() const noexcept {
+            const auto res = static_cast<std::size_t>(_buffer->_claimStrategy.getRemainingCapacity());
+            return res;
         }
-
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
-        [[nodiscard]] constexpr std::size_t       available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
-        [[nodiscard]] constexpr bool              isPublished() const noexcept { return _isRangePublished; }
-        [[nodiscard]] constexpr std::size_t       samplesPublished() const noexcept { return _nSamplesPublished; }
+        [[nodiscard]] constexpr bool        isPublished() const noexcept { return _isRangePublished; }
+        [[nodiscard]] constexpr std::size_t samplesPublished() const noexcept { return _nSamplesPublished; }
 
     private:
-        template<typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
-            try {
-                auto&             data  = _buffer->_data;
-                const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
-                std::span<U>      writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), writable_data, publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
-                } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), writable_data, args...);
-                } else {
-                    static_assert(gr::meta::always_false<Translator>, "Translator does not provide a matching signature");
-                }
-
-                if (!_isMmapAllocated) {
-                    // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf  = std::min(_size - index, n_slots_to_claim);
-                    const size_t nSecondHalf = n_slots_to_claim - nFirstHalf;
-
-                    std::copy(&data[index], &data[index + nFirstHalf], &data[index + _size]);
-                    std::copy(&data[_size], &data[_size + nSecondHalf], &data[0]);
-                }
-                _claimStrategy->publish(publishSequence - static_cast<signed_index_type>(n_slots_to_claim), n_slots_to_claim);
-            } catch (const std::exception&) {
-                throw;
-            } catch (...) {
-                throw std::runtime_error("CircularBuffer::translate_and_publish() - unknown user exception thrown");
-            }
-        }
-
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
-            if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
+            if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>) {
                 if (_internalSpan.size() - _nSamplesPublished != 0) {
                     fmt::print(stderr,
-                        "An error occurred: The method CircularBuffer::multiple_writer::reserve() was invoked for the second time in succession, "
+                        "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
                         "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.",
                         _internalSpan.size() - _nSamplesPublished);
                     std::abort();
                 }
 
             } else {
-                if (!_internalSpan.empty() && not _isRangePublished) {
+                if (!_internalSpan.empty() && !_isRangePublished) {
                     fmt::print(stderr,
-                        "An error occurred: The method CircularBuffer::single_writer::reserve() was invoked for the second time in succession "
+                        "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
                         "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.",
                         _internalSpan.size());
                     std::abort();
                 }
             }
         }
-    }; // class buffer_writer
-    // static_assert(BufferWriter<buffer_writer<T>>);
+    }; // class Writer
+    // static_assert(BufferWriterLike<Writer<T>>);
 
     template<typename U = T>
-    class buffer_reader;
+    class Reader;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class ConsumableInputRange {
-        const buffer_reader<U>* _parent = nullptr;
-        std::span<const T>      _internalSpan{};
+        const Reader<U>*   _parent = nullptr;
+        std::span<const T> _internalSpan{};
 
     public:
         using element_type     = T;
@@ -11019,9 +10944,9 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) { _parent->_rangesCounter++; }
+        explicit ConsumableInputRange(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_rangesCounter++; }
 
-        explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_rangesCounter++; }
+        explicit constexpr ConsumableInputRange(const Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_rangesCounter++; }
 
         ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_rangesCounter++; }
 
@@ -11126,17 +11051,16 @@ class CircularBuffer {
     static_assert(ConsumableSpan<ConsumableInputRange<T>>);
 
     template<typename U>
-    class buffer_reader {
+    class Reader {
         friend class ConsumableInputRange<U, SpanReleasePolicy::Terminate>;
         friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessAll>;
         friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessNone>;
 
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
         mutable signed_index_type _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
-        std::size_t               _size;                                                      // pre-condition: std::has_single_bit(_size)
         mutable std::size_t       _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
         mutable std::size_t       _rangesCounter{0UZ};                                        // reference counter for number of ConsumableSpanRanges
 
@@ -11145,20 +11069,29 @@ class CircularBuffer {
         mutable std::size_t _nSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
         mutable std::size_t _nSamplesConsumed{0UZ};                                      // The number of samples actually consumed.
 
-        std::size_t buffer_index() const noexcept {
-            const auto bitmask = _size - 1;
+        std::size_t bufferIndex() const noexcept {
+            const auto bitmask = _buffer->_size - 1;
             return static_cast<std::size_t>(_readIndexCached) & bitmask;
         }
 
     public:
-        buffer_reader() = delete;
-        explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(buffer), _size(buffer->_size) {
-            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_readIndex});
+        Reader() = delete;
+        explicit Reader(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(buffer) {
+            gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
             _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
             _readIndexCached = _readIndex->value();
         }
-        buffer_reader(buffer_reader&& other) noexcept : _readIndex(std::move(other._readIndex)), _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), _buffer(other._buffer), _size(_buffer->_size), _nSamplesFirstGet(std::move(other._nSamplesFirstGet)), _rangesCounter(std::move(other._rangesCounter)), _nSamplesToConsume(std::move(other._nSamplesToConsume)), _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
-        buffer_reader& operator=(buffer_reader tmp) noexcept {
+
+        Reader(Reader&& other) noexcept
+            : _readIndex(std::move(other._readIndex)),                                      //
+              _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
+              _buffer(other._buffer),                                                       //
+              _nSamplesFirstGet(std::move(other._nSamplesFirstGet)),                        //
+              _rangesCounter(std::move(other._rangesCounter)),                              //
+              _nSamplesToConsume(std::move(other._nSamplesToConsume)),                      //
+              _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
+
+        Reader& operator=(Reader tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);
@@ -11166,11 +11099,10 @@ class CircularBuffer {
             std::swap(_rangesCounter, tmp._rangesCounter);
             std::swap(_nSamplesToConsume, tmp._nSamplesToConsume);
             std::swap(_nSamplesConsumed, tmp._nSamplesConsumed);
-            _size = _buffer->_size;
             return *this;
         };
-        ~buffer_reader() {
-            gr::detail::removeSequence(_buffer->_read_indices, _readIndex);
+        ~Reader() {
+            gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
             _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
         }
 
@@ -11185,7 +11117,7 @@ class CircularBuffer {
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
             if (isConsumeRequested()) {
-                assert(false && "An error occurred: The method CircularBuffer::buffer_reader::get() was invoked after consume() methods was explicitly invoked.");
+                assert(false && "An error occurred: The method CircularBuffer::Reader::get() was invoked after consume() methods was explicitly invoked.");
             }
 
             std::size_t nSamples{nRequested};
@@ -11200,18 +11132,14 @@ class CircularBuffer {
             } else {
                 nSamples = std::min(nSamples, _nSamplesFirstGet);
             }
-            return ConsumableInputRange<U, policy>(this, buffer_index(), nSamples);
+            return ConsumableInputRange<U, policy>(this, bufferIndex(), nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
 
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            const auto last = _buffer->_claimStrategy.getHighestPublishedSequence(_readIndexCached + 1, _buffer->_cursor.value());
-            return static_cast<std::size_t>(last - _readIndexCached);
-        }
-    }; // class buffer_reader
-
-    // static_assert(BufferReader<buffer_reader<T>>);
+        [[nodiscard]] constexpr std::size_t available() const noexcept { return static_cast<std::size_t>(_buffer->_claimStrategy._publishCursor.value() - _readIndexCached); }
+    }; // class Reader
+    // static_assert(BufferReaderLike<Reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
         if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
@@ -11221,26 +11149,26 @@ class CircularBuffer {
         }
     }
 
-    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    explicit CircularBuffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    std::shared_ptr<BufferImpl> _shared_buffer_ptr;
+    explicit CircularBuffer(std::shared_ptr<BufferImpl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
     CircularBuffer() = delete;
-    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator()) : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) {}
+    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator()) : _shared_buffer_ptr(std::make_shared<BufferImpl>(min_size, allocator)) {}
     ~CircularBuffer() = default;
 
-    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
-    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
-    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
+    [[nodiscard]] std::size_t           size() const noexcept { return _shared_buffer_ptr->_size; }
+    [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_shared_buffer_ptr); }
+    [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_shared_buffer_ptr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
     [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
     [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_reader_count.load(std::memory_order_relaxed); }
     [[nodiscard]] const auto& claim_strategy() { return _shared_buffer_ptr->_claimStrategy; }
-    [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+    [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_claimStrategy._wait_strategy; }
+    [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_claimStrategy._publishCursor; }
 };
-static_assert(Buffer<CircularBuffer<int32_t>>);
+static_assert(BufferLike<CircularBuffer<int32_t>>);
 
 } // namespace gr
 #endif // GNURADIO_CIRCULARBUFFER_HPP
@@ -13432,6 +13360,10 @@ ENABLE_REFLECTION_FOR_TEMPLATE(gr::Packet, timestamp, signal_values, meta_inform
 #ifndef GNURADIO_MESSAGE_HPP
 #define GNURADIO_MESSAGE_HPP
 
+// #include <gnuradio-4.0/Buffer.hpp>
+
+// #include <gnuradio-4.0/CircularBuffer.hpp>
+
 // #include <gnuradio-4.0/meta/formatter.hpp>
 #ifndef GNURADIO_FORMATTER_HPP
 #define GNURADIO_FORMATTER_HPP
@@ -13959,8 +13891,7 @@ struct exception : public std::exception {
 
     exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {}
 
-    [[nodiscard]] const char *
-    what() const noexcept override {
+    [[nodiscard]] const char* what() const noexcept override {
         if (formattedMessage.empty()) {
             formattedMessage = fmt::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
         }
@@ -13976,29 +13907,20 @@ struct Error {
     std::source_location                  sourceLocation;
     std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
 
-    Error(std::string_view msg = "unknown error", std::source_location location = std::source_location::current(),
-          std::chrono::system_clock::time_point time = std::chrono::system_clock::now()) noexcept
-        : message(msg), sourceLocation(location), errorTime(time) {}
+    Error(std::string_view msg = "unknown error", std::source_location location = std::source_location::current(), std::chrono::system_clock::time_point time = std::chrono::system_clock::now()) noexcept : message(msg), sourceLocation(location), errorTime(time) {}
 
-    explicit Error(const std::exception &ex, std::source_location location = std::source_location::current()) noexcept : Error(ex.what(), location) {}
+    explicit Error(const std::exception& ex, std::source_location location = std::source_location::current()) noexcept : Error(ex.what(), location) {}
 
-    explicit Error(const gr::exception &ex) noexcept : message(ex.message), sourceLocation(ex.sourceLocation), errorTime(ex.errorTime) {}
+    explicit Error(const gr::exception& ex) noexcept : message(ex.message), sourceLocation(ex.sourceLocation), errorTime(ex.errorTime) {}
 
-    [[nodiscard]] std::string
-    srcLoc() const noexcept {
-        return fmt::format("{}", sourceLocation);
-    }
+    [[nodiscard]] std::string srcLoc() const noexcept { return fmt::format("{}", sourceLocation); }
 
-    [[nodiscard]] std::string
-    methodName() const noexcept {
-        return sourceLocation.function_name();
-    }
+    [[nodiscard]] std::string methodName() const noexcept { return sourceLocation.function_name(); }
 
-    [[nodiscard]] std::string
-    isoTime() const noexcept {
-        return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                                    // ms-precision ISO time-format
-                           fmt::localtime(std::chrono::system_clock::to_time_t(errorTime)), //
-                           std::chrono::duration_cast<std::chrono::milliseconds>(errorTime.time_since_epoch()).count() % 1000);
+    [[nodiscard]] std::string isoTime() const noexcept {
+        return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                     // ms-precision ISO time-format
+            fmt::localtime(std::chrono::system_clock::to_time_t(errorTime)), //
+            std::chrono::duration_cast<std::chrono::milliseconds>(errorTime.time_since_epoch()).count() % 1000);
     }
 };
 
@@ -14026,8 +13948,7 @@ enum class Command : unsigned char {
 };
 
 template<Command command>
-std::string
-commandName() noexcept {
+std::string commandName() noexcept {
     return std::string(magic_enum::enum_name<command>());
 }
 
@@ -14047,11 +13968,11 @@ struct Message {
 
     std::string                        protocol = message::defaultBlockProtocol; ///< unique protocol name including version (e.g. 'MDPC03' or 'MDPW03')
     message::Command                   cmd      = Notify;                        ///< command type (GET, SET, SUBSCRIBE, UNSUBSCRIBE, PARTIAL, FINAL, NOTIFY, READY, DISCONNECT, HEARTBEAT)
-    std::string                        serviceName; ///< service/block name (normally the URI path only), or client source ID (for broker/scheduler <-> worker messages) N.B empty string is wildcard
-    std::string                        clientRequestID = ""; ///< stateful: worker mirrors clientRequestID; stateless: worker generates unique increasing IDs (to detect packet loss)
-    std::string                        endpoint;             ///< URI containing at least <path> and optionally <query> parameters (e.g. property name)
-    std::expected<property_map, Error> data;                 ///< request/reply body and/or Error containing stack-trace
-    std::string                        rbac = "";            ///< optional RBAC meta-info -- may contain token, role, signed message hash (implementation dependent)
+    std::string                        serviceName;                              ///< service/block name (normally the URI path only), or client source ID (for broker/scheduler <-> worker messages) N.B empty string is wildcard
+    std::string                        clientRequestID = "";                     ///< stateful: worker mirrors clientRequestID; stateless: worker generates unique increasing IDs (to detect packet loss)
+    std::string                        endpoint;                                 ///< URI containing at least <path> and optionally <query> parameters (e.g. property name)
+    std::expected<property_map, Error> data;                                     ///< request/reply body and/or Error containing stack-trace
+    std::string                        rbac = "";                                ///< optional RBAC meta-info -- may contain token, role, signed message hash (implementation dependent)
 };
 
 static_assert(std::is_default_constructible_v<Message>);
@@ -14060,9 +13981,8 @@ static_assert(std::is_move_assignable_v<Message>);
 
 namespace detail {
 template<message::Command cmd, typename T>
-    requires(std::is_same_v<T, property_map> || std::is_same_v<T, Error>)
-void
-sendMessage(auto &port, std::string_view serviceName, std::string_view endpoint, T userMessage, std::string_view clientRequestID = "") {
+requires(std::is_same_v<T, property_map> || std::is_same_v<T, Error>)
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, T userMessage, std::string_view clientRequestID = "") {
     using namespace gr::message;
     using enum gr::message::Command;
 
@@ -14078,25 +13998,23 @@ sendMessage(auto &port, std::string_view serviceName, std::string_view endpoint,
     } else {
         message.data = std::unexpected(userMessage);
     }
-    port.streamWriter().publish([&](auto &out) { out[0] = std::move(message); }, 1UZ);
+    PublishableSpan auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+    msgSpan[0]                   = std::move(message);
 }
 } // namespace detail
 
 template<auto cmd>
-void
-sendMessage(auto &port, std::string_view serviceName, std::string_view endpoint, property_map userMessage, std::string_view clientRequestID = "") {
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, property_map userMessage, std::string_view clientRequestID = "") {
     detail::sendMessage<cmd>(port, serviceName, endpoint, std::move(userMessage), clientRequestID);
 }
 
 template<auto cmd>
-void
-sendMessage(auto &port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::string, pmtv::pmt>> userMessage, std::string_view clientRequestID = "") {
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::string, pmtv::pmt>> userMessage, std::string_view clientRequestID = "") {
     detail::sendMessage<cmd, property_map>(port, serviceName, endpoint, property_map(userMessage), clientRequestID);
 }
 
 template<auto cmd>
-void
-sendMessage(auto &port, std::string_view serviceName, std::string_view endpoint, Error userMessage, std::string_view clientRequestID = "") {
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, Error userMessage, std::string_view clientRequestID = "") {
     detail::sendMessage<cmd, Error>(port, serviceName, endpoint, std::move(userMessage), clientRequestID);
 }
 
@@ -14106,18 +14024,20 @@ template<>
 struct fmt::formatter<gr::Error> {
     char presentation = 's';
 
-    constexpr auto
-    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
         auto it = ctx.begin(), end = ctx.end();
-        if (it != end && (*it == 'f' || *it == 't' || *it == 's')) presentation = *it++;
-        if (it != end && *it != '}') throw fmt::format_error("invalid format");
+        if (it != end && (*it == 'f' || *it == 't' || *it == 's')) {
+            presentation = *it++;
+        }
+        if (it != end && *it != '}') {
+            throw fmt::format_error("invalid format");
+        }
         return it;
     }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
-    auto
-    format(const gr::Error &err, FormatContext &ctx) const -> decltype(ctx.out()) {
+    auto format(const gr::Error& err, FormatContext& ctx) const -> decltype(ctx.out()) {
         switch (presentation) {
         case 't': return fmt::format_to(ctx.out(), "{}: {}: {} in method: {}", err.isoTime(), err.srcLoc(), err.message, err.methodName());
         case 'f': return fmt::format_to(ctx.out(), "{}: {} in method: {}", err.srcLoc(), err.message, err.methodName());
@@ -14129,45 +14049,31 @@ struct fmt::formatter<gr::Error> {
 
 template<>
 struct fmt::formatter<gr::message::Command> {
-    constexpr auto
-    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-        return ctx.begin();
-    }
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
-    auto
-    format(const gr::message::Command &command, FormatContext &ctx) const -> decltype(ctx.out()) {
+    auto format(const gr::message::Command& command, FormatContext& ctx) const -> decltype(ctx.out()) {
         return fmt::format_to(ctx.out(), "{}", magic_enum::enum_name(command));
     }
 };
 
-inline std::ostream &
-operator<<(std::ostream &os, const gr::message::Command &command) {
-    return os << magic_enum::enum_name(command);
-}
+inline std::ostream& operator<<(std::ostream& os, const gr::message::Command& command) { return os << magic_enum::enum_name(command); }
 
 template<>
 struct fmt::formatter<gr::Message> {
-    constexpr auto
-    parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-        return ctx.begin();
-    }
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
-    auto
-    format(const gr::Message &msg, FormatContext &ctx) const -> decltype(ctx.out()) {
+    auto format(const gr::Message& msg, FormatContext& ctx) const -> decltype(ctx.out()) {
         return fmt::format_to(ctx.out(), "{{ protocol: '{}', cmd: {}, serviceName: '{}', clientRequestID: '{}', endpoint: '{}', {}, RBAC: '{}' }}", //
-                              msg.protocol, msg.cmd, msg.serviceName, msg.clientRequestID, msg.endpoint,                                            //
-                              msg.data.has_value() ? fmt::format("data: {}", msg.data.value()) : fmt::format("error: {}", msg.data.error()), msg.rbac);
+            msg.protocol, msg.cmd, msg.serviceName, msg.clientRequestID, msg.endpoint,                                                              //
+            msg.data.has_value() ? fmt::format("data: {}", msg.data.value()) : fmt::format("error: {}", msg.data.error()), msg.rbac);
     }
 };
 
-inline std::ostream &
-operator<<(std::ostream &os, const gr::Message &msg) {
-    return os << fmt::format("{}", msg);
-}
+inline std::ostream& operator<<(std::ostream& os, const gr::Message& msg) { return os << fmt::format("{}", msg); }
 
 #endif // include guard
 
@@ -14722,7 +14628,7 @@ struct Optional {};
  *
  * @tparam BufferType user-extendable buffer implementation for the streaming data
  */
-template<gr::Buffer BufferType>
+template<gr::BufferLike BufferType>
 struct StreamBufferType {
     using type = BufferType;
 };
@@ -14732,16 +14638,16 @@ struct StreamBufferType {
  *
  * @tparam BufferType user-extendable buffer implementation for the tag data
  */
-template<gr::Buffer BufferType>
+template<gr::BufferLike BufferType>
 struct TagBufferType {
     using type = BufferType;
 };
 
 template<typename T>
-concept IsStreamBufferAttribute = requires { typename T::type; } && gr::Buffer<typename T::type> && std::is_base_of_v<StreamBufferType<typename T::type>, T>;
+concept IsStreamBufferAttribute = requires { typename T::type; } && gr::BufferLike<typename T::type> && std::is_base_of_v<StreamBufferType<typename T::type>, T>;
 
 template<typename T>
-concept IsTagBufferAttribute = requires { typename T::type; } && gr::Buffer<typename T::type> && std::is_base_of_v<TagBufferType<typename T::type>, T>;
+concept IsTagBufferAttribute = requires { typename T::type; } && gr::BufferLike<typename T::type> && std::is_base_of_v<TagBufferType<typename T::type>, T>;
 
 template<typename T>
 using is_stream_buffer_attribute = std::bool_constant<IsStreamBufferAttribute<T>>;
@@ -15116,7 +15022,7 @@ public:
         return port_buffers{_ioHandler.buffer(), _tagIoHandler.buffer()};
     }
 
-    void setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
+    void setBuffer(gr::BufferLike auto streamBuffer, gr::BufferLike auto tagBuffer) noexcept {
         if constexpr (kIsInput) {
             _ioHandler    = streamBuffer.new_reader();
             _tagIoHandler = tagBuffer.new_reader();
@@ -15194,10 +15100,17 @@ public:
     }
 
     template<SpanReleasePolicy TSpanReleasePolicy>
-    auto reserve(std::size_t n_samples)
+    auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return streamWriter().template reserve<TSpanReleasePolicy>(n_samples);
+        return streamWriter().template reserve<TSpanReleasePolicy>(nSamples);
+    }
+
+    template<SpanReleasePolicy TSpanReleasePolicy>
+    auto tryReserve(std::size_t nSamples)
+    requires(kIsOutput)
+    {
+        return streamWriter().template tryReserve<TSpanReleasePolicy>(nSamples);
     }
 
     /**
@@ -15295,7 +15208,6 @@ private:
                 _cachedTag.map.insert_or_assign(key, value);
             }
         }
-
         if (isConnected() && (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM))) { // force tag publishing for explicitly published tags or EOS
             publishPendingTags();
         }
@@ -16211,10 +16123,10 @@ concept processBulk_requires_ith_output_as_span
 #ifndef GNURADIO_WAITSTRATEGY_HPP
 #define GNURADIO_WAITSTRATEGY_HPP
 
-#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -16433,7 +16345,7 @@ inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
 static_assert(!hasSignalAllWhenBlocking<int>);
 
 template<typename T>
-concept WaitStrategy = isWaitStrategy<T>;
+concept WaitStrategyLike = isWaitStrategy<T>;
 
 
 
@@ -16469,7 +16381,7 @@ public:
         _conditionVariable.notify_all();
     }
 };
-static_assert(WaitStrategy<BlockingWaitStrategy>);
+static_assert(WaitStrategyLike<BlockingWaitStrategy>);
 
 /**
  * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
@@ -16485,7 +16397,7 @@ struct BusySpinWaitStrategy {
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<BusySpinWaitStrategy>);
+static_assert(WaitStrategyLike<BusySpinWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
 
 /**
@@ -16525,7 +16437,7 @@ public:
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<SleepingWaitStrategy>);
+static_assert(WaitStrategyLike<SleepingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
 
 struct TimeoutException : public std::runtime_error {
@@ -16570,7 +16482,7 @@ public:
         _conditionVariable.notify_all();
     }
 };
-static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
+static_assert(WaitStrategyLike<TimeoutBlockingWaitStrategy>);
 static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
 
 /**
@@ -16601,7 +16513,7 @@ public:
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<YieldingWaitStrategy>);
+static_assert(WaitStrategyLike<YieldingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
 
 struct NoWaitStrategy {
@@ -16610,7 +16522,7 @@ struct NoWaitStrategy {
         return sequence;
     }
 };
-static_assert(WaitStrategy<NoWaitStrategy>);
+static_assert(WaitStrategyLike<NoWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
 
 
@@ -16728,7 +16640,7 @@ struct SpinWaitWaitStrategy {
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<SpinWaitWaitStrategy>);
+static_assert(WaitStrategyLike<SpinWaitWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
 
 struct NO_SPIN_WAIT {};
@@ -16757,10 +16669,8 @@ public:
     void unlock() { _lock.clear(std::memory_order::release); }
 };
 
-
 // clang-format on
 } // namespace gr
-
 
 #endif // GNURADIO_WAITSTRATEGY_HPP
 
@@ -20056,7 +19966,6 @@ public:
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
         traits::block::all_output_ports<Derived>::for_each(setPortName);
-
         // Handle settings
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
@@ -20068,7 +19977,6 @@ public:
             }
         });
         checkBlockParameterConsistency();
-
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
         emitErrorMessageIfAny("init(..) -> INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
@@ -20164,7 +20072,6 @@ public:
                 return;
             }
         }
-
         if constexpr (StrideControl::kEnabled) {
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
@@ -20174,7 +20081,6 @@ public:
                 return;
             }
         }
-
         const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         if (minSyncIn > maxSyncIn) {
@@ -20371,9 +20277,9 @@ public:
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template reserve<ProcessAll>(sync_samples);
+                            return std::forward<Port>(port).template tryReserve<ProcessAll>(sync_samples);
                         } else {
-                            return std::forward<Port>(port).template reserve<ProcessNone>(port.streamWriter().available());
+                            return std::forward<Port>(port).template tryReserve<ProcessNone>(port.streamWriter().available());
                         }
                     }
                 };
@@ -20387,6 +20293,27 @@ public:
                 }
             },
             ports);
+    }
+
+    template<typename TOutTuple>
+    constexpr static bool containsEmptyOutputSpans(TOutTuple& outputTuple) noexcept {
+        bool result = false;
+        meta::tuple_for_each(
+            [&result]<typename TOut>(TOut& out) {
+                if constexpr (PublishableSpan<TOut>) {
+                    if (out.empty()) {
+                        result = true;
+                    }
+                } else if constexpr (PublishableSpan<typename TOut::value_type>) {
+                    for (auto& span : out) {
+                        if (span.empty()) {
+                            result = true;
+                        }
+                    }
+                }
+            },
+            outputTuple);
+        return result;
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
@@ -20629,7 +20556,6 @@ protected:
             std::size_t maxAvailable = std::numeric_limits<std::size_t>::max(); // the maximum amount of that are available on all sync ports
             bool        hasAsync     = false;                                   // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
-
         auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
             const std::size_t available = [&port]() {
                 if constexpr (gr::traits::port::is_input_v<Port>) {
@@ -21012,6 +20938,10 @@ protected:
         const auto   inputSpans   = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto         outputSpans  = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
+        if (containsEmptyOutputSpans(outputSpans)) {
+            return {requested_work, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
+        }
+
         updateInputAndOutputTags();
         applyChangedSettings();
 
@@ -21227,9 +21157,10 @@ public:
                 continue; // function does not produce any return message
             }
 
-            retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
-            retMessage->serviceName = unique_name;
-            msgOut.streamWriter().publish([&](auto& out) { out[0] = *retMessage; }, 1UZ);
+            retMessage->cmd              = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
+            retMessage->serviceName      = unique_name;
+            PublishableSpan auto msgSpan = msgOut.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            msgSpan[0]                   = *retMessage;
         } // - end - for (const auto &message : messages) { ..
     }
 

@@ -35,13 +35,15 @@ const boost::ut::suite PortTests = [] {
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();
         { // put testdata into buffer
-            auto writeSpan = writer.reserve<SpanReleasePolicy::ProcessAll>(5);
-            auto tagSpan   = tagWriter.reserve(5);
-            tagSpan[0]     = {-1, {{"id", "tag@-1"}, {"id0", true}}};
-            tagSpan[1]     = {1, {{"id", "tag@101"}, {"id1", true}}};
-            tagSpan[2]     = {2, {{"id", "tag@102"}, {"id2", true}}};
-            tagSpan[3]     = {3, {{"id", "tag@103"}, {"id3", true}}};
-            tagSpan[4]     = {4, {{"id", "tag@104"}, {"id4", true}}};
+            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            auto tagSpan   = tagWriter.tryReserve(5);
+            expect(eq(writeSpan.size(), 5UZ));
+            expect(eq(tagSpan.size(), 5UZ));
+            tagSpan[0] = {-1, {{"id", "tag@-1"}, {"id0", true}}};
+            tagSpan[1] = {1, {{"id", "tag@101"}, {"id1", true}}};
+            tagSpan[2] = {2, {{"id", "tag@102"}, {"id2", true}}};
+            tagSpan[3] = {3, {{"id", "tag@103"}, {"id3", true}}};
+            tagSpan[4] = {4, {{"id", "tag@104"}, {"id4", true}}};
             std::iota(writeSpan.begin(), writeSpan.end(), 100);
             tagSpan.publish(5);   // this should not be necessary as the ProcessAll policy should publish automatically
             writeSpan.publish(5); // this should not be necessary as the ProcessAll policy should publish automatically
@@ -79,7 +81,8 @@ const boost::ut::suite PortTests = [] {
         auto         reader    = out.buffer().streamBuffer.new_reader();
         auto         tagReader = out.buffer().tagBuffer.new_reader();
         {
-            auto data = out.reserve<SpanReleasePolicy::ProcessAll>(5);
+            auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            expect(eq(data.size(), 5UZ));
             out.publishTag({{"id", "tag@-1"}}, -1);
             out.publishPendingTags();
             out.publishTag({{"id", "tag@101"}}, 1);
@@ -97,7 +100,8 @@ const boost::ut::suite PortTests = [] {
             expect(std::ranges::equal(tags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}}}, {1, {{"id", "tag@101"}}}, {4, {{"id", "tag@104"}}}}));
         }
         {
-            auto data = out.reserve<SpanReleasePolicy::ProcessAll>(5);
+            auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            expect(eq(data.size(), 5UZ));
             out.publishTag({{"id", "tag@-1"}}, -1);
             out.publishPendingTags();
             out.publishTag({{"id", "tag@106"}}, 1);

@@ -24,8 +24,7 @@ public:
     gr::PortOut<R> scaled;
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(V a) const noexcept {
+    [[nodiscard]] constexpr auto processOne(V a) const noexcept {
         return a * Scale;
     }
 };
@@ -40,8 +39,7 @@ public:
     gr::PortOut<T> sum;
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(V a, V b) const noexcept {
+    [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
         return a + b;
     }
 };
@@ -53,10 +51,7 @@ class cout_sink : public gr::Block<cout_sink<T>> {
 public:
     gr::PortIn<T> sink;
 
-    void
-    processOne(T value) {
-        fmt::print("Sinking a value: {}\n", value);
-    }
+    void processOne(T value) { fmt::print("Sinking a value: {}\n", value); }
 };
 
 static_assert(gr::BlockLike<cout_sink<float>>);
@@ -68,8 +63,7 @@ public:
     gr::PortOut<T> value;
     std::size_t    _counter = 0;
 
-    T
-    processOne() {
+    T processOne() {
         _counter++;
         if (_counter >= count) {
             this->requestStop();
@@ -120,28 +114,23 @@ const boost::ut::suite PortApiTests = [] {
     };
 
     "PortBufferApi"_test = [] {
-        PortOut<float>     output_port;
-        BufferWriter auto &writer = output_port.streamWriter();
+        PortOut<float>         output_port;
+        BufferWriterLike auto& writer = output_port.streamWriter();
         // BufferWriter auto                                             &tagWriter = output_port.tagWriter();
         expect(ge(writer.available(), 32UZ));
 
         using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
         PortIn<float, ExplicitUnlimitedSize> input_port;
-        const BufferReader auto             &reader = input_port.streamReader();
+        const BufferReaderLike auto&         reader = input_port.streamReader();
         expect(eq(reader.available(), 0UZ));
         auto buffers = output_port.buffer();
         input_port.setBuffer(buffers.streamBuffer, buffers.tagBuffer);
 
         expect(eq(buffers.streamBuffer.n_readers(), 1UZ));
 
-        int  offset = 1;
-        auto lambda = [&offset](auto &writableSpan) {
-            std::iota(writableSpan.begin(), writableSpan.end(), offset);
-            fmt::print("typed-port connected output vector: {}\n", writableSpan);
-            offset += static_cast<int>(writableSpan.size());
-        };
-
-        expect(writer.try_publish(lambda, 32UZ));
+        PublishableSpan auto pSpan = writer.reserve<SpanReleasePolicy::ProcessAll>(32UZ);
+        std::iota(pSpan.begin(), pSpan.end(), 1);
+        fmt::print("typed-port connected output vector: {}\n", pSpan);
     };
 
     "RuntimePortApi"_test = [] {
@@ -159,8 +148,8 @@ const boost::ut::suite PortApiTests = [] {
 
     "ConnectionApi - Port-level"_test = [] {
         gr::Graph flow;
-        auto     &number = flow.emplaceBlock<repeater_source<int, 6>>();
-        auto     &scaled = flow.emplaceBlock<scale<int, 2>>();
+        auto&     number = flow.emplaceBlock<repeater_source<int, 6>>();
+        auto&     scaled = flow.emplaceBlock<scale<int, 2>>();
 
         expect(!number.value.isConnected());
         expect(!scaled.original.isConnected());
@@ -193,12 +182,12 @@ const boost::ut::suite PortApiTests = [] {
         gr::Graph flow;
 
         // Generators
-        auto &answer = flow.emplaceBlock<repeater_source<int, 42>>();
-        auto &number = flow.emplaceBlock<repeater_source<int, 6>>();
+        auto& answer = flow.emplaceBlock<repeater_source<int, 42>>();
+        auto& number = flow.emplaceBlock<repeater_source<int, 6>>();
 
-        auto &scaled = flow.emplaceBlock<scale<int, 2>>();
-        auto &added  = flow.emplaceBlock<adder<int>>();
-        auto &out    = flow.emplaceBlock<cout_sink<int>>();
+        auto& scaled = flow.emplaceBlock<scale<int, 2>>();
+        auto& added  = flow.emplaceBlock<adder<int>>();
+        auto& out    = flow.emplaceBlock<cout_sink<int>>();
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
@@ -206,7 +195,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        gr::scheduler::Simple sched{ std::move(flow) };
+        gr::scheduler::Simple sched{std::move(flow)};
         expect(sched.runAndWait().has_value());
     };
 
@@ -215,7 +204,7 @@ const boost::ut::suite PortApiTests = [] {
         using port_direction_t::INPUT;
         using port_direction_t::OUTPUT;
         OUT<float, "out0"> output_port;
-        BufferWriter auto &writer = output_port.writer();
+        BufferWriter auto& writer = output_port.writer();
         IN<float, "in0">   input_port;
 
         auto source = std::make_shared<dynamicBlock>("source");
@@ -263,12 +252,12 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(source->port<OUTPUT>("out0").value()->connect(*sink->port<INPUT>("in0").value()), connection_result_t::SUCCESS)) << "double connection";
         expect(eq(source->port<OUTPUT>("out0").value()->connect(*sink->port<INPUT>("in1").value()), connection_result_t::SUCCESS)) << "second connection";
 
-        const BufferReader auto &reader = input_port.reader();
+        const BufferReader auto& reader = input_port.reader();
         expect(eq(reader.available(), 0U)) << fmt::format("reader already has some bytes pending: {}", reader.available());
 
         expect(eq(output_port.buffer().n_readers(), 2U));
 
-        constexpr auto lambda = [](auto &w) {
+        constexpr auto lambda = [](auto& w) {
             std::iota(w.begin(), w.end(), 0U);
             fmt::print("dyn_port connected sink output: {}\n", w);
         };
@@ -279,5 +268,4 @@ const boost::ut::suite PortApiTests = [] {
 #endif
 };
 
-int
-main() { /* tests are statically executed */ }
+int main() { /* tests are statically executed */ }

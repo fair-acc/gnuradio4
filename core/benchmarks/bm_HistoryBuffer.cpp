@@ -18,14 +18,19 @@ inline const boost::ut::suite _buffer_tests = [] {
 
     {
         CircularBuffer<int, std::dynamic_extent, ProducerType::Multi> buffer(32);
-        gr::BufferWriter auto                                         writer = buffer.new_writer();
-        gr::BufferReader auto                                         reader = buffer.new_reader();
+        gr::BufferWriterLike auto                                     writer = buffer.new_writer();
+        gr::BufferReaderLike auto                                     reader = buffer.new_reader();
 
         "circular_buffer<int>(32) - multiple producer"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
-                writer.publish([&](auto &vec) { vec[0] = counter; }, 1LU);
-                gr::ConsumableSpan auto data = reader.get(1);
+                {
+                    PublishableSpan auto pSpan = writer.tryReserve(1);
+                    boost::ut::expect(!pSpan.empty());
+                    pSpan[0] = counter;
+                    pSpan.publish(1);
+                }
+                ConsumableSpan auto data = reader.get(1);
                 if (data[0] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -36,14 +41,19 @@ inline const boost::ut::suite _buffer_tests = [] {
     }
     {
         CircularBuffer<int>   buffer(32);
-        gr::BufferWriter auto writer = buffer.new_writer();
-        gr::BufferReader auto reader = buffer.new_reader();
+        BufferWriterLike auto writer = buffer.new_writer();
+        BufferReaderLike auto reader = buffer.new_reader();
 
         "circular_buffer<int>(32) - single producer via lambda"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
-                writer.publish([&](auto &vec) { vec[0] = counter; }, 1LU);
-                gr::ConsumableSpan auto data = reader.get(1);
+                {
+                    PublishableSpan auto pSpan = writer.tryReserve(1);
+                    boost::ut::expect(!pSpan.empty());
+                    pSpan[0] = counter;
+                    pSpan.publish(1);
+                }
+                ConsumableSpan auto data = reader.get(1);
                 if (data[0] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -54,16 +64,19 @@ inline const boost::ut::suite _buffer_tests = [] {
     }
     {
         CircularBuffer<int>   buffer(32);
-        gr::BufferWriter auto writer = buffer.new_writer();
-        gr::BufferReader auto reader = buffer.new_reader();
+        BufferWriterLike auto writer = buffer.new_writer();
+        BufferReaderLike auto reader = buffer.new_reader();
 
         "circular_buffer<int>(32) - single producer via reserve"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
-                auto write_data = writer.reserve(1LU);
-                write_data[0]   = counter;
-                write_data.publish(1);
-                gr::ConsumableSpan auto data = reader.get(1);
+                {
+                    PublishableSpan auto pSpan = writer.tryReserve(1LU);
+                    boost::ut::expect(!pSpan.empty());
+                    pSpan[0] = counter;
+                    pSpan.publish(1);
+                }
+                ConsumableSpan auto data = reader.get(1);
                 if (data[0] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -105,16 +118,17 @@ inline const boost::ut::suite _buffer_tests = [] {
     }
 
     {
-        CircularBuffer<int>   buffer(32);
-        gr::BufferWriter auto writer = buffer.new_writer();
-        gr::BufferReader auto reader = buffer.new_reader();
+        CircularBuffer<int>       buffer(32);
+        gr::BufferWriterLike auto writer = buffer.new_writer();
+        gr::BufferReaderLike auto reader = buffer.new_reader();
 
         "circular_buffer<int>(32) - no checks"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
-            static int counter    = 0;
-            auto       write_data = writer.reserve(1LU);
-            write_data[0]         = counter;
+            static int counter = 0;
+            auto       pSpan   = writer.tryReserve(1LU);
+            boost::ut::expect(!pSpan.empty());
+            pSpan[0] = counter;
             for (std::size_t i = 0; i < samples; i++) {
-                write_data.publish(1);
+                pSpan.publish(1);
                 gr::ConsumableSpan auto     range = reader.get(1);
                 [[maybe_unused]] const auto data  = range[0];
                 [[maybe_unused]] const auto ret   = range.consume(1);
@@ -148,6 +162,4 @@ inline const boost::ut::suite _buffer_tests = [] {
     }
 };
 
-int
-main() { /* not needed by the UT framework */
-}
+int main() { /* not needed by the UT framework */ }
