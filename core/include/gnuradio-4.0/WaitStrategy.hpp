@@ -1,10 +1,10 @@
 #ifndef GNURADIO_WAITSTRATEGY_HPP
 #define GNURADIO_WAITSTRATEGY_HPP
 
-#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -42,7 +42,7 @@ inline constexpr bool hasSignalAllWhenBlocking = requires(T /*const*/ t) {
 static_assert(!hasSignalAllWhenBlocking<int>);
 
 template<typename T>
-concept WaitStrategy = isWaitStrategy<T>;
+concept WaitStrategyLike = isWaitStrategy<T>;
 
 
 
@@ -78,7 +78,7 @@ public:
         _conditionVariable.notify_all();
     }
 };
-static_assert(WaitStrategy<BlockingWaitStrategy>);
+static_assert(WaitStrategyLike<BlockingWaitStrategy>);
 
 /**
  * Busy Spin strategy that uses a busy spin loop for IEventProcessor's waiting on a barrier.
@@ -94,7 +94,7 @@ struct BusySpinWaitStrategy {
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<BusySpinWaitStrategy>);
+static_assert(WaitStrategyLike<BusySpinWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<BusySpinWaitStrategy>);
 
 /**
@@ -134,7 +134,7 @@ public:
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<SleepingWaitStrategy>);
+static_assert(WaitStrategyLike<SleepingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
 
 struct TimeoutException : public std::runtime_error {
@@ -179,7 +179,7 @@ public:
         _conditionVariable.notify_all();
     }
 };
-static_assert(WaitStrategy<TimeoutBlockingWaitStrategy>);
+static_assert(WaitStrategyLike<TimeoutBlockingWaitStrategy>);
 static_assert(hasSignalAllWhenBlocking<TimeoutBlockingWaitStrategy>);
 
 /**
@@ -210,7 +210,7 @@ public:
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<YieldingWaitStrategy>);
+static_assert(WaitStrategyLike<YieldingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
 
 struct NoWaitStrategy {
@@ -219,7 +219,7 @@ struct NoWaitStrategy {
         return sequence;
     }
 };
-static_assert(WaitStrategy<NoWaitStrategy>);
+static_assert(WaitStrategyLike<NoWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<NoWaitStrategy>);
 
 
@@ -337,7 +337,7 @@ struct SpinWaitWaitStrategy {
         return availableSequence;
     }
 };
-static_assert(WaitStrategy<SpinWaitWaitStrategy>);
+static_assert(WaitStrategyLike<SpinWaitWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SpinWaitWaitStrategy>);
 
 struct NO_SPIN_WAIT {};
@@ -366,9 +366,7 @@ public:
     void unlock() { _lock.clear(std::memory_order::release); }
 };
 
-
 // clang-format on
 } // namespace gr
-
 
 #endif // GNURADIO_WAITSTRATEGY_HPP

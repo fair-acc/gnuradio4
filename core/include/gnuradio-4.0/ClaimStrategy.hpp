@@ -16,139 +16,164 @@
 
 namespace gr {
 
-struct NoCapacityException : public std::runtime_error {
-    NoCapacityException() : std::runtime_error("NoCapacityException"){};
+namespace detail {
+
+/*
+ * `AtomicBitset` is a lock-free, thread-safe bitset.
+ * It allows for efficient and thread-safe manipulation of individual bits.
+ */
+template<std::size_t Size = std::dynamic_extent>
+class AtomicBitset {
+    static_assert(Size > 0, "Size must be greater than 0");
+    static constexpr bool isSizeDynamic = Size == std::dynamic_extent;
+
+    static constexpr std::size_t _bitsPerWord  = sizeof(size_t) * 8UZ;
+    static constexpr std::size_t _nStaticWords = isSizeDynamic ? 1UZ : (Size + _bitsPerWord - 1UZ) / _bitsPerWord;
+
+    // using DynamicArrayType = std::unique_ptr<std::atomic<std::size_t>[]>;
+    using DynamicArrayType = std::vector<std::atomic<std::size_t>>;
+    using StaticArrayType  = std::array<std::atomic<std::size_t>, _nStaticWords>;
+    using ArrayType        = std::conditional_t<isSizeDynamic, DynamicArrayType, StaticArrayType>;
+
+    std::size_t _size = Size;
+    ArrayType   _bits;
+
+public:
+    AtomicBitset()
+    requires(!isSizeDynamic)
+    {
+        for (auto& word : _bits) {
+            word.store(0, std::memory_order_relaxed);
+        }
+    }
+
+    explicit AtomicBitset(std::size_t size = 0UZ)
+    requires(isSizeDynamic)
+        : _size(size), _bits(std::vector<std::atomic<std::size_t>>(size)) {
+        // assert(size > 0UZ);
+        for (std::size_t i = 0; i < _size; i++) {
+            _bits[i].store(0, std::memory_order_relaxed);
+        }
+    }
+
+    void set(std::size_t bitPosition) {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = 1UL << bitIndex;
+
+        std::size_t oldBits;
+        std::size_t newBits;
+        do {
+            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            newBits = oldBits | mask;
+        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    void reset(std::size_t bitPosition) {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = ~(1UL << bitIndex);
+
+        std::size_t oldBits;
+        std::size_t newBits;
+        do {
+            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            newBits = oldBits & mask;
+        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    bool test(std::size_t bitPosition) const {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = 1UL << bitIndex;
+
+        return (_bits[wordIndex].load(std::memory_order_acquire) & mask) != 0;
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const { return _size; }
 };
 
-// clang-format off
+} // namespace detail
 
 template<typename T>
-concept ClaimStrategy = requires(T /*const*/ t, const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity,
-        const std::make_signed_t<std::size_t> cursorValue, const std::make_signed_t<std::size_t> sequence, const std::make_signed_t<std::size_t> offset, const std::make_signed_t<std::size_t> availableSequence, const std::size_t n_slots_to_claim) {
-    { t.hasAvailableCapacity(dependents, requiredCapacity, cursorValue) } -> std::same_as<bool>;
-    { t.next(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.tryNext(dependents, n_slots_to_claim) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.getRemainingCapacity(dependents) } -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.publish(offset, n_slots_to_claim) } -> std::same_as<void>;
-    { t.isAvailable(sequence) } -> std::same_as<bool>;
-    { t.getHighestPublishedSequence(sequence, availableSequence) } -> std::same_as<std::make_signed_t<std::size_t>>;
+concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index_type sequence, const Sequence::signed_index_type offset, const std::size_t nSlotsToClaim) {
+    { t.next(nSlotsToClaim) } -> std::same_as<Sequence::signed_index_type>;
+    { t.tryNext(nSlotsToClaim) } -> std::same_as<std::optional<Sequence::signed_index_type>>;
+    { t.getRemainingCapacity() } -> std::same_as<Sequence::signed_index_type>;
+    { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
 
 namespace claim_strategy::util {
-constexpr unsigned    floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned    ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-}
+constexpr unsigned floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
+constexpr unsigned ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
+} // namespace claim_strategy::util
 
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
     using signed_index_type = Sequence::signed_index_type;
-    const std::size_t _size;
-    Sequence &_cursor;
-    WAIT_STRATEGY &_waitStrategy;
-    signed_index_type _nextValue{ kInitialCursorValue }; // N.B. no need for atomics since this is called by a single publisher
-    mutable signed_index_type _cachedValue{ kInitialCursorValue };
+
+    const std::size_t _size = SIZE;
 
 public:
-    SingleThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, const std::size_t buffer_size = SIZE)
-        : _size(buffer_size), _cursor(cursor), _waitStrategy(waitStrategy){};
-    SingleThreadedStrategy(const SingleThreadedStrategy &)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy &&) = delete;
-    void operator=(const SingleThreadedStrategy &) = delete;
+    Sequence                                                _publishCursor;                      // slots are published and ready to be read until _publishCursor
+    signed_index_type                                       _reserveCursor{kInitialCursorValue}; // slots can be reserved starting from _reserveCursor, no need for atomics since this is called by a single publisher
+    TWaitStrategy                                           _waitStrategy;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type/*cursorValue*/) const noexcept {
-        if (const signed_index_type wrapPoint = (_nextValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size); wrapPoint > _cachedValue || _cachedValue > _nextValue) {
-            auto minSequence = detail::getMinimumSequence(dependents, _nextValue);
-            _cachedValue     = minSequence;
-            if (wrapPoint > minSequence) {
-                return false;
+    explicit SingleThreadedStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
+    SingleThreadedStrategy(const SingleThreadedStrategy&)  = delete;
+    SingleThreadedStrategy(const SingleThreadedStrategy&&) = delete;
+    void operator=(const SingleThreadedStrategy&)          = delete;
+
+    signed_index_type next(const std::size_t nSlotsToClaim = 1) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+
+        SpinWait spinWait;
+        while (getRemainingCapacity() < nSlotsToClaim) { // while not enough slots in buffer
+            if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
+                _waitStrategy.signalAllWhenBlocking();
             }
+            spinWait.spinOnce();
         }
-        return true;
+        _reserveCursor += nSlotsToClaim;
+        return _reserveCursor;
     }
 
-    signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim = 1) noexcept {
-        assert((n_slots_to_claim > 0 && n_slots_to_claim <= _size) && "n_slots_to_claim must be > 0 and <= bufferSize");
+    [[nodiscard]] std::optional<signed_index_type> tryNext(const std::size_t nSlotsToClaim) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+        static_cast<signed_index_type>(_size) < nSlotsToClaim + _reserveCursor - getMinReaderCursor();
 
-        auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
-        auto wrapPoint    = nextSequence - static_cast<signed_index_type>(_size);
-
-        if (const auto cachedGatingSequence = _cachedValue; wrapPoint > cachedGatingSequence || cachedGatingSequence > _nextValue) {
-            SpinWait     spinWait;
-            signed_index_type minSequence;
-            while (wrapPoint > (minSequence = detail::getMinimumSequence(dependents, _nextValue))) {
-                if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                    _waitStrategy.signalAllWhenBlocking();
-                }
-                spinWait.spinOnce();
-            }
-            _cachedValue = minSequence;
+        if (getRemainingCapacity() < nSlotsToClaim) { // not enough slots in buffer
+            return std::nullopt;
         }
-        _nextValue = nextSequence;
-
-        return nextSequence;
+        _reserveCursor += nSlotsToClaim;
+        return _reserveCursor;
     }
 
-    signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t n_slots_to_claim) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+    [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor - getMinReaderCursor()); }
 
-        if (!hasAvailableCapacity(dependents, n_slots_to_claim, 0 /* unused cursor value */)) {
-            throw NoCapacityException();
-        }
-
-        const auto nextSequence = _nextValue + static_cast<signed_index_type>(n_slots_to_claim);
-        _nextValue              = nextSequence;
-
-        return nextSequence;
-    }
-
-    signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto consumed = detail::getMinimumSequence(dependents, _nextValue);
-        const auto produced = _nextValue;
-
-        return static_cast<signed_index_type>(_size) - (produced - consumed);
-    }
-
-    void publish(signed_index_type offset, std::size_t n_slots_to_claim) {
-        const auto sequence = offset + static_cast<signed_index_type>(n_slots_to_claim);
-        _cursor.setValue(sequence);
-        _nextValue = sequence;
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+    void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
+        const auto sequence = offset + static_cast<signed_index_type>(nSlotsToClaim);
+        _publishCursor.setValue(sequence);
+        _reserveCursor = sequence;
+        if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
             _waitStrategy.signalAllWhenBlocking();
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept { return sequence <= _cursor.value(); }
-    [[nodiscard]] signed_index_type getHighestPublishedSequence(signed_index_type /*nextSequence*/, signed_index_type availableSequence) const noexcept { return availableSequence; }
+private:
+    [[nodiscard]] forceinline signed_index_type getMinReaderCursor() const noexcept {
+        if (_readSequences->empty()) {
+            return kInitialCursorValue;
+        }
+        return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
+    }
 };
 
-static_assert(ClaimStrategy<SingleThreadedStrategy<1024, NoWaitStrategy>>);
-
-template <std::size_t Size>
-struct MultiThreadedStrategySizeMembers
-{
-    static_assert(std::has_single_bit(Size));
-    static constexpr std::int32_t _size = Size;
-    static constexpr std::int32_t _indexShift = std::bit_width(Size - 1);
-};
-
-template <>
-struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
-    const std::int32_t _size;
-    const std::int32_t _indexShift;
-
-    #ifdef __clang__
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size - 1))) {} //NOSONAR
-    #else
-    #pragma GCC diagnostic push // std::bit_width seems to be compiler and platform specific
-    #ifndef __clang__
-    #pragma GCC diagnostic ignored "-Wuseless-cast"
-    #endif
-    explicit MultiThreadedStrategySizeMembers(std::size_t size) : _size(static_cast<std::int32_t>(size)), _indexShift(static_cast<std::int32_t>(std::bit_width(size - 1))) {
-        assert(std::has_single_bit(size));
-    } //NOSONAR
-    #pragma GCC diagnostic pop
-    #endif
-};
+static_assert(ClaimStrategyLike<SingleThreadedStrategy<1024, NoWaitStrategy>>);
 
 /**
  * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
@@ -158,170 +183,113 @@ struct MultiThreadedStrategySizeMembers<std::dynamic_extent> {
  *
  * The size argument (compile-time and run-time) must be a power-of-2 value.
  */
-template<std::size_t SIZE = std::dynamic_extent, WaitStrategy WAIT_STRATEGY = BusySpinWaitStrategy>
-requires (SIZE == std::dynamic_extent or std::has_single_bit(SIZE))
-class alignas(hardware_constructive_interference_size) MultiThreadedStrategy
-: private MultiThreadedStrategySizeMembers<SIZE> {
-    Sequence &_cursor;
-    WAIT_STRATEGY &_waitStrategy;
-#if (__cpp_lib_atomic_ref >= 201806L)
-    std::vector<std::int32_t> _availableBuffer; // tracks the state of each ringbuffer slot
-#else // clang's libc++ does not yet support std::atomic_ref
-    std::unique_ptr<std::atomic<std::int32_t>[]> _availableBuffer; // tracks the state of each ringbuffer slot
-#endif
-    std::shared_ptr<Sequence> _gatingSequenceCache = std::make_shared<Sequence>();
-    using MultiThreadedStrategySizeMembers<SIZE>::_size;
-    using MultiThreadedStrategySizeMembers<SIZE>::_indexShift;
+template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
+requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
+class alignas(hardware_constructive_interference_size) MultiThreadedStrategy {
     using signed_index_type = Sequence::signed_index_type;
 
+    detail::AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
+    const std::size_t          _size = SIZE;
+    const std::size_t          _mask = SIZE - 1;
+
 public:
+    Sequence                                                _reserveCursor; // slots can be reserved starting from _reserveCursor
+    Sequence                                                _publishCursor; // slots are published and ready to be read until _publishCursor
+    TWaitStrategy                                           _waitStrategy;
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
+
     MultiThreadedStrategy() = delete;
 
-    explicit
-    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy) requires (SIZE != std::dynamic_extent)
-    : _cursor(cursor), _waitStrategy(waitStrategy) {
-#if (__cpp_lib_atomic_ref >= 201806L)
-        _availableBuffer = std::vector<std::int32_t>(SIZE, -1);
-#else // clang's libc++ does not yet support std::atomic_ref
-        _availableBuffer = std::make_unique<std::atomic<std::int32_t>[]>(SIZE);
-        std::fill(_availableBuffer.get(), _availableBuffer.get() + SIZE, -1);
-#endif
-    }
+    explicit MultiThreadedStrategy()
+    requires(SIZE != std::dynamic_extent)
+    {}
 
-    explicit
-    MultiThreadedStrategy(Sequence &cursor, WAIT_STRATEGY &waitStrategy, std::size_t buffer_size)
-    requires (SIZE == std::dynamic_extent)
-    : MultiThreadedStrategySizeMembers<SIZE>(buffer_size),
-      _cursor(cursor), _waitStrategy(waitStrategy) {
-#if (__cpp_lib_atomic_ref >= 201806L)
-        _availableBuffer = std::vector<std::int32_t>(buffer_size, -1);
-#else // clang's libc++ does not yet support std::atomic_ref
-        _availableBuffer = std::make_unique<std::atomic<std::int32_t>[]>(buffer_size);
-        std::fill(_availableBuffer.get(), _availableBuffer.get() + buffer_size, -1);
-#endif
-    }
+    explicit MultiThreadedStrategy(std::size_t bufferSize)
+    requires(SIZE == std::dynamic_extent)
+        : _slotStates(detail::AtomicBitset<>(bufferSize)), _size(bufferSize), _mask(bufferSize - 1) {}
 
-    MultiThreadedStrategy(const MultiThreadedStrategy &)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy &&) = delete;
-    void               operator=(const MultiThreadedStrategy &) = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy&)  = delete;
+    MultiThreadedStrategy(const MultiThreadedStrategy&&) = delete;
+    void operator=(const MultiThreadedStrategy&)         = delete;
 
-    [[nodiscard]] bool hasAvailableCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents, const std::size_t requiredCapacity, const signed_index_type cursorValue) const noexcept {
-        const auto wrapPoint = (cursorValue + static_cast<signed_index_type>(requiredCapacity)) - static_cast<signed_index_type>(_size);
+    [[nodiscard]] signed_index_type next(std::size_t nSlotsToClaim = 1) {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        if (const auto cachedGatingSequence = _gatingSequenceCache->value(); wrapPoint > cachedGatingSequence || cachedGatingSequence > cursorValue) {
-            const auto minSequence = detail::getMinimumSequence(dependents, cursorValue);
-            _gatingSequenceCache->setValue(minSequence);
-
-            if (wrapPoint > minSequence) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    [[nodiscard]] signed_index_type next(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
-
-        signed_index_type current;
-        signed_index_type next;
-
-        SpinWait     spinWait;
+        signed_index_type currentReserveCursor;
+        signed_index_type nextReserveCursor;
+        SpinWait          spinWait;
         do {
-            current = _cursor.value();
-            next = current + static_cast<signed_index_type>(n_slots_to_claim);
-
-            signed_index_type wrapPoint            = next - static_cast<signed_index_type>(_size);
-            signed_index_type cachedGatingSequence = _gatingSequenceCache->value();
-
-            if (wrapPoint > cachedGatingSequence || cachedGatingSequence > current) {
-                signed_index_type gatingSequence = detail::getMinimumSequence(dependents, current);
-
-                if (wrapPoint > gatingSequence) {
-                    if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
-                        _waitStrategy.signalAllWhenBlocking();
-                    }
-                    spinWait.spinOnce();
-                    continue;
+            currentReserveCursor = _reserveCursor.value();
+            nextReserveCursor    = currentReserveCursor + static_cast<signed_index_type>(nSlotsToClaim);
+            if (nextReserveCursor - getMinReaderCursor() > static_cast<signed_index_type>(_size)) { // not enough slots in buffer
+                if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
+                    _waitStrategy.signalAllWhenBlocking();
                 }
-
-                _gatingSequenceCache->setValue(gatingSequence);
-            } else if (_cursor.compareAndSet(current, next)) {
+                spinWait.spinOnce();
+                continue;
+            } else if (_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor)) {
                 break;
             }
         } while (true);
 
-        return next;
+        return nextReserveCursor;
     }
 
-    [[nodiscard]] signed_index_type tryNext(const std::vector<std::shared_ptr<Sequence>> &dependents, std::size_t n_slots_to_claim = 1) {
-        assert((n_slots_to_claim > 0) && "n_slots_to_claim must be > 0");
+    [[nodiscard]] std::optional<signed_index_type> tryNext(std::size_t nSlotsToClaim = 1) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        signed_index_type current;
-        signed_index_type next;
+        signed_index_type currentReserveCursor;
+        signed_index_type nextReserveCursor;
 
         do {
-            current = _cursor.value();
-            next    = current + static_cast<signed_index_type>(n_slots_to_claim);
-
-            if (!hasAvailableCapacity(dependents, n_slots_to_claim, current)) {
-                throw NoCapacityException();
+            currentReserveCursor = _reserveCursor.value();
+            nextReserveCursor    = currentReserveCursor + static_cast<signed_index_type>(nSlotsToClaim);
+            if (nextReserveCursor - getMinReaderCursor() > static_cast<signed_index_type>(_size)) { // not enough slots in buffer
+                return std::nullopt;
             }
-        } while (!_cursor.compareAndSet(current, next));
-
-        return next;
+        } while (!_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor));
+        return nextReserveCursor;
     }
 
-    [[nodiscard]] signed_index_type getRemainingCapacity(const std::vector<std::shared_ptr<Sequence>> &dependents) const noexcept {
-        const auto produced = _cursor.value();
-        const auto consumed = detail::getMinimumSequence(dependents, produced);
+    [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor.value() - getMinReaderCursor()); }
 
-        return static_cast<signed_index_type>(_size) - (produced - consumed);
-    }
-
-    void publish(signed_index_type offset, std::size_t n_slots_to_claim) {
-        for (std::size_t i = 0; i < n_slots_to_claim; i++) {
-            setAvailable(offset + static_cast<signed_index_type>(i) + 1);
+    void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
+        for (std::size_t i = 0; i < nSlotsToClaim; i++) {
+            _slotStates.set((offset + i) & _mask); // mark slots as published
         }
-        if constexpr (hasSignalAllWhenBlocking<WAIT_STRATEGY>) {
+
+        // ensure publish cursor is only advanced after all prior slots are published
+        signed_index_type currentPublishCursor;
+        signed_index_type nextPublishCursor;
+        do {
+            currentPublishCursor = _publishCursor.value();
+            nextPublishCursor    = currentPublishCursor;
+
+            while (_slotStates.test(nextPublishCursor & _mask) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
+                nextPublishCursor++;
+            }
+        } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
+
+        //  clear completed slots up to the new published cursor
+        for (std::size_t seq = static_cast<std::size_t>(currentPublishCursor); seq < nextPublishCursor; seq++) {
+            _slotStates.reset(seq & _mask);
+        }
+
+        if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
             _waitStrategy.signalAllWhenBlocking();
         }
     }
 
-    [[nodiscard]] forceinline bool isAvailable(signed_index_type sequence) const noexcept {
-        const auto index = calculateIndex(sequence);
-        const auto flag  = calculateAvailabilityFlag(sequence);
-#if (__cpp_lib_atomic_ref >= 201806L)
-        return std::atomic_ref{_availableBuffer[index]} == flag;
-#else // clang's libc++ does not yet support std::atomic_ref
-        return _availableBuffer[index] == flag;
-#endif
-    }
-
-    [[nodiscard]] forceinline signed_index_type getHighestPublishedSequence(const signed_index_type lowerBound, const signed_index_type availableSequence) const noexcept {
-        for (signed_index_type sequence = lowerBound; sequence <= availableSequence; sequence++) {
-            if (!isAvailable(sequence)) {
-                return sequence - 1;
-            }
-        }
-
-        return availableSequence;
-    }
-
 private:
-    void                      setAvailable(signed_index_type sequence) noexcept { setAvailableBufferValue(calculateIndex(sequence), calculateAvailabilityFlag(sequence)); }
-    forceinline void          setAvailableBufferValue(std::size_t index, std::int32_t flag) noexcept {
-#if (__cpp_lib_atomic_ref >= 201806L)
-        std::atomic_ref{_availableBuffer[index]} = flag;
-#else // clang's libc++ does not yet support std::atomic_ref
-        _availableBuffer[index] = flag;
-#endif
+    [[nodiscard]] forceinline signed_index_type getMinReaderCursor() const noexcept {
+        if (_readSequences->empty()) {
+            return kInitialCursorValue;
+        }
+        return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
     }
-    [[nodiscard]] forceinline std::int32_t calculateAvailabilityFlag(const signed_index_type sequence) const noexcept { return static_cast<std::int32_t>(sequence >> _indexShift); }
-    [[nodiscard]] forceinline std::size_t calculateIndex(const signed_index_type sequence) const noexcept { return static_cast<std::size_t>(static_cast<std::int32_t>(sequence) & (_size - 1)); }
 };
 
-static_assert(ClaimStrategy<MultiThreadedStrategy<1024, NoWaitStrategy>>);
-// clang-format on
+static_assert(ClaimStrategyLike<MultiThreadedStrategy<1024, NoWaitStrategy>>);
 
 enum class ProducerType {
     /**
@@ -336,21 +304,21 @@ enum class ProducerType {
 };
 
 namespace detail {
-template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
+template<std::size_t size, ProducerType producerType, WaitStrategyLike TWaitStrategy>
 struct producer_type;
 
-template<std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Single, WAIT_STRATEGY> {
-    using value_type = SingleThreadedStrategy<size, WAIT_STRATEGY>;
+template<std::size_t size, WaitStrategyLike TWaitStrategy>
+struct producer_type<size, ProducerType::Single, TWaitStrategy> {
+    using value_type = SingleThreadedStrategy<size, TWaitStrategy>;
 };
 
-template<std::size_t size, WaitStrategy WAIT_STRATEGY>
-struct producer_type<size, ProducerType::Multi, WAIT_STRATEGY> {
-    using value_type = MultiThreadedStrategy<size, WAIT_STRATEGY>;
+template<std::size_t size, WaitStrategyLike TWaitStrategy>
+struct producer_type<size, ProducerType::Multi, TWaitStrategy> {
+    using value_type = MultiThreadedStrategy<size, TWaitStrategy>;
 };
 
-template<std::size_t size, ProducerType producerType, WaitStrategy WAIT_STRATEGY>
-using producer_type_v = typename producer_type<size, producerType, WAIT_STRATEGY>::value_type;
+template<std::size_t size, ProducerType producerType, WaitStrategyLike TWaitStrategy>
+using producer_type_v = typename producer_type<size, producerType, TWaitStrategy>::value_type;
 
 } // namespace detail
 

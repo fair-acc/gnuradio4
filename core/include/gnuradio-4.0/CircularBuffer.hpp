@@ -29,9 +29,10 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <cerrno>
 #include <fcntl.h>
 #if defined __has_include && not __EMSCRIPTEN__
-#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>)
+#if __has_include(<sys/mman.h>) && __has_include(<sys/stat.h>) && __has_include(<unistd.h>) && __has_include(<sys/syscall.h>)
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
@@ -216,29 +217,29 @@ enum class SpanReleasePolicy {
  *
  * for more details see
  */
-template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producer_type = ProducerType::Single, WaitStrategy WAIT_STRATEGY = SleepingWaitStrategy>
+template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producerType = ProducerType::Single, WaitStrategyLike TWaitStrategy = SleepingWaitStrategy>
 class CircularBuffer {
     using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = CircularBuffer<T, SIZE, producer_type, WAIT_STRATEGY>;
-    using ClaimType         = detail::producer_type_v<SIZE, producer_type, WAIT_STRATEGY>;
-    using DependendsType    = std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>;
+    using BufferType        = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
+    using ClaimType         = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
     using signed_index_type = Sequence::signed_index_type;
 
-    struct buffer_impl {
-        Sequence                  _cursor;
+    struct BufferImpl {
         Allocator                 _allocator{};
         const bool                _isMmapAllocated;
         const std::size_t         _size; // pre-condition: std::has_single_bit(_size)
         std::vector<T, Allocator> _data;
-        WAIT_STRATEGY             _wait_strategy = WAIT_STRATEGY();
         ClaimType                 _claimStrategy;
-        // list of dependent reader indices
-        DependendsType           _read_indices{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
-        std::atomic<std::size_t> _reader_count{0UZ};
-        std::atomic<std::size_t> _writer_count{0UZ};
+        std::atomic<std::size_t>  _reader_count{0UZ};
+        std::atomic<std::size_t>  _writer_count{0UZ};
 
-        buffer_impl() = delete;
-        buffer_impl(const std::size_t min_size, Allocator allocator) : _allocator(allocator), _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)), _data(buffer_size(_size, _isMmapAllocated), _allocator), _claimStrategy(ClaimType(_cursor, _wait_strategy, _size)) {}
+        BufferImpl() = delete;
+        BufferImpl(const std::size_t min_size, Allocator allocator)
+            : _allocator(allocator),                                                                 //
+              _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), //
+              _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)),                //
+              _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
+              _claimStrategy(ClaimType(_size)) {}
 
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
@@ -272,11 +273,11 @@ class CircularBuffer {
     }; // struct buffer_impl
 
     template<typename U = T>
-    class buffer_writer;
+    class Writer;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class PublishableOutputRange {
-        buffer_writer<U>* _parent = nullptr;
+        Writer<U>* _parent = nullptr;
 
     public:
         using element_type     = T;
@@ -286,15 +287,13 @@ class CircularBuffer {
         using pointer          = typename std::span<T>::reverse_iterator;
 
         PublishableOutputRange() = delete;
-        explicit PublishableOutputRange(buffer_writer<U>* parent) noexcept : _parent(parent) {
+        explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) {
             _parent->_index        = 0UZ;
             _parent->_offset       = 0;
             _parent->_internalSpan = std::span<T>();
-#ifndef NDEBUG
             _parent->_rangesCounter++;
-#endif
         };
-        explicit constexpr PublishableOutputRange(buffer_writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+        explicit constexpr PublishableOutputRange(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
             _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
@@ -304,9 +303,7 @@ class CircularBuffer {
         PublishableOutputRange& operator=(const PublishableOutputRange& other) {
             if (this != &other) {
                 _parent = other._parent;
-#ifndef NDEBUG
                 _parent->_rangesCounter++;
-#endif
             }
             return *this;
         }
@@ -314,8 +311,19 @@ class CircularBuffer {
         ~PublishableOutputRange() {
             _parent->_rangesCounter--;
             if (_parent->_rangesCounter == 0) {
-                if (!_parent->_isMmapAllocated) {
-                    const std::size_t size = _parent->_size;
+                if (!_parent->isPublished()) {
+                    if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
+                        assert(false && "CircularBuffer::PublishableOutputRange() - omitted publish() call for SpanReleasePolicy::Terminate");
+                        std::abort();
+                    } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                        publish(_parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                    } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
+                        publish(0UZ);
+                    }
+                }
+
+                if (!_parent->_buffer->_isMmapAllocated) {
+                    const std::size_t size = _parent->_buffer->_size;
                     // mirror samples below/above the buffer's wrap-around point
                     const size_t nFirstHalf  = std::min(size - _parent->_index, _parent->nSamplesPublished());
                     const size_t nSecondHalf = _parent->nSamplesPublished() - nFirstHalf;
@@ -324,7 +332,7 @@ class CircularBuffer {
                     std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
                     std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
                 }
-                _parent->_claimStrategy->publish(_parent->_offset, _parent->nSamplesPublished());
+                _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->nSamplesPublished());
                 _parent->_offset += static_cast<signed_index_type>(_parent->nSamplesPublished());
 #ifndef NDEBUG
                 if constexpr (isMultiThreadedStrategy()) {
@@ -342,7 +350,7 @@ class CircularBuffer {
 #endif
                 _parent->_nSamplesPublished = 0;
                 _parent->_internalSpan      = {};
-            };
+            }
         }
 
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _parent->_internalSpan.size(); };
@@ -362,7 +370,7 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t              samplesToPublish() const noexcept { return _parent->_nSamplesPublished; }
         [[nodiscard]] constexpr bool                     isPublished() const noexcept { return _parent->_isRangePublished; }
         [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nSamplesPublished; }
-        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>; }
+        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>; }
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
 
         constexpr void publish(std::size_t nSamplesToPublish) noexcept {
@@ -375,17 +383,14 @@ class CircularBuffer {
     static_assert(PublishableSpan<PublishableOutputRange<T>>);
 
     template<typename U>
-    class buffer_writer {
+    class Writer {
         friend class PublishableOutputRange<U, SpanReleasePolicy::Terminate>;
         friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessAll>;
         friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessNone>;
 
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         BufferTypeLocal _buffer; // controls buffer life-cycle, the rest are cache optimisations
-        bool            _isMmapAllocated;
-        std::size_t     _size;
-        ClaimType*      _claimStrategy;
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
         // These are the parameters for PublishableOutputRange, only one PublishableOutputRange can be reserved per writer
@@ -393,22 +398,25 @@ class CircularBuffer {
         bool              _isRangePublished{true}; // controls if publish() was invoked
         std::size_t       _index{0UZ};
         signed_index_type _offset{0};
-        std::span<T>      _internalSpan{}; // internal span is managed by buffer_writer and is shared across all PublishableSpans reserved by this buffer_writer
+        std::span<T>      _internalSpan{}; // internal span is managed by Writer and is shared across all PublishableSpans reserved by this Writer
         std::size_t       _rangesCounter{0};
 
     public:
-        buffer_writer() = delete;
-        explicit buffer_writer(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(std::move(buffer)), _isMmapAllocated(_buffer->_isMmapAllocated), _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+        Writer() = delete;
+        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
 
-        buffer_writer(buffer_writer&& other) noexcept : _buffer(std::move(other._buffer)), _isMmapAllocated(_buffer->_isMmapAllocated), _size(_buffer->_size), _claimStrategy(std::addressof(_buffer->_claimStrategy)), _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ)), _isRangePublished(std::exchange(other._isRangePublished, true)), _index(std::exchange(other._index, 0UZ)), _offset(std::exchange(other._offset, 0)), _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {};
+        Writer(Writer&& other) noexcept
+            : _buffer(std::move(other._buffer)),                                //
+              _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ)), //
+              _isRangePublished(std::exchange(other._isRangePublished, true)),  //
+              _index(std::exchange(other._index, 0UZ)),                         //
+              _offset(std::exchange(other._offset, 0)),                         //
+              _internalSpan(std::exchange(other._internalSpan, std::span<T>{})){};
 
-        buffer_writer& operator=(buffer_writer tmp) noexcept {
+        Writer& operator=(Writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
-            _isMmapAllocated = _buffer->_isMmapAllocated;
-            _size            = _buffer->_size;
             std::swap(_nSamplesPublished, tmp._nSamplesPublished);
             std::swap(_isRangePublished, tmp._isRangePublished);
-            _claimStrategy = std::addressof(_buffer->_claimStrategy);
             std::swap(_index, tmp._index);
             std::swap(_offset, tmp._offset);
             std::swap(_internalSpan, tmp._internalSpan);
@@ -416,7 +424,7 @@ class CircularBuffer {
             return *this;
         }
 
-        ~buffer_writer() {
+        ~Writer() {
             if (_buffer) {
                 _buffer->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
             }
@@ -425,6 +433,25 @@ class CircularBuffer {
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         [[nodiscard]] constexpr std::size_t nSamplesPublished() const noexcept { return _nSamplesPublished; };
+
+        template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
+        [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
+            checkIfCanReserveAndAbortIfNeeded();
+            _isRangePublished  = false;
+            _nSamplesPublished = 0UZ;
+
+            if (nSamples == 0) {
+                return PublishableOutputRange<U, policy>(this);
+            }
+
+            const std::optional<signed_index_type> sequence = _buffer->_claimStrategy.tryNext(nSamples);
+            if (sequence.has_value()) {
+                const std::size_t index = (static_cast<std::size_t>(sequence.value()) + _buffer->_size - nSamples) % _buffer->_size;
+                return PublishableOutputRange<U, policy>(this, index, sequence.value(), nSamples);
+            } else {
+                return PublishableOutputRange<U, policy>(this);
+            }
+        }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
@@ -436,104 +463,50 @@ class CircularBuffer {
                 return PublishableOutputRange<U, policy>(this);
             }
 
-            try {
-                const auto        sequence = _claimStrategy->next(*_buffer->_read_indices, nSamples); // alt: try_next
-                const std::size_t index    = (static_cast<std::size_t>(sequence) + _size - nSamples) % _size;
-                return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
-            } catch (const NoCapacityException&) {
-                return PublishableOutputRange<U, policy>(this);
-            }
+            const auto        sequence = _buffer->_claimStrategy.next(nSamples);
+            const std::size_t index    = (static_cast<std::size_t>(sequence) + _buffer->_size - nSamples) % _buffer->_size;
+            return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
         }
 
-        template<typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void publish(Translator&& translator, std::size_t nSamples = 1, Args&&... args) {
-            if (nSamples <= 0 || _buffer->_read_indices->empty()) {
-                return;
-            }
-            const auto sequence = _claimStrategy->next(*_buffer->_read_indices, nSamples);
-            translate_and_publish(std::forward<Translator>(translator), nSamples, sequence, std::forward<Args>(args)...);
-        } // blocks until elements are available
-
-        template<typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr bool try_publish(Translator&& translator, std::size_t nSamples = 1, Args&&... args) {
-            if (nSamples <= 0 || _buffer->_read_indices->empty()) {
-                return true;
-            }
-            try {
-                const auto sequence = _claimStrategy->tryNext(*_buffer->_read_indices, nSamples);
-                translate_and_publish(std::forward<Translator>(translator), nSamples, sequence, std::forward<Args>(args)...);
-                return true;
-            } catch (const NoCapacityException&) {
-                return false;
-            }
+        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
+        [[nodiscard]] constexpr std::size_t       available() const noexcept {
+            const auto res = static_cast<std::size_t>(_buffer->_claimStrategy.getRemainingCapacity());
+            return res;
         }
-
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_cursor.value(); }
-        [[nodiscard]] constexpr std::size_t       available() const noexcept { return static_cast<std::size_t>(_claimStrategy->getRemainingCapacity(*_buffer->_read_indices)); }
-        [[nodiscard]] constexpr bool              isPublished() const noexcept { return _isRangePublished; }
-        [[nodiscard]] constexpr std::size_t       samplesPublished() const noexcept { return _nSamplesPublished; }
+        [[nodiscard]] constexpr bool        isPublished() const noexcept { return _isRangePublished; }
+        [[nodiscard]] constexpr std::size_t samplesPublished() const noexcept { return _nSamplesPublished; }
 
     private:
-        template<typename... Args, WriterCallback<U, Args...> Translator>
-        constexpr void translate_and_publish(Translator&& translator, const std::size_t n_slots_to_claim, const signed_index_type publishSequence, const Args&... args) {
-            try {
-                auto&             data  = _buffer->_data;
-                const std::size_t index = (static_cast<std::size_t>(publishSequence) + _size - n_slots_to_claim) % _size;
-                std::span<U>      writable_data(&data[index], n_slots_to_claim);
-                if constexpr (std::is_invocable<Translator, std::span<T>&, signed_index_type, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), writable_data, publishSequence - static_cast<signed_index_type>(n_slots_to_claim), args...);
-                } else if constexpr (std::is_invocable<Translator, std::span<T>&, Args...>::value) {
-                    std::invoke(std::forward<Translator>(translator), writable_data, args...);
-                } else {
-                    static_assert(gr::meta::always_false<Translator>, "Translator does not provide a matching signature");
-                }
-
-                if (!_isMmapAllocated) {
-                    // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf  = std::min(_size - index, n_slots_to_claim);
-                    const size_t nSecondHalf = n_slots_to_claim - nFirstHalf;
-
-                    std::copy(&data[index], &data[index + nFirstHalf], &data[index + _size]);
-                    std::copy(&data[_size], &data[_size + nSecondHalf], &data[0]);
-                }
-                _claimStrategy->publish(publishSequence - static_cast<signed_index_type>(n_slots_to_claim), n_slots_to_claim);
-            } catch (const std::exception&) {
-                throw;
-            } catch (...) {
-                throw std::runtime_error("CircularBuffer::translate_and_publish() - unknown user exception thrown");
-            }
-        }
-
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
-            if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, WAIT_STRATEGY>, ClaimType>) {
+            if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>) {
                 if (_internalSpan.size() - _nSamplesPublished != 0) {
                     fmt::print(stderr,
-                        "An error occurred: The method CircularBuffer::multiple_writer::reserve() was invoked for the second time in succession, "
+                        "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
                         "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.",
                         _internalSpan.size() - _nSamplesPublished);
                     std::abort();
                 }
 
             } else {
-                if (!_internalSpan.empty() && not _isRangePublished) {
+                if (!_internalSpan.empty() && !_isRangePublished) {
                     fmt::print(stderr,
-                        "An error occurred: The method CircularBuffer::single_writer::reserve() was invoked for the second time in succession "
+                        "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
                         "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.",
                         _internalSpan.size());
                     std::abort();
                 }
             }
         }
-    }; // class buffer_writer
-    // static_assert(BufferWriter<buffer_writer<T>>);
+    }; // class Writer
+    // static_assert(BufferWriterLike<Writer<T>>);
 
     template<typename U = T>
-    class buffer_reader;
+    class Reader;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
     class ConsumableInputRange {
-        const buffer_reader<U>* _parent = nullptr;
-        std::span<const T>      _internalSpan{};
+        const Reader<U>*   _parent = nullptr;
+        std::span<const T> _internalSpan{};
 
     public:
         using element_type     = T;
@@ -542,9 +515,9 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit ConsumableInputRange(const buffer_reader<U>* parent) noexcept : _parent(parent) { _parent->_rangesCounter++; }
+        explicit ConsumableInputRange(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_rangesCounter++; }
 
-        explicit constexpr ConsumableInputRange(const buffer_reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_rangesCounter++; }
+        explicit constexpr ConsumableInputRange(const Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_rangesCounter++; }
 
         ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_rangesCounter++; }
 
@@ -649,17 +622,16 @@ class CircularBuffer {
     static_assert(ConsumableSpan<ConsumableInputRange<T>>);
 
     template<typename U>
-    class buffer_reader {
+    class Reader {
         friend class ConsumableInputRange<U, SpanReleasePolicy::Terminate>;
         friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessAll>;
         friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessNone>;
 
-        using BufferTypeLocal = std::shared_ptr<buffer_impl>;
+        using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
         mutable signed_index_type _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
-        std::size_t               _size;                                                      // pre-condition: std::has_single_bit(_size)
         mutable std::size_t       _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
         mutable std::size_t       _rangesCounter{0UZ};                                        // reference counter for number of ConsumableSpanRanges
 
@@ -668,20 +640,29 @@ class CircularBuffer {
         mutable std::size_t _nSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
         mutable std::size_t _nSamplesConsumed{0UZ};                                      // The number of samples actually consumed.
 
-        std::size_t buffer_index() const noexcept {
-            const auto bitmask = _size - 1;
+        std::size_t bufferIndex() const noexcept {
+            const auto bitmask = _buffer->_size - 1;
             return static_cast<std::size_t>(_readIndexCached) & bitmask;
         }
 
     public:
-        buffer_reader() = delete;
-        explicit buffer_reader(std::shared_ptr<buffer_impl> buffer) noexcept : _buffer(buffer), _size(buffer->_size) {
-            gr::detail::addSequences(_buffer->_read_indices, _buffer->_cursor, {_readIndex});
+        Reader() = delete;
+        explicit Reader(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(buffer) {
+            gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
             _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
             _readIndexCached = _readIndex->value();
         }
-        buffer_reader(buffer_reader&& other) noexcept : _readIndex(std::move(other._readIndex)), _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), _buffer(other._buffer), _size(_buffer->_size), _nSamplesFirstGet(std::move(other._nSamplesFirstGet)), _rangesCounter(std::move(other._rangesCounter)), _nSamplesToConsume(std::move(other._nSamplesToConsume)), _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
-        buffer_reader& operator=(buffer_reader tmp) noexcept {
+
+        Reader(Reader&& other) noexcept
+            : _readIndex(std::move(other._readIndex)),                                      //
+              _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
+              _buffer(other._buffer),                                                       //
+              _nSamplesFirstGet(std::move(other._nSamplesFirstGet)),                        //
+              _rangesCounter(std::move(other._rangesCounter)),                              //
+              _nSamplesToConsume(std::move(other._nSamplesToConsume)),                      //
+              _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
+
+        Reader& operator=(Reader tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);
@@ -689,11 +670,10 @@ class CircularBuffer {
             std::swap(_rangesCounter, tmp._rangesCounter);
             std::swap(_nSamplesToConsume, tmp._nSamplesToConsume);
             std::swap(_nSamplesConsumed, tmp._nSamplesConsumed);
-            _size = _buffer->_size;
             return *this;
         };
-        ~buffer_reader() {
-            gr::detail::removeSequence(_buffer->_read_indices, _readIndex);
+        ~Reader() {
+            gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
             _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
         }
 
@@ -708,7 +688,7 @@ class CircularBuffer {
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
             if (isConsumeRequested()) {
-                assert(false && "An error occurred: The method CircularBuffer::buffer_reader::get() was invoked after consume() methods was explicitly invoked.");
+                assert(false && "An error occurred: The method CircularBuffer::Reader::get() was invoked after consume() methods was explicitly invoked.");
             }
 
             std::size_t nSamples{nRequested};
@@ -723,18 +703,14 @@ class CircularBuffer {
             } else {
                 nSamples = std::min(nSamples, _nSamplesFirstGet);
             }
-            return ConsumableInputRange<U, policy>(this, buffer_index(), nSamples);
+            return ConsumableInputRange<U, policy>(this, bufferIndex(), nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
 
-        [[nodiscard]] constexpr std::size_t available() const noexcept {
-            const auto last = _buffer->_claimStrategy.getHighestPublishedSequence(_readIndexCached + 1, _buffer->_cursor.value());
-            return static_cast<std::size_t>(last - _readIndexCached);
-        }
-    }; // class buffer_reader
-
-    // static_assert(BufferReader<buffer_reader<T>>);
+        [[nodiscard]] constexpr std::size_t available() const noexcept { return static_cast<std::size_t>(_buffer->_claimStrategy._publishCursor.value() - _readIndexCached); }
+    }; // class Reader
+    // static_assert(BufferReaderLike<Reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
         if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
@@ -744,26 +720,26 @@ class CircularBuffer {
         }
     }
 
-    std::shared_ptr<buffer_impl> _shared_buffer_ptr;
-    explicit CircularBuffer(std::shared_ptr<buffer_impl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    std::shared_ptr<BufferImpl> _shared_buffer_ptr;
+    explicit CircularBuffer(std::shared_ptr<BufferImpl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
 
 public:
     CircularBuffer() = delete;
-    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator()) : _shared_buffer_ptr(std::make_shared<buffer_impl>(min_size, allocator)) {}
+    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator()) : _shared_buffer_ptr(std::make_shared<BufferImpl>(min_size, allocator)) {}
     ~CircularBuffer() = default;
 
-    [[nodiscard]] std::size_t       size() const noexcept { return _shared_buffer_ptr->_size; }
-    [[nodiscard]] BufferWriter auto new_writer() { return buffer_writer<T>(_shared_buffer_ptr); }
-    [[nodiscard]] BufferReader auto new_reader() { return buffer_reader<T>(_shared_buffer_ptr); }
+    [[nodiscard]] std::size_t           size() const noexcept { return _shared_buffer_ptr->_size; }
+    [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_shared_buffer_ptr); }
+    [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_shared_buffer_ptr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
     [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
     [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_reader_count.load(std::memory_order_relaxed); }
     [[nodiscard]] const auto& claim_strategy() { return _shared_buffer_ptr->_claimStrategy; }
-    [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_wait_strategy; }
-    [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_cursor; }
+    [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_claimStrategy._wait_strategy; }
+    [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_claimStrategy._publishCursor; }
 };
-static_assert(Buffer<CircularBuffer<int32_t>>);
+static_assert(BufferLike<CircularBuffer<int32_t>>);
 
 } // namespace gr
 #endif // GNURADIO_CIRCULARBUFFER_HPP

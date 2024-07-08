@@ -120,7 +120,7 @@ struct Optional {};
  *
  * @tparam BufferType user-extendable buffer implementation for the streaming data
  */
-template<gr::Buffer BufferType>
+template<gr::BufferLike BufferType>
 struct StreamBufferType {
     using type = BufferType;
 };
@@ -130,16 +130,16 @@ struct StreamBufferType {
  *
  * @tparam BufferType user-extendable buffer implementation for the tag data
  */
-template<gr::Buffer BufferType>
+template<gr::BufferLike BufferType>
 struct TagBufferType {
     using type = BufferType;
 };
 
 template<typename T>
-concept IsStreamBufferAttribute = requires { typename T::type; } && gr::Buffer<typename T::type> && std::is_base_of_v<StreamBufferType<typename T::type>, T>;
+concept IsStreamBufferAttribute = requires { typename T::type; } && gr::BufferLike<typename T::type> && std::is_base_of_v<StreamBufferType<typename T::type>, T>;
 
 template<typename T>
-concept IsTagBufferAttribute = requires { typename T::type; } && gr::Buffer<typename T::type> && std::is_base_of_v<TagBufferType<typename T::type>, T>;
+concept IsTagBufferAttribute = requires { typename T::type; } && gr::BufferLike<typename T::type> && std::is_base_of_v<TagBufferType<typename T::type>, T>;
 
 template<typename T>
 using is_stream_buffer_attribute = std::bool_constant<IsStreamBufferAttribute<T>>;
@@ -514,7 +514,7 @@ public:
         return port_buffers{_ioHandler.buffer(), _tagIoHandler.buffer()};
     }
 
-    void setBuffer(gr::Buffer auto streamBuffer, gr::Buffer auto tagBuffer) noexcept {
+    void setBuffer(gr::BufferLike auto streamBuffer, gr::BufferLike auto tagBuffer) noexcept {
         if constexpr (kIsInput) {
             _ioHandler    = streamBuffer.new_reader();
             _tagIoHandler = tagBuffer.new_reader();
@@ -592,10 +592,17 @@ public:
     }
 
     template<SpanReleasePolicy TSpanReleasePolicy>
-    auto reserve(std::size_t n_samples)
+    auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return streamWriter().template reserve<TSpanReleasePolicy>(n_samples);
+        return streamWriter().template reserve<TSpanReleasePolicy>(nSamples);
+    }
+
+    template<SpanReleasePolicy TSpanReleasePolicy>
+    auto tryReserve(std::size_t nSamples)
+    requires(kIsOutput)
+    {
+        return streamWriter().template tryReserve<TSpanReleasePolicy>(nSamples);
     }
 
     /**
@@ -693,7 +700,6 @@ private:
                 _cachedTag.map.insert_or_assign(key, value);
             }
         }
-
         if (isConnected() && (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM))) { // force tag publishing for explicitly published tags or EOS
             publishPendingTags();
         }
