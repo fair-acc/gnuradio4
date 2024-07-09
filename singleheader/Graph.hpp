@@ -9705,6 +9705,16 @@ inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Se
     return minimum;
 }
 
+// TODO: Revisit this code once libc++ adds support for `std::atomic<std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>>`.
+// Currently, suppressing deprecation warnings for `std::atomic_load_explicit` and `std::atomic_compare_exchange_weak` methods.
+// Note: While `std::atomic<std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>>` is compatible with GCC, it is not yet supported by libc++.
+// This workaround is necessary to maintain compatibility and avoid deprecation warnings in GCC. For more details, see the following example implementation:
+// https://godbolt.org/z/xxWbs659o
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
     signed_index_type                                       cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
@@ -9767,6 +9777,9 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
     return numToRemove != 0;
 }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace detail
 
@@ -10261,11 +10274,6 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index
     { t.getRemainingCapacity() } -> std::same_as<Sequence::signed_index_type>;
     { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
-
-namespace claim_strategy::util {
-constexpr unsigned floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-} // namespace claim_strategy::util
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
@@ -16226,6 +16234,16 @@ inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Se
     return minimum;
 }
 
+// TODO: Revisit this code once libc++ adds support for `std::atomic<std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>>`.
+// Currently, suppressing deprecation warnings for `std::atomic_load_explicit` and `std::atomic_compare_exchange_weak` methods.
+// Note: While `std::atomic<std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>>` is compatible with GCC, it is not yet supported by libc++.
+// This workaround is necessary to maintain compatibility and avoid deprecation warnings in GCC. For more details, see the following example implementation:
+// https://godbolt.org/z/xxWbs659o
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
     signed_index_type                                       cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
@@ -16288,6 +16306,9 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
     return numToRemove != 0;
 }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace detail
 
