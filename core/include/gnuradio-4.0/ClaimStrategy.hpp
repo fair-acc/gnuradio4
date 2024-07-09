@@ -106,11 +106,6 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index
     { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
 
-namespace claim_strategy::util {
-constexpr unsigned floorlog2(std::size_t x) { return x == 1 ? 0 : 1 + floorlog2(x >> 1); }
-constexpr unsigned ceillog2(std::size_t x) { return x == 1 ? 0 : floorlog2(x - 1) + 1; }
-} // namespace claim_strategy::util
-
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
     using signed_index_type = Sequence::signed_index_type;
