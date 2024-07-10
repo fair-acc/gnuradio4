@@ -310,12 +310,8 @@ const boost::ut::suite RunningGraphTests = [] {
         return reply.data.has_value();
     };
 
-    auto runScheduler = [&scheduler] {
-        auto ret = scheduler.runAndWait();
-        if (!ret.has_value()) {
-            expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", ret.error());
-        }
-    };
+    std::expected<void, Error> schedulerRet;
+    auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
 
     std::thread schedulerThread1(runScheduler);
 
@@ -323,7 +319,7 @@ const boost::ut::suite RunningGraphTests = [] {
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
     // FIXME: expect(eq(scheduler.graph().edges().size(), 1UZ)) << "added one new edges";
 
-    expect(awaitCondition(1s, [&sink, &scheduler] { return sink.count >= 10U; })) << "sink received enough data";
+    expect(awaitCondition(1s, [&sink] { return sink.count >= 10U; })) << "sink received enough data";
     fmt::println("executed basic graph");
 
     // Adding a few blocks
@@ -342,6 +338,10 @@ const boost::ut::suite RunningGraphTests = [] {
     scheduler.processScheduledMessages();
 
     scheduler.requestStop();
+    schedulerThread1.join();
+    if (!schedulerRet.has_value()) {
+        expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+    }
 
     // return to initial state
     expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
@@ -369,6 +369,9 @@ const boost::ut::suite RunningGraphTests = [] {
     fmt::print("Counting sink counted to {}\n", sink.count);
 
     schedulerThread2.join();
+    if (!schedulerRet.has_value()) {
+        expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+    }
 };
 
 } // namespace gr::testing

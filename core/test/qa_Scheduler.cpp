@@ -419,8 +419,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto                    sched = scheduler{getGraphLinear(trace), threadPool};
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs()->size() == 2u);
-        checkBlockNames(*sched.jobs()->at(0), {"s1", "mult2"});
-        checkBlockNames(*sched.jobs()->at(1), {"mult1", "out"});
+        checkBlockNames(sched.jobs()->at(0), {"s1", "mult2"});
+        checkBlockNames(sched.jobs()->at(1), {"mult1", "out"});
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 8u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
@@ -441,8 +441,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto                    sched = scheduler{getGraphParallel(trace), threadPool};
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs()->size() == 2u);
-        checkBlockNames(*sched.jobs()->at(0), {"s1", "mult1b", "mult2b", "outb"});
-        checkBlockNames(*sched.jobs()->at(1), {"mult1a", "mult2a", "outa"});
+        checkBlockNames(sched.jobs()->at(0), {"s1", "mult1b", "mult2b", "outb"});
+        checkBlockNames(sched.jobs()->at(1), {"mult1a", "mult2a", "outa"});
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 14u);
@@ -464,8 +464,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto                    sched = scheduler{getGraphScaledSum(trace), threadPool};
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs()->size() == 2u);
-        checkBlockNames(*sched.jobs()->at(0), {"s1", "mult", "out"});
-        checkBlockNames(*sched.jobs()->at(1), {"s2", "add"});
+        checkBlockNames(sched.jobs()->at(0), {"s1", "mult", "out"});
+        checkBlockNames(sched.jobs()->at(1), {"s2", "add"});
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 10u);

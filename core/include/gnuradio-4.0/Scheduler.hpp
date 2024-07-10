@@ -32,7 +32,7 @@ enum class ExecutionPolicy {
 template<typename Derived, ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase : public Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
-    using JobLists = std::shared_ptr<std::vector<std::shared_ptr<std::vector<BlockModel*>>>>;
+    using JobLists = std::shared_ptr<std::vector<std::vector<BlockModel*>>>;
 
 protected:
     gr::Graph                           _graph;
@@ -41,7 +41,7 @@ protected:
     std::shared_ptr<BasicThreadPool>    _pool;
     std::atomic_size_t                  _nRunningJobs{0UZ};
     std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
-    JobLists                            _jobLists = std::make_shared<std::vector<std::shared_ptr<std::vector<BlockModel*>>>>();
+    JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
     MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
     MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
@@ -60,8 +60,7 @@ public:
     explicit SchedulerBase(gr::Graph&&   graph,                                                                                                  //
         std::shared_ptr<BasicThreadPool> thread_pool       = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND), //
         const profiling::Options&        profiling_options = {})                                                                                        //
-        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()},                                   //
-          _pool(std::move(thread_pool)), _jobLists(std::make_shared<std::vector<std::shared_ptr<std::vector<BlockModel*>>>>()) {}
+        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(std::move(thread_pool)) {}
 
     ~SchedulerBase() {
         if (this->state() == lifecycle::RUNNING) {
@@ -217,14 +216,25 @@ protected:
     void init() {
         [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.init");
         base_t::processScheduledMessages(); // make sure initial subscriptions are processed
-    }
-
-    void start() {
         const auto result = _graph.performConnections();
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
         connectBlockMessagePorts();
+    }
+
+    void reset() {
+        _graph.forEachBlock([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block.changeState(lifecycle::INITIALISED)); });
+
+        // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
+        // clear buffers
+        // std::for_each(_graph.edges().begin(), _graph.edges().end(), [](auto &edge) {
+        //
+        // });
+    }
+
+    void start() {
+        // FIXME: runtime edge->connection API needs to add initialisation here. Implementation either here or in Graph.
 
         std::lock_guard lock(_jobListsMutex);
         _graph.forEachBlock([this](auto& block) {
@@ -244,7 +254,7 @@ protected:
         }
     }
 
-    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::shared_ptr<std::vector<BlockModel*>>>>& jobList) noexcept {
+    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<BlockModel*>>> jobList) noexcept {
         _nRunningJobs.fetch_add(1UZ, std::memory_order_acq_rel);
         _nRunningJobs.notify_all();
 
@@ -252,10 +262,10 @@ protected:
 
         std::vector<BlockModel*> localBlockList;
         {
-            std::lock_guard                           lock(_jobListsMutex);
-            std::shared_ptr<std::vector<BlockModel*>> blocks = jobList->at(runnerID);
-            localBlockList.reserve(blocks->size());
-            for (const auto& block : *blocks) {
+            std::lock_guard          lock(_jobListsMutex);
+            std::vector<BlockModel*> blocks = jobList->at(runnerID);
+            localBlockList.reserve(blocks.size());
+            for (const auto& block : blocks) {
                 localBlockList.push_back(block);
             }
         }
@@ -266,7 +276,7 @@ protected:
         auto                  activeState        = this->state();
         [[maybe_unused]] auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
         do {
-            if constexpr (std::is_same_v<TProfiler, profiling::null::Profiler>) {
+            if constexpr (not std::is_same_v<TProfiler, profiling::null::Profiler>) {
                 pe = profiler_handler.startCompleteEvent("scheduler_base.work");
             }
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
@@ -323,7 +333,7 @@ protected:
                     std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 }
             }
-            if constexpr (std::is_same_v<TProfiler, profiling::null::Profiler>) {
+            if constexpr (not std::is_same_v<TProfiler, profiling::null::Profiler>) {
                 pe.finish();
             }
         } while (lifecycle::isActive(activeState));
@@ -340,7 +350,7 @@ protected:
             }
         });
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-        this->emitErrorMessageIfAny("stop() -> LifecycleState ->INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
+        this->emitErrorMessageIfAny("stop() -> LifecycleState ->IDLE", this->changeStateTo(lifecycle::State::IDLE));
     }
 
     void pause() {
@@ -355,16 +365,6 @@ protected:
 
     void resume() {
         _graph.forEachBlock([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
-    }
-
-    void reset() {
-        _graph.forEachBlock([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block.changeState(lifecycle::INITIALISED)); });
-
-        // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
-        // clear buffers
-        // std::for_each(_graph.edges().begin(), _graph.edges().end(), [](auto &edge) {
-        //
-        // });
     }
 };
 
@@ -397,10 +397,10 @@ private:
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
-            auto& job = this->_jobLists->emplace_back(std::make_shared<std::vector<BlockModel*>>());
-            job->reserve(this->_graph.blocks().size() / n_batches + 1);
+            auto& job = this->_jobLists->emplace_back(std::vector<BlockModel*>());
+            job.reserve(this->_graph.blocks().size() / n_batches + 1);
             for (std::size_t j = i; j < this->_graph.blocks().size(); j += n_batches) {
-                job->push_back(this->_graph.blocks()[j].get());
+                job.push_back(this->_graph.blocks()[j].get());
             }
         }
     }
@@ -475,10 +475,10 @@ private:
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
-            auto& job = this->_jobLists->emplace_back(std::make_shared<std::vector<BlockModel*>>());
-            job->reserve(_blocklist.size() / n_batches + 1);
+            auto& job = this->_jobLists->emplace_back(std::vector<BlockModel*>());
+            job.reserve(_blocklist.size() / n_batches + 1);
             for (std::size_t j = i; j < _blocklist.size(); j += n_batches) {
-                job->push_back(_blocklist[j]);
+                job.push_back(_blocklist[j]);
             }
         }
     }
