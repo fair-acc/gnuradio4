@@ -274,11 +274,8 @@ protected:
         gr::Size_t            inactiveCycleCount = 0U;
         gr::Size_t            msgToCount         = 0U;
         auto                  activeState        = this->state();
-        [[maybe_unused]] auto pe                 = profiler_handler.startCompleteEvent("scheduler_base.work");
         do {
-            if constexpr (not std::is_same_v<TProfiler, profiling::null::Profiler>) {
-                pe = profiler_handler.startCompleteEvent("scheduler_base.work");
-            }
+            auto pe = profiler_handler.startCompleteEvent("scheduler_base.work");
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
                 // optionally tracking progress and block if there is none
                 progress = this->_graph.progress().value();
@@ -332,9 +329,6 @@ protected:
                     // allow scheduler process to sleep before retrying (N.B. intended to save CPU/battery power)
                     std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 }
-            }
-            if constexpr (not std::is_same_v<TProfiler, profiling::null::Profiler>) {
-                pe.finish();
             }
         } while (lifecycle::isActive(activeState));
         _nRunningJobs.fetch_sub(1UZ, std::memory_order_acq_rel);
