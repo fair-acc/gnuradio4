@@ -470,7 +470,7 @@ const boost::ut::suite MessagesTests = [] {
 
                 if (!data.empty()) {
                     expect(reply.data.has_value());
-                    expect(is_contained(reply.data.value(), data));
+                    expect(is_contained(reply.data.value(), data)) << fmt::format("scheduler return reply data: {}\n contains data {}\n", reply.data.value(), data);
                 }
             } else if constexpr (std::is_same_v<decltype(data), property_map>) {
                 expect(!reply.data.has_value());

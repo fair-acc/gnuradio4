@@ -299,6 +299,8 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
         _invokeCount.incrementAndGet();
 
         if (produceCount == 0) {
+            // early return by not explicitly consuming/producing but returning incomplete state
+            // normally this should be reserved for "starving" blocks. Here, it's being used to unit-test this alternative behaviour
             return gr::lifecycle::isActive(this->state()) ? INSUFFICIENT_OUTPUT_ITEMS : DONE;
         }
 
@@ -655,6 +657,16 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(monitor.in.isConnected()) << "monitor in is connected";
         expect(monitor.out.isConnected()) << "monitor out is connected";
 
+        auto oldProgress = scheduler.graph().progress().value();
+        expect(awaitCondition(1s, [&scheduler, &oldProgress] { // wait until there is no more progress (i.e. wait until all initial buffers are filled)
+            std::this_thread::sleep_for(100ms);                // wait
+            auto newProgress = scheduler.graph().progress().value();
+            if (oldProgress == newProgress) {
+                return true;
+            }
+            oldProgress = newProgress;
+            return false;
+        })) << "BusyLoopBlock sleeping";
         const auto progressAfterInit = scheduler.graph().progress().value();
         auto       estInvokeCount    = [&monitor] {
             const auto invokeCountInit = monitor._invokeCount.value();
