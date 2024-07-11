@@ -86,17 +86,6 @@ struct alignas(256) TraceEvent { // fills up to power of 2 size, see static_asse
 
         return {};
     }
-
-    TraceEvent()                                 = default;
-    ~TraceEvent()                                = default;
-    TraceEvent(TraceEvent&&) noexcept            = default;
-    TraceEvent& operator=(TraceEvent&&) noexcept = default;
-
-    // the default implementations slow down publish() even if never called at runtime (branch prediction going wrong for the non-mmap case?)
-    // seen with -O3 on gcc 12.3.0
-    TraceEvent(const TraceEvent&) { throw std::logic_error("unexpected copy"); }
-
-    TraceEvent& operator=(const TraceEvent&) { throw std::logic_error("unexpected assignment"); }
 };
 
 // size of TraceEvent must be power of 2, otherwise circular_buffer doesn't work correctly
@@ -166,7 +155,7 @@ public:
 } // namespace null
 
 template<typename Handler>
-class CompleteEvent {
+struct CompleteEvent {
     Handler&               _handler;
     std::string            _name;
     std::string            _categories;
@@ -174,7 +163,6 @@ class CompleteEvent {
     bool                   _finished = false;
     detail::time_point     _start    = detail::clock::now();
 
-public:
     explicit CompleteEvent(Handler& handler, std::string_view name, std::string_view categories, std::initializer_list<arg_value> args) : _handler{handler}, _name{name}, _categories{categories}, _args{args} {}
 
     ~CompleteEvent() { finish(); }
