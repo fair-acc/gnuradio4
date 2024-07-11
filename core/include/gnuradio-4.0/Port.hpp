@@ -670,10 +670,14 @@ public:
             return false;
         }
         {
-            auto outTags     = tagWriter().reserve(1UZ);
-            outTags[0].index = _cachedTag.index;
-            outTags[0].map   = _cachedTag.map;
-            outTags.publish(1UZ);
+            PublishableSpan auto outTags = tagWriter().tryReserve(1UZ);
+            if (!outTags.empty()) {
+                outTags[0].index = _cachedTag.index;
+                outTags[0].map   = _cachedTag.map;
+                outTags.publish(1UZ);
+            } else {
+                return false;
+            }
         }
 
         _cachedTag.reset();

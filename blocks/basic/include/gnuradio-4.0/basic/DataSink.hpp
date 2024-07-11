@@ -698,28 +698,34 @@ private:
 
         void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
 
-        inline void publishDataSet(DataSet<T>&& data) {
+        inline bool publishDataSet(DataSet<T>&& data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
+                return true;
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
                     this->setExpired();
-                    return;
+                    return false;
                 }
 
-                auto writeData = poller->writer.reserve(1);
-                if (block) {
-                    writeData[0] = std::move(data);
-                    writeData.publish(1);
+                auto writeData = poller->writer.tryReserve(1);
+                if (writeData.empty()) {
+                    return false;
                 } else {
-                    if (poller->writer.available() > 0) {
+                    if (block) {
                         writeData[0] = std::move(data);
                         writeData.publish(1);
                     } else {
-                        poller->drop_count++;
+                        if (poller->writer.available() > 0) {
+                            writeData[0] = std::move(data);
+                            writeData.publish(1);
+                        } else {
+                            poller->drop_count++;
+                        }
                     }
                 }
+                return true;
             }
         }
 
@@ -742,8 +748,10 @@ private:
                 window->pending_post_samples -= postSampleView.size();
 
                 if (window->pending_post_samples == 0) {
-                    this->publishDataSet(std::move(window->dataset));
-                    window = pending_trigger_windows.erase(window);
+                    bool published = this->publishDataSet(std::move(window->dataset));
+                    if (published) {
+                        window = pending_trigger_windows.erase(window);
+                    }
                 } else {
                     ++window;
                 }
@@ -753,7 +761,10 @@ private:
         void stop() override {
             for (auto& window : pending_trigger_windows) {
                 if (!window.dataset.signal_values.empty()) {
-                    this->publishDataSet(std::move(window.dataset));
+                    bool published = this->publishDataSet(std::move(window.dataset));
+                    if (!published) {
+                        throw gr::exception("DataSink::TriggerListener::stop() can not publish pending datasets\n");
+                    }
                 }
             }
             pending_trigger_windows.clear();
@@ -781,28 +792,34 @@ private:
 
         void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
 
-        inline void publishDataSet(DataSet<T>&& data) {
+        inline bool publishDataSet(DataSet<T>&& data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
+                return true;
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
                     this->setExpired();
-                    return;
+                    return false;
                 }
 
-                auto writeData = poller->writer.reserve(1);
-                if (block) {
-                    writeData[0] = std::move(data);
-                    writeData.publish(1);
+                auto writeData = poller->writer.tryReserve(1);
+                if (writeData.empty()) {
+                    return false;
                 } else {
-                    if (poller->writer.available() > 0) {
+                    if (block) {
                         writeData[0] = std::move(data);
                         writeData.publish(1);
                     } else {
-                        poller->drop_count++;
+                        if (poller->writer.available() > 0) {
+                            writeData[0] = std::move(data);
+                            writeData.publish(1);
+                        } else {
+                            poller->drop_count++;
+                        }
                     }
                 }
+                return true;
             }
         }
 
@@ -814,8 +831,10 @@ private:
                         if (obsr == trigger::MatchResult::NotMatching) {
                             pending_dataset->timing_events[0].push_back({static_cast<Tag::signed_index_type>(pending_dataset->signal_values.size()), *tagData0});
                         }
-                        this->publishDataSet(std::move(*pending_dataset));
-                        pending_dataset.reset();
+                        bool published = this->publishDataSet(std::move(*pending_dataset));
+                        if (published) {
+                            pending_dataset.reset();
+                        }
                     }
                 }
                 if (obsr == trigger::MatchResult::Matching) {
@@ -830,15 +849,20 @@ private:
                 pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), view.begin(), view.end());
 
                 if (pending_dataset->signal_values.size() == maximumWindowSize) {
-                    this->publishDataSet(std::move(*pending_dataset));
-                    pending_dataset.reset();
+                    bool published = this->publishDataSet(std::move(*pending_dataset));
+                    if (published) {
+                        pending_dataset.reset();
+                    }
                 }
             }
         }
 
         void stop() override {
             if (pending_dataset) {
-                this->publishDataSet(std::move(*pending_dataset));
+                bool published = this->publishDataSet(std::move(*pending_dataset));
+                if (!published) {
+                    throw gr::exception("DataSink::MultiplexedListener::stop() can not publish pending datasets\n");
+                }
                 pending_dataset.reset();
             }
             if (auto p = polling_handler.lock()) {
@@ -875,28 +899,34 @@ private:
             dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
         }
 
-        inline void publishDataSet(DataSet<T>&& data) {
+        inline bool publishDataSet(DataSet<T>&& data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
+                return true;
             } else {
                 auto poller = polling_handler.lock();
                 if (!poller) {
                     this->setExpired();
-                    return;
+                    return false;
                 }
 
-                auto writeData = poller->writer.reserve(1);
-                if (block) {
-                    writeData[0] = std::move(data);
-                    writeData.publish(1);
+                auto writeData = poller->writer.tryReserve(1);
+                if (writeData.empty()) {
+                    return false;
                 } else {
-                    if (poller->writer.available() > 0) {
+                    if (block) {
                         writeData[0] = std::move(data);
                         writeData.publish(1);
                     } else {
-                        poller->drop_count++;
+                        if (poller->writer.available() > 0) {
+                            writeData[0] = std::move(data);
+                            writeData.publish(1);
+                        } else {
+                            poller->drop_count++;
+                        }
                     }
                 }
+                return true;
             }
         }
 
@@ -918,9 +948,10 @@ private:
                 DataSet<T> dataset    = dataset_template;
                 dataset.timing_events = {{{-static_cast<Tag::signed_index_type>(it->delay), std::move(it->tag_data)}}};
                 dataset.signal_values = {inData[it->pending_samples]};
-                this->publishDataSet(std::move(dataset));
-
-                it = pending.erase(it);
+                bool published        = this->publishDataSet(std::move(dataset));
+                if (published) {
+                    it = pending.erase(it);
+                }
             }
         }
 

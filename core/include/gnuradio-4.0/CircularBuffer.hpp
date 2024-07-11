@@ -335,15 +335,15 @@ class CircularBuffer {
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->nSamplesPublished());
                 _parent->_offset += static_cast<signed_index_type>(_parent->nSamplesPublished());
 #ifndef NDEBUG
-                if constexpr (isMultiThreadedStrategy()) {
+                if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::multiple_writer::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                        fmt::print(stderr, "CircularBuffer::MultiWriter::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
                         std::abort();
                     }
 
                 } else {
                     if (!_parent->_internalSpan.empty() && !isPublished()) {
-                        fmt::print(stderr, "CircularBuffer::single_writer::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        fmt::print(stderr, "CircularBuffer::SingleWriter::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
@@ -370,7 +370,7 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t              samplesToPublish() const noexcept { return _parent->_nSamplesPublished; }
         [[nodiscard]] constexpr bool                     isPublished() const noexcept { return _parent->_isRangePublished; }
         [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nSamplesPublished; }
-        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>; }
+        [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>; }
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
 
         constexpr void publish(std::size_t nSamplesToPublish) noexcept {
@@ -478,7 +478,7 @@ class CircularBuffer {
 
     private:
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
-            if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>) {
+            if constexpr (std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>) {
                 if (_internalSpan.size() - _nSamplesPublished != 0) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "

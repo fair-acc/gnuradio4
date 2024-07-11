@@ -688,7 +688,7 @@ public:
             meta::tuple_for_each_enumerate(
                 [nSamples]<typename OutputRange>(auto, OutputRange& outputRange) {
                     auto processOneRange = [nSamples]<typename Out>(Out& out) {
-                        if constexpr (Out::isMultiThreadedStrategy()) {
+                        if constexpr (Out::isMultiProducerStrategy()) {
                             if (!out.isFullyPublished()) {
                                 std::abort();
                             }
@@ -1737,8 +1737,12 @@ public:
 
             retMessage->cmd              = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
             retMessage->serviceName      = unique_name;
-            PublishableSpan auto msgSpan = msgOut.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-            msgSpan[0]                   = *retMessage;
+            PublishableSpan auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            if (msgSpan.empty()) {
+                throw gr::exception(fmt::format("{}::processMessages() can not reserve span for message\n", name));
+            } else {
+                msgSpan[0] = *retMessage;
+            }
         } // - end - for (const auto &message : messages) { ..
     }
 
