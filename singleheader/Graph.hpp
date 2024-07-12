@@ -9612,6 +9612,140 @@ static_assert(!BufferWriterLike<test::non_compliant_class<int>>);
 // #include <gnuradio-4.0/meta/utils.hpp>
 
 
+// #include "AtomicBitset.hpp"
+#ifndef GNURADIO_ATOMICBITSET_HPP
+#define GNURADIO_ATOMICBITSET_HPP
+
+#include <vector>
+
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
+namespace gr {
+/*
+ * `AtomicBitset` is a lock-free, thread-safe bitset.
+ * It allows for efficient and thread-safe manipulation of individual bits.
+ * For bulk set or reset atomic operation is guaranteed per individual bit (word).
+ */
+template<std::size_t Size = std::dynamic_extent>
+class AtomicBitset {
+    static_assert(Size > 0, "Size must be greater than 0");
+    static constexpr bool isSizeDynamic = Size == std::dynamic_extent;
+
+    static constexpr std::size_t _bitsPerWord  = sizeof(size_t) * 8UZ;
+    static constexpr std::size_t _nStaticWords = isSizeDynamic ? 1UZ : (Size + _bitsPerWord - 1UZ) / _bitsPerWord;
+
+    // using DynamicArrayType = std::unique_ptr<std::atomic<std::size_t>[]>;
+    using DynamicArrayType = std::vector<std::atomic<std::size_t>>;
+    using StaticArrayType  = std::array<std::atomic<std::size_t>, _nStaticWords>;
+    using ArrayType        = std::conditional_t<isSizeDynamic, DynamicArrayType, StaticArrayType>;
+
+    std::size_t _size = Size;
+    ArrayType   _bits;
+
+public:
+    AtomicBitset()
+    requires(!isSizeDynamic)
+    {
+        for (auto& word : _bits) {
+            word.store(0UL, std::memory_order_relaxed);
+        }
+    }
+
+    explicit AtomicBitset(std::size_t size = 0UZ)
+    requires(isSizeDynamic)
+        : _size(size), _bits(std::vector<std::atomic<std::size_t>>(size)) {
+        // assert(size > 0UZ);
+        for (std::size_t i = 0; i < _size; i++) {
+            _bits[i].store(0UL, std::memory_order_relaxed);
+        }
+    }
+
+    void set(std::size_t bitPosition, bool value) {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = 1UL << bitIndex;
+
+        std::size_t oldBits;
+        std::size_t newBits;
+        do {
+            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            newBits = value ? (oldBits | mask) : (oldBits & ~mask);
+        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    void set(std::size_t begin, std::size_t end, bool value) {
+        assert(begin <= end && end <= _size); // [begin, end)
+
+        std::size_t       beginWord   = begin / _bitsPerWord;
+        std::size_t       endWord     = end / _bitsPerWord;
+        const std::size_t beginOffset = begin % _bitsPerWord;
+        const std::size_t endOffset   = end % _bitsPerWord;
+
+        if (begin == end) {
+            return;
+        } else if (beginWord == endWord) {
+            // the range is within a single word
+            setBitsInWord(beginWord, beginOffset, endOffset, value);
+        } else {
+            // leading bits in the first word
+            if (beginOffset != 0) {
+                setBitsInWord(beginWord, beginOffset, _bitsPerWord, value);
+                beginWord++;
+            }
+            // trailing bits in the last word
+            if (endOffset != 0) {
+                setBitsInWord(endWord, 0, endOffset, value);
+            }
+            endWord--;
+            // whole words in the middle
+            for (std::size_t wordIndex = beginWord; wordIndex <= endWord; ++wordIndex) {
+                setFullWord(wordIndex, value);
+            }
+        }
+    }
+
+    void set(std::size_t bitPosition) { set(bitPosition, true); }
+
+    void set(std::size_t begin, std::size_t end) { set(begin, end, true); }
+
+    void reset(std::size_t bitPosition) { set(bitPosition, false); }
+
+    void reset(std::size_t begin, std::size_t end) { set(begin, end, false); }
+
+    bool test(std::size_t bitPosition) const {
+        assert(bitPosition < _size);
+        const std::size_t wordIndex = bitPosition / _bitsPerWord;
+        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
+        const std::size_t mask      = 1UL << bitIndex;
+
+        return (_bits[wordIndex].load(std::memory_order_acquire) & mask) != 0;
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const { return _size; }
+
+private:
+    void setBitsInWord(std::size_t wordIndex, std::size_t begin, std::size_t end, bool value) {
+        assert(begin < end && end <= _bitsPerWord);
+        const std::size_t mask = (end == _bitsPerWord) ? ~((1UL << begin) - 1) : ((1UL << end) - 1) & ~((1UL << begin) - 1);
+        std::size_t       oldBits;
+        std::size_t       newBits;
+        do {
+            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            newBits = value ? (oldBits | mask) : (oldBits & ~mask);
+        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    forceinline void setFullWord(std::size_t wordIndex, bool value) { _bits[wordIndex].store(value ? ~0UL : 0UL, std::memory_order_release); }
+};
+
+} // namespace gr
+
+#endif // GNURADIO_ATOMICBITSET_HPP
+
 // #include "Sequence.hpp"
 #ifndef GNURADIO_SEQUENCE_HPP
 #define GNURADIO_SEQUENCE_HPP
@@ -10185,88 +10319,6 @@ public:
 
 namespace gr {
 
-namespace detail {
-
-/*
- * `AtomicBitset` is a lock-free, thread-safe bitset.
- * It allows for efficient and thread-safe manipulation of individual bits.
- */
-template<std::size_t Size = std::dynamic_extent>
-class AtomicBitset {
-    static_assert(Size > 0, "Size must be greater than 0");
-    static constexpr bool isSizeDynamic = Size == std::dynamic_extent;
-
-    static constexpr std::size_t _bitsPerWord  = sizeof(size_t) * 8UZ;
-    static constexpr std::size_t _nStaticWords = isSizeDynamic ? 1UZ : (Size + _bitsPerWord - 1UZ) / _bitsPerWord;
-
-    // using DynamicArrayType = std::unique_ptr<std::atomic<std::size_t>[]>;
-    using DynamicArrayType = std::vector<std::atomic<std::size_t>>;
-    using StaticArrayType  = std::array<std::atomic<std::size_t>, _nStaticWords>;
-    using ArrayType        = std::conditional_t<isSizeDynamic, DynamicArrayType, StaticArrayType>;
-
-    std::size_t _size = Size;
-    ArrayType   _bits;
-
-public:
-    AtomicBitset()
-    requires(!isSizeDynamic)
-    {
-        for (auto& word : _bits) {
-            word.store(0, std::memory_order_relaxed);
-        }
-    }
-
-    explicit AtomicBitset(std::size_t size = 0UZ)
-    requires(isSizeDynamic)
-        : _size(size), _bits(std::vector<std::atomic<std::size_t>>(size)) {
-        // assert(size > 0UZ);
-        for (std::size_t i = 0; i < _size; i++) {
-            _bits[i].store(0, std::memory_order_relaxed);
-        }
-    }
-
-    void set(std::size_t bitPosition) {
-        assert(bitPosition < _size);
-        const std::size_t wordIndex = bitPosition / _bitsPerWord;
-        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
-        const std::size_t mask      = 1UL << bitIndex;
-
-        std::size_t oldBits;
-        std::size_t newBits;
-        do {
-            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
-            newBits = oldBits | mask;
-        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
-    }
-
-    void reset(std::size_t bitPosition) {
-        assert(bitPosition < _size);
-        const std::size_t wordIndex = bitPosition / _bitsPerWord;
-        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
-        const std::size_t mask      = ~(1UL << bitIndex);
-
-        std::size_t oldBits;
-        std::size_t newBits;
-        do {
-            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
-            newBits = oldBits & mask;
-        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
-    }
-
-    bool test(std::size_t bitPosition) const {
-        assert(bitPosition < _size);
-        const std::size_t wordIndex = bitPosition / _bitsPerWord;
-        const std::size_t bitIndex  = bitPosition % _bitsPerWord;
-        const std::size_t mask      = 1UL << bitIndex;
-
-        return (_bits[wordIndex].load(std::memory_order_acquire) & mask) != 0;
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const { return _size; }
-};
-
-} // namespace detail
-
 template<typename T>
 concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index_type sequence, const Sequence::signed_index_type offset, const std::size_t nSlotsToClaim) {
     { t.next(nSlotsToClaim) } -> std::same_as<Sequence::signed_index_type>;
@@ -10276,7 +10328,7 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index
 };
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
-class alignas(hardware_constructive_interference_size) SingleThreadedStrategy {
+class alignas(hardware_constructive_interference_size) SingleProducerStrategy {
     using signed_index_type = Sequence::signed_index_type;
 
     const std::size_t _size = SIZE;
@@ -10287,16 +10339,16 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    explicit SingleThreadedStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
-    SingleThreadedStrategy(const SingleThreadedStrategy&)  = delete;
-    SingleThreadedStrategy(const SingleThreadedStrategy&&) = delete;
-    void operator=(const SingleThreadedStrategy&)          = delete;
+    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
+    SingleProducerStrategy(const SingleProducerStrategy&)  = delete;
+    SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
+    void operator=(const SingleProducerStrategy&)          = delete;
 
     signed_index_type next(const std::size_t nSlotsToClaim = 1) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         SpinWait spinWait;
-        while (getRemainingCapacity() < nSlotsToClaim) { // while not enough slots in buffer
+        while (getRemainingCapacity() < static_cast<signed_index_type>(nSlotsToClaim)) { // while not enough slots in buffer
             if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
                 _waitStrategy.signalAllWhenBlocking();
             }
@@ -10308,9 +10360,8 @@ public:
 
     [[nodiscard]] std::optional<signed_index_type> tryNext(const std::size_t nSlotsToClaim) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
-        static_cast<signed_index_type>(_size) < nSlotsToClaim + _reserveCursor - getMinReaderCursor();
 
-        if (getRemainingCapacity() < nSlotsToClaim) { // not enough slots in buffer
+        if (getRemainingCapacity() < static_cast<signed_index_type>(nSlotsToClaim)) { // not enough slots in buffer
             return std::nullopt;
         }
         _reserveCursor += nSlotsToClaim;
@@ -10337,7 +10388,7 @@ private:
     }
 };
 
-static_assert(ClaimStrategyLike<SingleThreadedStrategy<1024, NoWaitStrategy>>);
+static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
 
 /**
  * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
@@ -10349,12 +10400,12 @@ static_assert(ClaimStrategyLike<SingleThreadedStrategy<1024, NoWaitStrategy>>);
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
-class alignas(hardware_constructive_interference_size) MultiThreadedStrategy {
+class alignas(hardware_constructive_interference_size) MultiProducerStrategy {
     using signed_index_type = Sequence::signed_index_type;
 
-    detail::AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
-    const std::size_t          _size = SIZE;
-    const std::size_t          _mask = SIZE - 1;
+    AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
+    const std::size_t  _size = SIZE;
+    const std::size_t  _mask = SIZE - 1;
 
 public:
     Sequence                                                _reserveCursor; // slots can be reserved starting from _reserveCursor
@@ -10362,19 +10413,19 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    MultiThreadedStrategy() = delete;
+    MultiProducerStrategy() = delete;
 
-    explicit MultiThreadedStrategy()
+    explicit MultiProducerStrategy()
     requires(SIZE != std::dynamic_extent)
     {}
 
-    explicit MultiThreadedStrategy(std::size_t bufferSize)
+    explicit MultiProducerStrategy(std::size_t bufferSize)
     requires(SIZE == std::dynamic_extent)
-        : _slotStates(detail::AtomicBitset<>(bufferSize)), _size(bufferSize), _mask(bufferSize - 1) {}
+        : _slotStates(AtomicBitset<>(bufferSize)), _size(bufferSize), _mask(bufferSize - 1) {}
 
-    MultiThreadedStrategy(const MultiThreadedStrategy&)  = delete;
-    MultiThreadedStrategy(const MultiThreadedStrategy&&) = delete;
-    void operator=(const MultiThreadedStrategy&)         = delete;
+    MultiProducerStrategy(const MultiProducerStrategy&)  = delete;
+    MultiProducerStrategy(const MultiProducerStrategy&&) = delete;
+    void operator=(const MultiProducerStrategy&)         = delete;
 
     [[nodiscard]] signed_index_type next(std::size_t nSlotsToClaim = 1) {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
@@ -10418,9 +10469,10 @@ public:
     [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor.value() - getMinReaderCursor()); }
 
     void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
-        for (std::size_t i = 0; i < nSlotsToClaim; i++) {
-            _slotStates.set((offset + i) & _mask); // mark slots as published
+        if (nSlotsToClaim == 0) {
+            return;
         }
+        setSlotsStates(offset, offset + static_cast<signed_index_type>(nSlotsToClaim), true);
 
         // ensure publish cursor is only advanced after all prior slots are published
         signed_index_type currentPublishCursor;
@@ -10429,15 +10481,13 @@ public:
             currentPublishCursor = _publishCursor.value();
             nextPublishCursor    = currentPublishCursor;
 
-            while (_slotStates.test(nextPublishCursor & _mask) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
+            while (_slotStates.test(static_cast<std::size_t>(nextPublishCursor) & _mask) && static_cast<std::size_t>(nextPublishCursor - currentPublishCursor) < _slotStates.size()) {
                 nextPublishCursor++;
             }
         } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
 
         //  clear completed slots up to the new published cursor
-        for (std::size_t seq = static_cast<std::size_t>(currentPublishCursor); seq < nextPublishCursor; seq++) {
-            _slotStates.reset(seq & _mask);
-        }
+        setSlotsStates(currentPublishCursor, nextPublishCursor, false);
 
         if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
             _waitStrategy.signalAllWhenBlocking();
@@ -10451,9 +10501,30 @@ private:
         }
         return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
     }
+
+    void setSlotsStates(signed_index_type seqBegin, signed_index_type seqEnd, bool value) {
+        const std::size_t beginSet  = static_cast<std::size_t>(seqBegin) & _mask;
+        const std::size_t endSet    = static_cast<std::size_t>(seqEnd) & _mask;
+        const auto        diffReset = static_cast<std::size_t>(seqEnd - seqBegin);
+
+        if (beginSet == endSet && beginSet == 0UZ && diffReset == _size) {
+            _slotStates.set(0UZ, _size, value);
+        } else if (beginSet <= endSet) {
+            _slotStates.set(beginSet, endSet, value);
+        } else {
+            _slotStates.set(beginSet, _size, value);
+            if (endSet > 0UZ) {
+                _slotStates.set(0UZ, endSet, value);
+            }
+        }
+        // Non-bulk AtomicBitset API
+        //        for (std::size_t seq = static_cast<std::size_t>(seqBegin); seq < static_cast<std::size_t>(seqEnd); seq++) {
+        //            _slotStates.set(seq & _mask, value);
+        //        }
+    }
 };
 
-static_assert(ClaimStrategyLike<MultiThreadedStrategy<1024, NoWaitStrategy>>);
+static_assert(ClaimStrategyLike<MultiProducerStrategy<1024, NoWaitStrategy>>);
 
 enum class ProducerType {
     /**
@@ -10473,12 +10544,12 @@ struct producer_type;
 
 template<std::size_t size, WaitStrategyLike TWaitStrategy>
 struct producer_type<size, ProducerType::Single, TWaitStrategy> {
-    using value_type = SingleThreadedStrategy<size, TWaitStrategy>;
+    using value_type = SingleProducerStrategy<size, TWaitStrategy>;
 };
 
 template<std::size_t size, WaitStrategyLike TWaitStrategy>
 struct producer_type<size, ProducerType::Multi, TWaitStrategy> {
-    using value_type = MultiThreadedStrategy<size, TWaitStrategy>;
+    using value_type = MultiProducerStrategy<size, TWaitStrategy>;
 };
 
 template<std::size_t size, ProducerType producerType, WaitStrategyLike TWaitStrategy>
@@ -10772,15 +10843,15 @@ class CircularBuffer {
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->nSamplesPublished());
                 _parent->_offset += static_cast<signed_index_type>(_parent->nSamplesPublished());
 #ifndef NDEBUG
-                if constexpr (isMultiThreadedStrategy()) {
+                if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::multiple_writer::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                        fmt::print(stderr, "CircularBuffer::MultiWriter::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
                         std::abort();
                     }
 
                 } else {
                     if (!_parent->_internalSpan.empty() && !isPublished()) {
-                        fmt::print(stderr, "CircularBuffer::single_writer::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        fmt::print(stderr, "CircularBuffer::SingleWriter::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
@@ -10807,7 +10878,7 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t              samplesToPublish() const noexcept { return _parent->_nSamplesPublished; }
         [[nodiscard]] constexpr bool                     isPublished() const noexcept { return _parent->_isRangePublished; }
         [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nSamplesPublished; }
-        [[nodiscard]] constexpr static bool              isMultiThreadedStrategy() noexcept { return std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>; }
+        [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>; }
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
 
         constexpr void publish(std::size_t nSamplesToPublish) noexcept {
@@ -10915,7 +10986,7 @@ class CircularBuffer {
 
     private:
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
-            if constexpr (std::is_base_of_v<MultiThreadedStrategy<SIZE, TWaitStrategy>, ClaimType>) {
+            if constexpr (std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>) {
                 if (_internalSpan.size() - _nSamplesPublished != 0) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
@@ -15186,10 +15257,14 @@ public:
             return false;
         }
         {
-            auto outTags     = tagWriter().reserve(1UZ);
-            outTags[0].index = _cachedTag.index;
-            outTags[0].map   = _cachedTag.map;
-            outTags.publish(1UZ);
+            PublishableSpan auto outTags = tagWriter().tryReserve(1UZ);
+            if (!outTags.empty()) {
+                outTags[0].index = _cachedTag.index;
+                outTags[0].map   = _cachedTag.map;
+                outTags.publish(1UZ);
+            } else {
+                return false;
+            }
         }
 
         _cachedTag.reset();
@@ -20131,7 +20206,7 @@ public:
             meta::tuple_for_each_enumerate(
                 [nSamples]<typename OutputRange>(auto, OutputRange& outputRange) {
                     auto processOneRange = [nSamples]<typename Out>(Out& out) {
-                        if constexpr (Out::isMultiThreadedStrategy()) {
+                        if constexpr (Out::isMultiProducerStrategy()) {
                             if (!out.isFullyPublished()) {
                                 std::abort();
                             }
@@ -21180,8 +21255,12 @@ public:
 
             retMessage->cmd              = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
             retMessage->serviceName      = unique_name;
-            PublishableSpan auto msgSpan = msgOut.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-            msgSpan[0]                   = *retMessage;
+            PublishableSpan auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            if (msgSpan.empty()) {
+                throw gr::exception(fmt::format("{}::processMessages() can not reserve span for message\n", name));
+            } else {
+                msgSpan[0] = *retMessage;
+            }
         } // - end - for (const auto &message : messages) { ..
     }
 
