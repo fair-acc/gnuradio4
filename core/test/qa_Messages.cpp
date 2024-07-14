@@ -420,6 +420,9 @@ const boost::ut::suite MessagesTests = [] {
         gr::MsgPortOut toScheduler;
         gr::MsgPortIn  fromScheduler;
         auto           scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+        scheduler.settings().set({{"process_stream_to_message_ratio", 1UZ}});
+        scheduler.settings().applyStagedParameters();
+        scheduler.settings().storeDefaults();
 
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
