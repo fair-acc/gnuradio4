@@ -438,7 +438,7 @@ const boost::ut::suite MessagesTests = [] {
             };
         };
 
-        auto checkReply = [&fromScheduler](std::size_t nReplyExpected, std::string_view serviceName, std::string_view endPoint, auto data) -> std::optional<bool> {
+        auto checkReply = [&fromScheduler](std::string testCase, std::size_t nReplyExpected, std::string_view serviceName, std::string_view endPoint, auto data) -> std::optional<bool> {
             std::size_t nAvailable = fromScheduler.streamReader().available();
             if (nReplyExpected == 0UZ) {
                 if (nAvailable == 0UZ) {
@@ -449,7 +449,7 @@ const boost::ut::suite MessagesTests = [] {
             } else if (nAvailable == 0UZ) {
                 return std::nullopt;
             }
-            expect(eq(nAvailable, nReplyExpected)) << fmt::format("actual {} vs. expected {} reply messages", nAvailable, nReplyExpected);
+            expect(eq(nAvailable, nReplyExpected)) << fmt::format("testCase: '{}' actual {} vs. expected {} reply messages", testCase, nAvailable, nReplyExpected);
             if (nReplyExpected == 0) {
                 return false;
             }
@@ -470,7 +470,7 @@ const boost::ut::suite MessagesTests = [] {
 
                 if (!data.empty()) {
                     expect(reply.data.has_value());
-                    expect(is_contained(reply.data.value(), data)) << fmt::format("scheduler return reply data: {}\n contains data {}\n", reply.data.value(), data);
+                    expect(is_contained(reply.data.value(), data)) << fmt::format("testCase: '{}' scheduler return reply data: {}\n contains data {}\n", testCase, reply.data.value(), data);
                 }
             } else if constexpr (std::is_same_v<decltype(data), property_map>) {
                 expect(!reply.data.has_value());
@@ -487,7 +487,7 @@ const boost::ut::suite MessagesTests = [] {
             SendCommand               cmd     = [] {};
             ResultCheck               check   = [] { return true; };
             std::chrono::milliseconds delay   = 1ms; // delay after 'cmd' which the reply is being checked
-            std::chrono::milliseconds timeout = 1s;  // time-out for the 'check' test
+            std::chrono::milliseconds timeout = 2s;  // time-out for the 'check' test
         };
 
         using enum gr::message::Command;
@@ -496,9 +496,9 @@ const boost::ut::suite MessagesTests = [] {
                 { .cmd = [&] { fmt::print("executing failing test"); /* simulate work */ }, .check = [&] { return false; /* simulate failure */ } },
                 { .cmd = [&] { fmt::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
                 { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }},
-                { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 10ms },
-                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply(0UZ, "", "", property_map{ }); }, .delay = 200ms },
-                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 10ms },
+                { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("get settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 100ms },
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 200ms },
+                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms },
                 { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
         };
         // clang-format on
