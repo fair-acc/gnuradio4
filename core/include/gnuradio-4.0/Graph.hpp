@@ -38,52 +38,38 @@ namespace gr {
 template<typename T>
 struct PortIndexDefinition {
     T           topLevel;
-    std::size_t subIndex;
+    std::size_t subIndex = meta::invalid_index;
 
     constexpr PortIndexDefinition(T _topLevel, std::size_t _subIndex = meta::invalid_index) : topLevel(std::move(_topLevel)), subIndex(_subIndex) {}
 };
 
-class Edge {
-public: // TODO: consider making this private and to use accessors (that can be safely used by users)
+struct Edge {
     using PortDirection::INPUT;
     using PortDirection::OUTPUT;
-    BlockModel*                      _sourceBlock;
-    BlockModel*                      _destinationBlock;
+    BlockModel*                      _sourceBlock;      /// non-owning reference
+    BlockModel*                      _destinationBlock; /// non-owning reference
     PortIndexDefinition<std::size_t> _sourcePortDefinition;
     PortIndexDefinition<std::size_t> _destinationPortDefinition;
     std::size_t                      _minBufferSize;
-    std::int32_t                     _weight;
-    std::string                      _name; // custom edge name
-    bool                             _connected;
+    std::int32_t                     _weight    = 0;
+    std::string                      _name      = "unnamed edge"; // custom edge name
+    bool                             _connected = false;
 
-public:
-    Edge() = delete;
-
-    Edge(const Edge&) = delete;
-
-    Edge& operator=(const Edge&) = delete;
-
-    Edge(Edge&&) noexcept = default;
-
+    Edge()                           = delete;
+    Edge(const Edge&)                = delete;
+    Edge& operator=(const Edge&)     = delete;
+    Edge(Edge&&) noexcept            = default;
     Edge& operator=(Edge&&) noexcept = default;
-
     Edge(BlockModel* sourceBlock, PortIndexDefinition<std::size_t> sourcePortDefinition, BlockModel* destinationBlock, PortIndexDefinition<std::size_t> destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string_view name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(name) {}
 
-    [[nodiscard]] constexpr const BlockModel& sourceBlock() const noexcept { return *_sourceBlock; }
-
-    [[nodiscard]] constexpr const BlockModel& destinationBlock() const noexcept { return *_destinationBlock; }
-
+    [[nodiscard]] constexpr const BlockModel&                sourceBlock() const noexcept { return *_sourceBlock; }
+    [[nodiscard]] constexpr const BlockModel&                destinationBlock() const noexcept { return *_destinationBlock; }
     [[nodiscard]] constexpr PortIndexDefinition<std::size_t> sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
-
     [[nodiscard]] constexpr PortIndexDefinition<std::size_t> destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
-
-    [[nodiscard]] constexpr std::string_view name() const noexcept { return _name; }
-
-    [[nodiscard]] constexpr std::size_t minBufferSize() const noexcept { return _minBufferSize; }
-
-    [[nodiscard]] constexpr std::int32_t weight() const noexcept { return _weight; }
-
-    [[nodiscard]] constexpr bool is_connected() const noexcept { return _connected; }
+    [[nodiscard]] constexpr std::string_view                 name() const noexcept { return _name; }
+    [[nodiscard]] constexpr std::size_t                      minBufferSize() const noexcept { return _minBufferSize; }
+    [[nodiscard]] constexpr std::int32_t                     weight() const noexcept { return _weight; }
+    [[nodiscard]] constexpr bool                             is_connected() const noexcept { return _connected; }
 };
 
 namespace graph::property {
@@ -104,14 +90,12 @@ inline static const char* kEdgeRemoved  = "EdgeRemoved";
 } // namespace graph::property
 
 class Graph : public gr::Block<Graph> {
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress                         = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
-
-private:
+    std::shared_ptr<gr::Sequence>                        _progress     = std::make_shared<gr::Sequence>();
+    std::shared_ptr<gr::thread_pool::BasicThreadPool>    _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
+    std::atomic_bool                                     _topologyChanged{false};
     std::vector<std::function<ConnectionResult(Graph&)>> _connectionDefinitions;
     std::vector<Edge>                                    _edges;
-
-    std::vector<std::unique_ptr<BlockModel>> _blocks;
+    std::vector<std::unique_ptr<BlockModel>>             _blocks;
 
     template<typename TBlock>
     std::unique_ptr<BlockModel>& findBlock(TBlock& what) {
@@ -162,6 +146,7 @@ private:
             auto* destinationNode = findBlock(destinationNodeRaw).get();
             // TODO: Rethink edge definition, indices, message port -1 etc.
             _edges.emplace_back(sourceNode, PortIndexDefinition<std::size_t>{sourcePortIndex, sourcePortSubIndex}, destinationNode, PortIndexDefinition<std::size_t>{destinationPortIndex, destinationPortSubIndex}, minBufferSize, weight, edgeName);
+            setTopologyChanged();
         }
 
         return result;
@@ -242,35 +227,47 @@ private:
     };
 
 public:
-    Graph(Graph&)             = delete;
-    Graph(Graph&&)            = default;
-    Graph& operator=(Graph&)  = delete;
-    Graph& operator=(Graph&&) = delete;
-
-    Graph() {
-        _blocks.reserve(100);
+    Graph() noexcept {
         propertyCallbacks[graph::property::kEmplaceBlock] = &Graph::propertyCallbackEmplaceBlock;
         propertyCallbacks[graph::property::kRemoveBlock]  = &Graph::propertyCallbackRemoveBlock;
         propertyCallbacks[graph::property::kReplaceBlock] = &Graph::propertyCallbackReplaceBlock;
         propertyCallbacks[graph::property::kEmplaceEdge]  = &Graph::propertyCallbackEmplaceEdge;
         propertyCallbacks[graph::property::kRemoveEdge]   = &Graph::propertyCallbackRemoveEdge;
     }
+    Graph(Graph&)            = delete; // there can be only one owner of Graph
+    Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
+    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { *this = std::move(other); }
+    Graph& operator=(Graph&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        _progress     = std::move(other._progress);
+        _ioThreadPool = std::move(other._ioThreadPool);
+        _topologyChanged.store(other._topologyChanged.load(std::memory_order_acquire), std::memory_order_release);
+        _connectionDefinitions = std::move(other._connectionDefinitions);
+        _edges                 = std::move(other._edges);
+        _blocks                = std::move(other._blocks);
 
-    /**
-     * @return a list of all blocks contained in this graph
-     * N.B. some 'blocks' may be (sub-)graphs themselves
-     */
+        return *this;
+    }
+
+    void               setTopologyChanged() noexcept { _topologyChanged.store(true, std::memory_order_release); }
+    [[nodiscard]] bool hasTopologyChanged() const noexcept { return _topologyChanged; }
+    void               ackTopologyChange() noexcept { _topologyChanged.store(false, std::memory_order_release); }
+
     [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<Edge>                        edges() noexcept { return {_edges}; }
 
     /**
-     * @return a list of all edges in this graph connecting blocks
+     * @return atomic sequence counter that indicates if any block could process some data or messages
      */
-    [[nodiscard]] std::span<Edge> edges() noexcept { return {_edges}; }
+    [[nodiscard]] const Sequence& progress() noexcept { return *_progress.get(); }
 
     BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
         auto& new_block_ref = _blocks.emplace_back(std::move(block));
-        new_block_ref->init(progress, ioThreadPool);
+        new_block_ref->init(_progress, _ioThreadPool);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
+        setTopologyChanged();
         return *new_block_ref.get();
     }
 
@@ -280,13 +277,15 @@ public:
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto  new_block = std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings));
         auto* raw_ref   = static_cast<TBlock*>(new_block->raw());
-        raw_ref->init(progress, ioThreadPool);
+        raw_ref->init(_progress, _ioThreadPool);
         _blocks.push_back(std::move(new_block));
+        setTopologyChanged();
         return *raw_ref;
     }
 
     [[maybe_unused]] auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
         if (auto block_load = loader.instantiate(type, parameters, std::move(initialSettings)); block_load) {
+            setTopologyChanged();
             return addBlock(std::move(block_load));
         }
         throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
@@ -356,6 +355,9 @@ public:
         const std::string& sourcePort       = std::get<std::string>(data.at("sourcePort"s));
         const std::string& destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
         const std::string& destinationPort  = std::get<std::string>(data.at("destinationPort"s));
+        const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
+        const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
+        const std::string  edgeName         = std::get<std::string>(data.at("edgeName"s));
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
@@ -380,7 +382,8 @@ public:
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
-        // _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, edgeName);
+        // FIXME: continue here _edges.emplace_back(sourceBlock, sourcePort, destinationBlock, destinationBlock, minBufferSize, weight, edgeName);
+        //_edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, edgeName);
 
         message.endpoint = graph::property::kEdgeEmplaced;
         return message;
@@ -773,6 +776,36 @@ inline std::ostream& operator<<(std::ostream& os, const T& value) {
 
 } // namespace gr
 
-REFL_TYPE(gr::Graph) REFL_END // minimal reflection declaration
+// minimal reflection declaration
+REFL_TYPE(gr::Graph)
+REFL_END
+
+template<>
+struct fmt::formatter<gr::Edge> {
+    char formatSpecifier = 's';
+
+    constexpr auto parse(fmt::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && (*it == 's' || *it == 'l')) {
+            formatSpecifier = *it++;
+        } else if (it != ctx.end() && *it != '}') {
+            throw fmt::format_error("invalid format specifier");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::Edge& e, FormatContext& ctx) {
+        using PortIndex     = gr::PortIndexDefinition<std::size_t>;
+        const auto& name    = [this](const gr::BlockModel* block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
+        const auto& portIdx = [](const PortIndex& port) { return port.topLevel; };
+        const auto& subPort = [](const PortIndex& port) { return (port.subIndex == gr::meta::invalid_index) ? "" : fmt::format("[{}]", port.subIndex); };
+
+        return fmt::format_to(ctx.out(), "{}/{}{} ⟶ (name: '{}', size: {:2}, weight: {:2}, connected: {}) ⟶ {}/{}{}", //
+            name(e._sourceBlock), portIdx(e._sourcePortDefinition), subPort(e._sourcePortDefinition),                 //
+            e._name, e._minBufferSize, e._weight, e._connected,                                                       //
+            name(e._destinationBlock), portIdx(e._destinationPortDefinition), subPort(e._destinationPortDefinition));
+    }
+};
 
 #endif // include guard

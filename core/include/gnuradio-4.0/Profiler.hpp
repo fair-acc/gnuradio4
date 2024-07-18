@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <variant>
 
 #include <unistd.h>
@@ -36,8 +37,7 @@ enum class EventType {
     FlowEnd       = 'f'  // Flow Event (end).
 };
 
-inline std::string
-format_args(const std::vector<arg_value> &args) {
+inline std::string format_args(const std::vector<arg_value>& args) {
     if (args.empty()) {
         return "{}";
     }
@@ -69,43 +69,22 @@ struct alignas(256) TraceEvent { // fills up to power of 2 size, see static_asse
     std::vector<arg_value>    args;   // Event arguments.
 
     // Function to format a TraceEvent into JSON format.
-    std::string
-    toJSON(int pid, int tid) const {
+    std::string toJSON(int pid, int tid) const {
         using enum EventType;
         switch (type) {
         case DurationBegin:
         case DurationEnd:
         case Counter:
-        case Instant:
-            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
-        case Complete:
-            return fmt::format(R"({{"name": "{}", "ph": "X", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": {}}})", name, ts.count(), pid, tid, dur.count(), cat, format_args(args));
+        case Instant: return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
+        case Complete: return fmt::format(R"({{"name": "{}", "ph": "X", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": {}}})", name, ts.count(), pid, tid, dur.count(), cat, format_args(args));
         case AsyncStart:
         case AsyncStep:
-        case AsyncEnd:
-            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": "{}", "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat,
-                               format_args(args));
+        case AsyncEnd: return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": "{}", "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat, format_args(args));
         default: // TODO
             return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
         }
 
         return {};
-    }
-
-    TraceEvent()                       = default;
-    ~TraceEvent()                      = default;
-    TraceEvent(TraceEvent &&) noexcept = default;
-    TraceEvent &
-    operator=(TraceEvent &&) noexcept
-            = default;
-
-    // the default implementations slow down publish() even if never called at runtime (branch prediction going wrong for the non-mmap case?)
-    // seen with -O3 on gcc 12.3.0
-    TraceEvent(const TraceEvent &) { throw std::logic_error("unexpected copy"); }
-
-    TraceEvent &
-    operator=(const TraceEvent &) {
-        throw std::logic_error("unexpected assignment");
     }
 };
 
@@ -147,97 +126,53 @@ struct Options {
 };
 
 namespace null {
-class StepEvent {
-public:
-    constexpr void
-    step() const noexcept {}
-
-    constexpr void
-    finish() const noexcept {}
+struct StepEvent {
+    constexpr void step() const noexcept {}
+    constexpr void finish() const noexcept {}
 };
 
-class SimpleEvent {
-public:
-    constexpr void
-    finish() const noexcept {}
+struct SimpleEvent {
+    constexpr void finish() const noexcept {}
 };
 
 class Handler {
 public:
-    constexpr void
-    instantEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) const noexcept {
-        std::ignore = name;
-        std::ignore = categories;
-        std::ignore = args;
-    }
-
-    constexpr void
-    counterEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) const noexcept {
-        std::ignore = name;
-        std::ignore = categories;
-        std::ignore = args;
-    }
-
-    [[nodiscard]] constexpr SimpleEvent
-    startCompleteEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) const noexcept {
-        std::ignore = name;
-        std::ignore = categories;
-        std::ignore = args;
-        return SimpleEvent{};
-    }
-
-    [[nodiscard]] constexpr StepEvent
-    startAsyncEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) const noexcept {
-        std::ignore = name;
-        std::ignore = categories;
-        std::ignore = args;
-        return StepEvent{};
-    }
+    constexpr void                      instantEvent(std::string_view /*name*/, std::string_view /*categories*/ = {}, std::initializer_list<arg_value> /*args*/ = {}) const noexcept {}
+    constexpr void                      counterEvent(std::string_view /*name*/, std::string_view /*categories*/ = {}, std::initializer_list<arg_value> /*args*/ = {}) const noexcept {}
+    [[nodiscard]] constexpr SimpleEvent startCompleteEvent(std::string_view /*name*/, std::string_view /*categories*/ = {}, std::initializer_list<arg_value> /*args*/ = {}) const noexcept { return {}; }
+    [[nodiscard]] constexpr StepEvent   startAsyncEvent(std::string_view /*name*/, std::string_view /*categories*/ = {}, std::initializer_list<arg_value> /*args*/ = {}) const noexcept { return {}; }
 };
 
 class Profiler {
     Handler _handler;
 
 public:
-    constexpr explicit Profiler(const Options & = {}) {}
-
-    constexpr void
-    reset() const {}
-
-    constexpr Handler &
-    forThisThread() {
-        return _handler;
-    }
+    constexpr explicit Profiler(const Options& = {}) {}
+    constexpr void     reset() const {}
+    constexpr Handler& forThisThread() { return _handler; }
 };
 
 } // namespace null
 
 template<typename Handler>
-class CompleteEvent {
-    Handler               &_handler;
+struct CompleteEvent {
+    Handler&               _handler;
     std::string            _name;
     std::string            _categories;
     std::vector<arg_value> _args;
     bool                   _finished = false;
     detail::time_point     _start    = detail::clock::now();
 
-public:
-    explicit CompleteEvent(Handler &handler, std::string_view name, std::string_view categories, std::initializer_list<arg_value> args)
-        : _handler{ handler }, _name{ name }, _categories{ categories }, _args{ args } {}
+    explicit CompleteEvent(Handler& handler, std::string_view name, std::string_view categories, std::initializer_list<arg_value> args) : _handler{handler}, _name{name}, _categories{categories}, _args{args} {}
 
     ~CompleteEvent() { finish(); }
 
-    CompleteEvent(const CompleteEvent &) = delete;
-    CompleteEvent &
-    operator=(const CompleteEvent &)
-            = delete;
-    CompleteEvent(CompleteEvent &&) noexcept = default;
-    CompleteEvent &
-    operator=(CompleteEvent &&) noexcept
-            = default;
+    CompleteEvent(const CompleteEvent&)                = delete;
+    CompleteEvent& operator=(const CompleteEvent&)     = delete;
+    CompleteEvent(CompleteEvent&&) noexcept            = default;
+    CompleteEvent& operator=(CompleteEvent&&) noexcept = default;
 
-    void
-    finish() noexcept {
+    void finish() noexcept {
         if (_finished) {
             return;
         }
@@ -256,34 +191,24 @@ public:
 
 template<typename Handler>
 class AsyncEvent {
-    Handler    &_handler;
+    Handler&    _handler;
     bool        _finished = false;
     int         _id;
     std::string _name;
 
 public:
-    explicit AsyncEvent(Handler &handler, std::string_view name, int id, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) : _handler(handler), _id{ id }, _name{ name } {
-        postEvent(detail::EventType::AsyncStart, categories, args);
-    }
+    explicit AsyncEvent(Handler& handler, std::string_view name, int id, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) : _handler(handler), _id{id}, _name{name} { postEvent(detail::EventType::AsyncStart, categories, args); }
 
     ~AsyncEvent() { finish(); }
 
-    AsyncEvent(const AsyncEvent &) = delete;
-    AsyncEvent &
-    operator=(const AsyncEvent &)
-            = delete;
-    AsyncEvent(AsyncEvent &&) noexcept = default;
-    AsyncEvent &
-    operator=(AsyncEvent &&) noexcept
-            = default;
+    AsyncEvent(const AsyncEvent&)                = delete;
+    AsyncEvent& operator=(const AsyncEvent&)     = delete;
+    AsyncEvent(AsyncEvent&&) noexcept            = default;
+    AsyncEvent& operator=(AsyncEvent&&) noexcept = default;
 
-    void
-    step() noexcept {
-        postEvent(detail::EventType::AsyncStep);
-    }
+    void step() noexcept { postEvent(detail::EventType::AsyncStep); }
 
-    void
-    finish() noexcept {
+    void finish() noexcept {
         if (_finished) {
             return;
         }
@@ -292,13 +217,12 @@ public:
     }
 
 private:
-    void
-    postEvent(detail::EventType type, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
+    void postEvent(detail::EventType type, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
         auto r    = _handler.reserveEvent();
         r[0].name = _name;
         r[0].type = type;
         r[0].id   = _id;
-        r[0].cat  = std::string{ categories };
+        r[0].cat  = categories;
         r[0].args = args;
         r.publish(1);
     }
@@ -307,29 +231,21 @@ private:
 template<typename TProfiler, typename TWriterType>
 class Handler {
     using this_t = Handler<TProfiler, TWriterType>;
-    TProfiler  &_profiler;
+    TProfiler&  _profiler;
     TWriterType _writer;
     int         _nextId = 1;
 
 public:
-    explicit Handler(TProfiler &profiler, TWriterType &&writer) : _profiler(profiler), _writer{ std::move(writer) } {}
+    explicit Handler(TProfiler& profiler, TWriterType&& writer) : _profiler(profiler), _writer{std::move(writer)} {}
 
-    Handler(const this_t &) = delete;
-    this_t &
-    operator=(const this_t &)
-            = delete;
-    Handler(this_t &&) noexcept = delete;
-    this_t &
-    operator=(this_t &&) noexcept
-            = delete;
+    Handler(const this_t&)               = delete;
+    this_t& operator=(const this_t&)     = delete;
+    Handler(this_t&&) noexcept           = delete;
+    this_t& operator=(this_t&&) noexcept = delete;
 
-    const TProfiler &
-    Profiler() const {
-        return _profiler;
-    }
+    const TProfiler& Profiler() const { return _profiler; }
 
-    auto
-    reserveEvent() noexcept {
+    auto reserveEvent() noexcept {
         const auto elapsed = detail::clock::now() - _profiler.start();
         auto       r       = _writer.reserve(1);
         r[0].thread_id     = std::this_thread::get_id();
@@ -337,36 +253,30 @@ public:
         return r;
     }
 
-    void
-    instantEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
+    void instantEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
         auto r    = reserveEvent();
-        r[0].name = std::string{ name };
+        r[0].name = name;
         r[0].type = detail::EventType::Instant;
-        r[0].cat  = std::string{ categories };
+        r[0].cat  = categories;
         r[0].args = args;
         r.publish(1);
     }
 
-    void
-    counterEvent(std::string_view name, std::string_view categories, std::initializer_list<arg_value> args = {}) noexcept {
+    void counterEvent(std::string_view name, std::string_view categories, std::initializer_list<arg_value> args = {}) noexcept {
         auto r    = reserveEvent();
-        r[0].name = std::string{ name };
+        r[0].name = name;
         r[0].type = detail::EventType::Counter;
-        r[0].cat  = std::string{ categories };
+        r[0].cat  = std::string{categories};
         r[0].args = args;
         r.publish(1);
     }
 
-    [[nodiscard]] CompleteEvent<this_t>
-    startCompleteEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
-        return CompleteEvent<this_t>{ *this, name, categories, args };
-    }
+    [[nodiscard]] CompleteEvent<this_t> startCompleteEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept { return CompleteEvent<this_t>{*this, name, categories, args}; }
 
-    [[nodiscard]] AsyncEvent<this_t>
-    startAsyncEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
+    [[nodiscard]] AsyncEvent<this_t> startAsyncEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
         const auto id = _nextId;
         ++_nextId;
-        return AsyncEvent<this_t>{ *this, name, id, categories, args };
+        return AsyncEvent<this_t>{*this, name, id, categories, args};
     }
 };
 
@@ -382,7 +292,7 @@ class Profiler {
     detail::time_point                     _start = detail::clock::now();
 
 public:
-    explicit Profiler(const Options &options = {}) : _buffer(500000) {
+    explicit Profiler(const Options& options = {}) : _buffer(500000) {
         _event_handler = std::thread([options, &reader = _reader, &finished = _finished]() {
             auto          file_name = options.output_file;
             std::ofstream out_file;
@@ -392,7 +302,7 @@ public:
                 out_file                        = std::ofstream(file_name, std::ios::out | std::ios::binary);
             }
 
-            std::ostream &out_stream = options.output_mode == OutputMode::File ? out_file : std::cout;
+            std::ostream& out_stream = options.output_mode == OutputMode::File ? out_file : std::cout;
             const int     pid        = getpid();
 
             // assign numerical values to threads as we see them
@@ -418,7 +328,7 @@ public:
                     std::ignore = event.consume(1);
                 }
             }
-            fmt::print(out_stream, "\n]\n");
+            fmt::println(out_stream, "\n]");
         });
 
         reset();
@@ -429,24 +339,16 @@ public:
         _event_handler.join();
     }
 
-    detail::time_point
-    start() const {
-        return _start;
-    }
+    detail::time_point start() const { return _start; }
 
-    void
-    reset() noexcept {
-        _start = detail::clock::now();
-    }
+    void reset() noexcept { _start = detail::clock::now(); }
 
-    Handler<Profiler, WriterType> &
-    forThisThread() {
+    Handler<Profiler, WriterType>& forThisThread() {
         const auto            this_id = std::this_thread::get_id();
-        const std::lock_guard lock{ _handlers_lock };
+        const std::lock_guard lock{_handlers_lock};
         auto                  it = _handlers.find(this_id);
         if (it == _handlers.end()) {
-            auto [new_it, _] = _handlers.try_emplace(this_id, *this, _buffer.new_writer());
-            it               = new_it;
+            it = _handlers.try_emplace(this_id, *this, _buffer.new_writer()).first;
         }
 
         return it->second;

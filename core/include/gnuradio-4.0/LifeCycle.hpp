@@ -11,7 +11,7 @@
 #include <source_location>
 #include <string>
 
-namespace gr ::lifecycle {
+namespace gr::lifecycle {
 /**
  * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
  *
@@ -67,18 +67,11 @@ namespace gr ::lifecycle {
 enum class State : char { IDLE, INITIALISED, RUNNING, REQUESTED_PAUSE, PAUSED, REQUESTED_STOP, STOPPED, ERROR };
 using enum State;
 
-inline constexpr bool
-isActive(lifecycle::State state) noexcept {
-    return state == RUNNING || state == REQUESTED_PAUSE || state == PAUSED;
-}
+inline constexpr bool isActive(lifecycle::State state) noexcept { return state == RUNNING || state == REQUESTED_PAUSE || state == PAUSED; }
 
-inline constexpr bool
-isShuttingDown(lifecycle::State state) noexcept {
-    return state == REQUESTED_STOP || state == STOPPED;
-}
+inline constexpr bool isShuttingDown(lifecycle::State state) noexcept { return state == REQUESTED_STOP || state == STOPPED; }
 
-constexpr bool
-isValidTransition(const State from, const State to) noexcept {
+constexpr bool isValidTransition(const State from, const State to) noexcept {
     if (to == State::ERROR || from == to) {
         // can transit to ERROR from any state
         return true;
@@ -121,13 +114,12 @@ enum class StorageType { ATOMIC, NON_ATOMIC };
 template<typename TDerived, StorageType storageType = StorageType::ATOMIC>
 class StateMachine {
 protected:
-    using StateStorage  = std::conditional_t<storageType == StorageType::ATOMIC, std::atomic<State>, State>;
-    StateStorage _state = lifecycle::State::IDLE;
+    using StateStorage = std::conditional_t<storageType == StorageType::ATOMIC, std::atomic<State>, State>;
+    StateStorage _state{lifecycle::State::IDLE};
 
-    void
-    setAndNotifyState(State newState) {
+    void setAndNotifyState(State newState) {
         if constexpr (requires(TDerived d) { d.stateChanged(newState); }) {
-            static_cast<TDerived *>(this)->stateChanged(newState);
+            static_cast<TDerived*>(this)->stateChanged(newState);
         }
         if constexpr (storageType == StorageType::ATOMIC) {
             _state.store(newState, std::memory_order_release);
@@ -137,59 +129,64 @@ protected:
         }
     }
 
-    std::string
-    getBlockName() {
+    std::string getBlockName() {
         if constexpr (requires(TDerived d) { d.uniqueName(); }) {
-            return std::string{ static_cast<TDerived *>(this)->uniqueName() };
+            return std::string{static_cast<TDerived*>(this)->uniqueName()};
         } else if constexpr (requires(TDerived d) { d.unique_name; }) {
-            return std::string{ static_cast<TDerived *>(this)->unique_name };
+            return std::string{static_cast<TDerived*>(this)->unique_name};
         } else {
             return "unknown block/item";
         }
     }
 
     template<typename TMethod>
-    std::expected<void, Error>
-    invokeLifecycleMethod(TMethod method, const std::source_location &location) {
+    std::expected<void, Error> invokeLifecycleMethod(TMethod method, const std::source_location& location) {
         try {
-            (static_cast<TDerived *>(this)->*method)();
+            (static_cast<TDerived*>(this)->*method)();
             return {};
-        } catch (const gr::exception &e) {
+        } catch (const gr::exception& e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime });
-        } catch (const std::exception &e) {
+            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime});
+        } catch (const std::exception& e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location });
+            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location});
         } catch (...) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{ fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location });
+            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location});
         }
     }
 
 public:
-    StateMachine() noexcept = default;
+    StateMachine() noexcept {
+        if constexpr (storageType == StorageType::ATOMIC) {
+            _state.store(State::IDLE, std::memory_order_release);
+        }
+    }
 
-    StateMachine(StateMachine &&other) noexcept
-        requires(storageType == StorageType::ATOMIC)
-        : _state(other._state.load()) {} // atomic, not moving
+    StateMachine(StateMachine&& other) noexcept
+    requires(storageType == StorageType::ATOMIC)
+        : _state(other._state.load(std::memory_order_acquire)) {} // atomic, not moving
 
-    StateMachine(StateMachine &&other) noexcept
-        requires(storageType != StorageType::ATOMIC)
+    StateMachine(StateMachine&& other) noexcept
+    requires(storageType != StorageType::ATOMIC)
         : _state(other._state) {} // plain enum
 
-    [[nodiscard]] std::expected<void, Error>
-    changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
-        State oldState = _state;
+    [[nodiscard]] std::expected<void, Error> changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
+        State oldState;
+        if constexpr (storageType == StorageType::ATOMIC) {
+            oldState = _state.load(std::memory_order_acquire);
+        } else {
+            oldState = _state;
+        }
         if (oldState == newState || (oldState == STOPPED && newState == REQUESTED_STOP) || (oldState == PAUSED && newState == REQUESTED_PAUSE)) {
             return {};
         }
 
         if (!isValidTransition(oldState, newState)) {
-            return std::unexpected(Error{ fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", //
-                                                                   getBlockName(), gr::meta::type_name<TDerived>(),              //
-                                                                   magic_enum::enum_name(state()), magic_enum::enum_name(newState)),
-                                                       location });
-            ;
+            return std::unexpected(Error{fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", //
+                                             getBlockName(), gr::meta::type_name<TDerived>(),                      //
+                                             magic_enum::enum_name(state()), magic_enum::enum_name(newState)),
+                location});
         }
 
         setAndNotifyState(newState);
@@ -198,32 +195,32 @@ public:
             return {};
         } else {
             // Call specific methods in TDerived based on the state
-            if constexpr (requires(TDerived &d) { d.init(); }) {
+            if constexpr (requires(TDerived& d) { d.init(); }) {
                 if (oldState == State::IDLE && newState == State::INITIALISED) {
                     return invokeLifecycleMethod(&TDerived::init, location);
                 }
             }
-            if constexpr (requires(TDerived &d) { d.start(); }) {
+            if constexpr (requires(TDerived& d) { d.start(); }) {
                 if (oldState == State::INITIALISED && newState == State::RUNNING) {
                     return invokeLifecycleMethod(&TDerived::start, location);
                 }
             }
-            if constexpr (requires(TDerived &d) { d.stop(); }) {
+            if constexpr (requires(TDerived& d) { d.stop(); }) {
                 if (newState == State::REQUESTED_STOP) {
                     return invokeLifecycleMethod(&TDerived::stop, location);
                 }
             }
-            if constexpr (requires(TDerived &d) { d.pause(); }) {
+            if constexpr (requires(TDerived& d) { d.pause(); }) {
                 if (newState == State::REQUESTED_PAUSE) {
                     return invokeLifecycleMethod(&TDerived::pause, location);
                 }
             }
-            if constexpr (requires(TDerived &d) { d.resume(); }) {
+            if constexpr (requires(TDerived& d) { d.resume(); }) {
                 if ((oldState == State::REQUESTED_PAUSE || oldState == State::PAUSED) && newState == State::RUNNING) {
                     return invokeLifecycleMethod(&TDerived::resume, location);
                 }
             }
-            if constexpr (requires(TDerived &d) { d.reset(); }) {
+            if constexpr (requires(TDerived& d) { d.reset(); }) {
                 if (oldState != State::IDLE && newState == State::INITIALISED) {
                     return invokeLifecycleMethod(&TDerived::reset, location);
                 }
@@ -233,20 +230,18 @@ public:
         }
     }
 
-    [[nodiscard]] State
-    state() const noexcept {
+    [[nodiscard]] State state() const noexcept {
         if constexpr (storageType == StorageType::ATOMIC) {
-            return _state.load();
+            return _state.load(std::memory_order_acquire);
         } else {
             return _state;
         }
     }
 
-    void
-    waitOnState(State oldState)
-        requires(storageType == StorageType::ATOMIC)
+    void waitOnState(State oldState)
+    requires(storageType == StorageType::ATOMIC)
     {
-        _state.wait(oldState);
+        _state.wait(oldState, std::memory_order_acquire);
     }
 };
 
