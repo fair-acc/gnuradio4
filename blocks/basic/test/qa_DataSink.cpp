@@ -60,8 +60,7 @@ struct Matcher {
 
     static inline bool changed(int x, std::optional<int> other) { return !same(x, other); }
 
-    [[nodiscard]] trigger::MatchResult
-    operator()(std::string_view /* filterSpec */, const Tag &tag, const property_map & /* filter state */) {
+    [[nodiscard]] trigger::MatchResult operator()(std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
         const auto ty = tag.get("YEAR");
         const auto tm = tag.get("MONTH");
         const auto td = tag.get("DAY");
@@ -136,7 +135,7 @@ template<trigger::Matcher TMatcher>
 std::string runMatcherTest(std::span<const Tag> tags, TMatcher matcher) {
     std::vector<trigger::MatchResult> result;
     result.reserve(tags.size());
-    for (const auto &tag : tags) {
+    for (const auto& tag : tags) {
         result.push_back(matcher("", tag, {}));
     }
     return toAsciiArt(result);
@@ -243,7 +242,7 @@ bool indexesMatch(const T& lhs, const U& rhs) {
     return std::equal(std::begin(lhs), std::end(lhs), std::begin(rhs), std::end(rhs), index_match);
 }
 
-using Scheduler = gr::scheduler::Simple<gr::scheduler::multiThreaded>;
+using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
 
 const boost::ut::suite DataSinkTests = [] {
     using namespace boost::ut;
@@ -458,7 +457,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            auto isTrigger = [](std::string_view /* filterSpec */, const Tag &tag, const property_map & /* filter state */) {
+            auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto v = tag.get("TYPE");
                 return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
@@ -521,10 +520,10 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            std::vector<int32_t> receivedData;
-            std::vector<Tag>     receivedTags;
-            bool                 seenFinished = false;
-            auto                 isTrigger    = [](std::string_view /* filterSpec */, const Tag &, const property_map                    &/* filter state */) { return trigger::MatchResult::Matching; };
+            std::vector<int32_t>                              receivedData;
+            std::vector<Tag>                                  receivedTags;
+            bool                                              seenFinished = false;
+            auto                                              isTrigger    = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
             std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
             expect(spinUntil(4s, [&] {
                 poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 0UZ, 2UZ, BlockingMode::Blocking);
@@ -582,7 +581,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto callback = [&receivedDataCb](const auto& dataset) { receivedDataCb.insert(receivedDataCb.end(), dataset.signal_values.begin(), dataset.signal_values.end()); };
 
-        auto isTrigger = [](std::string_view /* filterSpec */, const Tag &tag, const property_map & /* filter state */) {
+        auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
             const auto v = tag.get("TYPE");
             return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
         };
@@ -739,7 +738,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            auto isTrigger = [](std::string_view /* filterSpec */, const Tag &, const property_map & /* filter state */) { return trigger::MatchResult::Matching; };
+            auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
 
             std::shared_ptr<DataSink<float>::DataSetPoller> poller;
             expect(spinUntil(4s, [&] {
@@ -795,7 +794,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
-        auto isTrigger = [](std::string_view /* filterSpec */, const Tag &, const property_map & /* filter state */) { return trigger::MatchResult::Matching; };
+        auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
 
         std::mutex         m;
         std::vector<float> receivedData;

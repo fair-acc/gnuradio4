@@ -41,16 +41,16 @@ struct Error {
     std::source_location                  sourceLocation;
     std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
 
-    Error(std::string_view msg = "unknown error", std::source_location location = std::source_location::current(), std::chrono::system_clock::time_point time = std::chrono::system_clock::now()) noexcept : message(msg), sourceLocation(location), errorTime(time) {}
+    Error(std::string_view msg = "unknown error", std::source_location location = std::source_location::current(), //
+        std::chrono::system_clock::time_point time = std::chrono::system_clock::now()) noexcept                    //
+        : message(msg), sourceLocation(location), errorTime(time) {}
 
     explicit Error(const std::exception& ex, std::source_location location = std::source_location::current()) noexcept : Error(ex.what(), location) {}
 
-    explicit Error(const gr::exception& ex) noexcept : message(ex.message), sourceLocation(ex.sourceLocation), errorTime(ex.errorTime) {}
+    explicit Error(const gr::exception& ex) noexcept : Error(ex.message, ex.sourceLocation, ex.errorTime) {}
 
     [[nodiscard]] std::string srcLoc() const noexcept { return fmt::format("{}", sourceLocation); }
-
-    [[nodiscard]] std::string methodName() const noexcept { return sourceLocation.function_name(); }
-
+    [[nodiscard]] std::string methodName() const noexcept { return {sourceLocation.function_name()}; }
     [[nodiscard]] std::string isoTime() const noexcept {
         return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                     // ms-precision ISO time-format
             fmt::localtime(std::chrono::system_clock::to_time_t(errorTime)), //
@@ -173,10 +173,10 @@ struct fmt::formatter<gr::Error> {
     template<typename FormatContext>
     auto format(const gr::Error& err, FormatContext& ctx) const -> decltype(ctx.out()) {
         switch (presentation) {
-        case 't': return fmt::format_to(ctx.out(), "{}: {}: {} in method: {}", err.isoTime(), err.srcLoc(), err.message, err.methodName());
-        case 'f': return fmt::format_to(ctx.out(), "{}: {} in method: {}", err.srcLoc(), err.message, err.methodName());
+        case 't': return fmt::format_to(ctx.out(), "{}: {}: {} in method: {}", err.isoTime(), err.sourceLocation, err.message, err.sourceLocation.function_name());
+        case 'f': return fmt::format_to(ctx.out(), "{}: {} in method: {}", err.sourceLocation, err.message, err.sourceLocation.function_name());
         case 's':
-        default: return fmt::format_to(ctx.out(), "{}: {}", err.srcLoc(), err.message);
+        default: return fmt::format_to(ctx.out(), "{}: {}", err.sourceLocation, err.message);
         }
     }
 };
