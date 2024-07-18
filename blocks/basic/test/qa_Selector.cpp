@@ -12,6 +12,8 @@
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+using namespace std::string_literals;
+
 struct TestParams {
     gr::Size_t                                     nSamples;
     std::vector<std::pair<gr::Size_t, gr::Size_t>> mapping;
@@ -49,13 +51,13 @@ void execute_selector_test(TestParams params) {
     for (gr::Size_t i = 0; i < nSources; ++i) {
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", params.nSamples}, {"values", params.inValues[i]}})));
         expect(sources[i]->settings().applyStagedParameters().forwardParameters.empty());
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], {"out", gr::meta::invalid_index}, *selector, {"inputs", i}));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, *selector, "inputs#"s + std::to_string(i)));
     }
 
     for (gr::Size_t i = 0; i < nSinks; ++i) {
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>()));
         expect(sinks[i]->settings().applyStagedParameters().forwardParameters.empty());
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, {"outputs", i}, *sinks[i], {"in"}));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
 
     TagSink<double, ProcessFunction::USE_PROCESS_ONE>* monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());

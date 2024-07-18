@@ -66,6 +66,7 @@ function(set_project_warnings project_name)
           -Wuseless-cast # warn if you perform a cast to the same type
           -Wno-interference-size # suppress ABI compatibility warnings for hardware inferred size
           -Wno-maybe-uninitialized # false positives if asan is enabled: https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
+          -Wno-tautological-compare # fmt has always true comparisons
           -fconcepts-diagnostics-depth=3
           -Wno-missing-field-initializers # confusing warning which is not what most users expect: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96868#c3
           )

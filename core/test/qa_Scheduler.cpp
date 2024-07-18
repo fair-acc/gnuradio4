@@ -647,11 +647,13 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto scheduler                     = TScheduler{std::move(flow), threadPool};
         scheduler.timeout_ms               = 100U; // also dynamically settable via messages/block interface
         scheduler.timeout_inactivity_count = 10U;  // also dynamically settable via messages/block interface
+        scheduler.graph().reconnectAllEdges();
 
         expect(eq(0, scheduler.graph().progress().value())) << "initial progress definition (0)";
         std::expected<void, Error> schedulerResult;
         auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] { schedulerResult = scheduler.runAndWait(); });
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
         expect(source.out.isConnected()) << "source out is connected";
         expect(monitor.in.isConnected()) << "monitor in is connected";

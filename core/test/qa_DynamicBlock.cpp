@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite DynamicBlocktests = [] {
+    using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr::testing;
     "Change number of ports dynamically"_test = [] {
@@ -25,7 +26,7 @@ const boost::ut::suite DynamicBlocktests = [] {
         for (std::size_t i = 0; i < nInputs; ++i) {
             sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"mark_tag", false}})));
             expect(sources.back()->settings().applyStagedParameters().forwardParameters.empty());
-            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), {"out", gr::meta::invalid_index}, adder, {"inputs", sources.size() - 1}));
+            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), "out"s, adder, "inputs#"s + std::to_string(sources.size() - 1)));
         }
         expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));
 

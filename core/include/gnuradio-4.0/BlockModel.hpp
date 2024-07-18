@@ -11,15 +11,74 @@
 
 namespace gr {
 
+class BlockModel;
+
+struct PortDefinition {
+    struct IndexBased {
+        std::size_t topLevel;
+        std::size_t subIndex;
+    };
+
+    struct StringBased {
+        std::string name;
+    };
+
+    std::variant<IndexBased, StringBased> definition;
+
+    constexpr PortDefinition(std::size_t _topLevel, std::size_t _subIndex = meta::invalid_index) : definition(IndexBased{_topLevel, _subIndex}) {}
+    constexpr PortDefinition(std::string name) : definition(StringBased(std::move(name))) {}
+};
+
+struct Edge {
+    enum class EdgeState { WaitingToBeConnected, Connected, Overriden, ErrorConnecting, PortNotFound, IncompatiblePorts };
+
+    BlockModel*    _sourceBlock;      /// non-owning reference
+    BlockModel*    _destinationBlock; /// non-owning reference
+    PortDefinition _sourcePortDefinition;
+    PortDefinition _destinationPortDefinition;
+    std::size_t    _minBufferSize;
+    std::int32_t   _weight = 0;
+    std::string    _name   = "unnamed edge"; // custom edge name
+    EdgeState      _state  = EdgeState::WaitingToBeConnected;
+
+public:
+    Edge() = delete;
+
+    Edge(const Edge&) = delete;
+
+    Edge& operator=(const Edge&) = delete;
+
+    Edge(Edge&&) noexcept = default;
+
+    Edge& operator=(Edge&&) noexcept = default;
+
+    Edge(BlockModel* sourceBlock, PortDefinition sourcePortDefinition, BlockModel* destinationBlock, PortDefinition destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
+
+    [[nodiscard]] constexpr const BlockModel& sourceBlock() const noexcept { return *_sourceBlock; }
+    [[nodiscard]] constexpr const BlockModel& destinationBlock() const noexcept { return *_destinationBlock; }
+    [[nodiscard]] PortDefinition              sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
+    [[nodiscard]] PortDefinition              destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
+    [[nodiscard]] constexpr std::string_view  name() const noexcept { return _name; }
+    [[nodiscard]] constexpr std::size_t       minBufferSize() const noexcept { return _minBufferSize; }
+    [[nodiscard]] constexpr std::int32_t      weight() const noexcept { return _weight; }
+    [[nodiscard]] constexpr EdgeState         state() const noexcept { return _state; }
+};
+
 class BlockModel {
-protected:
+public:
     struct NamedPortCollection {
         std::string                  name;
         std::vector<gr::DynamicPort> ports;
+
+        [[nodiscard]] auto disconnect() {
+            return std::ranges::count_if(ports, [](auto& port) { return port.disconnect() == ConnectionResult::FAILED; }) == 0 ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
+        }
     };
 
-    using DynamicPortOrCollection             = std::variant<gr::DynamicPort, NamedPortCollection>;
-    using DynamicPorts                        = std::vector<DynamicPortOrCollection>;
+    using DynamicPortOrCollection = std::variant<gr::DynamicPort, NamedPortCollection>;
+    using DynamicPorts            = std::vector<DynamicPortOrCollection>;
+
+protected:
     bool                  _dynamicPortsLoaded = false;
     std::function<void()> _dynamicPortsLoader;
     DynamicPorts          _dynamicInputPorts;
@@ -27,10 +86,10 @@ protected:
 
     BlockModel() = default;
 
-    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, std::string_view name) {
+    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, const std::string& name) {
         initDynamicPorts();
 
-        if (auto separatorIt = std::ranges::find(name, '.'); separatorIt == name.end()) {
+        if (auto separatorIt = std::ranges::find(name, '#'); separatorIt == name.end()) {
             auto it = std::ranges::find_if(what, [name](const DynamicPortOrCollection& portOrCollection) {
                 const auto* port = std::get_if<gr::DynamicPort>(&portOrCollection);
                 return port && port->name == name;
@@ -50,10 +109,14 @@ protected:
                 throw gr::exception(fmt::format("Invalid index {} specified, needs to be an integer", indexString));
             }
 
-            auto collectionIt = std::ranges::find_if(what, [name](const DynamicPortOrCollection& portOrCollection) {
+            auto collectionIt = std::ranges::find_if(what, [&base](const DynamicPortOrCollection& portOrCollection) {
                 const auto* collection = std::get_if<NamedPortCollection>(&portOrCollection);
-                return collection && collection->name == name;
+                return collection && collection->name == base;
             });
+
+            if (collectionIt == what.cend()) {
+                throw gr::exception(fmt::format("Invalid name specified name={}, base={}\n", name, base));
+            }
 
             auto& collection = std::get<NamedPortCollection>(*collectionIt);
 
@@ -80,15 +143,34 @@ public:
     MsgPortInNamed<"__Builtin">*  msgIn;
     MsgPortOutNamed<"__Builtin">* msgOut;
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::string_view name) { return dynamicPortFromName(_dynamicInputPorts, name); }
+    static std::string portName(const DynamicPortOrCollection& portOrCollection) {
+        return std::visit(meta::overloaded{                                          //
+                              [](const gr::DynamicPort& port) { return port.name; }, //
+                              [](const NamedPortCollection& namedCollection) { return namedCollection.name; }},
+            portOrCollection);
+    }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::string_view name) { return dynamicPortFromName(_dynamicOutputPorts, name); }
+    [[nodiscard]] virtual std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {}; };
+    [[nodiscard]] virtual std::span<Edge>                        edges() noexcept { return {}; }
+
+    DynamicPorts& dynamicInputPorts() {
+        initDynamicPorts();
+        return _dynamicInputPorts;
+    }
+    DynamicPorts& dynamicOutputPorts() {
+        initDynamicPorts();
+        return _dynamicOutputPorts;
+    }
+
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name) { return dynamicPortFromName(_dynamicInputPorts, name); }
+
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name) { return dynamicPortFromName(_dynamicOutputPorts, name); }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument("Need to specify the index in the port collection");
+                throw std::invalid_argument(fmt::format("Need to specify the index in the port collection for {}", portCollection->name));
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -97,7 +179,7 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw std::invalid_argument("Specified sub-index for a normal port");
+                throw std::invalid_argument(fmt::format("Specified sub-index for a normal port {}", port->name));
             }
         }
 
@@ -108,7 +190,7 @@ public:
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument("Need to specify the index in the port collection");
+                throw std::invalid_argument(fmt::format("Need to specify the index in the port collection for {}", portCollection->name));
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -117,11 +199,25 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw std::invalid_argument("Specified sub-index for a normal port");
+                throw std::invalid_argument(fmt::format("Specified sub-index for a normal port {}", port->name));
             }
         }
 
         throw std::logic_error("Variant construction failed");
+    }
+
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition) {
+        return std::visit(meta::overloaded(                                                                                                                                   //
+                              [this](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex); }, //
+                              [this](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.name); }),                         //
+            definition.definition);
+    }
+
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition) {
+        return std::visit(meta::overloaded(                                                                                                                                    //
+                              [this](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex); }, //
+                              [this](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.name); }),                         //
+            definition.definition);
     }
 
     [[nodiscard]] std::size_t dynamicInputPortsSize(std::size_t parentIndex = meta::invalid_index) const {
@@ -150,7 +246,7 @@ public:
         }
     }
 
-    std::size_t dynamicInputPortIndex(std::string_view name) const {
+    std::size_t dynamicInputPortIndex(const std::string& name) const {
         initDynamicPorts();
         for (std::size_t i = 0; i < _dynamicInputPorts.size(); ++i) {
             if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(i))) {
@@ -167,7 +263,7 @@ public:
         throw std::invalid_argument(fmt::format("Port {} does not exist", name));
     }
 
-    std::size_t dynamicOutputPortIndex(std::string_view name) const {
+    std::size_t dynamicOutputPortIndex(const std::string& name) const {
         initDynamicPorts();
         for (std::size_t i = 0; i < _dynamicOutputPorts.size(); ++i) {
             if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(i))) {
@@ -252,6 +348,8 @@ public:
     [[nodiscard]] virtual work::Result work(std::size_t requested_work) = 0;
 
     [[nodiscard]] virtual work::Status draw() = 0;
+
+    [[nodiscard]] virtual block::Category blockCategory() const { return block::Category::NormalBlock; }
 
     virtual void processScheduledMessages() = 0;
 
@@ -349,7 +447,7 @@ public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
         initMessagePorts();
-        _dynamicPortsLoader = std::bind(&BlockWrapper::dynamicPortLoader, this);
+        _dynamicPortsLoader = std::bind_front(&BlockWrapper::dynamicPortLoader, this);
     }
 
     BlockWrapper(const BlockWrapper& other)            = delete;
@@ -369,9 +467,30 @@ public:
         return work::Status::ERROR;
     }
 
-    UICategory                               uiCategory() const override { return T::DrawableControl::kCategory; }
-    void                                     processScheduledMessages() override { return blockRef().processScheduledMessages(); }
-    [[nodiscard]] constexpr bool             isBlocking() const noexcept override { return blockRef().isBlocking(); }
+    [[nodiscard]] block::Category blockCategory() const override { return T::blockCategory; }
+
+    UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
+
+    void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
+
+    [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept override {
+        if constexpr (requires { blockRef().blocks(); }) {
+            return blockRef().blocks();
+        } else {
+            return {};
+        }
+    }
+
+    [[nodiscard]] std::span<Edge> edges() noexcept override {
+        if constexpr (requires { blockRef().edges(); }) {
+            return blockRef().edges();
+        } else {
+            return {};
+        }
+    }
+
+    [[nodiscard]] constexpr bool isBlocking() const noexcept override { return blockRef().isBlocking(); }
+
     [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
     [[nodiscard]] lifecycle::State           state() const noexcept override { return blockRef().state(); }
     [[nodiscard]] constexpr std::size_t      availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
