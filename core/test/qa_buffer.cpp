@@ -541,22 +541,22 @@ const boost::ut::suite CircularBufferTests = [] {
                 auto in = reader.get().get();
                 for (const auto& map : in) {
                     auto vIt = map.find(0);
-                    expect(vIt != map.end());
+                    expect(vIt != map.end()) << "map does not contain zero";
                     if (vIt == map.end()) {
                         continue;
                     }
                     const auto value = vIt->second;
-                    expect(ge(value, 0));
-                    expect(le(value, static_cast<int>(kWrites)));
+                    expect(ge(value, 0)) << "value in map should be greater than zero";
+                    expect(le(value, static_cast<int>(kWrites))) << "value in map should be smaller than number of samples to publish";
                     const auto nextIt = std::ranges::find(next, value);
-                    expect(nextIt != next.end());
+                    expect(nextIt != next.end()) << "No writer thread waiting for that number";
                     if (nextIt == next.end()) {
                         continue;
                     }
                     *nextIt = value + 1;
                 }
                 read += in.size();
-                expect(in.consume(in.size()));
+                expect(in.consume(in.size())) << "Failed to consume all";
             }
         };
 
