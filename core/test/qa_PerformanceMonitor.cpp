@@ -36,8 +36,8 @@ int main(int argc, char* argv[]) {
     using namespace gr;
     using namespace gr::testing;
 
-    int         runTime     = -1; // in seconds
-    int         testCaseId  = -1;
+    int         runTime     = 120; // in seconds
+    int         testCaseId  = 1;
     std::string outFilePath = "";
 
     if (argc >= 2) {
