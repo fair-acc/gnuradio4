@@ -10335,7 +10335,7 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
+    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize) {};
     SingleProducerStrategy(const SingleProducerStrategy&)  = delete;
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
@@ -10499,13 +10499,12 @@ private:
     }
 
     void setSlotsStates(signed_index_type seqBegin, signed_index_type seqEnd, bool value) {
+        assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
         const std::size_t beginSet  = static_cast<std::size_t>(seqBegin) & _mask;
         const std::size_t endSet    = static_cast<std::size_t>(seqEnd) & _mask;
         const auto        diffReset = static_cast<std::size_t>(seqEnd - seqBegin);
 
-        if (beginSet == endSet && beginSet == 0UZ && diffReset == _size) {
-            _slotStates.set(0UZ, _size, value);
-        } else if (beginSet <= endSet) {
+        if (beginSet <= endSet && diffReset < _size) {
             _slotStates.set(beginSet, endSet, value);
         } else {
             _slotStates.set(beginSet, _size, value);
