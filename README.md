@@ -22,6 +22,10 @@ led to adoption in hobbyist, academic, and commercial environments. GNU Radio ha
 found use in software-defined radio, digital communications, nuclear physics, high-
 energy particle physics, astrophysics, radio astronomy and more!
 
+## Development
+
+If you want to start working on the GNURadio 4.0 source, the [DEVELOPMENT.md](DEVELOPMENT.md) file describes how to set up a local development environment.
+
 ## Helpful Links
 
 * [GNU Radio Website](https://gnuradio.org)
