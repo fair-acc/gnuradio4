@@ -403,7 +403,7 @@ private:
             return;
         }
 
-        auto registerPort = [this]<typename Direction, typename ConstIndex, typename CurrentPortType>(DynamicPorts& where, [[maybe_unused]] Direction direction, [[maybe_unused]] ConstIndex index, CurrentPortType&&) noexcept {
+        auto registerPort = [this]<typename Direction, typename ConstIndex, typename CurrentPortType>(DynamicPorts& where, [[maybe_unused]] Direction direction, [[maybe_unused]] ConstIndex index, CurrentPortType*) noexcept {
             if constexpr (traits::port::is_port_v<CurrentPortType>) {
                 using PortDescriptor = typename CurrentPortType::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
@@ -506,5 +506,44 @@ public:
 };
 
 } // namespace gr
+
+template<>
+struct fmt::formatter<gr::Edge> {
+    char formatSpecifier = 's';
+
+    constexpr auto parse(fmt::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && (*it == 's' || *it == 'l')) {
+            formatSpecifier = *it++;
+        } else if (it != ctx.end() && *it != '}') {
+            throw fmt::format_error("invalid format specifier");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::Edge& e, FormatContext& ctx) {
+        using PortIndex  = gr::PortDefinition;
+        const auto& name = [this](const gr::BlockModel* block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
+
+        const auto portIndex = [](const gr::PortDefinition& port) {
+            return std::visit(gr::meta::overloaded(
+                                  [](const gr::PortDefinition::IndexBased& index) {
+                                      if (index.subIndex == gr::meta::invalid_index) {
+                                          return fmt::format("{}", index.topLevel);
+                                      } else {
+                                          return fmt::format("{}#{}", index.topLevel, index.subIndex);
+                                      }
+                                  },
+                                  [](const gr::PortDefinition::StringBased& index) { return index.name; }),
+                port.definition);
+        };
+
+        return fmt::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
+            name(e._sourceBlock), portIndex(e._sourcePortDefinition),                                         //
+            e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            //
+            name(e._destinationBlock), portIndex(e._destinationPortDefinition));
+    }
+};
 
 #endif // GNURADIO_BLOCK_MODEL_HPP

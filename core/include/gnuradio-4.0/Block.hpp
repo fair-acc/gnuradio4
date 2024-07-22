@@ -533,15 +533,15 @@ public:
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
-        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto&& t) {
-            using CurrentPortType = std::remove_cvref_t<decltype(t)>;
+        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto* t) {
+            using CurrentPortType = std::remove_pointer_t<decltype(t)>;
             if constexpr (traits::port::is_port_v<CurrentPortType>) {
                 using PortDescriptor = typename CurrentPortType::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
                     auto& port = (self().*(PortDescriptor::pointer));
                     port.name  = CurrentPortType::Name;
                 }
-            } else {
+            } else if constexpr (traits::port::is_port_collection_v<CurrentPortType>) {
                 using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
                     auto&       collection     = (self().*(PortCollectionDescriptor::pointer));
@@ -550,6 +550,8 @@ public:
                         port.name = collectionName;
                     }
                 }
+            } else {
+                meta::print_types<meta::message_type<"Not a port, not a collection of ports">, CurrentPortType>{};
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
