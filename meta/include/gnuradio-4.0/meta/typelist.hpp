@@ -115,8 +115,7 @@ struct splitter<8> {
 
 template<>
 struct splitter<16> {
-    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12, typename T13,
-             typename T14, typename T15, typename...>
+    template<typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12, typename T13, typename T14, typename T15, typename...>
     using first = typelist<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>;
 
     template<typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename, typename... Ts>
@@ -219,9 +218,7 @@ struct transform_conditional_impl;
 
 template<typename CondFun, template<typename> class Tpl1, template<typename> class Tpl2, typename... Ts>
 struct transform_conditional_impl<CondFun, Tpl1, Tpl2, typelist<Ts...>> {
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> typelist<typename conditional_specialization<CondFun()(Is), Tpl1, Tpl2, Ts>::type...> {
-        return {};
-    }(std::make_index_sequence<sizeof...(Ts)>()));
+    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> typelist<typename conditional_specialization<CondFun()(Is), Tpl1, Tpl2, Ts>::type...> { return {}; }(std::make_index_sequence<sizeof...(Ts)>()));
 };
 } // namespace detail
 
@@ -272,8 +269,7 @@ struct find_type_or_default_impl {
 };
 
 template<template<typename> typename Predicate, typename DefaultType, typename Head, typename... Ts>
-struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...>
-    : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
+struct find_type_or_default_impl<Predicate, DefaultType, Head, Ts...> : std::conditional_t<Predicate<Head>::value, find_type_or_default_impl<Predicate, Head, Ts...>, find_type_or_default_impl<Predicate, DefaultType, Ts...>> {};
 
 template<std::size_t Index, typename... Ts>
 struct at_impl;
@@ -319,7 +315,7 @@ struct at_impl<7, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> {
 };
 
 template<std::size_t Index, typename T0, typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename... Ts>
-    requires(Index >= 8)
+requires(Index >= 8)
 struct at_impl<Index, T0, T1, T2, T3, T4, T5, T6, T7, Ts...> : at_impl<Index - 8, Ts...> {};
 
 } // namespace detail
@@ -339,14 +335,12 @@ struct typelist {
     using apply = Other<Ts...>;
 
     template<class F, std::size_t... Is, typename... LeadingArguments>
-    static constexpr void
-    for_each_impl(F &&f, std::index_sequence<Is...>, LeadingArguments &&...args) {
-        (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, Ts{}), ...);
+    static constexpr void for_each_impl(F&& f, std::index_sequence<Is...>, LeadingArguments&&... args) {
+        (f(std::forward<LeadingArguments>(args)..., std::integral_constant<std::size_t, Is>{}, static_cast<Ts*>(nullptr)), ...);
     }
 
     template<class F, typename... LeadingArguments>
-    static constexpr void
-    for_each(F &&f, LeadingArguments &&...args) {
+    static constexpr void for_each(F&& f, LeadingArguments&&... args) {
         for_each_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
     }
 
@@ -366,10 +360,9 @@ struct typelist {
     static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
 
     template<typename F, typename Tup>
-        requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
-    static constexpr auto
-    construct(Tup &&args_tuple) {
-        return std::apply([]<typename... Args>(Args &&...args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
+    requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
+    static constexpr auto construct(Tup&& args_tuple) {
+        return std::apply([]<typename... Args>(Args&&... args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
     }
 
     template<template<typename> typename Trafo>
@@ -387,17 +380,17 @@ struct typelist {
     template<typename DefaultType>
     using safe_head_default = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) > 0) {
-            return static_cast<this_t::at<0> *>(nullptr);
+            return static_cast<this_t::at<0>*>(nullptr);
         } else {
-            return static_cast<DefaultType *>(nullptr);
+            return static_cast<DefaultType*>(nullptr);
         }
     }())>;
 
     using safe_head = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) > 0) {
-            return static_cast<this_t::at<0> *>(nullptr);
+            return static_cast<this_t::at<0>*>(nullptr);
         } else {
-            return static_cast<void *>(nullptr);
+            return static_cast<void*>(nullptr);
         }
     }())>;
 
@@ -414,11 +407,10 @@ struct typelist {
     using find_or_default = typename detail::find_type_or_default_impl<Pred, DefaultType, Ts...>::type;
 
     template<typename Needle>
-    static constexpr std::size_t
-    index_of() {
+    static constexpr std::size_t index_of() {
         std::size_t result = static_cast<std::size_t>(-1);
-        gr::meta::typelist<Ts...>::for_each([&](auto index, auto &&t) {
-            if constexpr (std::is_same_v<Needle, std::remove_cvref_t<decltype(t)>>) {
+        gr::meta::typelist<Ts...>::for_each([&](auto index, auto* t) {
+            if constexpr (std::is_same_v<Needle, std::remove_pointer_t<decltype(t)>>) {
                 result = index;
             }
         });
@@ -431,11 +423,11 @@ struct typelist {
     using tuple_type    = std::tuple<Ts...>;
     using tuple_or_type = std::remove_pointer_t<decltype([] {
         if constexpr (sizeof...(Ts) == 0) {
-            return static_cast<void *>(nullptr);
+            return static_cast<void*>(nullptr);
         } else if constexpr (sizeof...(Ts) == 1) {
-            return static_cast<at<0> *>(nullptr);
+            return static_cast<at<0>*>(nullptr);
         } else {
-            return static_cast<tuple_type *>(nullptr);
+            return static_cast<tuple_type*>(nullptr);
         }
     }())>;
 };
@@ -445,12 +437,11 @@ constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Ts>...>;
 
 namespace detail {
 template<template<typename...> typename OtherTypelist, typename... Args>
-meta::typelist<Args...>
-to_typelist_helper(OtherTypelist<Args...> *);
+meta::typelist<Args...> to_typelist_helper(OtherTypelist<Args...>*);
 } // namespace detail
 
 template<typename OtherTypelist>
-using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist *>(nullptr)));
+using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist*>(nullptr)));
 
 } // namespace gr::meta
 

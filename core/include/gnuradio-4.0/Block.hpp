@@ -221,6 +221,14 @@ inline static const char* kStoreDefaults = "StoreDefaults"; ///< store present s
 inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
 } // namespace block::property
 
+namespace block {
+enum class Category {
+    NormalBlock,           ///< Block that does not contain children blocks
+    TransparentBlockGroup, ///< Block with children blocks which do not have a dedicated scheduler
+    ScheduledBlockGroup    ///< Block with children that have a dedicated scheduler
+};
+}
+
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -363,7 +371,9 @@ public:
     using StrideControl              = ArgumentsTypeList::template find_or_default<is_stride, Stride<0UL, true>>;
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
-    constexpr static bool blockingIO = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
+
+    constexpr static bool            blockingIO    = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
+    constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
     template<typename T>
     auto& getArgument() {
@@ -523,15 +533,15 @@ public:
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
-        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto&& t) {
-            using CurrentPortType = std::remove_cvref_t<decltype(t)>;
+        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto* t) {
+            using CurrentPortType = std::remove_pointer_t<decltype(t)>;
             if constexpr (traits::port::is_port_v<CurrentPortType>) {
                 using PortDescriptor = typename CurrentPortType::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
                     auto& port = (self().*(PortDescriptor::pointer));
                     port.name  = CurrentPortType::Name;
                 }
-            } else {
+            } else if constexpr (traits::port::is_port_collection_v<CurrentPortType>) {
                 using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
                 if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
                     auto&       collection     = (self().*(PortCollectionDescriptor::pointer));
@@ -540,6 +550,8 @@ public:
                         port.name = collectionName;
                     }
                 }
+            } else {
+                meta::print_types<meta::message_type<"Not a port, not a collection of ports">, CurrentPortType>{};
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
@@ -1986,7 +1998,6 @@ template<BlockLike TBlock>
 }
 
 namespace detail {
-using namespace std::string_literals;
 
 template<typename Type>
 std::string reflFirstTypeName() {
@@ -2012,6 +2023,7 @@ std::string reflFirstTypeName() {
 
 template<typename... Types>
 std::string encodeListOfTypes() {
+    using namespace std::string_literals;
     struct accumulator {
         std::string value;
 

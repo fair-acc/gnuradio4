@@ -36,21 +36,21 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
             std::string result = fmt::format("{:s}", edge);
             fmt::println("Edge formatter - default:   {}", result);
 
-            expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, connected: false) ⟶")) << result;
+            expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
 
         "short names"_test = [&edge] {
             std::string result = fmt::format("{:s}", edge);
             fmt::println("Edge formatter - short 's': {}", result);
 
-            expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, connected: false) ⟶")) << result;
+            expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
 
         "long names"_test = [&edge] {
             std::string result = fmt::format("{:l}", edge);
             fmt::println("Edge formatter - long  'l': {}", result);
 
-            expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, connected: false) ⟶")) << result;
+            expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
     };
 };
@@ -64,7 +64,8 @@ auto returnReplyMsg(gr::MsgPortIn& port) {
     return msg;
 };
 
-bool awaitCondition(std::chrono::milliseconds timeout, std::function<bool()> condition) {
+template<typename Condition>
+bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start < timeout) {
         if (condition()) {
@@ -264,10 +265,10 @@ const boost::ut::suite RunningGraphTests = [] {
 
     gr::scheduler::Simple scheduler{gr::Graph()};
 
-    // auto& source = scheduler.graph().emplaceBlock<gr::basic::ClockSource<float>>();
     auto& source = scheduler.graph().emplaceBlock<SlowSource<float>>();
     auto& sink   = scheduler.graph().emplaceBlock<CountingSink<float>>();
     expect(eq(ConnectionResult::SUCCESS, scheduler.graph().connect<"out">(source).to<"in">(sink)));
+    expect(eq(scheduler.graph().edges().size(), 1UZ)) << "edge registered with connect";
 
     gr::MsgPortOut toGraph;
     gr::MsgPortIn  fromGraph;
@@ -317,7 +318,7 @@ const boost::ut::suite RunningGraphTests = [] {
 
     expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
-    // FIXME: expect(eq(scheduler.graph().edges().size(), 1UZ)) << "added one new edges";
+    expect(eq(scheduler.graph().edges().size(), 1UZ)) << "added one edge";
 
     expect(awaitCondition(1s, [&sink] { return sink.count >= 10U; })) << "sink received enough data";
     fmt::println("executed basic graph");
@@ -355,7 +356,7 @@ const boost::ut::suite RunningGraphTests = [] {
     for (const auto& edge : scheduler.graph().edges()) {
         fmt::println("edge in list({}): {}", scheduler.graph().edges().size(), edge);
     }
-    // FIXME: expect(eq(scheduler.graph().edges().size(), 3UZ)) << "added three new edges";
+    expect(eq(scheduler.graph().edges().size(), 4UZ)) << "added three new edges, one previously registered with connect";
 
     // FIXME: edge->connection is not performed
     //    expect(awaitCondition(1s, [&sink] {
