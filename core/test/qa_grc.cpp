@@ -63,8 +63,15 @@ auto collectBlocks(const gr::Graph& graph) {
 auto collectEdges(const gr::Graph& graph) {
     std::set<std::string> result;
     graph.forEachEdge([&](const auto& edge) {
-        result.insert(fmt::format("{}#{}#{} - {}#{}#{}", edge.sourceBlock().name(), edge.sourcePortDefinition().topLevel, edge.sourcePortDefinition().subIndex, //
-            edge.destinationBlock().name(), edge.destinationPortDefinition().topLevel, edge.destinationPortDefinition().subIndex));
+        auto portDefinitionToString = [](const gr::PortDefinition& definition) {
+            return std::visit(gr::meta::overloaded(                                                                                                                   //
+                                  [](const gr::PortDefinition::IndexBased& _definition) { return fmt::format("{}#{}", _definition.topLevel, _definition.subIndex); }, //
+                                  [](const gr::PortDefinition::StringBased& _definition) { return _definition.name; }),                                               //
+                definition.definition);
+        };
+        result.insert(fmt::format("{}#{} - {}#{}",                                          //
+            edge.sourceBlock().name(), portDefinitionToString(edge.sourcePortDefinition()), //
+            edge.destinationBlock().name(), portDefinitionToString(edge.destinationPortDefinition())));
     });
     return result;
 }
@@ -227,7 +234,7 @@ connections:
             expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB", 0>(arraySource0).to<"inA", 0>(arraySink)));
             expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB", 1>(arraySource1).to<"inA", 1>(arraySink)));
 
-            expect(graph1.performConnections());
+            expect(graph1.reconnectAllEdges());
 
             const auto graph1Saved = gr::saveGrc(graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);

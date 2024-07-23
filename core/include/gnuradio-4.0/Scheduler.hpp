@@ -21,7 +21,6 @@
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
 using namespace gr::message;
-using namespace std::string_literals;
 
 enum class ExecutionPolicy {
     singleThreaded,        ///
@@ -55,6 +54,8 @@ public:
     Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
     Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
 
+    constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
+
     [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
 
     explicit SchedulerBase(gr::Graph&&   graph,                                                                                                  //
@@ -80,7 +81,7 @@ public:
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
     void connectBlockMessagePorts() {
-        _graph.forEachBlock([this](auto& block) {
+        _graph.forEachBlockMutable([this](auto& block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()));
             }
@@ -119,7 +120,7 @@ public:
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
-            _graph.forEachBlock(&BlockModel::processScheduledMessages);
+            _graph.forEachBlockMutable(&BlockModel::processScheduledMessages);
         }
 
         const auto& messagesFromChildren = _fromChildMessagePort.streamReader().get();
@@ -216,28 +217,22 @@ protected:
     void init() {
         [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.init");
         base_t::processScheduledMessages(); // make sure initial subscriptions are processed
-        const auto result = _graph.performConnections();
-        if (!result) {
-            this->emitErrorMessage("init()", "Failed to connect blocks in graph");
-        }
         connectBlockMessagePorts();
     }
 
     void reset() {
-        _graph.forEachBlock([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block.changeState(lifecycle::INITIALISED)); });
-
-        // since it is not possible to set up the graph connections a second time, this method leaves the graph in the initialized state with clear buffers.
-        // clear buffers
-        // std::for_each(_graph.edges().begin(), _graph.edges().end(), [](auto &edge) {
-        //
-        // });
+        _graph.forEachBlockMutable([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block.changeState(lifecycle::INITIALISED)); });
+        _graph.disconnectAllEdges();
     }
 
     void start() {
-        // FIXME: runtime edge->connection API needs to add initialisation here. Implementation either here or in Graph.
+        const bool result = _graph.reconnectAllEdges();
+        if (!result) {
+            this->emitErrorMessage("init()", "Failed to connect blocks in graph");
+        }
 
         std::lock_guard lock(_jobListsMutex);
-        _graph.forEachBlock([this](auto& block) {
+        _graph.forEachBlockMutable([this](auto& block) {
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING));
             for_each_port([](auto& port) { port.publishPendingTags(); }, outputPorts<PortType::STREAM>(this));
         });
@@ -337,7 +332,7 @@ protected:
     }
 
     void stop() {
-        _graph.forEachBlock([this](auto& block) {
+        _graph.forEachBlockMutable([this](auto& block) {
             this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block.changeState(lifecycle::State::REQUESTED_STOP));
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block.changeState(lifecycle::State::STOPPED));
@@ -348,7 +343,7 @@ protected:
     }
 
     void pause() {
-        _graph.forEachBlock([this](auto& block) {
+        _graph.forEachBlockMutable([this](auto& block) {
             this->emitErrorMessageIfAny("pause() -> LifecycleState", block.changeState(lifecycle::State::REQUESTED_PAUSE));
             if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("pause() -> LifecycleState", block.changeState(lifecycle::State::PAUSED));
@@ -358,7 +353,11 @@ protected:
     }
 
     void resume() {
-        _graph.forEachBlock([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
+        const bool result = _graph.connectPendingEdges();
+        if (!result) {
+            this->emitErrorMessage("init()", "Failed to connect blocks in graph");
+        }
+        _graph.forEachBlockMutable([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
     }
 };
 

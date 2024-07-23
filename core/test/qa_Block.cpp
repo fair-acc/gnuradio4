@@ -729,10 +729,10 @@ const boost::ut::suite _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"inputs", 3UZ>(*testNode)));
 
         // test also different connect API
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 0}, *sinks[0], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 1}, *sinks[1], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 2}, *sinks[2], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, {"outputs", 3}, *sinks[3], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#0"s, *sinks[0], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#1"s, *sinks[1], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#2"s, *sinks[2], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#3"s, *sinks[3], "in"s)));
 
         gr::scheduler::Simple sched{std::move(graph)};
         expect(sched.runAndWait().has_value());

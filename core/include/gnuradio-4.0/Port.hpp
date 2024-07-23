@@ -372,8 +372,8 @@ struct Port {
 
     static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
 
-    std::span<const Tag>   tags;        // Range of tags for the currently processed stream range; only used in input ports
-    Tag::signed_index_type streamIndex; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
+    std::span<const Tag>   tags;          // Range of tags for the currently processed stream range; only used in input ports
+    Tag::signed_index_type streamIndex{}; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
 
 private:
     IoType    _ioHandler    = newIoHandler();
@@ -823,7 +823,7 @@ private:
     std::unique_ptr<model> _accessor;
 
     template<PortLike T, bool owning>
-    class wrapper final : public model {
+    class PortWrapper final : public model {
         using TPortType = std::decay_t<T>;
         std::conditional_t<owning, TPortType, TPortType&> _value;
 
@@ -839,15 +839,15 @@ private:
         }
 
     public:
-        wrapper() = delete;
+        PortWrapper() = delete;
 
-        wrapper(const wrapper&) = delete;
+        PortWrapper(const PortWrapper&) = delete;
+        PortWrapper(PortWrapper&&)      = delete;
 
-        auto& operator=(const wrapper&) = delete;
+        auto& operator=(const PortWrapper&) = delete;
+        auto& operator=(PortWrapper&&)      = delete;
 
-        auto& operator=(wrapper&&) = delete;
-
-        explicit constexpr wrapper(T& arg) noexcept : _value{arg} {
+        explicit constexpr PortWrapper(T& arg) noexcept : _value{arg} {
             if constexpr (T::kIsInput) {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
@@ -855,7 +855,7 @@ private:
             }
         }
 
-        explicit constexpr wrapper(T&& arg) noexcept : _value{std::move(arg)} {
+        explicit constexpr PortWrapper(T&& arg) noexcept : _value{std::move(arg)} {
             if constexpr (T::kIsInput) {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             } else {
@@ -863,7 +863,7 @@ private:
             }
         }
 
-        ~wrapper() override = default;
+        ~PortWrapper() override = default;
 
         [[nodiscard]] std::any defaultValue() const noexcept override { return _value.defaultValue(); }
 
@@ -918,10 +918,10 @@ public:
     // a reference to the port in DynamicPort, the port object
     // can not be reallocated
     template<PortLike T>
-    explicit constexpr DynamicPort(T& arg, non_owned_reference_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<wrapper<T, false>>(arg)} {}
+    explicit constexpr DynamicPort(T& arg, non_owned_reference_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, false>>(arg)} {}
 
     template<PortLike T>
-    explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<wrapper<T, true>>(std::forward<T>(arg))} {}
+    explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
 
     [[nodiscard]] std::any defaultValue() const noexcept { return _accessor->defaultValue(); }
 
