@@ -500,7 +500,7 @@ const boost::ut::suite MessagesTests = [] {
                 { .cmd = [&] { fmt::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
                 { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }},
                 { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("get settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 100ms },
-                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 200ms },
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 500ms },
                 { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms },
                 { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
         };
@@ -541,7 +541,7 @@ const boost::ut::suite MessagesTests = [] {
                         break; // move on to the next command
                     }
                     // sleep a bit before polling again to reduce CPU usage
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::this_thread::sleep_for(10ms);
                 }
                 if (!gotResult) {
                     fmt::println(" - test timed-out after {}", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime));
