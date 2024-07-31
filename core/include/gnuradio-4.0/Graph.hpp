@@ -812,6 +812,23 @@ public:
         }
     } // end:: processOne
 
+    constexpr void settingsAutoUpdate(const Tag& tag) {
+        // apply tags as new settings if matching
+        left.settings().autoUpdate(tag);
+        right.settings().autoUpdate(tag);
+        /* Without complete state tracking in 'left' & 'right' the following would be an error:
+        if (tag.map.contains(gr::tag::END_OF_STREAM)) {
+            left.requestStop();
+            right.requestStop();
+        }
+        */
+    }
+
+    void applyChangedSettingsCustomization() {
+        left.applyChangedSettings();
+        right.applyChangedSettings();
+    }
+
     // work::Result // TODO: ask Matthias if this is still needed or whether this can be simplified.
     // work(std::size_t requested_work) noexcept {
     //     return base::work(requested_work);

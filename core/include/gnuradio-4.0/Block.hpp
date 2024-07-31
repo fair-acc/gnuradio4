@@ -372,6 +372,12 @@ public:
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
 
+    // TODO: Stripped down block type without unnecessary data members for use inside a MergedGraph
+    //using AsMergedBlock              = Derived<MergedBlock>;
+
+    // TODO:
+    //constexpr static bool            isMergeable   = HasConstProcessOneFunction<Derived> || opt-in;
+
     constexpr static bool            blockingIO    = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
@@ -827,6 +833,10 @@ public:
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
                 requestStop();
             }
+            if constexpr (requires(Derived& d) { d.settingsAutoUpdate(mergedInputTag()); }) {
+                // customization to call autoUpdate of nested settings and potentially requestStop
+                self().settingsAutoUpdate(mergedInputTag());
+            }
         }
     }
 
@@ -851,6 +861,10 @@ public:
             }
             notifyListeners(block::property::kSetting, settings().get());
         });
+        if constexpr (requires(Derived& d) { d.applyChangedSettingsCustomization(); }) {
+            // customization to potentially repeat all of the above for nested settings
+            self().applyChangedSettingsCustomization();
+        }
     }
 
     constexpr static auto prepareStreams(auto ports, std::size_t sync_samples) {
