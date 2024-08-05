@@ -101,7 +101,7 @@ Additionally, the block provides three optional output ports for real-time strea
     gr::work::Status processBulk(gr::ConsumableSpan auto& inSpan, gr::PublishableSpan auto& outResSpan, gr::PublishableSpan auto& outRateSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), static_cast<std::size_t>(evaluate_perf_rate - _nSamplesCounter));
         std::ignore                = inSpan.consume(nSamples);
-        _nSamplesCounter += nSamples;
+        _nSamplesCounter += static_cast<gr::Size_t>(nSamples);
 
         if (_nSamplesCounter >= evaluate_perf_rate) {
             addNewMetrics(outResSpan, outRateSpan);

@@ -10326,7 +10326,7 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize) {};
+    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
     SingleProducerStrategy(const SingleProducerStrategy&)  = delete;
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
@@ -10341,7 +10341,7 @@ public:
             }
             spinWait.spinOnce();
         }
-        _reserveCursor += nSlotsToClaim;
+        _reserveCursor += static_cast<signed_index_type>(nSlotsToClaim);
         return _reserveCursor;
     }
 
@@ -10351,7 +10351,7 @@ public:
         if (getRemainingCapacity() < static_cast<signed_index_type>(nSlotsToClaim)) { // not enough slots in buffer
             return std::nullopt;
         }
-        _reserveCursor += nSlotsToClaim;
+        _reserveCursor += static_cast<signed_index_type>(nSlotsToClaim);
         return _reserveCursor;
     }
 
@@ -10490,7 +10490,7 @@ private:
     }
 
     void setSlotsStates(signed_index_type seqBegin, signed_index_type seqEnd, bool value) {
-        assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
+        assert(static_cast<std::size_t>(seqEnd - seqBegin) <= _size && "Begin cannot overturn end");
         const std::size_t beginSet  = static_cast<std::size_t>(seqBegin) & _mask;
         const std::size_t endSet    = static_cast<std::size_t>(seqEnd) & _mask;
         const auto        diffReset = static_cast<std::size_t>(seqEnd - seqBegin);
@@ -22214,7 +22214,6 @@ struct fmt::formatter<gr::Edge> {
 
     template<typename FormatContext>
     auto format(const gr::Edge& e, FormatContext& ctx) {
-        using PortIndex  = gr::PortDefinition;
         const auto& name = [this](const gr::BlockModel* block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
 
         const auto portIndex = [](const gr::PortDefinition& port) {
@@ -23029,14 +23028,14 @@ public:
 
     std::optional<Message> propertyCallbackEmplaceEdge(std::string_view /*propertyName*/, Message message) {
         using namespace std::string_literals;
-        const auto&        data             = message.data.value();
-        const std::string& sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
-        const std::string& sourcePort       = std::get<std::string>(data.at("sourcePort"s));
-        const std::string& destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
-        const std::string& destinationPort  = std::get<std::string>(data.at("destinationPort"s));
-        const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
-        const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
-        const std::string  edgeName         = std::get<std::string>(data.at("edgeName"s));
+        const auto&                         data             = message.data.value();
+        const std::string&                  sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string&                  sourcePort       = std::get<std::string>(data.at("sourcePort"s));
+        const std::string&                  destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
+        const std::string&                  destinationPort  = std::get<std::string>(data.at("destinationPort"s));
+        [[maybe_unused]] const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
+        [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
+        const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
