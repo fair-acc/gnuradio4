@@ -803,7 +803,7 @@ const boost::ut::suite TransactionTests = [] {
 
         const auto ctxStr = SettingsCtx(timeNow, "String context"); // OK: string
         expect(settings.set({{"scaling_factor", 1}}, ctxStr).empty()) << "successful set returns empty map";
-        const auto ctxInt = SettingsCtx(timeNow, static_cast<int>(1)); // OK: int
+        const auto ctxInt = SettingsCtx(timeNow, 1); // OK: int
         expect(settings.set({{"scaling_factor", 2}}, ctxInt).empty()) << "successful set returns empty map";
 
         auto runType = [&]<typename TCtx>() {

@@ -74,7 +74,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             {"name", "ClockSource"},                                                                                                           //
             {"tag_times", std::vector<std::uint64_t>{10 * ms, 90 * ms, 100 * ms, 300 * ms, 350 * ms, 550 * ms, 650 * ms, 800 * ms, 850 * ms}}, //
             {"tag_values", std::vector<std::string>{"CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1", "CMD_DIAG_TRIGGER1", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}},
-            {"repeat_period", std::uint64_t(1000 * ms)},
+            {"repeat_period", 1000 * ms},
             {"do_zero_order_hold", true},
         });
 
