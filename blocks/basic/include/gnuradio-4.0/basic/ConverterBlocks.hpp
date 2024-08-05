@@ -20,7 +20,7 @@ struct Convert : public gr::Block<Convert<T, R>> {
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
         if constexpr (gr::meta::any_simd<V>) { // simd case
-            using RetType = std::experimental::rebind_simd_t<R, V>;
+            using RetType = vir::stdx::rebind_simd_t<R, V>;
             return vir::stdx::static_simd_cast<RetType>(input);
         } else { // non-simd case
             return static_cast<R>(input);
@@ -42,7 +42,7 @@ Performs scaling, i.e. 'R output = R(input * scale)'
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
         if constexpr (gr::meta::any_simd<V>) { // simd case
-            using RetType = std::experimental::rebind_simd_t<R, V>;
+            using RetType = vir::stdx::rebind_simd_t<R, V>;
             return vir::stdx::static_simd_cast<RetType>(input * scale);
         } else { // non-simd case
             return static_cast<R>(input * scale);
@@ -61,9 +61,9 @@ struct Abs : public gr::Block<Abs<T>> {
     [[nodiscard]] constexpr R processOne(T input) const noexcept {
         if constexpr (std::is_unsigned_v<T>) {
             using TSigned = std::make_signed_t<T>;
-            return std::abs(static_cast<TSigned>(input));
+            return static_cast<R>(std::abs(static_cast<TSigned>(input)));
         } else {
-            return std::abs(input);
+            return static_cast<R>(std::abs(input));
         }
     }
 };
@@ -240,6 +240,8 @@ ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::MagPhaseToComplex, m
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::ComplexToInterleaved, in, interleaved)
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::InterleavedToComplex, interleaved, out)
 
+/*
+ TODO: temporarily disabled due to excessive compile-times on CI
 namespace gr::blocks::type::converter {
 using TSupportedTypes    = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>; // N.B. 10 base types
 using TComplexTypes      = std::tuple<std::complex<float>, std::complex<double>>;                                               // N.B. 2 (valid) complex types
@@ -263,5 +265,6 @@ const inline auto registerConverterBlocks =
   | gr::registerBlockTT<InterleavedToComplex, TCommonRawSDRTypes, TComplexTypes>(gr::globalBlockRegistry());
 // clang-format on
 } // namespace gr::blocks::type::converter
+*/
 
 #endif // CONVERTERBLOCKS_HPP

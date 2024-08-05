@@ -253,17 +253,17 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
             InterleavedToComplex<R, std::complex<T>> interleavedToComplex;
 
             expect(complexToInterleaved.processBulk(complexData, interleavedData) == gr::work::Status::OK);
-            expect(eq(interleavedData[0], 1.0f));
-            expect(eq(interleavedData[1], 2.0f));
-            expect(eq(interleavedData[2], 3.0f));
-            expect(eq(interleavedData[3], 4.0f));
-            expect(eq(interleavedData[4], 5.0f));
-            expect(eq(interleavedData[5], 6.0f));
+            expect(eq(interleavedData[0], R(1.0f)));
+            expect(eq(interleavedData[1], R(2.0f)));
+            expect(eq(interleavedData[2], R(3.0f)));
+            expect(eq(interleavedData[3], R(4.0f)));
+            expect(eq(interleavedData[4], R(5.0f)));
+            expect(eq(interleavedData[5], R(6.0f)));
 
             expect(interleavedToComplex.processBulk(interleavedData, outputComplexData) == gr::work::Status::OK);
-            expect(eq(outputComplexData[0], std::complex<T>{1.0f, 2.0f}));
-            expect(eq(outputComplexData[1], std::complex<T>{3.0f, 4.0f}));
-            expect(eq(outputComplexData[2], std::complex<T>{5.0f, 6.0f}));
+            expect(eq(outputComplexData[0], std::complex<T>{T(1.0f), T(2.0f)}));
+            expect(eq(outputComplexData[1], std::complex<T>{T(3.0f), T(4.0f)}));
+            expect(eq(outputComplexData[2], std::complex<T>{T(5.0f), T(6.0f)}));
         } | std::tuple<float, double, std::int8_t, std::int16_t>();
     } | kArithmeticTypes;
 };
