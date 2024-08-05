@@ -37,7 +37,7 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize) {};
+    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
     SingleProducerStrategy(const SingleProducerStrategy&)  = delete;
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
@@ -52,7 +52,7 @@ public:
             }
             spinWait.spinOnce();
         }
-        _reserveCursor += nSlotsToClaim;
+        _reserveCursor += static_cast<signed_index_type>(nSlotsToClaim);
         return _reserveCursor;
     }
 
@@ -62,7 +62,7 @@ public:
         if (getRemainingCapacity() < static_cast<signed_index_type>(nSlotsToClaim)) { // not enough slots in buffer
             return std::nullopt;
         }
-        _reserveCursor += nSlotsToClaim;
+        _reserveCursor += static_cast<signed_index_type>(nSlotsToClaim);
         return _reserveCursor;
     }
 
@@ -201,7 +201,7 @@ private:
     }
 
     void setSlotsStates(signed_index_type seqBegin, signed_index_type seqEnd, bool value) {
-        assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
+        assert(static_cast<std::size_t>(seqEnd - seqBegin) <= _size && "Begin cannot overturn end");
         const std::size_t beginSet  = static_cast<std::size_t>(seqBegin) & _mask;
         const std::size_t endSet    = static_cast<std::size_t>(seqEnd) & _mask;
         const auto        diffReset = static_cast<std::size_t>(seqEnd - seqBegin);

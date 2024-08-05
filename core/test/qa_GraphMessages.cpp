@@ -27,10 +27,10 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
     using namespace gr;
 
     "Edge formatter tests"_test = [] {
-        Graph graph;
-        auto& source = graph.emplaceBlock<NullSource<float>>();
-        auto& sink   = graph.emplaceBlock<NullSink<float>>();
-        Edge  edge{graph.blocks()[0UZ].get(), {1}, graph.blocks()[1UZ].get(), {2}, 1024, 1, "test_edge"};
+        Graph                  graph;
+        [[maybe_unused]] auto& source = graph.emplaceBlock<NullSource<float>>();
+        [[maybe_unused]] auto& sink   = graph.emplaceBlock<NullSink<float>>();
+        Edge                   edge{graph.blocks()[0UZ].get(), {1}, graph.blocks()[1UZ].get(), {2}, 1024, 1, "test_edge"};
 
         "default"_test = [&edge] {
             std::string result = fmt::format("{:s}", edge);
@@ -213,7 +213,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
         "Add an edge"_test = [&] {
             property_map data = {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "out"}, //
                 {"destinationBlock", std::string(blockIn.uniqueName())}, {"destinationPort", "in"},          //
-                {"minBufferSize", gr::Size_t()}, {"weight", std::int32_t(0)}, {"edgeName", "unnamed edge"}};
+                {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
 
             sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
@@ -275,7 +275,7 @@ const boost::ut::suite RunningGraphTests = [] {
     expect(eq(ConnectionResult::SUCCESS, toGraph.connect(scheduler.graph().msgIn)));
     expect(eq(ConnectionResult::SUCCESS, scheduler.graph().msgOut.connect(fromGraph)));
 
-    auto waitForAReply = [&](std::chrono::milliseconds maxWait = 1s, std::source_location source = std::source_location::current()) {
+    auto waitForAReply = [&](std::chrono::milliseconds maxWait = 1s, std::source_location currentSource = std::source_location::current()) {
         auto startedAt = std::chrono::system_clock::now();
         while (fromGraph.streamReader().available() == 0) {
             std::this_thread::sleep_for(100ms);
@@ -283,7 +283,7 @@ const boost::ut::suite RunningGraphTests = [] {
                 break;
             }
         }
-        expect(fromGraph.streamReader().available() > 0) << "Caller at" << source.file_name() << ":" << source.line();
+        expect(fromGraph.streamReader().available() > 0) << "Caller at" << currentSource.file_name() << ":" << currentSource.line();
         return fromGraph.streamReader().available() > 0;
     };
 
@@ -300,7 +300,7 @@ const boost::ut::suite RunningGraphTests = [] {
     auto emplaceTestEdge = [&](std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort) {
         property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort},    //
             {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
-            {"minBufferSize", gr::Size_t()}, {"weight", std::int32_t(0)}, {"edgeName", "unnamed edge"}};
+            {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
         sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
         if (!waitForAReply()) {
             fmt::println("didn't receive a reply message for {}", data);

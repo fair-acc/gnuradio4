@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (nSamplesPerTag > 0) {
-        src._tags = {gr::Tag(static_cast<gr::Tag::signed_index_type>(nSamplesPerTag - 1), {{tagName, 2000.f}})};
+        src._tags = {gr::Tag(nSamplesPerTag - 1, {{tagName, 2000.f}})};
     };
 
     auto& monitorBulk        = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"log_samples", false}, {"log_tags", false}});

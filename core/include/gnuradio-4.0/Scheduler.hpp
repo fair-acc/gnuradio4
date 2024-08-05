@@ -265,15 +265,15 @@ protected:
             }
         }
 
-        [[maybe_unused]] auto progress           = this->_graph.progress().value();
+        [[maybe_unused]] auto currentProgress    = this->_graph.progress().value();
         gr::Size_t            inactiveCycleCount = 0U;
         gr::Size_t            msgToCount         = 0U;
         auto                  activeState        = this->state();
         do {
-            auto pe = profiler_handler.startCompleteEvent("scheduler_base.work");
+            [[maybe_unused]] auto pe = profiler_handler.startCompleteEvent("scheduler_base.work");
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
                 // optionally tracking progress and block if there is none
-                progress = this->_graph.progress().value();
+                currentProgress = this->_graph.progress().value();
             }
 
             bool processMessages = msgToCount == 0U;
@@ -313,13 +313,13 @@ protected:
             // optionally tracking progress and block if there is none
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
                 auto progressAfter = this->_graph.progress().value();
-                if (progress == progressAfter) {
+                if (currentProgress == progressAfter) {
                     inactiveCycleCount++;
                 } else {
                     inactiveCycleCount = 0U;
                 }
 
-                progress = progressAfter;
+                currentProgress = progressAfter;
                 if (inactiveCycleCount > timeout_inactivity_count) {
                     // allow scheduler process to sleep before retrying (N.B. intended to save CPU/battery power)
                     std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
