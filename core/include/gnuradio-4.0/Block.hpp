@@ -1090,13 +1090,13 @@ protected:
             if (notSet.empty()) {
                 if (!message.clientRequestID.empty()) {
                     message.cmd  = Final;
-                    message.data = stagedParameter;
+                    message.data = std::move(stagedParameter);
                     return message;
                 }
                 return std::nullopt;
             }
 
-            throw gr::exception(fmt::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(notSet), keys(settings().get())));
+            throw gr::exception(fmt::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(std::move(notSet)), keys(settings().get())));
         } else if (message.cmd == Get) {
             message.data = self().settings().stagedParameters();
             return message;

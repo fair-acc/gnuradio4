@@ -484,12 +484,13 @@ const boost::ut::suite MessagesTests = [] {
 
         using namespace std::literals;
         struct MessageTestCase {
-            using SendCommand                 = std::function<void()>;
-            using ResultCheck                 = std::function<std::optional<bool>()>;
-            SendCommand               cmd     = [] {};
-            ResultCheck               check   = [] { return true; };
-            std::chrono::milliseconds delay   = 1ms; // delay after 'cmd' which the reply is being checked
-            std::chrono::milliseconds timeout = 2s;  // time-out for the 'check' test
+            using SendCommand                                 = std::function<void()>;
+            using ResultCheck                                 = std::function<std::optional<bool>()>;
+            SendCommand                              cmd      = [] {};
+            ResultCheck                              check    = [] { return true; };
+            std::chrono::milliseconds                delay    = 1ms; // delay after 'cmd' which the reply is being checked
+            std::chrono::milliseconds                timeout  = 2s;  // time-out for the 'check' test
+            std::optional<std::chrono::milliseconds> retryFor = {};  // if the test fails, should we retry it and for how long?
         };
 
         using enum gr::message::Command;
@@ -499,8 +500,8 @@ const boost::ut::suite MessagesTests = [] {
                 { .cmd = [&] { fmt::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
                 { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }},
                 { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("get settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 100ms },
-                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 200ms },
-                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms },
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 500ms },
+                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms, .retryFor = 5s },
                 { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
         };
         // clang-format on
@@ -517,34 +518,48 @@ const boost::ut::suite MessagesTests = [] {
             fmt::println("scheduler is running.");
             std::fflush(stdout);
 
-            for (auto& [command, resultCheck, delay, timeout] : commands) {
-                fmt::print("executing command: ");
-                std::fflush(stdout);
-                command();                          // execute the command
-                std::this_thread::sleep_for(delay); // wait for approximate time when command should be expected to be applied
+            for (auto& [command, resultCheck, delay, timeout, retryFor] : commands) {
+                auto commandStartTime = std::chrono::system_clock::now();
 
-                // poll for result until timeout
-                bool gotResult = false;
-                auto startTime = std::chrono::steady_clock::now();
-                while (std::chrono::steady_clock::now() - startTime < timeout) {
-                    if (auto result = resultCheck()) { // if result check passes
-                        gotResult = true;
-                        if (*result) {
-                            fmt::println(" - passed.");
-                            std::fflush(stdout);
-                        } else {
-                            fmt::println(" - failed.");
-                            std::fflush(stdout);
-                            // optional: throw gr::exception("command execution timed out");
-                        }
-                        break; // move on to the next command
-                    }
-                    // sleep a bit before polling again to reduce CPU usage
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                }
-                if (!gotResult) {
-                    fmt::println(" - test timed-out after {}", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime));
+                while (true) {
+                    fmt::print("executing command: ");
                     std::fflush(stdout);
+                    command();                          // execute the command
+                    std::this_thread::sleep_for(delay); // wait for approximate time when command should be expected to be applied
+
+                    // poll for result until timeout
+                    std::optional<bool> result    = false;
+                    auto                startTime = std::chrono::steady_clock::now();
+                    while (std::chrono::steady_clock::now() - startTime < timeout) {
+                        result = resultCheck();
+                        if (result.has_value()) { // if result check passes
+                            if (*result) {
+                                fmt::println(" - passed.");
+                                std::fflush(stdout);
+                            } else {
+                                fmt::println(" - failed.");
+                                std::fflush(stdout);
+                                // optional: throw gr::exception("command execution timed out");
+                            }
+                            break; // move on to the next command
+                        }
+                        // sleep a bit before polling again to reduce CPU usage
+                        std::this_thread::sleep_for(10ms);
+                    }
+                    if (!result.has_value()) {
+                        fmt::println(" - test timed-out after {}", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime));
+                        std::fflush(stdout);
+                    }
+
+                    // The test passed successfully, no need to repeat
+                    if (result.has_value() && *result) {
+                        break;
+                    }
+
+                    // Retry not specified, or the time for retrying has passed
+                    if (!retryFor.has_value() || std::chrono::system_clock::now() - commandStartTime > *retryFor) {
+                        break;
+                    }
                 }
             }
         });
