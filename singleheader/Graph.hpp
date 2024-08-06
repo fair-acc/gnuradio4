@@ -15720,31 +15720,30 @@ template<typename Descriptor>
 using is_port_or_collection_descriptor = std::integral_constant<bool, is_port_descriptor_v<Descriptor> || is_port_collection_descriptor_v<Descriptor>>;
 
 template<typename Descriptor>
-constexpr auto
-member_to_named_port_helper() {
+constexpr auto member_to_named_port_helper() {
     // Collections of ports don't get names inside the type as
     // the ports inside are dynamically created
     if constexpr (is_port_descriptor_v<Descriptor>) {
-        return static_cast<typename Descriptor::value_type::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor> *>(nullptr);
+        return static_cast<typename Descriptor::value_type::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>*>(nullptr);
     } else if constexpr (is_port_collection_descriptor_v<Descriptor>) {
         if constexpr (gr::meta::is_std_array_type<typename Descriptor::value_type>()) {
-            auto value_type_updater = []<template<typename, auto> typename Template, typename Arg, auto Size>(Template<Arg, Size> *) {
+            auto value_type_updater = []<template<typename, auto> typename Template, typename Arg, auto Size>(Template<Arg, Size>*) {
                 return static_cast< //
-                        Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>, Size> *>(nullptr);
+                    Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>, Size>*>(nullptr);
             };
-            return value_type_updater(static_cast<typename Descriptor::value_type *>(nullptr));
+            return value_type_updater(static_cast<typename Descriptor::value_type*>(nullptr));
         } else {
-            auto value_type_updater = []<template<typename...> typename Template, typename Arg, typename... Args>(Template<Arg, Args...> *) {
+            auto value_type_updater = []<template<typename...> typename Template, typename Arg, typename... Args>(Template<Arg, Args...>*) {
                 // This type is not going to be used for a variable, it is just meant to be
                 // a compile-time hint of what the port collection looks like.
                 // We're ignoring the Args... because they might depend on the
                 // main type (for example, allocator in a vector)
-                return static_cast<Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>> *>(nullptr);
+                return static_cast<Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>>*>(nullptr);
             };
-            return value_type_updater(static_cast<typename Descriptor::value_type *>(nullptr));
+            return value_type_updater(static_cast<typename Descriptor::value_type*>(nullptr));
         }
     } else {
-        return static_cast<void *>(nullptr);
+        return static_cast<void*>(nullptr);
     }
 }
 
@@ -15783,7 +15782,7 @@ struct fixedBlock_ports_data_helper;
 // This specialization defines block attributes when the block is created
 // with two type lists - one list for input and one for output ports
 template<typename TBlock, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-    requires(InputPorts::template all_of<port::has_fixed_info> && OutputPorts::template all_of<port::has_fixed_info>)
+requires(InputPorts::template all_of<port::has_fixed_info> && OutputPorts::template all_of<port::has_fixed_info>)
 struct fixedBlock_ports_data_helper<TBlock, InputPorts, OutputPorts> {
     using member_ports_detector = std::false_type;
 
@@ -15813,9 +15812,9 @@ struct fixedBlock_ports_data_helper<TBlock, Ports...> {
 
     using all_ports = std::remove_pointer_t<decltype([] {
         if constexpr (member_ports_detector::value) {
-            return static_cast<typename member_ports_detector::member_ports *>(nullptr);
+            return static_cast<typename member_ports_detector::member_ports*>(nullptr);
         } else {
-            return static_cast<typename meta::concat<std::conditional_t<gr::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...> *>(nullptr);
+            return static_cast<typename meta::concat<std::conditional_t<gr::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>*>(nullptr);
         }
     }())>;
 
@@ -15889,25 +15888,21 @@ template<typename TBlock>
 constexpr bool block_defines_ports_as_member_variables = fixedBlock_ports_data<TBlock>::member_ports_detector::value;
 
 template<typename TBlock, typename TPortType>
-using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<detail::is_port_or_collection_descriptor>::template filter<
-        detail::member_descriptor_has_type<TPortType>::template matches>::template at<0>;
+using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<detail::is_port_or_collection_descriptor>::template filter<detail::member_descriptor_has_type<TPortType>::template matches>::template at<0>;
 
 // TODO: Why is this not done with requires?
 namespace detail {
 template<std::size_t... Is>
-auto
-can_processOne_invoke_test(auto &block, const auto &input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
+auto can_processOne_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
 
 template<typename T>
 struct exact_argument_type {
     template<std::same_as<T> U>
-    constexpr
-    operator U() const noexcept;
+    constexpr operator U() const noexcept;
 };
 
 template<std::size_t... Is>
-auto
-can_processOne_with_offset_invoke_test(auto &block, const auto &input, std::index_sequence<Is...>) -> decltype(block.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
+auto can_processOne_with_offset_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
 
 template<typename TBlock>
 using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlock>, meta::simdize_size_v<meta::simdize<stream_input_port_types_tuple<TBlock>>>>;
@@ -15923,38 +15918,42 @@ using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlo
  * `processOne_simd(integral_constant)`, which returns SIMD object(s) of width N.
  */
 template<typename TBlock>
-concept can_processOne_simd =
-#if DISABLE_SIMD
-        false;
-#else
-        traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock &block, const meta::simdize<stream_input_port_types_tuple<TBlock>> &input_simds) {
-            {
-                detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>())
-            } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
-        };
-#endif
+concept can_processOne_simd =                                                     //
+    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
+    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+        { detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
+    };
+
+template<typename TBlock>
+concept can_processOne_simd_const =                                               //
+    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
+    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+        { detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
+    };
 
 template<typename TBlock>
 concept can_processOne_simd_with_offset =
 #if DISABLE_SIMD
-        false;
+    false;
 #else
-        traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-        traits::block::stream_input_port_types<TBlock>::size() > 0 && requires(TBlock &block, const meta::simdize<stream_input_port_types_tuple<TBlock>> &input_simds) {
-            {
-                detail::can_processOne_with_offset_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>())
-            } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
-        };
+    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
+    traits::block::stream_input_port_types<TBlock>::size() > 0 && requires(TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+        { detail::can_processOne_with_offset_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
+    };
 #endif
 
 template<typename TBlock>
-concept can_processOne_scalar = requires(TBlock &block, const stream_input_port_types_tuple<TBlock> &inputs) {
+concept can_processOne_scalar = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
     { detail::can_processOne_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
 };
 
 template<typename TBlock>
-concept can_processOne_scalar_with_offset = requires(TBlock &block, const stream_input_port_types_tuple<TBlock> &inputs) {
+concept can_processOne_scalar_const = requires(const TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
+    { detail::can_processOne_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
+};
+
+template<typename TBlock>
+concept can_processOne_scalar_with_offset = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
     { detail::can_processOne_with_offset_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
 };
 
@@ -15962,13 +15961,16 @@ template<typename TBlock>
 concept can_processOne = can_processOne_scalar<TBlock> or can_processOne_simd<TBlock> or can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
 
 template<typename TBlock>
+concept can_processOne_const = can_processOne_scalar_const<TBlock> or can_processOne_simd_const<TBlock>;
+
+template<typename TBlock>
 concept can_processOne_with_offset = can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
 
 template<typename TBlock, typename TPort>
-concept can_processMessagesForPortConsumableSpan = requires(TBlock &block, TPort &inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
+concept can_processMessagesForPortConsumableSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
 
 template<typename TBlock, typename TPort>
-concept can_processMessagesForPortStdSpan = requires(TBlock &block, TPort &inPort, std::span<const Message> msgSpan) { block.processMessages(inPort, msgSpan); };
+concept can_processMessagesForPortStdSpan = requires(TBlock& block, TPort& inPort, std::span<const Message> msgSpan) { block.processMessages(inPort, msgSpan); };
 
 // clang-format off
 namespace detail {
@@ -16041,14 +16043,14 @@ struct to_any_vector {
     } // NOSONAR
 
     template<typename Any>
-    operator std::vector<Any> &() const {
+    operator std::vector<Any>&() const {
         return {};
     } // NOSONAR
 };
 
 struct to_any_pointer {
     template<typename Any>
-    operator Any *() const {
+    operator Any*() const {
         return {};
     } // NOSONAR
 };
@@ -16064,31 +16066,30 @@ struct dummy_writer {
 };
 
 template<typename Port, bool isVectorOfSpansReturned>
-constexpr auto *
-port_to_processBulk_argument_helper() {
+constexpr auto* port_to_processBulk_argument_helper() {
     if constexpr (requires(Port p) { // array of ports
                       typename Port::value_type;
                       p.cbegin() != p.cend();
                   }) {
         if constexpr (Port::value_type::kIsInput) {
             if constexpr (isVectorOfSpansReturned) {
-                return static_cast<std::span<std::span<const typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<std::span<const typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyConsumablePortSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyConsumablePortSpan<typename Port::value_type::value_type>>*>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
             if constexpr (isVectorOfSpansReturned) {
-                return static_cast<std::span<std::span<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<std::span<typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyPublishableSpan<typename Port::value_type::value_type>> *>(nullptr);
+                return static_cast<std::span<DummyPublishableSpan<typename Port::value_type::value_type>>*>(nullptr);
             }
         }
 
     } else { // single port
         if constexpr (Port::kIsInput) {
-            return static_cast<DummyConsumablePortSpan<typename Port::value_type> *>(nullptr);
+            return static_cast<DummyConsumablePortSpan<typename Port::value_type>*>(nullptr);
         } else if constexpr (Port::kIsOutput) {
-            return static_cast<DummyPublishableSpan<typename Port::value_type> *>(nullptr);
+            return static_cast<DummyPublishableSpan<typename Port::value_type>*>(nullptr);
         }
     }
 }
@@ -16111,17 +16112,12 @@ template<typename T>
 using dynamic_span = std::span<T>;
 
 template<std::size_t... InIdx, std::size_t... OutIdx>
-auto
-can_processBulk_invoke_test(auto &block, const auto &inputs, auto &outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>)
-        -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
+auto can_processBulk_invoke_test(auto& block, const auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
 template<typename TBlock, template<typename> typename TArguments>
-concept can_processBulk_helper = requires(TBlock &n, typename meta::transform_types_nested<TArguments, traits::block::stream_input_ports<TBlock>>::tuple_type inputs,
-                                          typename meta::transform_types_nested<TArguments, traits::block::stream_output_ports<TBlock>>::tuple_type outputs) {
-    {
-        detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<stream_input_port_types<TBlock>::size>(), std::make_index_sequence<stream_output_port_types<TBlock>::size>())
-    } -> std::same_as<work::Status>;
+concept can_processBulk_helper = requires(TBlock& n, typename meta::transform_types_nested<TArguments, traits::block::stream_input_ports<TBlock>>::tuple_type inputs, typename meta::transform_types_nested<TArguments, traits::block::stream_output_ports<TBlock>>::tuple_type outputs) {
+    { detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<stream_input_port_types<TBlock>::size>(), std::make_index_sequence<stream_output_port_types<TBlock>::size>()) } -> std::same_as<work::Status>;
 };
 
 template<typename TBlock>
@@ -16133,27 +16129,11 @@ concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_process
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
 template<typename TDerived, std::size_t I>
-concept processBulk_requires_ith_output_as_span
-        = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0)
-       && requires(TDerived &d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs,
-                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan,
-                                                        traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
-                           outputs,
-                   typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishableSpan,
-                                                        traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple>
-                           bad_outputs) {
-              {
-                  detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(),
-                                                      std::make_index_sequence<stream_output_port_types<TDerived>::size>())
-              } -> std::same_as<work::Status>;
-              // TODO: Is this check redundant?
-              not requires {
-                  []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>,
-                                                                  std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) {
-                      return {};
-                  }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>());
-              };
-          };
+concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishableSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
+    { detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(), std::make_index_sequence<stream_output_port_types<TDerived>::size>()) } -> std::same_as<work::Status>;
+    // TODO: Is this check redundant?
+    not requires { []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) { return {}; }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>()); };
+};
 
 } // namespace gr::traits::block
 
@@ -19682,16 +19662,16 @@ template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
 
 template<typename Derived>
-concept HasConstProcessOneFunction = traits::block::can_processOne<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processOne)>;
+concept HasConstProcessOneFunction = traits::block::can_processOne_const<Derived>;
 
 template<typename Derived>
-concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processOne)>;
+concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>;
 
 template<typename Derived>
 concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 
 template<typename Derived>
-concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processBulk)>;
+concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>;
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
@@ -21578,6 +21558,40 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), detail::reflFirstTypeName<Type>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+/**
+ * This function can be used to register a block with two templated types with the block registry
+ * to be used for runtime instantiation of blocks based on their stringified types.
+ *
+ * The arguments are:
+ *  - registerInstance -- a reference to the registry (common to use gr::globalBlockRegistry)
+ *  - TBlock -- the block class template with two template parameters
+ *  - Tuple1 -- a std::tuple containing the types for the first template parameter of TBlock
+ *  - Tuple2 -- a std::tuple containing the types for the second template parameter of TBlock
+ *
+ * This function iterates over all combinations of the types in Tuple1 and Tuple2,
+ * instantiates TBlock with each combination, and registers the block with the registry.
+ */
+template<template<typename, typename> typename TBlock, typename Tuple1, typename Tuple2, typename TRegisterInstance>
+inline constexpr int registerBlockTT(TRegisterInstance& registerInstance) {
+    auto addBlockType = [&]<typename Type1, typename Type2> {
+        using ThisBlock = TBlock<Type1, Type2>;
+        registerInstance.template addBlockType<ThisBlock>( //
+            detail::blockBaseName<ThisBlock>(), detail::reflFirstTypeName<Type1>() + "," + detail::reflFirstTypeName<Type2>());
+    };
+
+    std::apply(
+        [&]<typename... T1>(T1...) { // iterate over first type
+            std::apply(
+                [&]<typename... T2>(T2...) { // iterate over second type
+                    (([&]<typename Type1>() { ((addBlockType.template operator()<Type1, T2>()), ...); }.template operator()<T1>()), ...);
+                },
+                Tuple2{});
+        },
+        Tuple1{});
+
     return {};
 }
 
