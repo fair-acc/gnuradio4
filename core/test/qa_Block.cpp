@@ -97,6 +97,23 @@ static_assert(gr::HasProcessOneFunction<BlockSignaturesProcessOneConst<float>>);
 static_assert(gr::HasConstProcessOneFunction<BlockSignaturesProcessOneConst<float>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessOneConst<float>>);
 
+template<typename T>
+struct BlockSignaturesTemplatedProcessOneConst : public gr::Block<BlockSignaturesTemplatedProcessOneConst<T>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    template<gr::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
+        return V();
+    }
+};
+
+ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesTemplatedProcessOneConst, in, out);
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
+static_assert(gr::HasProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
+static_assert(gr::HasConstProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
+
 enum class ProcessBulkVariant { SPAN_SPAN, SPAN_PUBLISHABLE, SPAN_PUBLISHABLE2, CONSUMABLE_SPAN, CONSUMABLE_SPAN2, CONSUMABLE_PUBLISHABLE, CONSUMABLE_PUBLISHABLE2 };
 
 template<typename T, ProcessBulkVariant processVariant>
@@ -419,7 +436,7 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
 
 ENABLE_REFLECTION_FOR_TEMPLATE(ArrayPortsNode, inputs, outputs);
 static_assert(gr::HasProcessBulkFunction<ArrayPortsNode<int>>);
-const boost::ut::suite _block_signature = [] {
+const boost::ut::suite<"Block signatures"> _block_signature = [] {
     using namespace boost::ut;
 
     "failure"_test = [] {
@@ -562,7 +579,7 @@ void syncOrAsyncTest() {
     expect(eq(n_samples, sink.n_samples_produced)) << testInfo;
 }
 
-const boost::ut::suite _stride_tests = [] {
+const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
     using namespace gr;
@@ -745,7 +762,7 @@ const boost::ut::suite _stride_tests = [] {
     };
 };
 
-const boost::ut::suite _drawableAnnotations = [] {
+const boost::ut::suite<"Drawable Annotations"> _drawableAnnotations = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
 
@@ -766,7 +783,7 @@ const boost::ut::suite _drawableAnnotations = [] {
     };
 };
 
-const boost::ut::suite _portMetaInfoTests = [] {
+const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
     using namespace gr;

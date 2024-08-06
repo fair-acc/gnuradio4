@@ -187,16 +187,16 @@ template<typename Derived>
 concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
 
 template<typename Derived>
-concept HasConstProcessOneFunction = traits::block::can_processOne<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processOne)>;
+concept HasConstProcessOneFunction = traits::block::can_processOne_const<Derived>;
 
 template<typename Derived>
-concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processOne)>;
+concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>;
 
 template<typename Derived>
 concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 
 template<typename Derived>
-concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsConstMemberFunction<decltype(&Derived::processBulk)>;
+concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>;
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
@@ -2083,6 +2083,40 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), detail::reflFirstTypeName<Type>());
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
+    return {};
+}
+
+/**
+ * This function can be used to register a block with two templated types with the block registry
+ * to be used for runtime instantiation of blocks based on their stringified types.
+ *
+ * The arguments are:
+ *  - registerInstance -- a reference to the registry (common to use gr::globalBlockRegistry)
+ *  - TBlock -- the block class template with two template parameters
+ *  - Tuple1 -- a std::tuple containing the types for the first template parameter of TBlock
+ *  - Tuple2 -- a std::tuple containing the types for the second template parameter of TBlock
+ *
+ * This function iterates over all combinations of the types in Tuple1 and Tuple2,
+ * instantiates TBlock with each combination, and registers the block with the registry.
+ */
+template<template<typename, typename> typename TBlock, typename Tuple1, typename Tuple2, typename TRegisterInstance>
+inline constexpr int registerBlockTT(TRegisterInstance& registerInstance) {
+    auto addBlockType = [&]<typename Type1, typename Type2> {
+        using ThisBlock = TBlock<Type1, Type2>;
+        registerInstance.template addBlockType<ThisBlock>( //
+            detail::blockBaseName<ThisBlock>(), detail::reflFirstTypeName<Type1>() + "," + detail::reflFirstTypeName<Type2>());
+    };
+
+    std::apply(
+        [&]<typename... T1>(T1...) { // iterate over first type
+            std::apply(
+                [&]<typename... T2>(T2...) { // iterate over second type
+                    (([&]<typename Type1>() { ((addBlockType.template operator()<Type1, T2>()), ...); }.template operator()<T1>()), ...);
+                },
+                Tuple2{});
+        },
+        Tuple1{});
+
     return {};
 }
 
