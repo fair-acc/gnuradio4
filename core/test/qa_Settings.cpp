@@ -9,8 +9,8 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/Settings.hpp>
 #include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/Transactions.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 using namespace std::string_literals;
@@ -711,7 +711,7 @@ const boost::ut::suite TransactionTests = [] {
         // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
         Graph testGraph;
         auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
-        auto  s     = std::make_unique<CtxSettings<std::remove_reference<decltype(block)>::type>>(block, matchPred);
+        auto  s     = CtxSettings<std::remove_reference<decltype(block)>::type>(block, matchPred);
         block.setSettings(s);
         auto ctx0 = SettingsCtx(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
         expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}, ctx0).empty()) << "successful set returns empty map";
