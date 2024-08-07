@@ -103,7 +103,7 @@ struct BlockSignaturesTemplatedProcessOneConst : public gr::Block<BlockSignature
     gr::PortOut<T> out;
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
+    [[nodiscard]] constexpr auto processOne(const V& /*input*/) const noexcept {
         return V();
     }
 };
