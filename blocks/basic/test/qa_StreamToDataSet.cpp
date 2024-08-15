@@ -227,6 +227,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             return ret;
         }();
 
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         expect(!dataSetSink._samples.empty()) << "dataSetSink did not receive the required minimum data";
         if (dataSetSink._samples.empty()) {
             return;

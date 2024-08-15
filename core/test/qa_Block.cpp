@@ -576,7 +576,7 @@ void syncOrAsyncTest() {
 
     scheduler::Simple sched{std::move(testGraph)};
     expect(sched.runAndWait().has_value()) << testInfo;
-    expect(eq(n_samples, sink.n_samples_produced)) << testInfo;
+    expect(eq(n_samples, sink._nSamplesProduced)) << testInfo;
 }
 
 const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
@@ -756,7 +756,7 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
         for (std::size_t i = 0UZ; i < sinks.size(); i++) {
-            expect(sinks[i]->n_samples_produced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
+            expect(sinks[i]->_nSamplesProduced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
             expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << fmt::format("sinks[{}]->_samples does not match to expected values", i);
         }
     };

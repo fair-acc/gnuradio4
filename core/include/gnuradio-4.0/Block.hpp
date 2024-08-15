@@ -489,16 +489,14 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-    Block(property_map initParameter) noexcept(false)                                                                                     // N.B. throws in case of on contract violations
+    Block(property_map initParameters) noexcept(false)                                                                                    // N.B. throws in case of on contract violations
         : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
 
-        if (initParameter.size() != 0) {
-            if (const property_map failed = settings().set(std::move(initParameter)); !failed.empty()) {
-                throw gr::exception(fmt::format("settings could not be applied: {}", failed));
-            }
+        if constexpr (refl::is_reflectable<Derived>()) {
+            settings().setInitBlockParameters(initParameters);
         }
     }
 
@@ -555,7 +553,9 @@ public:
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
         traits::block::all_output_ports<Derived>::for_each(setPortName);
-        // Handle settings
+
+        settings().init();
+
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
@@ -1080,8 +1080,8 @@ protected:
                 throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
+            property_map notSet          = self().settings().setStaged(*message.data);
             property_map stagedParameter = self().settings().stagedParameters();
-            property_map notSet          = self().settings().set(*message.data);
 
             if (notSet.empty()) {
                 if (!message.clientRequestID.empty()) {

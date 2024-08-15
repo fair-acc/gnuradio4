@@ -63,8 +63,8 @@ const boost::ut::suite TagTests = [] {
 
         expect(eq(src.n_samples_max, n_samples)) << "src did not accept require max input samples";
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(static_cast<gr::Size_t>(sink1.n_samples_produced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1.n_samples_produced, n_samples);
-        expect(eq(static_cast<gr::Size_t>(sink2.n_samples_produced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2.n_samples_produced, n_samples);
+        expect(eq(static_cast<gr::Size_t>(sink1._nSamplesProduced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1._nSamplesProduced, n_samples);
+        expect(eq(static_cast<gr::Size_t>(sink2._nSamplesProduced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2._nSamplesProduced, n_samples);
 
         // TODO: last decimator/interpolator + stride addition seems to break the limiting the input samples to the min of available vs. n_samples-until next tags
         // expect(equal_tag_lists(src.tags, sink1._tags)) << "sink1 (USE_PROCESS_ONE) did not receive the required tags";
@@ -83,12 +83,8 @@ const boost::ut::suite TagTests = [] {
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
 
         for (const auto& sig : signals) {
-            SignalGenerator<double> signalGen{};
-            auto                    failed = signalGen.settings().set({{"signal_type", sig}, //
-                                   {"sample_rate", 2048.f}, {"frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
-            expect(failed.empty()) << fmt::format("settings have mismatching keys or value types. offending keys: {}\n", fmt::join(mismatchedKey(failed), ", "));
-            const auto applyResult = signalGen.settings().applyStagedParameters();
-            expect(eq(applyResult.forwardParameters.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(applyResult.forwardParameters), ", "));
+            SignalGenerator<double> signalGen({{"signal_type", sig}, {"sample_rate", 2048.f}, {"frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
+            signalGen.init(signalGen.progress, signalGen.ioThreadPool);
 
             // expected values corresponds to sample_rate = 1024., frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
             std::map<std::string, std ::vector<double>> expResults = {{"Const", {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}}, {"Sin", {0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0., 0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0.}}, {"Cos", {0.707106, 0., -0.707106, -1., -0.7071067, 0., 0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0., 0.707106, 1.}}, {"Square", {1., 1., 1., -1., -1., -1., -1., 1., 1., 1., 1., -1., -1., -1., -1., 1.}}, {"Saw", {0.25, 0.5, 0.75, -1., -0.75, -0.5, -0.25, 0., 0.25, 0.5, 0.75, -1., -0.75, -0.5, -0.25, 0.}}, {"Triangle", {0.5, 1., 0.5, 0., -0.5, -1., -0.5, 0., 0.5, 1., 0.5, 0., -0.5, -1., -0.5, 0.}}};
@@ -105,12 +101,8 @@ const boost::ut::suite TagTests = [] {
         const std::size_t        N = 512; // test points
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
         for (const auto& sig : signals) {
-            SignalGenerator<double> signalGen{};
-            const auto              failed = signalGen.settings().set({{"signal_type", sig}, //
-                             {"sample_rate", 8192.f}, {"frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
-            expect(failed.empty()) << fmt::format("settings have mismatching keys or value types. offending keys: {}\n", fmt::join(mismatchedKey(failed), ", "));
-            const auto applyResult = signalGen.settings().applyStagedParameters();
-            expect(eq(applyResult.forwardParameters.size(), 1UZ)) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(applyResult.forwardParameters), ", "));
+            SignalGenerator<double> signalGen({{"signal_type", sig}, {"sample_rate", 8192.f}, {"frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
+            signalGen.init(signalGen.progress, signalGen.ioThreadPool);
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
@@ -137,19 +129,37 @@ const boost::ut::suite TagTests = [] {
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
 
-        expect(eq(n_samples, static_cast<std::uint32_t>(sink.n_samples_produced))) << "Number of samples does not match";
+        expect(eq(n_samples, static_cast<std::uint32_t>(sink._nSamplesProduced))) << "Number of samples does not match";
     };
 
     "FunctionGenerator ImChart test"_test = [] {
         using namespace function_generator;
-        const std::size_t       N          = 128; // test points
-        double                  startValue = 10.;
-        double                  finalValue = 20.;
-        std::vector<SignalType> signals{Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse};
+        const std::size_t         N          = 128; // test points
+        double                    startValue = 10.;
+        double                    finalValue = 20.;
+        std::vector<SignalType>   signals{Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse};
+        FunctionGenerator<double> funcGen;
+        funcGen.init(funcGen.progress, funcGen.ioThreadPool);
+        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
         for (const auto& sig : signals) {
-            FunctionGenerator<double> funcGen{};
-            std::ignore = funcGen.settings().set({createPropertyMapEntry(signal_type, sig), {"n_samples_max", static_cast<std::uint32_t>(N)}, {"sample_rate", 128.f}, createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, 1.), createPropertyMapEntry(round_off_time, .15), createPropertyMapEntry(impulse_time0, .2), createPropertyMapEntry(impulse_time1, .15)});
-            std::ignore = funcGen.settings().applyStagedParameters();
+            const property_map params{{createPropertyMapEntry(signal_type, sig), //
+                {"sample_rate", 128.f},                                          //
+                createPropertyMapEntry(start_value, startValue),                 //
+                createPropertyMapEntry(final_value, finalValue),                 //
+                createPropertyMapEntry(duration, 1.),                            //
+                createPropertyMapEntry(round_off_time, .15),                     //
+                createPropertyMapEntry(impulse_time0, .2),                       //
+                createPropertyMapEntry(impulse_time1, .15)}};
+
+            expect(funcGen.settings().set(params, SettingsCtx{now, static_cast<int>(sig)}).empty());
+        }
+        expect(eq(funcGen.settings().getNStoredParameters(), 6UZ)); // +1 for default
+
+        for (const auto& sig : signals) {
+            expect(funcGen.settings().activateContext(SettingsCtx{now, static_cast<int>(sig)}) != std::nullopt);
+            const auto applyResult = funcGen.settings().applyStagedParameters();
+            expect(expect(eq(applyResult.forwardParameters.size(), 2UZ))) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
@@ -174,7 +184,8 @@ const boost::ut::suite TagTests = [] {
             Tag(350, createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f)), //
             Tag(550, createConstPropertyMap(20.f)),                           //
             Tag(650, createCubicSplinePropertyMap(20.f, 10.f, .1f)),          //
-            Tag(800, createConstPropertyMap(10.f)), Tag(850, createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f))};
+            Tag(800, createConstPropertyMap(10.f)),                           //
+            Tag(850, createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f))};
 
         auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
         auto& sink    = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
