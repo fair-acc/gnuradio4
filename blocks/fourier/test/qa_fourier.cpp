@@ -16,12 +16,11 @@
 #include <gnuradio-4.0/fourier/fft.hpp>
 
 template<typename T>
-std::vector<T>
-generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {
+std::vector<T> generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {
     std::vector<T> signal(N);
     for (std::size_t i = 0; i < N; i++) {
         if constexpr (gr::meta::complex_like<T>) {
-            signal[i] = { static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate)), 0. };
+            signal[i] = {static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate)), 0.};
         } else {
             signal[i] = static_cast<T>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate));
         }
@@ -30,23 +29,19 @@ generateSinSample(std::size_t N, double sample_rate, double frequency, double am
 }
 
 template<typename T, typename U = T>
-bool
-equalVectors(const std::vector<T> &v1, const std::vector<U> &v2, double tolerance = std::is_same_v<T, double> ? 1.e-5 : 1e-4) {
+bool equalVectors(const std::vector<T>& v1, const std::vector<U>& v2, double tolerance = std::is_same_v<T, double> ? 1.e-5 : 1e-4) {
     if (v1.size() != v2.size()) {
         return false;
     }
     if constexpr (gr::meta::complex_like<T>) {
-        return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto &l, const auto &r) {
-            return std::abs(l.real() - r.real()) < static_cast<typename T::value_type>(tolerance) && std::abs(l.imag() - r.imag()) < static_cast<typename T::value_type>(tolerance);
-        });
+        return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto& l, const auto& r) { return std::abs(l.real() - r.real()) < static_cast<typename T::value_type>(tolerance) && std::abs(l.imag() - r.imag()) < static_cast<typename T::value_type>(tolerance); });
     } else {
-        return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto &l, const auto &r) { return std::abs(static_cast<double>(l) - static_cast<double>(r)) < tolerance; });
+        return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto& l, const auto& r) { return std::abs(static_cast<double>(l) - static_cast<double>(r)) < tolerance; });
     }
 }
 
 template<typename T, typename U>
-void
-equalDataset(const gr::blocks::fft::FFT<T, gr::DataSet<U>> &fftBlock, const gr::DataSet<U> &ds1, float sample_rate) {
+void equalDataset(const gr::blocks::fft::FFT<T, gr::DataSet<U>>& fftBlock, const gr::DataSet<U>& ds1, float sample_rate) {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
 
@@ -65,17 +60,14 @@ equalDataset(const gr::blocks::fft::FFT<T, gr::DataSet<U>> &fftBlock, const gr::
     bool       isEqualFFTOut = true;
     const auto NSize         = static_cast<std::size_t>(N);
     for (std::size_t i = 0U; i < NSize; i++) {
-        if (std::abs(ds1.signal_values[i + NSize] - static_cast<U>(fftBlock._outData[i].real())) > tolerance
-            || std::abs(ds1.signal_values[i + 2U * NSize] - static_cast<U>(fftBlock._outData[i].imag())) > tolerance) {
+        if (std::abs(ds1.signal_values[i + NSize] - static_cast<U>(fftBlock._outData[i].real())) > tolerance || std::abs(ds1.signal_values[i + 2U * NSize] - static_cast<U>(fftBlock._outData[i].imag())) > tolerance) {
             isEqualFFTOut = false;
             break;
         }
     }
     expect(eq(isEqualFFTOut, true)) << fmt::format("<{}> equal DataSet FFT output", type_name<T>());
-    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(3U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N)), fftBlock._magnitudeSpectrum))
-            << fmt::format("<{}> equal DataSet magnitude", type_name<T>());
-    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(5U * N)), fftBlock._phaseSpectrum))
-            << fmt::format("<{}> equal DataSet phase", type_name<T>());
+    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(3U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N)), fftBlock._magnitudeSpectrum)) << fmt::format("<{}> equal DataSet magnitude", type_name<T>());
+    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(5U * N)), fftBlock._phaseSpectrum)) << fmt::format("<{}> equal DataSet phase", type_name<T>());
 
     for (std::size_t i = 0U; i < 5; i++) {
         const auto mm = std::minmax_element(std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
@@ -96,29 +88,29 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     using namespace boost::ut::reflection;
 
     using AllTypesToTest = std::tuple<
-            // complex input, same in-out precision
-            TestTypes<std::complex<float>, DataSet<float>>, TestTypes<std::complex<double>, DataSet<double>>,
-            // complex input, different in-out precision
-            TestTypes<std::complex<double>, DataSet<float>>, TestTypes<std::complex<float>, DataSet<double>>,
-            // real input, same in-out precision
-            TestTypes<float, DataSet<float>>, TestTypes<double, DataSet<double>>,
-            // real input, different in-out precision
-            TestTypes<float, DataSet<double>>, TestTypes<double, DataSet<float>>>;
+        // complex input, same in-out precision
+        TestTypes<std::complex<float>, DataSet<float>>, TestTypes<std::complex<double>, DataSet<double>>,
+        // complex input, different in-out precision
+        TestTypes<std::complex<double>, DataSet<float>>, TestTypes<std::complex<float>, DataSet<double>>,
+        // real input, same in-out precision
+        TestTypes<float, DataSet<float>>, TestTypes<double, DataSet<double>>,
+        // real input, different in-out precision
+        TestTypes<float, DataSet<double>>, TestTypes<double, DataSet<float>>>;
 
     "FFT processBulk tests"_test = []<typename T>() {
         using InType  = T::InType;
         using OutType = T::OutType;
 
-        constexpr gr::Size_t N{ 16 };
-        constexpr float      sample_rate{ 1.f };
-        FFT<InType, OutType> fftBlock({ { "fftSize", N }, { "sample_rate", sample_rate } });
-        std::ignore = fftBlock.settings().applyStagedParameters();
+        constexpr gr::Size_t N{16};
+        constexpr float      sample_rate{1.f};
+        FFT<InType, OutType> fftBlock({{"fftSize", N}, {"sample_rate", sample_rate}});
+        fftBlock.init(fftBlock.progress, fftBlock.ioThreadPool);
 
         expect(eq(fftBlock.algorithm, gr::meta::type_name<algorithm::FFT<InType, std::complex<typename OutType::value_type>>>()));
 
         std::vector<InType> signal(N);
         std::iota(signal.begin(), signal.end(), 1);
-        std::vector<OutType> v{ OutType() };
+        std::vector<OutType> v{OutType()};
         std::span<OutType>   outSpan(v);
 
         expect(gr::work::Status::OK == fftBlock.processBulk(signal, outSpan));
@@ -140,24 +132,23 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using Scheduler      = gr::scheduler::Simple<>;
         auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         gr::Graph flow1;
-        auto &source1 = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({ { "n_samples_max", static_cast<gr::Size_t>(1024) }, { "mark_tag", false } });
-        auto &fftBlock = flow1.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
+        auto&     source1  = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
+        auto&     fftBlock = flow1.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
         auto sched1 = Scheduler(std::move(flow1), threadPool);
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
             gr::Graph flow2;
-            auto     &source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(
-                    { { "n_samples_max", static_cast<gr::Size_t>(1024) }, { "mark_tag", false } });
-            auto &fft2 = flow2.emplaceBlock<FFT<float>>({ { "fftSize", static_cast<gr::Size_t>(16) } });
+            auto&     source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
+            auto&     fft2    = flow2.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
             expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
             auto sched2 = Scheduler(std::move(flow2), threadPool);
             expect(sched2.runAndWait().has_value());
-            expect(eq(source2.n_samples_produced, source2.n_samples_max));
+            expect(eq(source2._nSamplesProduced, source2.n_samples_max));
         }
         expect(sched1.runAndWait().has_value());
-        expect(eq(source1.n_samples_produced, source1.n_samples_max));
+        expect(eq(source1._nSamplesProduced, source1.n_samples_max));
     };
 
     "window function tests"_test = []<typename T>() {
@@ -167,12 +158,12 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         FFT<InType, OutType> fftBlock{};
 
         using value_type = OutType::value_type;
-        constexpr value_type tolerance{ value_type(0.00001) };
+        constexpr value_type tolerance{value_type(0.00001)};
 
-        constexpr gr::Size_t N{ 8 };
-        for (const auto &[window, windowName] : magic_enum::enum_entries<gr::algorithm::window::Type>()) {
-            std::ignore = fftBlock.settings().set({ { "fftSize", N } });
-            std::ignore = fftBlock.settings().set({ { "window", std::string(windowName) } });
+        constexpr gr::Size_t N{8};
+        for (const auto& [window, windowName] : magic_enum::enum_entries<gr::algorithm::window::Type>()) {
+            expect(fftBlock.settings().set({{"fftSize", N}, {"window", std::string(windowName)}}).empty());
+            expect(fftBlock.settings().activateContext() != std::nullopt);
             std::ignore = fftBlock.settings().applyStagedParameters();
 
             std::vector<InType> signal(N);
@@ -207,6 +198,4 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     } | AllTypesToTest{};
 };
 
-int
-main() { /* not needed for UT */
-}
+int main() { /* not needed for UT */ }

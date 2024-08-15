@@ -190,12 +190,12 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(src.signal_name, sinkBulk.signal_name)) << "sinkBulk signal_name";
         expect(eq(src.signal_name, sinkOne.signal_name)) << "sinkOne signal_name";
 
-        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(monitorBulk.n_samples_produced, n_samples)) << "monitorBulk did not consume enough input samples";
-        expect(eq(monitorOne.n_samples_produced, n_samples)) << "monitorOne did not consume enough input samples";
-        expect(eq(monitorOneSIMD.n_samples_produced, n_samples)) << "monitorOneSIMD did not consume enough input samples";
-        expect(eq(sinkBulk.n_samples_produced, n_samples)) << "sinkBulk did not consume enough input samples";
-        expect(eq(sinkOne.n_samples_produced, n_samples)) << "sinkOne did not consume enough input samples";
+        expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
+        expect(eq(monitorBulk._nSamplesProduced, n_samples)) << "monitorBulk did not consume enough input samples";
+        expect(eq(monitorOne._nSamplesProduced, n_samples)) << "monitorOne did not consume enough input samples";
+        expect(eq(monitorOneSIMD._nSamplesProduced, n_samples)) << "monitorOneSIMD did not consume enough input samples";
+        expect(eq(sinkBulk._nSamplesProduced, n_samples)) << "sinkBulk did not consume enough input samples";
+        expect(eq(sinkOne._nSamplesProduced, n_samples)) << "sinkOne did not consume enough input samples";
 
         expect(!monitorBulk.log_samples || eq(monitorBulk._samples.size(), n_samples)) << "monitorBulk did not log enough input samples";
         expect(!monitorOne.log_samples || eq(monitorOne._samples.size(), n_samples)) << "monitorOne did not log enough input samples";
@@ -203,11 +203,12 @@ const boost::ut::suite TagPropagation = [] {
         expect(!sinkBulk.log_samples || eq(sinkBulk._samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
         expect(!sinkOne.log_samples || eq(sinkOne._samples.size(), n_samples)) << "sinkOne did not log enough input samples";
 
-        expect(equal_tag_lists(src._tags, monitorBulk._tags, "signal_name"s)) << "monitorBulk did not receive the required tags";
-        expect(equal_tag_lists(src._tags, monitorOne._tags, "signal_name"s)) << "monitorOne did not receive the required tags";
-        expect(equal_tag_lists(src._tags, monitorOneSIMD._tags, "signal_name"s)) << "monitorOneSIMD did not receive the required tags";
-        expect(equal_tag_lists(src._tags, sinkBulk._tags, "signal_name"s)) << "sinkBulk did not receive the required tags";
-        expect(equal_tag_lists(src._tags, sinkOne._tags, "signal_name"s)) << "sinkOne did not receive the required tags";
+        const std::vector<std::string> ignoreKeys = {"sample_rate", "signal_name"};
+        expect(equal_tag_lists(src._tags, monitorBulk._tags, ignoreKeys)) << "monitorBulk did not receive the required tags";
+        expect(equal_tag_lists(src._tags, monitorOne._tags, ignoreKeys)) << "monitorOne did not receive the required tags";
+        expect(equal_tag_lists(src._tags, monitorOneSIMD._tags, ignoreKeys)) << "monitorOneSIMD did not receive the required tags";
+        expect(equal_tag_lists(src._tags, sinkBulk._tags, ignoreKeys)) << "sinkBulk did not receive the required tags";
+        expect(equal_tag_lists(src._tags, sinkOne._tags, ignoreKeys)) << "sinkOne did not receive the required tags";
     };
 
     "TagSource<float, USE_PROCESS_BULK>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
@@ -240,9 +241,9 @@ const boost::ut::suite TagPropagation = [] {
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
 
-        expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(sink.n_samples_produced, 1008U)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
-        expect(eq(sink._tags.size(), 3UZ));                                                           // default policy is to drop epilogue samples
+        expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
+        expect(eq(sink._nSamplesProduced, 1008U)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
+        expect(eq(sink._tags.size(), 3UZ));                                                          // default policy is to drop epilogue samples
     };
 };
 

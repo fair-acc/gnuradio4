@@ -22,27 +22,24 @@ using enum ParameterType;
 constexpr auto SignalTypeList = magic_enum::enum_values<SignalType>();
 
 template<typename T>
-    requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
-constexpr std::string
-toString(T type) {
+requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
+constexpr std::string toString(T type) {
     return std::string(magic_enum::enum_name(type));
 }
 
 template<typename EnumType, typename T>
-    requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, ParameterType>
-[[nodiscard]] std::pair<std::string, pmtv::pmt>
-createPropertyMapEntry(EnumType enumType, T value) {
+requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, ParameterType>
+[[nodiscard]] std::pair<std::string, pmtv::pmt> createPropertyMapEntry(EnumType enumType, T value) {
     if constexpr (std::is_same_v<T, SignalType>) {
-        return { toString(enumType), static_cast<pmtv::pmt>(toString(value)) };
+        return {toString(enumType), static_cast<pmtv::pmt>(toString(value))};
     } else {
-        return { toString(enumType), static_cast<pmtv::pmt>(value) };
+        return {toString(enumType), static_cast<pmtv::pmt>(value)};
     }
 }
 
 template<typename T>
-    requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
-constexpr T
-parse(std::string_view name) {
+requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
+constexpr T parse(std::string_view name) {
     auto type = magic_enum::enum_cast<T>(name, magic_enum::case_insensitive);
     if (!type.has_value()) {
         throw std::invalid_argument(fmt::format("parser error, unknown function_generator::{} - '{}'", meta::type_name<T>(), name));
@@ -51,43 +48,34 @@ parse(std::string_view name) {
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createConstPropertyMap(T startValue) {
-    return { createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue) };
+[[nodiscard]] property_map createConstPropertyMap(T startValue) {
+    return {createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createLinearRampPropertyMap(T startValue, T finalValue, T durationValue) {
-    return { createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(duration, durationValue) };
+[[nodiscard]] property_map createLinearRampPropertyMap(T startValue, T finalValue, T durationValue) {
+    return {createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createParabolicRampPropertyMap(T startValue, T finalValue, T durationValue, T roundOffTime) {
-    return { createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime) };
+[[nodiscard]] property_map createParabolicRampPropertyMap(T startValue, T finalValue, T durationValue, T roundOffTime) {
+    return {createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createCubicSplinePropertyMap(T startValue, T finalValue, T durationValue) {
-    return { createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(duration, durationValue) };
+[[nodiscard]] property_map createCubicSplinePropertyMap(T startValue, T finalValue, T durationValue) {
+    return {createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
-    return { createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1) };
+[[nodiscard]] property_map createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
+    return {createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
 }
 
 } // namespace function_generator
 
 template<typename T>
-    requires(std::floating_point<T>)
+requires(std::floating_point<T>)
 struct FunctionGenerator : public gr::Block<FunctionGenerator<T>, BlockingIO<true>> {
     using Description = Doc<R""(
 @brief The `FunctionGenerator` class generates a variety of functions and their combinations.
@@ -167,7 +155,7 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
      * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
      * which indicates that no matches were found and there is no chance of matching anything in a further round.
      */
-    using MatchPredicate = std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
+    using MatchPredicate = std::function<std::optional<bool>(const property_map&, const property_map&, std::size_t)>;
 
     PortIn<T>  in; // ClockSource input
     PortOut<T> out;
@@ -193,14 +181,13 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
 
     MatchPredicate match_pred = [](auto, auto, auto) { return std::nullopt; };
 
-    T   _currentTime  = T(0.);
-    int sampleCounter = 0;
+    T   _currentTime   = T(0.);
+    int _sampleCounter = 0;
 
     function_generator::SignalType _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
     T                              _timeTick   = T(1.) / static_cast<T>(sample_rate);
 
-    void
-    settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) {
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) {
         if (new_settings.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
             const auto funcSettings = bestMatch(trigger_meta_info);
             if (funcSettings.has_value()) {
@@ -216,9 +203,8 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
         _timeTick = T(1.) / static_cast<T>(sample_rate);
     }
 
-    [[nodiscard]] constexpr T
-    processOne(T /*input*/) noexcept {
-        sampleCounter++;
+    [[nodiscard]] constexpr T processOne(T /*input*/) noexcept {
+        _sampleCounter++;
         using enum function_generator::SignalType;
         T value{};
 
@@ -241,23 +227,21 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
         return value;
     }
 
-    constexpr void
-    addFunctionTableEntry(const property_map &key, const property_map &value) {
+    constexpr void addFunctionTableEntry(const property_map& key, const property_map& value) {
         function_keys.push_back(key);
         function_values.push_back(value);
     }
 
 private:
-    void
-    applyFunctionSettings(const property_map &properties) {
-        auto getProperty = []<typename U>(const property_map &m, function_generator::ParameterType paramType, U &&) -> std::optional<U> {
+    void applyFunctionSettings(const property_map& properties) {
+        auto getProperty = []<typename U>(const property_map& m, function_generator::ParameterType paramType, U&&) -> std::optional<U> {
             const auto it = m.find(function_generator::toString(paramType));
             if (it == m.end()) {
                 return std::nullopt;
             }
             try {
                 return std::get<U>(it->second);
-            } catch (const std::bad_variant_access &) {
+            } catch (const std::bad_variant_access&) {
                 return std::nullopt;
             }
         };
@@ -271,8 +255,7 @@ private:
         impulse_time1  = getProperty(properties, function_generator::impulse_time1, T{}).value_or(T(0.));
     }
 
-    [[nodiscard]] constexpr T
-    calculateParabolicRamp() {
+    [[nodiscard]] constexpr T calculateParabolicRamp() {
         const T roundOnTime  = round_off_time; // assume that round ON and OFF times are equal
         const T linearLength = duration - (roundOnTime + round_off_time);
         const T a            = (final_value - start_value) / (T(2.) * roundOnTime * (linearLength + round_off_time));
@@ -295,8 +278,7 @@ private:
         return transitPoint2 + slope * shiftedTime - a * std::pow(shiftedTime, T(2.));
     }
 
-    std::optional<property_map>
-    bestMatch(const property_map &context) const {
+    std::optional<property_map> bestMatch(const property_map& context) const {
         if (function_keys.size() != function_values.size()) {
             throw std::invalid_argument(fmt::format("function_keys size ({}) and function_values size ({}) must be equal", function_keys.size(), function_values.size()));
         }

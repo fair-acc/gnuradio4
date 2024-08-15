@@ -88,7 +88,7 @@ const boost::ut::suite SelectorTest = [] {
 
     "Selector<T> constructor"_test = [] {
         Selector<double> block_nop({{"name", "block_nop"}});
-        expect(block_nop.settings().applyStagedParameters().forwardParameters.empty());
+        block_nop.init(block_nop.progress, block_nop.ioThreadPool);
         expect(eq(block_nop.n_inputs, 0U));
         expect(eq(block_nop.n_outputs, 0U));
         expect(eq(block_nop.inputs.size(), 0U));
@@ -96,7 +96,7 @@ const boost::ut::suite SelectorTest = [] {
         expect(eq(block_nop._internalMapping.size(), 0U));
 
         Selector<double> block({{"name", "block"}, {"n_inputs", 4U}, {"n_outputs", 3U}});
-        expect(block.settings().applyStagedParameters().forwardParameters.empty());
+        block.init(block.progress, block.ioThreadPool);
         expect(eq(block.n_inputs, 4U));
         expect(eq(block.n_outputs, 3U));
         expect(eq(block.inputs.size(), 4U));
@@ -108,7 +108,7 @@ const boost::ut::suite SelectorTest = [] {
         using T = double;
         const std::vector<uint32_t> outputMap{1U, 0U};
         Selector<T>                 block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", std::vector<gr::Size_t>{0U, 1U}}, {"map_out", outputMap}}); // N.B. 3rd input is unconnected
-        expect(block.settings().applyStagedParameters().forwardParameters.empty());
+        block.init(block.progress, block.ioThreadPool);
         expect(eq(block._internalMapping.size(), 2U));
 
         using internal_mapping_t = decltype(block._internalMapping);
