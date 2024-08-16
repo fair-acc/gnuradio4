@@ -20,41 +20,6 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         boost::ext::ut::cfg<override> = {.tag = std::vector<std::string_view>{"visual", "benchmarks"}};
     }
 
-    constexpr static auto funcMatcher = [](const gr::property_map& tableEntry, const gr::property_map& searchEntry,
-                                            const std::size_t attempt) -> std::optional<bool> { // TODO: refactor FunctionGenerator to use TriggerMatcher
-        using namespace gr;
-
-        if (attempt > 0) {
-            return std::nullopt;
-        }
-        if (!searchEntry.contains(tag::CONTEXT.shortKey())) {
-            return std::nullopt;
-        }
-        if (!tableEntry.contains(tag::CONTEXT.shortKey())) {
-            throw gr::exception(fmt::format("config error: tableEntry: {} does not contain {} key", tableEntry, tag::CONTEXT.shortKey()));
-        }
-
-        [[maybe_unused]] bool triggerNameEnds;
-        [[maybe_unused]] bool ctxNameEnds;
-        std::string           searchEvent;
-        std::string           searchContext;
-        const auto            searchEntryContext = std::get<std::string>(searchEntry.at(tag::CONTEXT.shortKey()));
-        trigger::detail::parse(searchEntryContext, searchEvent, triggerNameEnds, searchContext, ctxNameEnds);
-
-        const auto  tableEntryContext = std::get<std::string>(tableEntry.at(tag::CONTEXT.shortKey()));
-        std::string triggerEvent;
-        std::string triggerContext;
-        trigger::detail::parse(tableEntryContext, triggerEvent, triggerNameEnds, triggerContext, ctxNameEnds);
-
-        if (searchEvent != triggerEvent) {
-            return false;
-        }
-        if (triggerContext.empty() || searchContext == triggerContext) {
-            return true;
-        }
-        return false;
-    };
-
     auto runUIExample = [](std::uint32_t lengthSeconds, std::string filter, gr::Size_t preSamples = 0U, gr::Size_t postSamples = 0U, gr::Size_t maxSamples = 10000U) {
         using namespace gr;
         using namespace gr::basic;
@@ -78,20 +43,22 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             {"do_zero_order_hold", true},
         });
 
-        auto& funcGen      = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
-        funcGen.match_pred = funcMatcher;
+        auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
 
         using gr::tag::TRIGGER_NAME;
         using gr::tag::CONTEXT;
 
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"}}, createConstPropertyMap(5.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"}}, createLinearRampPropertyMap(5.f, 30.f, 0.2f /* [s]*/));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"}}, createConstPropertyMap(30.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"}}, createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f /* [s]*/));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5"}}, createConstPropertyMap(20.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6"}}, createCubicSplinePropertyMap(20.f, 10.f, 0.1f /* [s]*/));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7"}}, createConstPropertyMap(10.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}}, createImpulseResponsePropertyMap(10.f, 20.f, 0.02f /* [s]*/, 0.06f /* [s]*/));
+        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        expect(funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(20.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap(20.f, 10.f, .1f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(10.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
+
+        expect(eq(funcGen.settings().getNStoredParameters(), 9UZ));
 
         auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
         auto& uiSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartSinkFull"}});
@@ -181,14 +148,15 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             genTrigger(300, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"), //
             genTrigger(400, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5")};
 
-        auto& funcGen      = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
-        funcGen.match_pred = funcMatcher;
+        auto&      funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
+        const auto now     = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
         // TODO: add graphic
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"}}, createConstPropertyMap(1.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"}}, createConstPropertyMap(2.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"}}, createConstPropertyMap(3.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"}}, createConstPropertyMap(4.f));
-        funcGen.addFunctionTableEntry({{CONTEXT.shortKey(), "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5"}}, createConstPropertyMap(5.f));
+        expect(funcGen.settings().set(createConstPropertyMap(1.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(2.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(3.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(4.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"in">(funcGen))) << "connect clockSrc->funcGen";
 
         const property_map blockSettings = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
