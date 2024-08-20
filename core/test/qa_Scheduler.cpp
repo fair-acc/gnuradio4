@@ -328,9 +328,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
     using namespace gr;
-    auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+    // auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
-    "SimpleScheduler_linear"_test = [&threadPool] {
+    "SimpleScheduler_linear"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphLinear(trace), threadPool};
@@ -340,7 +341,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t == TraceVectorType{"s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out"});
     };
 
-    "BreadthFirstScheduler_linear"_test = [&] {
+    "BreadthFirstScheduler_linear"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphLinear(trace), threadPool};
@@ -350,7 +352,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t == TraceVectorType{"s1", "mult1", "mult2", "out", "s1", "mult1", "mult2", "out"});
     };
 
-    "SimpleScheduler_parallel"_test = [&] {
+    "SimpleScheduler_parallel"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphParallel(trace), threadPool};
@@ -360,7 +363,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t == TraceVectorType{"s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb", "s1", "mult1a", "mult2a", "outa", "mult1b", "mult2b", "outb"});
     };
 
-    "BreadthFirstScheduler_parallel"_test = [&threadPool] {
+    "BreadthFirstScheduler_parallel"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphParallel(trace), threadPool};
@@ -385,7 +389,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
                                       });
     };
 
-    "SimpleScheduler_scaled_sum"_test = [&threadPool] {
+    "SimpleScheduler_scaled_sum"_test = [] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler = gr::scheduler::Simple<>;
         // construct an example graph and get an adjacency list for it
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
@@ -396,7 +401,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t == TraceVectorType{"s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out"});
     };
 
-    "BreadthFirstScheduler_scaled_sum"_test = [&threadPool] {
+    "BreadthFirstScheduler_scaled_sum"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::BreadthFirst<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphScaledSum(trace), threadPool};
@@ -406,7 +412,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t == TraceVectorType{"s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out"});
     };
 
-    "SimpleScheduler_linear_multi_threaded"_test = [&threadPool] {
+    "SimpleScheduler_linear_multi_threaded"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphLinear(trace), threadPool};
@@ -415,7 +422,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(that % t.size() >= 8u);
     };
 
-    "BreadthFirstScheduler_linear_multi_threaded"_test = [&threadPool] {
+    "BreadthFirstScheduler_linear_multi_threaded"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphLinear(trace), threadPool};
@@ -428,7 +436,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 8u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
     };
 
-    "SimpleScheduler_parallel_multi_threaded"_test = [&threadPool] {
+    "SimpleScheduler_parallel_multi_threaded"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphParallel(trace), threadPool};
@@ -437,7 +446,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 14u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
     };
 
-    "BreadthFirstScheduler_parallel_multi_threaded"_test = [&threadPool] {
+    "BreadthFirstScheduler_parallel_multi_threaded"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphParallel(trace), threadPool};
@@ -450,7 +460,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 14u);
     };
 
-    "SimpleScheduler_scaled_sum_multi_threaded"_test = [&threadPool] {
+    "SimpleScheduler_scaled_sum_multi_threaded"_test = [] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         // construct an example graph and get an adjacency list for it
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
@@ -460,7 +471,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 10u);
     };
 
-    "BreadthFirstScheduler_scaled_sum_multi_threaded"_test = [&threadPool] {
+    "BreadthFirstScheduler_scaled_sum_multi_threaded"_test = [] {
+        auto threadPool               = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         auto                    sched = scheduler{getGraphScaledSum(trace), threadPool};
@@ -473,7 +485,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 10u);
     };
 
-    "LifecycleBlock"_test = [&threadPool] {
+    "LifecycleBlock"_test = [] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
 
@@ -496,7 +509,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(lifecycleBlock.reset_count, 1));
     };
 
-    "propagate DONE check-infinite loop"_test = [&threadPool] {
+    "propagate DONE check-infinite loop"_test = [] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using namespace gr::testing;
         using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
@@ -558,7 +572,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
     };
 
-    "propagate source DONE state: down-stream using EOS tag"_test = [&threadPool, &createWatchdog] {
+    "propagate source DONE state: down-stream using EOS tag"_test = [&createWatchdog] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using namespace gr::testing;
         using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
@@ -583,7 +598,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         fmt::println("N.B. 'propagate source DONE state: down-stream using EOS tag' test finished");
     };
 
-    "propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports"_test = [&threadPool, &createWatchdog] {
+    "propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports"_test = [&createWatchdog] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using namespace gr::testing;
         using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
@@ -608,7 +624,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         fmt::println("N.B. 'propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports' test finished");
     };
 
-    "propagate sink DONE status: upstream via disconnecting ports"_test = [&threadPool, &createWatchdog] {
+    "propagate sink DONE status: upstream via disconnecting ports"_test = [&createWatchdog] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using namespace gr::testing;
         using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
@@ -632,7 +649,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         fmt::println("N.B. 'propagate sink DONE status: upstream via disconnecting ports' test finished");
     };
 
-    "blocking scheduler"_test = [&threadPool] {
+    "blocking scheduler"_test = [] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using namespace gr;
         using namespace gr::testing;
         using TScheduler = scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking>;
