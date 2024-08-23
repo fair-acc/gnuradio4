@@ -48,6 +48,14 @@ else ()
     message(STATUS "ccache will not be used")
 endif ()
 
+# Prefer forced colored compiler output if there's a chance we'd otherwise get none at all.
+# Ninja and ccache "consume" the compiler output, breaking the terminal detection of compilers.
+# ccache tries to solve the problem, but can only do so if it determines that it's calling GCC or Clang. It uses a very lightweight heuristic, which breaks easily.
+if ((CMAKE_GENERATOR STREQUAL "Ninja" OR (CCACHE_PROGRAM AND USE_CCACHE)) AND NOT DEFINED CMAKE_COLOR_DIAGNOSTICS)
+    message(STATUS "Forcing compiler color output due to the use of Ninja and/or ccache. Use -DCMAKE_COLOR_DIAGNOSTICS=OFF to turn it off.")
+    set(CMAKE_COLOR_DIAGNOSTICS ON)
+endif()
+
 set(CMAKE_EXT_DEP_WARNING_GUARD "")
 if (DISABLE_EXTERNAL_DEPS_WARNINGS) # enable warnings for external dependencies
     set(CMAKE_EXT_DEP_WARNING_GUARD SYSTEM)
@@ -102,7 +110,7 @@ endif ()
 string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
 if (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-    add_compile_options(-stdlib=libc++ -fcolor-diagnostics)
+    add_compile_options(-stdlib=libc++)
     if (TIMETRACE)
         add_compile_options(-ftime-trace)
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ftime-trace")
@@ -110,7 +118,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's li
     endif ()
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    add_compile_options(-fdiagnostics-color=always)
     if (ENABLE_TBB)
         find_package(TBB REQUIRED)
         target_link_libraries(gnuradio-options INTERFACE TBB::tbb)
