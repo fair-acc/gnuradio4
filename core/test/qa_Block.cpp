@@ -835,4 +835,59 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
     };
 };
 
+const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "work() test"_test = [] {
+        gr::Size_t nSamples = 1000000;
+
+        gr::Graph graph;
+        auto&     src   = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"disconnect_on_done", false}});
+        auto&     block = graph.emplaceBlock<IntDecBlock<float>>({{"disconnect_on_done", false}});
+        auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
+
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(block)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(block).template to<"in">(sink)));
+
+        graph.reconnectAllEdges();
+        auto blockInit = [](auto& block) {
+            if (block.state() == lifecycle::State::IDLE) {
+                std::ignore = block.changeStateTo(lifecycle::State::INITIALISED);
+            }
+            std::ignore = block.changeStateTo(lifecycle::State::RUNNING);
+            expect(block.state() == lifecycle::State::RUNNING);
+        };
+        blockInit(src);
+        blockInit(block);
+        blockInit(sink);
+
+        auto resultSrc = src.work(100);
+        expect(eq(resultSrc.performed_work, 100UZ));
+
+        auto resultBlock = block.work(10); // requestedWork is applied, process 10 samples
+        expect(eq(resultBlock.requested_work, 10UZ));
+        expect(eq(resultBlock.performed_work, 10UZ));
+
+        expect(block.settings().set({{"output_chunk_size", gr::Size_t(7)}, {"input_chunk_size", gr::Size_t(7)}}).empty());
+        expect(block.settings().activateContext() != std::nullopt);
+        resultBlock = block.work(8); // requestedWork is applied, process only one `input_chunk_size` which fits to requestedWork
+        expect(eq(resultBlock.requested_work, 8UZ));
+        expect(eq(resultBlock.performed_work, 7UZ));
+        resultBlock = block.work(28); // requestedWork is applied, process 4 `input_chunk_size` which fits to requestedWork
+        expect(eq(resultBlock.requested_work, 28UZ));
+        expect(eq(resultBlock.performed_work, 28UZ));
+        resultBlock = block.work(5); // requestedWork is clamped to `input_chunk_size`
+        expect(eq(resultBlock.requested_work, 5UZ));
+        expect(eq(resultBlock.performed_work, 7UZ)); // 7 samples are processed
+        expect(block.settings().set({{"output_chunk_size", gr::Size_t(1)}, {"input_chunk_size", gr::Size_t(1)}}).empty());
+        expect(block.settings().activateContext() != std::nullopt);
+        resultBlock = block.work(); // process last 48 samples
+        expect(eq(resultBlock.requested_work, std::numeric_limits<std::size_t>::max()));
+        expect(eq(resultBlock.performed_work, 48UZ));
+        auto resultSink = sink.work(100);
+        expect(eq(resultSink.performed_work, 100UZ));
+    };
+};
 int main() { /* not needed for UT */ }
