@@ -19,7 +19,6 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <gnuradio-4.0/Settings.hpp>
-#include <gnuradio-4.0/Transactions.hpp>
 #include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include <gnuradio-4.0/reflection.hpp>
 
@@ -464,7 +463,7 @@ protected:
     Tag  _mergedInputTag{};
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<SettingsBase> _settings;
+    CtxSettings<Derived> _settings;
 
     [[nodiscard]] constexpr auto& self() noexcept { return *static_cast<Derived*>(this); }
 
@@ -490,16 +489,14 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-    Block(property_map initParameter) noexcept(false)                                                                                                       // N.B. throws in case of on contract violations
-        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameters) noexcept(false)                                                                                    // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
 
-        if (initParameter.size() != 0) {
-            if (const property_map failed = settings().set(std::move(initParameter)); !failed.empty()) {
-                throw gr::exception(fmt::format("settings could not be applied: {}", failed));
-            }
+        if constexpr (refl::is_reflectable<Derived>()) {
+            settings().setInitBlockParameters(initParameters);
         }
     }
 
@@ -556,7 +553,9 @@ public:
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
         traits::block::all_output_ports<Derived>::for_each(setPortName);
-        // Handle settings
+
+        settings().init();
+
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
@@ -626,14 +625,11 @@ public:
 
     [[nodiscard]] Tag mergedInputTag() const noexcept { return _mergedInputTag; }
 
-    [[nodiscard]] constexpr SettingsBase& settings() const noexcept { return *_settings; }
+    [[nodiscard]] constexpr const SettingsBase& settings() const noexcept { return _settings; }
 
-    [[nodiscard]] constexpr SettingsBase& settings() noexcept { return *_settings; }
+    [[nodiscard]] constexpr SettingsBase& settings() noexcept { return _settings; }
 
-    template<typename T>
-    void setSettings(std::unique_ptr<T>& settings) {
-        _settings = std::move(settings);
-    }
+    void setSettings(CtxSettings<Derived>& settings) { _settings = std::move(settings); }
 
     template<std::size_t Index, typename Self>
     friend constexpr auto& inputPort(Self* self) noexcept;
@@ -844,7 +840,7 @@ public:
                 }
             }
 
-            settings()._changed.store(false);
+            settings().setChanged(false);
 
             if (!applyResult.appliedParameters.empty()) {
                 notifyListeners(block::property::kStagedSetting, applyResult.appliedParameters);
@@ -1084,8 +1080,8 @@ protected:
                 throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
+            property_map notSet          = self().settings().setStaged(*message.data);
             property_map stagedParameter = self().settings().stagedParameters();
-            property_map notSet          = self().settings().set(*message.data);
 
             if (notSet.empty()) {
                 if (!message.clientRequestID.empty()) {

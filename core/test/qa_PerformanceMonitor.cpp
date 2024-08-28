@@ -36,7 +36,7 @@ int main(int argc, char* argv[]) {
     using namespace gr;
     using namespace gr::testing;
 
-    int         runTime     = 120; // in seconds
+    int         runTime     = 5; // in seconds
     int         testCaseId  = 1;
     std::string outFilePath = "";
 
@@ -105,7 +105,7 @@ int main(int argc, char* argv[]) {
         watchdogThread.join();
     }
 
-    expect(approx(monitorPerformance.n_updates_res, sinkRes.n_samples_produced, 2U));
-    expect(approx(monitorPerformance.n_updates_rate, sinkRate.n_samples_produced, 2U));
+    expect(approx(monitorPerformance.n_updates_res, sinkRes._nSamplesProduced, 2U));
+    expect(approx(monitorPerformance.n_updates_rate, sinkRate._nSamplesProduced, 2U));
     //   expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
 }

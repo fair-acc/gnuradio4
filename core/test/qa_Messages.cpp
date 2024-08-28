@@ -420,8 +420,6 @@ const boost::ut::suite MessagesTests = [] {
         gr::MsgPortOut toScheduler;
         gr::MsgPortIn  fromScheduler;
         auto           scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
-        expect(scheduler.settings().set({{"process_stream_to_message_ratio", 1UZ}}).empty());
-        expect(scheduler.settings().applyStagedParameters().forwardParameters.empty());
 
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
@@ -573,7 +571,7 @@ const boost::ut::suite MessagesTests = [] {
             testWorker.join();
         }
 
-        fmt::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink.n_samples_produced);
+        fmt::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink._nSamplesProduced);
     } | schedulingPolicies;
 
     "Subscribe to scheduler lifecycle messages"_test = []<typename SchedulerPolicy> {

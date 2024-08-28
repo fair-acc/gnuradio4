@@ -426,7 +426,7 @@ public:
             result["metaInformation"s] = block->metaInformation();
             result["blockCategory"s]   = std::string(magic_enum::enum_name(block->blockCategory()));
             result["uiCategory"s]      = std::string(magic_enum::enum_name(block->uiCategory()));
-            result["settings"s]        = block->settings().getStored();
+            result["settings"s]        = block->settings().getStored().value_or(property_map());
 
             property_map inputPorts;
             for (auto& portOrCollection : block->dynamicInputPorts()) {

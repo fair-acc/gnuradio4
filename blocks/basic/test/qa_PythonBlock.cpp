@@ -200,7 +200,7 @@ def process_bulk(ins, outs):
         }
         expect(!throws);
 
-        expect(eq(sink.n_samples_produced, 5U)) << "sinkOne did not consume enough input samples";
+        expect(eq(sink._nSamplesProduced, 5U)) << "sinkOne did not consume enough input samples";
         expect(eq(sink._samples, std::vector<std::int32_t>{0, 2, 4, 6, 8})) << fmt::format("mismatch of vector {}", sink._samples);
     };
 
@@ -264,7 +264,7 @@ def process_bulk(ins, outs):
         }
         expect(!throws);
 
-        expect(eq(sink.n_samples_produced, 5U)) << "sinkOne did not consume enough input samples";
+        expect(eq(sink._nSamplesProduced, 5U)) << "sinkOne did not consume enough input samples";
         expect(eq(sink._samples, std::vector<float>{0.f, 2.f, 4.f, 6.f, 8.f})) << fmt::format("mismatch of vector {}", sink._samples);
     };
 };
