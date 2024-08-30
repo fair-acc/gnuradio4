@@ -58,17 +58,17 @@ template<typename T>
 using DivideConst = MathOpImpl<T, '/'>;
 
 
-template<typename T, char op>
+template<typename T, typename op>
 requires(std::is_arithmetic_v<T>)
 struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
     using Description = Doc<R""(
     @brief Math block combining multiple inputs into a single output with a given operation
 
     Depending on the operator op this block computes:
-    - Multiply (op='*'): out = in_1 * in_2 * in_3 * ...
-    - Divide (op='/'): out = in_1 / in_2 / in_3 / ...
-    - Add (op='+'): out = in_1 + in_2 + in_3 + ...
-    - Subtract (op='-'): out = in_1 - in_2 - in_3 - ...
+    - Multiply: out = in_1 * in_2 * in_3 * ...
+    - Divide: out = in_1 / in_2 / in_3 / ...
+    - Add: out = in_1 + in_2 + in_3 + ...
+    - Subtract: out = in_1 - in_2 - in_3 - ...
     )"">;
 
     // ports
@@ -86,40 +86,25 @@ struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
         }
     }
 
-    template<gr::ConsumableSpan TInSpan>
-    gr::work::Status processBulk(const std::span<TInSpan> &ins, gr::PublishableSpan auto &sout) const {
-
-    template<gr::ConsumableSpan TInSpan, gr::PublishableSpan TOutSpan>
-    gr::work::Status processBulk(const std::span<TInSpan> &ins, std::span<TOutSpan> &outs) {
-        for (std::size_t n=0; n < ins.size(); n++) {
-            for (std::size_t i=0; i < ins[n].size(); i++) {
-                if (n == 0) {
-                    sout[i] = ins[0][i];
-                } else if constexpr (op == '*') {
-                    sout[i] *= ins[n][i];
-                } else if constexpr (op == '/') {
-                    sout[i] /= ins[n][i];
-                } else if constexpr (op == '+') {
-                    sout[i] += ins[n][i];
-                } else if constexpr (op == '-') {
-                    sout[i] -= ins[n][i];
-                } else {
-                    static_assert(gr::meta::always_false<T>, "unknown op");
-                }
-            }
+    template<gr::InputSpan TInSpan>
+    gr::work::Status processBulk(const std::span<TInSpan> &ins, gr::OutputSpan auto &sout) const {
+        std::copy(ins[0].begin(), ins[0].end(), sout.begin());
+        for (std::size_t n=1; n < ins.size(); n++) {
+            std::transform(sout.begin(), sout.end(), ins[n].begin(), sout.begin(), op{});
         }
         return gr::work::Status::OK;
     }
 };
 
 template<typename T>
-using Add = MathOpMultiPortImpl<T, '+'>;
+using Add = MathOpMultiPortImpl<T, std::plus<T>>;
 template<typename T>
-using Subtract = MathOpMultiPortImpl<T, '-'>;
+using Subtract = MathOpMultiPortImpl<T, std::minus<T>>;
 template<typename T>
-using Multiply = MathOpMultiPortImpl<T, '*'>;
+using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
-using Divide = MathOpMultiPortImpl<T, '/'>;
+using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+
 
 } // namespace gr::blocks::math
 
