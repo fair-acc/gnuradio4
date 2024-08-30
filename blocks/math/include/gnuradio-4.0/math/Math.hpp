@@ -56,17 +56,17 @@ template<typename T>
 using DivideConst = MathOpImpl<T, '/'>;
 
 
-template<typename T, char op>
+template<typename T, typename op>
 requires(std::is_arithmetic_v<T>)
 struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
     using Description = Doc<R""(
     @brief Math block combining multiple inputs into a single output with a given operation
     
     Depending on the operator op this block computes:
-    - Multiply (op='*'): out = in_1 * in_2 * in_3 * ...
-    - Divide (op='/'): out = in_1 / in_2 / in_3 / ...
-    - Add (op='+'): out = in_1 + in_2 + in_3 + ...
-    - Subtract (op='-'): out = in_1 - in_2 - in_3 - ...
+    - Multiply: out = in_1 * in_2 * in_3 * ...
+    - Divide: out = in_1 / in_2 / in_3 / ...
+    - Add: out = in_1 + in_2 + in_3 + ...
+    - Subtract: out = in_1 - in_2 - in_3 - ...
     )"">;
 
     // ports
@@ -84,43 +84,30 @@ struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
 
     template<gr::ConsumableSpan TInSpan>
     gr::work::Status processBulk(const std::span<TInSpan> &ins, gr::PublishableSpan auto &sout) const {
-        for (std::size_t n=0; n < ins.size(); n++) {
-            for (std::size_t i=0; i < ins[n].size(); i++) {
-                if (n == 0) {
-                    sout[i] = ins[0][i];
-                } else if constexpr (op == '*') {
-                    sout[i] *= ins[n][i];
-                } else if constexpr (op == '/') {
-                    sout[i] /= ins[n][i];
-                } else if constexpr (op == '+') {
-                    sout[i] += ins[n][i];
-                } else if constexpr (op == '-') {
-                    sout[i] -= ins[n][i];
-                } else {
-                    static_assert(gr::meta::always_false<T>, "unknown op");
-                }
-            }
+        std::copy(ins[0].begin(), ins[0].end(), sout.begin());
+        for (std::size_t n=1; n < ins.size(); n++) {
+            std::transform(sout.begin(), sout.end(), ins[n].begin(), sout.begin(), op{});
         }
         return gr::work::Status::OK;
     }
-
 };
 
 template<typename T>
-using Add = MathOpMultiPortImpl<T, '+'>;
+using Add = MathOpMultiPortImpl<T, std::plus<T>>;
 template<typename T>
-using Subtract = MathOpMultiPortImpl<T, '-'>;
+using Subtract = MathOpMultiPortImpl<T, std::minus<T>>;
 template<typename T>
-using Multiply = MathOpMultiPortImpl<T, '*'>;
+using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
-using Divide = MathOpMultiPortImpl<T, '/'>;
+using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+
 
 
 
 } // namespace gr::blocks::math
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (gr::blocks::math::MathOpImpl<T, op>), in, out, value);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (gr::blocks::math::MathOpMultiPortImpl<T, op>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename op), (gr::blocks::math::MathOpMultiPortImpl<T, op>), in, out);
 
 // clang-format off
 const inline auto registerConstMath = gr::registerBlock<gr::blocks::math::AddConst,      uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double /*, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> */>(gr::globalBlockRegistry())
