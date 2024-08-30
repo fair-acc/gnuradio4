@@ -124,11 +124,12 @@ inline const boost::ut::suite _buffer_tests = [] {
 
         "circular_buffer<int>(32) - no checks"_benchmark.repeat<n_repetitions>(samples) = [&writer, &reader] {
             static int counter = 0;
-            auto       pSpan   = writer.tryReserve(1LU);
-            boost::ut::expect(!pSpan.empty());
-            pSpan[0] = counter;
             for (std::size_t i = 0; i < samples; i++) {
-                pSpan.publish(1);
+                {
+                    PublishableSpan auto pSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(1LU);
+                    boost::ut::expect(!pSpan.empty());
+                    pSpan[0] = counter;
+                }
                 gr::ConsumableSpan auto     range = reader.get(1);
                 [[maybe_unused]] const auto data  = range[0];
                 [[maybe_unused]] const auto ret   = range.consume(1);
