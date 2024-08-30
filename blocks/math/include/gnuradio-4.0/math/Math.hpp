@@ -57,32 +57,45 @@ using DivideConst = MathOpImpl<T, '/'>;
 
 
 template<typename T, char op>
-struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>,  Doc<R""(
-@brief Math block combining multiple inputs into a single output with a given operation
+requires(std::is_arithmetic_v<T>)
+struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
+    using Description = Doc<R""(
+    @brief Math block combining multiple inputs into a single output with a given operation
+    
+    Depending on the operator op this block computes:
+    - Multiply (op='*'): out = in_1 * in_2 * in_3 * ...
+    - Divide (op='/'): out = in_1 / in_2 / in_3 / ...
+    - Add (op='+'): out = in_1 + in_2 + in_3 + ...
+    - Subtract (op='-'): out = in_1 - in_2 - in_3 - ...
+    )"">;
 
-Depending on the operator op this block computes:
-- Multiply (op='*'): out = in_1 * in_2 * in_3 * ...
-- Divide (op='/'): out = in_1 / in_2 / in_3 / ...
-- Add (op='+'): out = in_1 + in_2 + in_3 + ...
-- Subtract (op='-'): out = in_1 - in_2 - in_3 - ...
-)"">> {
-    std::vector<PortIn<T>>    in;
-    std::array<PortOut<T>, 1> out;
+    // ports
+    std::vector<PortIn<T>> in;
+    PortOut<T> out;
 
-    template<gr::ConsumableSpan TInSpan, gr::PublishableSpan TOutSpan>
-    gr::work::Status processBulk(const std::span<TInSpan> &ins, std::span<TOutSpan> &outs) {
+    // settings
+    Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
+
+    void settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
+        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+            in.resize(n_inputs);
+        }
+    }
+
+    template<gr::ConsumableSpan TInSpan>
+    gr::work::Status processBulk(const std::span<TInSpan> &ins, gr::PublishableSpan auto &sout) const {
         for (std::size_t n=0; n < ins.size(); n++) {
             for (std::size_t i=0; i < ins[n].size(); i++) {
                 if (n == 0) {
-                    outs[0][i] = ins[0][i];
+                    sout[i] = ins[0][i];
                 } else if constexpr (op == '*') {
-                    outs[0][i] *= ins[n][i];
+                    sout[i] *= ins[n][i];
                 } else if constexpr (op == '/') {
-                    outs[0][i] /= ins[n][i];
+                    sout[i] /= ins[n][i];
                 } else if constexpr (op == '+') {
-                    outs[0][i] += ins[n][i];
+                    sout[i] += ins[n][i];
                 } else if constexpr (op == '-') {
-                    outs[0][i] -= ins[n][i];
+                    sout[i] -= ins[n][i];
                 } else {
                     static_assert(gr::meta::always_false<T>, "unknown op");
                 }
@@ -90,6 +103,7 @@ Depending on the operator op this block computes:
         }
         return gr::work::Status::OK;
     }
+
 };
 
 template<typename T>
