@@ -30,18 +30,19 @@ namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
 template<typename F>
-constexpr void simd_epilogue(auto width, F&& fun) {
-    static_assert(std::has_single_bit(+width));
-    auto w2 = std::integral_constant<std::size_t, width / 2>{};
-    if constexpr (w2 > 0) {
-        fun(w2);
-        simd_epilogue(w2, std::forward<F>(fun));
+constexpr void simd_epilogue(auto kWidth, F&& fun) {
+    using namespace vir::literals;
+    static_assert(std::has_single_bit(unsigned(kWidth)));
+    auto kHalfWidth = kWidth / 2_cw;
+    if constexpr (kHalfWidth > 0) {
+        fun(kHalfWidth);
+        simd_epilogue(kHalfWidth, std::forward<F>(fun));
     }
 }
 
 template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
 constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>& rngs, auto offset, auto&& fun, Flag f = {}) {
-    using Tup = meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
+    using Tup = vir::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
@@ -1492,7 +1493,6 @@ protected:
             }
         }
 
-        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
         if constexpr (TOutputTypes::size.value > 0UZ) {
             if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
                 this->requestStop(); // no dependent non-optional children, should stop processing
@@ -1592,18 +1592,22 @@ protected:
                 processedIn  = 0;
                 processedOut = 0;
             } else {
-                using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
-                using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
-
-                constexpr auto                                 input_types_simd_size = meta::simdize_size_v<input_simd_types>;
-                constexpr std::size_t                          max_simd_double_size  = stdx::simd_abi::max_fixed_size<double>;
-                constexpr std::size_t                          simd_size             = input_types_simd_size == 0 ? max_simd_double_size : std::min(max_simd_double_size, input_types_simd_size * 4);
-                std::integral_constant<std::size_t, simd_size> width{};
-
-                if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived& d) {
-                                  { d.processOne_simd(simd_size) };
-                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
-                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &width, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn); });
+                constexpr bool        kIsSourceBlock = TInputTypes::size() == 0;
+                constexpr std::size_t kMaxWidth      = stdx::simd_abi::max_fixed_size<double>;
+                // A block determines it's simd::size() via its input types. However, a source block doesn't have any
+                // input types and therefore wouldn't be able to produce simd output on processOne calls. To overcome
+                // this limitation, a source block can implement `processOne_simd(vir::constexpr_value auto width)`
+                // instead of `processOne()` and then return simd objects with simd::size() == width.
+                constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(Derived& d) { d.processOne_simd(vir::cw<kMaxWidth>); };
+                if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
+                    // SIMD loop
+                    constexpr auto kWidth = [&] {
+                        if constexpr (kIsSourceBlock)
+                            return vir::cw<kMaxWidth>;
+                        else
+                            return vir::cw<std::min(kMaxWidth, vir::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
+                    }();
+                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
                 } else {                                                 // Non-SIMD loop
                     if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
                         invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });

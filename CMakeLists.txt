@@ -220,7 +220,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         vir-simd
         GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-        GIT_TAG v0.2.0
+        GIT_TAG v0.4.0
 )
 
 FetchContent_Declare(

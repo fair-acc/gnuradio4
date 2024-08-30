@@ -50,6 +50,11 @@ struct math_bulk_op : public gr::Block<math_bulk_op<T, op>, gr::PortInNamed<T, "
         // C++20 ranges
         // std::ranges::transform(input, output.begin(), [this](const T& elem) { return processOne(elem); });
 
+        // vir-simd execution policy
+        // vir::transform(vir::execution::simd, input, output, [this](const auto &elem) {
+        //     return processOne(elem);
+        // });
+
         return gr::work::Status::OK;
     }
 };

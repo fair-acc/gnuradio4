@@ -754,7 +754,7 @@ public:
 
     template<meta::any_simd... Ts>
     requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr meta::simdize<TReturnType, meta::simdize_size_v<std::tuple<Ts...>>> processOne(std::size_t offset, const Ts&... inputs) {
+    constexpr vir::simdize<TReturnType, (Ts::size(), ...)> processOne(std::size_t offset, const Ts&... inputs) {
         static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
         return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::tie(inputs...)));
     }
@@ -772,7 +772,7 @@ public:
             return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(N));
         } else {
             using LeftResult = typename traits::block::stream_return_type<Left>;
-            using V          = meta::simdize<LeftResult, N>;
+            using V          = vir::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0UZ; i < V::size(); ++i) {
                 tmp[i] = invokeProcessOneWithOrWithoutOffset(left, offset + i);

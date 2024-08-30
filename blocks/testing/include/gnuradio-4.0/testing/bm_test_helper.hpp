@@ -27,9 +27,9 @@ struct source : public gr::Block<source<T, min, count>> {
     }
 
     [[nodiscard]] constexpr auto
-    processOne_simd(auto N) const noexcept -> gr::meta::simdize<T, decltype(N)::value> {
+    processOne_simd(auto N) const noexcept -> vir::simdize<T, decltype(N)::value> {
         n_samples_produced += N;
-        gr::meta::simdize<T, N> x{};
+        vir::simdize<T, N> x{};
         benchmark::force_to_memory(x);
         return x;
     }
