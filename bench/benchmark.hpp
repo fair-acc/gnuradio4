@@ -50,21 +50,16 @@ namespace benchmark {
 template<typename T, typename... Ts>
 BENCHMARK_ALWAYS_INLINE void fake_modify(T& x, Ts&... more) {
 #ifdef __GNUC__
-    // GNU compatible compilers need to support this part
     if constexpr (sizeof(T) >= 16 || std::is_floating_point_v<T>) {
-        // NOLINTNEXTLINE(hicpp-no-assembler)
         asm volatile("" : "+" SIMD_REG "g,m"(x));
     } else {
-        // NOLINTNEXTLINE(hicpp-no-assembler)
         asm volatile("" : "+g,m"(x));
     }
 #else
     const volatile T y = x;
     x                  = y;
 #endif
-    if constexpr (sizeof...(Ts) > 0) {
-        fake_modify(more...);
-    }
+    (fake_modify(more), ...);
 }
 
 /**
@@ -142,19 +137,11 @@ struct perf_metric {
 };
 
 #ifdef HAS_LINUX_PERFORMANCE_HEADER
-/**
- * A short and sweet performance counter (only works on Linux)
- */
-class PerformanceCounter {
-    static bool                       _has_required_rights;
-    int                               _fd_misses;
-    int                               _fd_accesses;
-    int                               _fd_branch_misses;
-    int                               _fd_branch;
-    int                               _fd_instructions;
-    int                               _fd_ctx_switches;
-    constexpr static std::string_view _sys_error_message =
-        R"(You may not have permission to collect perf stats data.
+template<__u32 TypeId, __u64 ConfigId>
+class PerfEventHandler {
+    int _fd = -1;
+
+    constexpr static std::string_view _sysErrorMessage = R"(You may not have permission to collect perf stats data.
 Consider tweaking /proc/sys/kernel/perf_event_paranoid:
  -1 - Not paranoid at all
   0 - Disallow raw tracepoint access for unpriv
@@ -163,18 +150,42 @@ Consider tweaking /proc/sys/kernel/perf_event_paranoid:
 quick_fix: sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid'
 for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
 
-    static void print_access_right_msg(std::string_view msg) noexcept {
+    constexpr static std::string_view eventIdToStringView() noexcept {
+        if constexpr (TypeId == PERF_TYPE_HARDWARE) {
+            switch (ConfigId) {
+            case PERF_COUNT_HW_CPU_CYCLES: return "CPU cycles";
+            case PERF_COUNT_HW_INSTRUCTIONS: return "Instructions";
+            case PERF_COUNT_HW_CACHE_REFERENCES: return "Cache references";
+            case PERF_COUNT_HW_CACHE_MISSES: return "Cache misses";
+            case PERF_COUNT_HW_BRANCH_INSTRUCTIONS: return "Branch instructions";
+            case PERF_COUNT_HW_BRANCH_MISSES: return "Branch misses";
+            case PERF_COUNT_HW_BUS_CYCLES: return "Bus cycles";
+            case PERF_COUNT_HW_STALLED_CYCLES_FRONTEND: return "Stalled cycles frontend";
+            case PERF_COUNT_HW_STALLED_CYCLES_BACKEND: return "Stalled cycles backend";
+            case PERF_COUNT_HW_REF_CPU_CYCLES: return "Ref CPU cycles";
+            default: return "Unknown hardware config";
+            }
+        } else if constexpr (TypeId == PERF_TYPE_SOFTWARE) {
+            switch (ConfigId) {
+            case PERF_COUNT_SW_CONTEXT_SWITCHES: return "Context switches";
+            case PERF_COUNT_SW_CPU_MIGRATIONS: return "CPU migrations";
+            case PERF_COUNT_SW_PAGE_FAULTS: return "Page faults";
+            case PERF_COUNT_SW_TASK_CLOCK: return "Task clock";
+            default: return "Unknown software config";
+            }
+        } else {
+            return "Unknown type";
+        }
+    }
+
+    static void printAccessRightMsg(std::string_view method = "") noexcept {
         try {
             if (errno != 0) {
-                fmt::println(stderr, "PerformanceCounter: {} - error {}: '{}'", msg, errno, strerror(errno));
+                fmt::println(stderr, "PerformanceCounter: could not perform {} in method '{}' - error {}: '{}'", eventIdToStringView(), method, errno, strerror(errno));
             } else {
-                fmt::println(stderr, "PerformanceCounter: {}", msg);
+                fmt::println(stderr, "PerformanceCounter: could not perform {} in method '{}'", eventIdToStringView(), method);
             }
-            _has_required_rights = false;
-
-            fmt::println(_sys_error_message);
-        } catch (const std::system_error& e) {
-            std::cerr << "System error during logging: " << e.what() << '\n';
+            fmt::println(stderr, _sysErrorMessage);
         } catch (const std::exception& e) {
             std::cerr << "Error during logging: " << e.what() << '\n';
         } catch (...) {
@@ -185,31 +196,69 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
         std::cout.flush();
     }
 
-    static int open_perf_event(perf_event_attr& attr, int pid, int cpu, int group_fd, unsigned long flags) {
-        int fd = static_cast<int>(syscall(SYS_perf_event_open, &attr, pid, cpu, group_fd, flags));
-        if (fd == -1) {
-            print_access_right_msg("could not open SYS_perf_event_open");
-        }
-        return fd;
-    }
+public:
+    PerfEventHandler() = default;
 
-    static void enable_perf_event(int fd) {
-        if (fd != -1 && ioctl(fd, PERF_EVENT_IOC_ENABLE) == -1) {
-            print_access_right_msg("could not PERF_EVENT_IOC_ENABLE");
+    PerfEventHandler(perf_event_attr& attr, int pid, int cpu, unsigned long flags, int group_fd = -1) {
+        attr.type   = TypeId;
+        attr.config = ConfigId;
+        _fd         = static_cast<int>(syscall(SYS_perf_event_open, &attr, pid, cpu, group_fd, flags));
+        if (_fd < -1) {
+            printAccessRightMsg();
         }
     }
 
-    static void disable_perf_event(int fd) {
-        if (fd != -1 && ioctl(fd, PERF_EVENT_IOC_DISABLE) == -1) {
-            print_access_right_msg("could not PERF_EVENT_IOC_DISABLE");
+    ~PerfEventHandler() {
+        disable();
+        if (_fd != -1) {
+            close(_fd);
+            _fd = -1;
         }
     }
 
-    static void close_perf_event(int fd) {
-        if (fd != -1) {
-            close(fd);
+    PerfEventHandler(const PerfEventHandler&)            = delete;
+    PerfEventHandler& operator=(const PerfEventHandler&) = delete;
+    PerfEventHandler(PerfEventHandler&& other) noexcept : _fd(other._fd) { other._fd = -1; }
+    PerfEventHandler& operator=(PerfEventHandler&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        _fd       = other._fd;
+        other._fd = -1;
+        return *this;
+    }
+
+    int getFd() const noexcept { return _fd; }
+
+    [[nodiscard]] bool isValid() const noexcept { return _fd != -1; }
+
+    void enable() {
+        if (_fd != -1 && ioctl(_fd, PERF_EVENT_IOC_ENABLE) == -1) {
+            _fd = -1;
+            printAccessRightMsg("PERF_EVENT_IOC_ENABLE");
         }
     }
+
+    void disable() {
+        if (_fd != -1 && ioctl(_fd, PERF_EVENT_IOC_DISABLE) == -1) {
+            _fd = -1;
+            printAccessRightMsg("PERF_EVENT_IOC_DISABLE");
+        }
+    }
+};
+
+/**
+ * A short and sweet performance counter (only works on Linux)
+ */
+class PerformanceCounter {
+    static bool _has_required_rights;
+
+    PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES>        _fd_misses;
+    PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_REFERENCES>    _fd_accesses;
+    PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES>       _fd_branch_misses;
+    PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_INSTRUCTIONS> _fd_branch;
+    PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS>        _fd_instructions;
+    PerfEventHandler<PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CONTEXT_SWITCHES>    _fd_ctx_switches;
 
 public:
     PerformanceCounter() {
@@ -221,81 +270,52 @@ public:
         }
 
         perf_event_attr attr{};
-        attr.type       = PERF_TYPE_HARDWARE;
         attr.disabled   = 1;
         attr.exclude_hv = 1;
 
         // cache prediction metric
-        attr.config = PERF_COUNT_HW_CACHE_MISSES;
-        if (_fd_misses = open_perf_event(attr, PROCESS, ANY_CPU, -1, FLAGS); _fd_misses == -1) {
-            return;
-        }
-
-        attr.config = PERF_COUNT_HW_CACHE_REFERENCES;
-        if (_fd_accesses = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_accesses == -1) {
+        _fd_misses = PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES>(attr, PROCESS, ANY_CPU, FLAGS, -1);
+        if (_fd_misses.isValid()) {
+            _fd_accesses = PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_REFERENCES>(attr, PROCESS, ANY_CPU, FLAGS, _fd_misses.getFd());
+        } else {
+            _has_required_rights = false;
             return;
         }
 
         // branch prediction metric
-        attr.config = PERF_COUNT_HW_BRANCH_MISSES;
-        if (_fd_branch_misses = open_perf_event(attr, PROCESS, ANY_CPU, -1, FLAGS); _fd_branch_misses == -1) {
-            return;
-        }
-
-        attr.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
-        if (_fd_branch = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_branch == -1) {
+        _fd_branch_misses = PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES>(attr, PROCESS, ANY_CPU, FLAGS);
+        if (_fd_branch_misses.isValid()) {
+            _fd_branch = PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_INSTRUCTIONS>(attr, PROCESS, ANY_CPU, FLAGS, _fd_branch_misses.getFd());
+        } else {
+            _has_required_rights = false;
             return;
         }
 
         // instruction count metric
-        attr.config = PERF_COUNT_HW_INSTRUCTIONS;
-        if (_fd_instructions = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_instructions == -1) {
+        _fd_instructions = PerfEventHandler<PERF_TYPE_HARDWARE, PERF_COUNT_HW_INSTRUCTIONS>(attr, PROCESS, ANY_CPU, FLAGS, _fd_misses.getFd());
+        if (!_fd_instructions.isValid()) {
+            _has_required_rights = false;
             return;
         }
 
         // ctx switch count metric
-        attr.type   = PERF_TYPE_SOFTWARE;
-        attr.config = PERF_COUNT_SW_CONTEXT_SWITCHES;
-        if (_fd_ctx_switches = open_perf_event(attr, PROCESS, ANY_CPU, _fd_misses, FLAGS); _fd_ctx_switches == -1) {
+        _fd_ctx_switches = PerfEventHandler<PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CONTEXT_SWITCHES>(attr, PROCESS, ANY_CPU, FLAGS, _fd_misses.getFd());
+        if (!_fd_instructions.isValid()) {
+            _has_required_rights = false;
             return;
         }
 
-        // Enable events
-        enable_perf_event(_fd_misses);
-        enable_perf_event(_fd_accesses);
-        enable_perf_event(_fd_branch_misses);
-        enable_perf_event(_fd_branch);
-        enable_perf_event(_fd_instructions);
-        enable_perf_event(_fd_ctx_switches);
+        // Enable all valid file descriptors
+        _fd_misses.enable();
+        _fd_accesses.enable();
+        _fd_branch_misses.enable();
+        _fd_branch.enable();
+        _fd_instructions.enable();
+        _fd_ctx_switches.enable();
     }
 
-    ~PerformanceCounter() {
-        try {
-            if (_has_required_rights) {
-                disable_perf_event(_fd_misses);
-                disable_perf_event(_fd_accesses);
-                disable_perf_event(_fd_branch_misses);
-                disable_perf_event(_fd_branch);
-                disable_perf_event(_fd_instructions);
-                disable_perf_event(_fd_ctx_switches);
-            }
-            close_perf_event(_fd_misses);
-            close_perf_event(_fd_accesses);
-            close_perf_event(_fd_branch_misses);
-            close_perf_event(_fd_branch);
-            close_perf_event(_fd_instructions);
-            close_perf_event(_fd_ctx_switches);
-        } catch (const std::system_error& e) {
-            std::cerr << "~PerformanceCounter(): System error during destruction: " << e.what() << '\n';
-        } catch (const std::exception& e) {
-            std::cerr << "~PerformanceCounter(): Error during destruction: " << e.what() << '\n';
-        } catch (...) {
-            std::cerr << "~PerformanceCounter(): Unknown error during destruction\n";
-        }
-    }
-
-    PerformanceCounter(const PerformanceCounter&) = delete;
-    auto& operator=(const PerformanceCounter&)    = delete;
+    PerformanceCounter(const PerformanceCounter&)            = delete;
+    PerformanceCounter& operator=(const PerformanceCounter&) = delete;
 
     [[nodiscard]] static bool available() noexcept { return _has_required_rights; }
 
@@ -304,8 +324,8 @@ public:
             return {};
         }
         perf_metric           ret;
-        constexpr static auto read_metric = [](int metric_fd, auto& data) noexcept -> bool { return metric_fd != -1 && read(metric_fd, &data, sizeof(data)) == sizeof(data); };
-        if (!read_metric(_fd_misses, ret.cache.misses) || !read_metric(_fd_accesses, ret.cache.total) || !read_metric(_fd_branch_misses, ret.branch.misses) || !read_metric(_fd_branch, ret.branch.total) || !read_metric(_fd_instructions, ret.instructions) || !read_metric(_fd_ctx_switches, ret.ctx_switches)) {
+        constexpr static auto readMetric = [](const auto& metric_fd, auto& data) noexcept -> bool { return metric_fd.isValid() && read(metric_fd.getFd(), &data, sizeof(data)) == sizeof(data); };
+        if (!readMetric(_fd_misses, ret.cache.misses) || !readMetric(_fd_accesses, ret.cache.total) || !readMetric(_fd_branch_misses, ret.branch.misses) || !readMetric(_fd_branch, ret.branch.total) || !readMetric(_fd_instructions, ret.instructions) || !readMetric(_fd_ctx_switches, ret.ctx_switches)) {
             return {};
         }
         using T          = decltype(ret.cache.ratio);
@@ -506,7 +526,7 @@ requires(N > 0)
 constexpr std::vector<T> diff(const std::vector<time_point>& stop, time_point start) {
     std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
-        ret[i] = 1e-9l * static_cast<T>((stop[i] - start).count());
+        ret[i] = 1e-9L * static_cast<T>((stop[i] - start).count());
         start  = stop[i];
     }
     return ret;
@@ -517,7 +537,7 @@ requires(N > 0)
 constexpr std::vector<T> diff(const std::vector<time_point>& stop, const std::vector<time_point>& start) {
     std::vector<T> ret(N);
     for (auto i = 0LU; i < N; i++) {
-        ret[i] = 1e-9l * static_cast<T>((stop[i] - start[i]).count());
+        ret[i] = 1e-9L * static_cast<T>((stop[i] - start[i]).count());
     }
     return ret;
 }
@@ -544,19 +564,19 @@ template<typename T>
     if (N < 1) {
         return {};
     }
-    const auto minmax = std::minmax_element(values.cbegin(), values.cend());
-    const auto mean   = std::accumulate(values.begin(), values.end(), T{}) / static_cast<T>(N);
+    const auto [min, max] = std::ranges::minmax_element(values);
+    const auto mean       = std::accumulate(values.begin(), values.end(), T{}) / static_cast<T>(N);
 
     T stddev{};
-    std::for_each(values.cbegin(), values.cend(), [&](const auto x) { stddev += (x - mean) * (x - mean); });
+    std::ranges::for_each(values, [&](const auto x) { stddev += (x - mean) * (x - mean); });
     stddev /= static_cast<T>(N);
     stddev = std::sqrt(stddev);
 
     // Compute the median value
     std::vector<T> sorted_values(values);
-    std::sort(sorted_values.begin(), sorted_values.end());
+    std::ranges::sort(sorted_values);
     const auto median = sorted_values[N / 2];
-    return {*minmax.first, mean, stddev, median, *minmax.second};
+    return {*min, mean, stddev, median, *max};
 }
 
 template<typename T>
@@ -565,33 +585,33 @@ concept Numeric = std::integral<T> || std::floating_point<T>;
 template<Numeric T>
 std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
     static constexpr std::array  si_prefixes{'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'};
-    static constexpr long double base  = 1000.0l;
+    static constexpr long double base  = 1000.0L;
     long double                  value = value_base;
 
-    std::size_t exponent = 10u;
-    if (value == 0.0l) {
+    std::size_t exponent = 10U;
+    if (value == 0.0L) {
         return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
     }
     while (value >= base && exponent < si_prefixes.size()) {
         value /= base;
         ++exponent;
     }
-    while (value < 1.0l && exponent > 0u) {
+    while (value < 1.0L && exponent > 0U) {
         value *= base;
         --exponent;
     }
     if (significant_digits == 0 && exponent > 10) {
-        if (value < 10.0l) {
+        if (value < 10.0L) {
             significant_digits = 2u;
-        } else if (value < 100.0l) {
+        } else if (value < 100.0L) {
             significant_digits = 1u;
         }
-    } else if (significant_digits == 1 && value >= 100.0l) {
+    } else if (significant_digits == 1 && value >= 100.0L) {
         --significant_digits;
-    } else if (significant_digits >= 2u) {
-        if (value >= 100.0l) {
-            significant_digits -= 2u;
-        } else if (value >= 10.0l) {
+    } else if (significant_digits >= 2U) {
+        if (value >= 100.0L) {
+            significant_digits -= 2U;
+        } else if (value >= 10.0L) {
             --significant_digits;
         }
     }
@@ -746,7 +766,7 @@ public:
             // not time-critical post-processing starts here
             const auto        time_differences_ns = utils::diff<N_ITERATIONS, long double>(stop_iter, start);
             const auto        ns                  = stop_iter[N_ITERATIONS - 1] - start;
-            const long double duration_s          = 1e-9l * static_cast<long double>(ns.count());
+            const long double duration_s          = 1e-9L * static_cast<long double>(ns.count());
 
             const auto add_statistics = [&]<typename T>(ResultMap& map, const T& time_diff) {
                 if constexpr (N_ITERATIONS != 1) {
@@ -884,10 +904,10 @@ public:
         // N.B. using <algorithm> rather than <ranges> to be compatible with libc/Emscripten
         // for details see: https://libcxx.llvm.org/Status/Ranges.html
         // not as of clang 15: https://compiler-explorer.com/z/8arxzodh3 ('trunk' seems to be OK)
-        std::transform(data.cbegin(), data.cend(), v.begin(), [](auto val) { return val.first.size(); });
+        std::ranges::transform(data, v.begin(), [](auto val) { return val.first.size(); });
 
         const std::string test_case_label = "benchmark:";
-        const std::size_t name_max_size   = std::max(*std::max_element(v.cbegin(), v.cend()), test_case_label.size()) + 1LU;
+        const std::size_t name_max_size   = std::max(*std::ranges::max_element(v), test_case_label.size()) + 1LU;
 
         const auto format = [](auto& value, const std::string& unit, std::size_t digits) -> std::string {
             using ::benchmark::utils::to_si_prefix;
