@@ -9,6 +9,62 @@
 
 namespace gr::algorithm {
 
+namespace detail {
+    template<typename TData>
+    struct FFTwImplTypes {
+        using PlanType        = fftwf_plan;
+        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftwf_complex, float>;
+        using OutAlgoDataType = fftwf_complex;
+    };
+
+    template<typename TData>
+       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+    struct FFTwImplTypes<TData> {
+        using PlanType        = fftw_plan;
+        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftw_complex, double>;
+        using OutAlgoDataType = fftw_complex;
+    };
+
+    template<typename TData>
+    struct FFTwImplFreeIn {
+        using InAlgoDataType = FFTwImplTypes<TData>::InAlgoDataType;
+        void operator()(InAlgoDataType *ptr) { fftwf_free(ptr); }
+    };
+
+    template<typename TData>
+       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+    struct FFTwImplFreeIn<TData> {
+        using InAlgoDataType = FFTwImplTypes<TData>::InAlgoDataType;
+        void operator()(InAlgoDataType *ptr) { fftw_free(ptr); }
+    };
+
+    template<typename TData>
+    struct FFTwImplFreeOut {
+        using OutAlgoDataType = FFTwImplTypes<TData>::OutAlgoDataType;
+        void operator()(OutAlgoDataType *ptr) { fftwf_free(ptr); }
+    };
+
+    template<typename TData>
+       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+    struct FFTwImplFreeOut<TData> {
+        using OutAlgoDataType = FFTwImplTypes<TData>::OutAlgoDataType;
+        void operator()(OutAlgoDataType *ptr) { fftw_free(ptr); }
+    };
+
+    template<typename TData>
+    struct FFTwImplDestroyPlan {
+        using PlanType = FFTwImplTypes<TData>::PlanType;
+        void operator()(PlanType ptr) { fftwf_destroy_plan(ptr); }
+    };
+
+    template<typename TData>
+       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+    struct FFTwImplDestroyPlan<TData> {
+        using PlanType = FFTwImplTypes<TData>::PlanType;
+        void operator()(PlanType ptr) { fftw_destroy_plan(ptr); }
+    };
+}
+
 template<typename TInput, typename TOutput = std::conditional<gr::meta::complex_like<TInput>, TInput, std::complex<typename TInput::value_type>>>
     requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>) && (gr::meta::complex_like<TOutput>) )
 struct FFTw {
@@ -19,12 +75,13 @@ public:
     // clang-format off
     template<typename TData>
     struct FFTwImpl {
-        using PlanType        = fftwf_plan;
-        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftwf_complex, float>;
-        using OutAlgoDataType = fftwf_complex;
-        using InUniquePtr     = std::unique_ptr<InAlgoDataType [], decltype([](InAlgoDataType *ptr) { fftwf_free(ptr); })>;
-        using OutUniquePtr    = std::unique_ptr<OutAlgoDataType [], decltype([](OutAlgoDataType *ptr) { fftwf_free(ptr); })>;
-        using PlanUniquePtr   = std::unique_ptr<std::remove_pointer_t<PlanType>, decltype([](PlanType ptr) { fftwf_destroy_plan(ptr); })>;
+        using Types           = detail::FFTwImplTypes<TData>;
+        using PlanType        = Types::PlanType;
+        using InAlgoDataType  = Types::InAlgoDataType;
+        using OutAlgoDataType = Types::OutAlgoDataType;
+        using InUniquePtr     = std::unique_ptr<InAlgoDataType [], detail::FFTwImplFreeIn<TData>>;
+        using OutUniquePtr    = std::unique_ptr<OutAlgoDataType [], detail::FFTwImplFreeOut<TData>>;
+        using PlanUniquePtr   = std::unique_ptr<std::remove_pointer_t<PlanType>, detail::FFTwImplDestroyPlan<TData>>;
 
         static void execute(const PlanType p) { fftwf_execute(p); }
         static void cleanup() { fftwf_cleanup(); }
@@ -52,12 +109,13 @@ public:
     template<typename TData>
        requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
     struct FFTwImpl<TData> {
-        using PlanType        = fftw_plan;
-        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftw_complex, double>;
-        using OutAlgoDataType = fftw_complex;
-        using InUniquePtr     = std::unique_ptr<InAlgoDataType [], decltype([](InAlgoDataType *ptr) { fftwf_free(ptr); })>;
-        using OutUniquePtr    = std::unique_ptr<OutAlgoDataType [], decltype([](OutAlgoDataType *ptr) { fftwf_free(ptr); })>;
-        using PlanUniquePtr   = std::unique_ptr<std::remove_pointer_t<PlanType>, decltype([](PlanType ptr) { fftw_destroy_plan(ptr); })>;
+        using Types           = detail::FFTwImplTypes<TData>;
+        using PlanType        = Types::PlanType;
+        using InAlgoDataType  = Types::InAlgoDataType;
+        using OutAlgoDataType = Types::OutAlgoDataType;
+        using InUniquePtr     = std::unique_ptr<InAlgoDataType [], detail::FFTwImplFreeIn<TData>>;
+        using OutUniquePtr    = std::unique_ptr<OutAlgoDataType [], detail::FFTwImplFreeOut<TData>>;
+        using PlanUniquePtr   = std::unique_ptr<std::remove_pointer_t<PlanType>, detail::FFTwImplDestroyPlan<TData>>;
 
         static void execute(const PlanType p) { fftw_execute(p); }
         static void cleanup() { fftw_cleanup(); }
