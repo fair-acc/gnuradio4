@@ -16,7 +16,7 @@
 
 using namespace gr;
 
-#if defined __has_include && not __EMSCRIPTEN__
+#if defined(__has_include) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 #if __has_include(<pthread.h>) && __has_include(<sched.h>)
 #include <errno.h>
 #include <pthread.h>
