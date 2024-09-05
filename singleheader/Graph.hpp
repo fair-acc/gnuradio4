@@ -12936,503 +12936,11 @@ template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
 // #include <pmtv/pmt.hpp>
 
 
-// #include <pmtv/format.hpp>
-// Support for std::format is really spotty.
-// Gcc12 does not support it.
-// Eventually replace with std::format when that is widely available.
-#include <fmt/format.h>
-
-namespace fmt {
-template <>
-struct formatter<pmtv::map_t::value_type> {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
-    }
-};
-
-template <pmtv::Complex C>
-struct formatter<C> {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const C& arg, FormatContext& ctx) const {
-        if (arg.imag() >= 0)
-            return fmt::format_to(ctx.out(), "{0}+j{1}", arg.real(), arg.imag());
-        else
-            return fmt::format_to(ctx.out(), "{0}-j{1}", arg.real(), -arg.imag());
-    }
-};
-
-
-template<pmtv::IsPmt P>
-struct formatter<P>
-{
-
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const P& value, FormatContext& ctx) const {
-        // Due to an issue with the c++ spec that has since been resolved, we have to do something
-        // funky here.  See
-        // https://stackoverflow.com/questions/37526366/nested-constexpr-function-calls-before-definition-in-a-constant-expression-con
-        // This problem only appears to occur in gcc 11 in certain optimization modes. The problem
-        // occurs when we want to format a vector<pmt>.  Ideally, we can write something like:
-        //      return fmt::format_to(ctx.out(), "[{}]", fmt::join(arg, ", "));
-        // It looks like the issue effects clang 14/15 as well.
-        // However, due to the above issue, it fails to compile.  So we have to do the equivalent
-        // ourselves.  We can't recursively call the formatter, but we can recursively call a lambda
-        // function that does the formatting.
-        // It gets more complicated, because we need to pass the function into the lambda.  We can't
-        // pass in the lamdba as it is defined, so we create a nested lambda.  Which accepts a function
-        // as a argument.
-        // Because we are calling std::visit, we can't pass non-variant arguments to the visitor, so we
-        // have to create a new nested lambda every time we format a vector to ensure that it works.
-        using namespace pmtv;
-        using ret_type = decltype(fmt::format_to(ctx.out(), ""));
-        auto format_func = [&ctx](const auto format_arg) {
-            auto function_main = [&ctx](const auto arg, auto function) -> ret_type {
-            using namespace pmtv;
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (Scalar<T> || Complex<T>)
-                return fmt::format_to(ctx.out(), "{}", arg);
-            else if constexpr (std::same_as<T, std::string>)
-                return fmt::format_to(ctx.out(), "{}",  arg);
-            else if constexpr (UniformVector<T> || UniformStringVector<T>)
-                return fmt::format_to(ctx.out(), "[{}]", fmt::join(arg, ", "));
-            else if constexpr (std::same_as<T, std::vector<pmt>>) {
-                fmt::format_to(ctx.out(), "[");
-                auto new_func = [&function](const auto new_arg) -> ret_type { return function(new_arg, function); };
-                for (auto& a: std::span(arg).first(arg.size()-1)) {
-                    std::visit(new_func, a);
-                    fmt::format_to(ctx.out(), ", ");
-                }
-                std::visit(new_func, arg[arg.size()-1]);
-                return fmt::format_to(ctx.out(), "]");
-                // When we drop support for gcc11/clang15, get rid of the nested lambda and replace
-                // the above with this line.
-                //return fmt::format_to(ctx.out(), "[{}]", fmt::join(arg, ", "));
-            } else if constexpr (PmtMap<T>) {
-                fmt::format_to(ctx.out(), "{{");
-                auto new_func = [&function](const auto new_arg) -> ret_type { return function(new_arg, function); };
-                size_t i = 0;
-                for (auto& [k, v]: arg) {
-                    fmt::format_to(ctx.out(), "{}: ", k);
-                    std::visit(new_func, v);
-                    if (i++ < arg.size() - 1)
-                        fmt::format_to(ctx.out(), ", ");
-                }
-                return fmt::format_to(ctx.out(), "}}");
-                // When we drop support for gcc11/clang15, get rid of the nested lambda and replace
-                // the above with this line.
-                //return fmt::format_to(ctx.out(), "{{{}}}", fmt::join(arg, ", "));
-            } else if constexpr (std::same_as<std::monostate, T>)
-                return fmt::format_to(ctx.out(), "null");
-            return fmt::format_to(ctx.out(), "unknown type {}", typeid(T).name());
-            };
-            return function_main(format_arg, function_main);
-        };
-        return std::visit(format_func, value);
-
-    }
-};
-
-} // namespace fmt
-
-namespace pmtv {
-    template <IsPmt P>
-    std::ostream& operator<<(std::ostream& os, const P& value) {
-        os << fmt::format("{}", value);
-        return os;
-    }
-}
-
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-// #include "reflection.hpp"
-
-
-#ifdef __cpp_lib_hardware_interference_size
-using std::hardware_constructive_interference_size;
-using std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t hardware_destructive_interference_size  = 64;
-inline constexpr std::size_t hardware_constructive_interference_size = 64;
-#endif
-
-#ifdef __EMSCRIPTEN__
-// constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
-#define EM_CONSTEXPR
-#define EM_CONSTEXPR_STATIC static const
-#else
-#define EM_CONSTEXPR        constexpr
-#define EM_CONSTEXPR_STATIC constexpr
-#endif
-
-namespace gr {
-
-/***
- * Controls automatic propagation of stream tags on sync ports.
- *       ```
- *     ┌───────┐      ┌───────┐     ┌───────┐      ┌───────┐
- *    ┌┤       ├┐    ┌┤       ├┐   ┌┤       ├┐    ┌┤       ├┐
- *    ││       ││    ││ ────► ││   ││ ────► ││    ││       ││
- *    └┤       ├┘    └┤  \ /  ├┘   └┤       ├┘    └┤work(){├┘
- *     │       │      │   X   │     │       │      │ get();│
- *    ┌┤       ├┐    ┌┤  / \  ├┐   ┌┤       ├┐    ┌┤ pub();├┐
- *    ││       ││    ││ ────► ││   ││ ────► ││    ││}      ││
- *    └┤       ├┘    └┤       ├┘   └┤       ├┘    └┤       ├┘
- *     └───────┘      └───────┘     └───────┘      └───────┘
- *       `DONT`      `ALL_TO_ALL   `ONE_TO_ONE`   `TPP_CUSTOM`
- * ```
- */
-enum class TagPropagationPolicy {
-    TPP_DONT       = 0, /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
-    TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The scheduler takes care of that. */
-    TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires same number of in- and outputs */
-    TPP_CUSTOM     = 3  /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
-};
-
-using property_map = pmtv::map_t;
-
-template<typename T>
-concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
-
-/**
- * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
- * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
- * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
- * any point in the signal processing flow, allowing for flexible and customisable data processing.
- *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
- * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
- * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
- */
-struct alignas(hardware_constructive_interference_size) Tag {
-    using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{0};
-    property_map      map{};
-
-    Tag() = default; // TODO: remove -- needed only for Clang <=15
-
-    Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
-
-    bool operator==(const Tag& other) const = default;
-
-    // TODO: do we need the convenience methods below?
-    void reset() noexcept {
-        index = 0;
-        map.clear();
-    }
-
-    [[nodiscard]] pmtv::pmt& at(const std::string& key) { return map.at(key); }
-
-    [[nodiscard]] const pmtv::pmt& at(const std::string& key) const { return map.at(key); }
-
-    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>> get(const std::string& key) const noexcept {
-        try {
-            return map.at(key);
-        } catch (const std::out_of_range& e) {
-            return std::nullopt;
-        }
-    }
-
-    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>> get(const std::string& key) noexcept {
-        try {
-            return map.at(key);
-        } catch (const std::out_of_range&) {
-            return std::nullopt;
-        }
-    }
-
-    void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
-
-    void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
-};
-
-} // namespace gr
-
-ENABLE_REFLECTION(gr::Tag, index, map);
-
-namespace gr {
-using meta::fixed_string;
-
-inline void updateMaps(const property_map& src, property_map& dest) {
-    for (const auto& [key, value] : src) {
-        if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
-            // If it's a nested map
-            if (auto it = dest.find(key); it != dest.end()) {
-                // If the key exists in the destination map
-                auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
-                if (dest_nested_map) {
-                    // Merge the nested maps recursively
-                    updateMaps(*nested_map, *dest_nested_map);
-                } else {
-                    // Key exists but not a map, replace it
-                    dest[key] = value;
-                }
-            } else {
-                // If the key doesn't exist, just insert
-                dest.insert({key, value});
-            }
-        } else {
-            // If it's not a nested map, insert/replace the value
-            dest[key] = value;
-        }
-    }
-}
-
-constexpr fixed_string GR_TAG_PREFIX = "gr:";
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
-class DefaultTag {
-    constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
-
-public:
-    using value_type = PMT_TYPE;
-
-    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
-    [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
-    [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
-    [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
-
-    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
-
-    template<typename T>
-    requires std::is_same_v<value_type, T>
-    [[nodiscard]] std::pair<std::string, pmtv::pmt> operator()(const T& newValue) const noexcept {
-        return {std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue))};
-    }
-};
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
-    if ((dt.shortKey() <=> str) == 0) {
-        return std::strong_ordering::equal; // shortKeys are equal
-    } else {
-        return dt.key() <=> str; // compare key()
-    }
-}
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
-    if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
-        return std::strong_ordering::equal; // shortKeys are equal
-    } else {
-        return str <=> dt.key(); // compare key()
-    }
-}
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
-    return (dt <=> std::string_view(str)) == 0;
-}
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
-    return (std::string_view(str) <=> dt) == 0;
-}
-
-namespace tag { // definition of default tags and names
-inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
-inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information"> TRIGGER_META_INFO;
-inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
-inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
-
-inline constexpr std::array<std::string_view, 14> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "reset_default", "store_default", "end_of_stream"};
-
-} // namespace tag
-
-} // namespace gr
-
-#endif // GNURADIO_TAG_HPP
-
-#include <chrono>
-#include <cstdint>
-#include <map>
-// #include <pmtv/pmt.hpp>
-
-#include <variant>
-#include <vector>
-
-namespace gr {
-
-struct LayoutRight {};
-
-struct LayoutLeft {};
-
-/**
- * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
- */
-template<typename T>
-concept PacketLike = requires(T t) {
-    typename T::value_type;
-    typename T::pmt_map;
-    requires std::is_same_v<decltype(t.timestamp), int64_t>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-};
-
-/**
- * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
- */
-template<typename T>
-concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
-    typename T::value_type;
-    typename T::pmt_map;
-    typename T::tensor_layout_type;
-    requires std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
-    requires std::is_same_v<decltype(t.layout), typename T::tensor_layout_type>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-};
-
-/**
- * @brief: a DataSet consists of signal data, metadata, and associated axis information.
- *
- * The DataSet can be used to store and manipulate data in a structured way, and supports various types of axes,
- * layouts, and signal data. The dataset contains information such as timestamp, axis names and units, signal names,
- * values, and ranges, as well as metadata and timing events. This struct provides a flexible way to store and organize
- * data with associated metadata, and can be customized for different types of data and applications.
- */
-template<typename T>
-concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
-    typename T::value_type;
-    typename T::pmt_map;
-    typename T::tensor_layout_type;
-    requires std::is_same_v<decltype(t.timestamp), int64_t>;
-
-    // axis layout:
-    requires std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.axis_values), std::vector<std::vector<typename T::value_type>>>;
-
-    // signal data storage
-    requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
-
-    // meta data
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
-};
-
-template<typename T>
-struct DataSet {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
-
-    // axis layout:
-    std::vector<std::string>    axis_names{};  // e.g. time, frequency, …
-    std::vector<std::string>    axis_units{};  // axis base SI-unit
-    std::vector<std::vector<T>> axis_values{}; // explicit axis values
-
-    // signal data layout:
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout{};  // row-major, column-major, “special”
-
-    // signal data storage:
-    std::vector<std::string>    signal_names{};      // size = extents[0]
-    std::vector<std::string>    signal_quantities{}; // size = extents[0]
-    std::vector<std::string>    signal_units{};      // size = extents[0]
-    std::vector<T>              signal_values{};     // size = \PI_i extents[i]
-    std::vector<T>              signal_errors{};     // size = \PI_i extents[i] or '0' if not applicable
-    std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
-
-    // meta data
-    std::vector<pmt_map>          meta_information{};
-    std::vector<std::vector<Tag>> timing_events{};
-};
-
-static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
-static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
-static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
-
-template<typename T>
-struct Tensor {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
-
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout{};  // row-major, column-major, “special”
-
-    std::vector<T> signal_values{}; // size = \PI_i extents[i]
-    std::vector<T> signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
-
-    // meta data
-    std::vector<pmt_map> meta_information{};
-};
-
-static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
-static_assert(TensorLike<Tensor<float>>, "Tensor<std::byte> concept conformity");
-static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity");
-
-template<typename T>
-struct Packet {
-    using value_type = T;
-    using pmt_map    = std::map<std::string, pmtv::pmt>;
-
-    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
-    std::vector<T>       signal_values{}; // size = \PI_i extents[i
-    std::vector<pmt_map> meta_information{};
-};
-
-static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
-static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity");
-static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
-
-} // namespace gr
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges,
-                               meta_information, timing_events)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::Packet, timestamp, signal_values, meta_information)
-
-#endif // GNURADIO_DATASET_HPP
-
-// #include "Message.hpp"
-#ifndef GNURADIO_MESSAGE_HPP
-#define GNURADIO_MESSAGE_HPP
-
-// #include <gnuradio-4.0/Buffer.hpp>
-
-// #include <gnuradio-4.0/CircularBuffer.hpp>
-
 // #include <gnuradio-4.0/meta/formatter.hpp>
 #ifndef GNURADIO_FORMATTER_HPP
 #define GNURADIO_FORMATTER_HPP
 
+#include <chrono>
 #include <complex>
 #include <expected>
 #include <fmt/chrono.h>
@@ -13856,13 +13364,10 @@ struct fmt::formatter<std::complex<T>> {
 // simplified formatter for UncertainValue
 template<gr::arithmetic_or_complex_like T>
 struct fmt::formatter<gr::UncertainValue<T>> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template<typename FormatContext>
-    constexpr auto format(const gr::UncertainValue<T>& value, FormatContext& ctx) const {
+    constexpr auto format(const gr::UncertainValue<T>& value, FormatContext& ctx) const noexcept {
         if constexpr (gr::meta::complex_like<T>) {
             return fmt::format_to(ctx.out(), "({} ± {})", value.value, value.uncertainty);
         } else {
@@ -13871,16 +13376,99 @@ struct fmt::formatter<gr::UncertainValue<T>> {
     }
 };
 
-template<>
-struct fmt::formatter<gr::property_map> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
+// pmt formatter
+
+namespace gr {
+
+template<typename OutputIt, typename Container, typename Separator>
+constexpr auto format_join(OutputIt out, const Container& container, const Separator& separator) {
+    auto it = container.begin();
+    if (it != container.end()) {
+        out = fmt::format_to(out, "{}", *it); // format first element
+        ++it;
     }
 
+    for (; it != container.end(); ++it) {
+        out = fmt::format_to(out, "{}", separator); // insert separator
+        out = fmt::format_to(out, "{}", *it);       // format remaining element
+    }
+
+    return out;
+}
+
+template<typename Container, typename Separator>
+constexpr std::string join(const Container& container, const Separator& separator) {
+    std::ostringstream ss;
+    auto               out = std::ostream_iterator<char>(ss);
+    format_join(out, container, separator);
+    return ss.str();
+}
+
+} // namespace gr
+
+template<>
+struct fmt::formatter<pmtv::map_t::value_type> {
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
     template<typename FormatContext>
-    constexpr auto format(const gr::property_map& value, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{{ {} }}", fmt::join(value, ", "));
+    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
+        return fmt::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
+    }
+};
+
+template<pmtv::IsPmt T>
+struct fmt::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const T& value, FormatContext& ctx) const noexcept {
+        // if the std::visit dispatch is too expensive then maybe manually loop-unroll this
+        return std::visit([&ctx](const auto& format_arg) { return format_value(format_arg, ctx); }, value);
+    }
+
+private:
+    template<typename FormatContext, typename U>
+    static auto format_value(const U& arg, FormatContext& ctx) -> decltype(fmt::format_to(ctx.out(), "")) {
+        if constexpr (pmtv::Scalar<U> || pmtv::Complex<U>) {
+            return fmt::format_to(ctx.out(), "{}", arg);
+        } else if constexpr (std::same_as<U, std::string>) {
+            return fmt::format_to(ctx.out(), "{}", arg);
+        } else if constexpr (pmtv::UniformVector<U> || pmtv::UniformStringVector<U>) { // format vector
+            fmt::format_to(ctx.out(), "[");
+            gr::format_join(ctx.out(), arg, ", ");
+            return fmt::format_to(ctx.out(), "]");
+        } else if constexpr (std::same_as<U, std::vector<pmtv::pmt>>) { // format vector of pmts
+            fmt::format_to(ctx.out(), "[");
+            gr::format_join(ctx.out(), arg, ", ");
+            return fmt::format_to(ctx.out(), "]");
+        } else if constexpr (pmtv::PmtMap<U>) { // format map
+            fmt::format_to(ctx.out(), "{{ ");
+            for (auto it = arg.begin(); it != arg.end(); ++it) {
+                format_value(it->first, ctx); // Format key
+                fmt::format_to(ctx.out(), ": ");
+                format_value(it->second, ctx); // Format value
+                if (std::next(it) != arg.end()) {
+                    fmt::format_to(ctx.out(), ", ");
+                }
+            }
+            return fmt::format_to(ctx.out(), " }}");
+        } else if constexpr (std::same_as<std::monostate, U>) {
+            return fmt::format_to(ctx.out(), "null");
+        } else {
+            return fmt::format_to(ctx.out(), "unknown type {}", typeid(U).name());
+        }
+    }
+};
+
+template<>
+struct fmt::formatter<pmtv::map_t> {
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
+        fmt::format_to(ctx.out(), "{{ ");
+        gr::format_join(ctx.out(), value, ", ");
+        return fmt::format_to(ctx.out(), " }}");
     }
 };
 
@@ -13900,7 +13488,7 @@ struct fmt::formatter<std::vector<bool>> {
     }
 
     template<typename FormatContext>
-    auto format(const std::vector<bool>& v, FormatContext& ctx) const -> decltype(ctx.out()) {
+    auto format(const std::vector<bool>& v, FormatContext& ctx) const noexcept -> decltype(ctx.out()) {
         auto   sep = (presentation == 'c' ? ", " : " ");
         size_t len = v.size();
         fmt::format_to(ctx.out(), "[");
@@ -13917,9 +13505,8 @@ struct fmt::formatter<std::vector<bool>> {
 
 template<typename Value, typename Error>
 struct fmt::formatter<std::expected<Value, Error>> {
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
-    // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const std::expected<Value, Error>& ret, FormatContext& ctx) const -> decltype(ctx.out()) {
         if (ret.has_value()) {
@@ -13931,6 +13518,378 @@ struct fmt::formatter<std::expected<Value, Error>> {
 };
 
 #endif // GNURADIO_FORMATTER_HPP
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+// #include "reflection.hpp"
+
+
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_constructive_interference_size;
+using std::hardware_destructive_interference_size;
+#else
+inline constexpr std::size_t hardware_destructive_interference_size  = 64;
+inline constexpr std::size_t hardware_constructive_interference_size = 64;
+#endif
+
+#ifdef __EMSCRIPTEN__
+// constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
+#define EM_CONSTEXPR
+#define EM_CONSTEXPR_STATIC static const
+#else
+#define EM_CONSTEXPR        constexpr
+#define EM_CONSTEXPR_STATIC constexpr
+#endif
+
+namespace gr {
+
+/***
+ * Controls automatic propagation of stream tags on sync ports.
+ *       ```
+ *     ┌───────┐      ┌───────┐     ┌───────┐      ┌───────┐
+ *    ┌┤       ├┐    ┌┤       ├┐   ┌┤       ├┐    ┌┤       ├┐
+ *    ││       ││    ││ ────► ││   ││ ────► ││    ││       ││
+ *    └┤       ├┘    └┤  \ /  ├┘   └┤       ├┘    └┤work(){├┘
+ *     │       │      │   X   │     │       │      │ get();│
+ *    ┌┤       ├┐    ┌┤  / \  ├┐   ┌┤       ├┐    ┌┤ pub();├┐
+ *    ││       ││    ││ ────► ││   ││ ────► ││    ││}      ││
+ *    └┤       ├┘    └┤       ├┘   └┤       ├┘    └┤       ├┘
+ *     └───────┘      └───────┘     └───────┘      └───────┘
+ *       `DONT`      `ALL_TO_ALL   `ONE_TO_ONE`   `TPP_CUSTOM`
+ * ```
+ */
+enum class TagPropagationPolicy {
+    TPP_DONT       = 0, /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
+    TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The scheduler takes care of that. */
+    TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires same number of in- and outputs */
+    TPP_CUSTOM     = 3  /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
+};
+
+using property_map = pmtv::map_t;
+
+template<typename T>
+concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
+
+/**
+ * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
+ * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
+ * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
+ * any point in the signal processing flow, allowing for flexible and customisable data processing.
+ *
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
+ * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
+ * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
+ */
+struct alignas(hardware_constructive_interference_size) Tag {
+    using signed_index_type = std::make_signed_t<std::size_t>;
+    signed_index_type index{0};
+    property_map      map{};
+
+    Tag() = default; // TODO: remove -- needed only for Clang <=15
+
+    Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
+
+    bool operator==(const Tag& other) const = default;
+
+    // TODO: do we need the convenience methods below?
+    void reset() noexcept {
+        index = 0;
+        map.clear();
+    }
+
+    [[nodiscard]] pmtv::pmt& at(const std::string& key) { return map.at(key); }
+
+    [[nodiscard]] const pmtv::pmt& at(const std::string& key) const { return map.at(key); }
+
+    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>> get(const std::string& key) const noexcept {
+        try {
+            return map.at(key);
+        } catch (const std::out_of_range& e) {
+            return std::nullopt;
+        }
+    }
+
+    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>> get(const std::string& key) noexcept {
+        try {
+            return map.at(key);
+        } catch (const std::out_of_range&) {
+            return std::nullopt;
+        }
+    }
+
+    void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
+
+    void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
+};
+
+} // namespace gr
+
+ENABLE_REFLECTION(gr::Tag, index, map);
+
+namespace gr {
+using meta::fixed_string;
+
+inline void updateMaps(const property_map& src, property_map& dest) {
+    for (const auto& [key, value] : src) {
+        if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
+            // If it's a nested map
+            if (auto it = dest.find(key); it != dest.end()) {
+                // If the key exists in the destination map
+                auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
+                if (dest_nested_map) {
+                    // Merge the nested maps recursively
+                    updateMaps(*nested_map, *dest_nested_map);
+                } else {
+                    // Key exists but not a map, replace it
+                    dest[key] = value;
+                }
+            } else {
+                // If the key doesn't exist, just insert
+                dest.insert({key, value});
+            }
+        } else {
+            // If it's not a nested map, insert/replace the value
+            dest[key] = value;
+        }
+    }
+}
+
+constexpr fixed_string GR_TAG_PREFIX = "gr:";
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
+class DefaultTag {
+    constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
+
+public:
+    using value_type = PMT_TYPE;
+
+    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
+    [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
+    [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
+    [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
+
+    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
+
+    template<typename T>
+    requires std::is_same_v<value_type, T>
+    [[nodiscard]] std::pair<std::string, pmtv::pmt> operator()(const T& newValue) const noexcept {
+        return {std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue))};
+    }
+};
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
+    if ((dt.shortKey() <=> str) == 0) {
+        return std::strong_ordering::equal; // shortKeys are equal
+    } else {
+        return dt.key() <=> str; // compare key()
+    }
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
+    if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
+        return std::strong_ordering::equal; // shortKeys are equal
+    } else {
+        return str <=> dt.key(); // compare key()
+    }
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
+    return (dt <=> std::string_view(str)) == 0;
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
+    return (std::string_view(str) <=> dt) == 0;
+}
+
+namespace tag { // definition of default tags and names
+inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
+inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information"> TRIGGER_META_INFO;
+inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
+
+inline constexpr std::array<std::string_view, 14> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "reset_default", "store_default", "end_of_stream"};
+
+} // namespace tag
+
+} // namespace gr
+
+#endif // GNURADIO_TAG_HPP
+
+#include <chrono>
+#include <cstdint>
+#include <map>
+// #include <pmtv/pmt.hpp>
+
+#include <variant>
+#include <vector>
+
+namespace gr {
+
+struct LayoutRight {};
+
+struct LayoutLeft {};
+
+/**
+ * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
+ */
+template<typename T>
+concept PacketLike = requires(T t) {
+    typename T::value_type;
+    typename T::pmt_map;
+    requires std::is_same_v<decltype(t.timestamp), int64_t>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+};
+
+/**
+ * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
+ */
+template<typename T>
+concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
+    typename T::value_type;
+    typename T::pmt_map;
+    typename T::tensor_layout_type;
+    requires std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
+    requires std::is_same_v<decltype(t.layout), typename T::tensor_layout_type>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+};
+
+/**
+ * @brief: a DataSet consists of signal data, metadata, and associated axis information.
+ *
+ * The DataSet can be used to store and manipulate data in a structured way, and supports various types of axes,
+ * layouts, and signal data. The dataset contains information such as timestamp, axis names and units, signal names,
+ * values, and ranges, as well as metadata and timing events. This struct provides a flexible way to store and organize
+ * data with associated metadata, and can be customized for different types of data and applications.
+ */
+template<typename T>
+concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
+    typename T::value_type;
+    typename T::pmt_map;
+    typename T::tensor_layout_type;
+    requires std::is_same_v<decltype(t.timestamp), int64_t>;
+
+    // axis layout:
+    requires std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.axis_values), std::vector<std::vector<typename T::value_type>>>;
+
+    // signal data storage
+    requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
+
+    // meta data
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
+};
+
+template<typename T>
+struct DataSet {
+    using value_type         = T;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map            = std::map<std::string, pmtv::pmt>;
+    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+
+    // axis layout:
+    std::vector<std::string>    axis_names{};  // e.g. time, frequency, …
+    std::vector<std::string>    axis_units{};  // axis base SI-unit
+    std::vector<std::vector<T>> axis_values{}; // explicit axis values
+
+    // signal data layout:
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
+
+    // signal data storage:
+    std::vector<std::string>    signal_names{};      // size = extents[0]
+    std::vector<std::string>    signal_quantities{}; // size = extents[0]
+    std::vector<std::string>    signal_units{};      // size = extents[0]
+    std::vector<T>              signal_values{};     // size = \PI_i extents[i]
+    std::vector<T>              signal_errors{};     // size = \PI_i extents[i] or '0' if not applicable
+    std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+
+    // meta data
+    std::vector<pmt_map>          meta_information{};
+    std::vector<std::vector<Tag>> timing_events{};
+};
+
+static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
+static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
+static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
+
+template<typename T>
+struct Tensor {
+    using value_type         = T;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map            = std::map<std::string, pmtv::pmt>;
+    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
+
+    std::vector<T> signal_values{}; // size = \PI_i extents[i]
+    std::vector<T> signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
+
+    // meta data
+    std::vector<pmt_map> meta_information{};
+};
+
+static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<float>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity");
+
+template<typename T>
+struct Packet {
+    using value_type = T;
+    using pmt_map    = std::map<std::string, pmtv::pmt>;
+
+    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
+    std::vector<T>       signal_values{}; // size = \PI_i extents[i
+    std::vector<pmt_map> meta_information{};
+};
+
+static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
+
+} // namespace gr
+
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges,
+                               meta_information, timing_events)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information)
+ENABLE_REFLECTION_FOR_TEMPLATE(gr::Packet, timestamp, signal_values, meta_information)
+
+#endif // GNURADIO_DATASET_HPP
+
+// #include "Message.hpp"
+#ifndef GNURADIO_MESSAGE_HPP
+#define GNURADIO_MESSAGE_HPP
+
+// #include <gnuradio-4.0/Buffer.hpp>
+
+// #include <gnuradio-4.0/CircularBuffer.hpp>
+
+// #include <gnuradio-4.0/meta/formatter.hpp>
 
 // #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -17935,6 +17894,12 @@ static_assert(ThreadPool<BasicThreadPool>);
 #include <fmt/chrono.h>
 #pragma GCC diagnostic pop
 
+#if defined(__GNUC__) || defined(__clang__)
+#define NO_INLINE __attribute__((noinline))
+#else
+#define NO_INLINE
+#endif
+
 namespace gr {
 
 namespace detail {
@@ -18014,8 +17979,8 @@ inline constexpr void hash_combine(std::size_t& seed, const T& v) noexcept {
 } // namespace detail
 
 struct SettingsCtx {
-    uint64_t  time    = 0ULL; // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
-    pmtv::pmt context = "";   // user-defined multiplexing context for which the setting is valid
+    std::uint64_t time    = 0ULL; // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
+    pmtv::pmt     context = "";   // user-defined multiplexing context for which the setting is valid
 
     bool operator==(const SettingsCtx&) const = default;
 
@@ -18207,6 +18172,14 @@ class CtxSettings : public SettingsBase {
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
+    template<typename Func>
+    inline constexpr static void processMembers(Func func) {
+        // reflect and iterate via known base-class member fields
+        refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, func);
+        // reflect and iterate via known derived class member fields
+        refl::util::for_each(refl::reflect<TBlock>().members, func);
+    }
+
 public:
     // Settings configuration
     std::uint64_t expiry_time{std::numeric_limits<std::uint64_t>::max()}; // in ns, expiry time of parameter set after the last use, std::numeric_limits<std::uint64_t>::max() == no expiry time
@@ -18255,7 +18228,7 @@ public:
                     _allWritableMembers.emplace(memberName);
                 }
             };
-            processMembers<TBlock>(processOneMember);
+            processMembers(processOneMember);
         }
     }
 
@@ -18322,7 +18295,7 @@ public:
 
     void setInitBlockParameters(const property_map& parameters) override { _initBlockParameters = parameters; }
 
-    void init() override {
+    NO_INLINE void init() override {
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
@@ -18373,7 +18346,7 @@ public:
                         }
                     }
                 };
-                processMembers<TBlock>(processOneMember);
+                processMembers(processOneMember);
                 if (!isSet) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
@@ -18401,7 +18374,7 @@ public:
 
     void storeDefaults() override { this->storeCurrentParameters(_defaultParameters); }
 
-    void resetDefaults() override {
+    NO_INLINE void resetDefaults() override {
         // add default parameters to stored and apply the parameters
         auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), ""};
 #ifdef __EMSCRIPTEN__
@@ -18418,7 +18391,7 @@ public:
         }
     }
 
-    [[nodiscard]] std::optional<SettingsCtx> activateContext(SettingsCtx ctx = {}) override {
+    [[nodiscard]] NO_INLINE std::optional<SettingsCtx> activateContext(SettingsCtx ctx = {}) override {
         if (ctx.time == 0ULL) {
             ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 #ifdef __EMSCRIPTEN__
@@ -18426,39 +18399,45 @@ public:
 #endif
         }
 
-        const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-        if (bestMatchSettingsCtx != std::nullopt) {
-            if (bestMatchSettingsCtx == _activeCtx) {
-                // context and time are the same -> do not change stagedParameters
-                return bestMatchSettingsCtx;
-            } else if (bestMatchSettingsCtx.value().context == _activeCtx.context) {
-                // context is the same but time is different -> find the bestMatchParameters, add only (isWritable and not in autoUpdate) to stagedParameters
-                auto parameters = getBestMatchStoredParameters(ctx);
-                if (parameters != std::nullopt) {
-                    const auto   currentAutoUpdateParameters = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
-                    auto         notAutoUpdateView           = parameters.value() | std::views::filter([&currentAutoUpdateParameters](const auto& pair) { return !currentAutoUpdateParameters.contains(pair.first); });
-                    property_map notAutoUpdateParameters(notAutoUpdateView.begin(), notAutoUpdateView.end());
+        const std::optional<SettingsCtx> bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
+        if (!bestMatchSettingsCtx || bestMatchSettingsCtx == _activeCtx) {
+            return bestMatchSettingsCtx;
+        }
 
-                    std::ignore = setStagedImpl(notAutoUpdateParameters);
-                    _activeCtx  = bestMatchSettingsCtx.value();
-                    setChanged(true);
+        if (bestMatchSettingsCtx.value().context == _activeCtx.context) {
+            std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
+            if (parameters) {
+                const std::set<std::string>& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
+                // auto                         notAutoUpdateView       = parameters.value() | std::views::filter([&](const auto& pair) { return !currentAutoUpdateParams.contains(pair.first); });
+                // property_map                 notAutoUpdateParams(notAutoUpdateView.begin(), notAutoUpdateView.end());
+
+                // the following is more compile-time friendly
+                property_map notAutoUpdateParams;
+                for (const auto& pair : parameters.value()) {
+                    if (!currentAutoUpdateParams.contains(pair.first)) {
+                        notAutoUpdateParams.insert(pair);
+                    }
                 }
+
+                std::ignore = setStagedImpl(std::move(notAutoUpdateParams));
+                _activeCtx  = bestMatchSettingsCtx.value();
+                setChanged(true);
+            }
+        } else {
+            std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
+            if (parameters) {
+                _stagedParameters.insert(parameters.value().begin(), parameters.value().end());
+                _activeCtx = bestMatchSettingsCtx.value();
+                setChanged(true);
             } else {
-                // context and time are different -> switch to new activeContext, add all parameters to stagedParameters
-                auto parameters = getBestMatchStoredParameters(ctx);
-                if (parameters != std::nullopt) {
-                    _stagedParameters.insert(parameters.value().begin(), parameters.value().end());
-                    _activeCtx = bestMatchSettingsCtx.value();
-                    setChanged(true);
-                } else {
-                    return std::nullopt;
-                }
+                return std::nullopt;
             }
         }
+
         return bestMatchSettingsCtx;
     }
 
-    void autoUpdate(const Tag& tag) override {
+    NO_INLINE void autoUpdate(const Tag& tag) override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_mutex);
             const auto      tagCtx = createSettingsCtxFromTag(tag);
@@ -18494,7 +18473,7 @@ public:
                         }
                     }
                 };
-                processMembers<TBlock>(processOneMember);
+                processMembers(processOneMember);
             }
 
             if (tagCtx == std::nullopt && !wasChanged) { // not context and no parameters in the Tag
@@ -18529,7 +18508,7 @@ public:
         }
     }
 
-    [[nodiscard]] std::optional<property_map> getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override {
+    [[nodiscard]] NO_INLINE std::optional<property_map> getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override {
         std::lock_guard lg(_mutex);
         if (ctx.time == 0ULL) {
             ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
@@ -18537,7 +18516,7 @@ public:
 #ifdef __EMSCRIPTEN__
         ctx.time += _timePrecisionTolerance;
 #endif
-        auto allBestMatchParameters = this->getBestMatchStoredParameters(ctx);
+        std::optional<property_map> allBestMatchParameters = this->getBestMatchStoredParameters(ctx);
 
         if (allBestMatchParameters == std::nullopt) {
             return std::nullopt;
@@ -18586,18 +18565,18 @@ public:
         return _stagedParameters;
     }
 
-    [[nodiscard]] std::set<std::string> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override {
+    [[nodiscard]] NO_INLINE std::set<std::string> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override {
         auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
         return bestMatchSettingsCtx == std::nullopt ? std::set<std::string>() : _autoUpdateParameters[bestMatchSettingsCtx.value()];
     }
 
-    [[nodiscard]] std::set<std::string>& autoForwardParameters() noexcept override { return _autoForwardParameters; }
+    [[nodiscard]] NO_INLINE std::set<std::string>& autoForwardParameters() noexcept override { return _autoForwardParameters; }
 
-    [[nodiscard]] const property_map& defaultParameters() const noexcept override { return _defaultParameters; }
+    [[nodiscard]] NO_INLINE const property_map& defaultParameters() const noexcept override { return _defaultParameters; }
 
-    [[nodiscard]] const property_map& activeParameters() const noexcept override { return _activeParameters; }
+    [[nodiscard]] NO_INLINE const property_map& activeParameters() const noexcept override { return _activeParameters; }
 
-    [[nodiscard]] ApplyStagedParametersResult applyStagedParameters() override {
+    [[nodiscard]] NO_INLINE ApplyStagedParametersResult applyStagedParameters() override {
         ApplyStagedParametersResult result;
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_mutex);
@@ -18659,7 +18638,7 @@ public:
                         }
                     }
                 };
-                processMembers<TBlock>(applyOneMemberChanges);
+                processMembers(applyOneMemberChanges);
             }
 
             updateActiveParametersImpl();
@@ -18688,7 +18667,7 @@ public:
         return result;
     }
 
-    void updateActiveParameters() noexcept override {
+    NO_INLINE void updateActiveParameters() noexcept override {
         if constexpr (refl::is_reflectable<TBlock>()) {
             std::lock_guard lg(_mutex);
             updateActiveParametersImpl();
@@ -18696,17 +18675,17 @@ public:
     }
 
 private:
-    void updateActiveParametersImpl() noexcept {
+    NO_INLINE void updateActiveParametersImpl() noexcept {
         auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
             using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
             if constexpr (settings::isReadableMember<Type>(member)) {
                 _activeParameters.insert_or_assign(get_display_name_const(member).str(), static_cast<Type>(member(*_block)));
             }
         };
-        processMembers<TBlock>(processOneMember);
+        processMembers(processOneMember);
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt> findBestMatchCtx(const pmtv::pmt& contextToSearch) const {
+    [[nodiscard]] NO_INLINE std::optional<pmtv::pmt> findBestMatchCtx(const pmtv::pmt& contextToSearch) const {
         if (_storedParameters.empty()) {
             return std::nullopt;
         }
@@ -18730,7 +18709,7 @@ private:
         return std::nullopt;
     }
 
-    [[nodiscard]] std::optional<SettingsCtx> findBestMatchSettingsCtx(const SettingsCtx& ctx) const {
+    [[nodiscard]] NO_INLINE std::optional<SettingsCtx> findBestMatchSettingsCtx(const SettingsCtx& ctx) const {
         const auto bestMatchCtx = findBestMatchCtx(ctx.context);
         if (bestMatchCtx == std::nullopt) {
             return std::nullopt;
@@ -18757,7 +18736,7 @@ private:
         return std::nullopt;
     }
 
-    [[nodiscard]] std::optional<property_map> getBestMatchStoredParameters(const SettingsCtx& ctx) const {
+    [[nodiscard]] inline std::optional<property_map> getBestMatchStoredParameters(const SettingsCtx& ctx) const {
         const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
         if (bestMatchSettingsCtx == std::nullopt) {
             return std::nullopt;
@@ -18768,7 +18747,7 @@ private:
         return parameters != vec.end() ? std::optional(parameters->second) : std::nullopt;
     }
 
-    [[nodiscard]] std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
+    [[nodiscard]] inline std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
         const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
         if (bestMatchSettingsCtx == std::nullopt || !_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
             return std::nullopt;
@@ -18777,7 +18756,7 @@ private:
         }
     }
 
-    void resolveDuplicateTimestamp(SettingsCtx& ctx) {
+    NO_INLINE void resolveDuplicateTimestamp(SettingsCtx& ctx) {
         const auto vecIt = _storedParameters.find(ctx.context);
         if (vecIt == _storedParameters.end() || vecIt->second.empty()) {
             return;
@@ -18792,7 +18771,7 @@ private:
         }
     }
 
-    [[nodiscard]] property_map setStagedImpl(const property_map& parameters) {
+    [[nodiscard]] NO_INLINE property_map setStagedImpl(const property_map& parameters) {
         property_map ret;
         if constexpr (refl::is_reflectable<TBlock>()) {
             for (const auto& [key, value] : parameters) {
@@ -18814,7 +18793,7 @@ private:
                         }
                     }
                 };
-                processMembers<TBlock>(processOneMember);
+                processMembers(processOneMember);
                 if (!isSet) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
@@ -18826,17 +18805,18 @@ private:
         return ret; // N.B. returns those <key:value> parameters that could not be set
     }
 
-    void addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx) {
+    NO_INLINE void addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx) {
         if (!_autoUpdateParameters.contains(ctx)) {
             _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
         }
 
-        _storedParameters[ctx.context].push_back({ctx, newParameters});
-        auto& vec = _storedParameters[ctx.context];
-        std::sort(vec.begin(), vec.end(), [](const auto& a, const auto& b) { return a.first.time < b.first.time; });
+        std::vector<std::pair<SettingsCtx, property_map>>& sortedVectorForContext = _storedParameters[ctx.context];
+        // binary search and merge-sort
+        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.first.time; });
+        sortedVectorForContext.insert(it, {ctx, newParameters});
     }
 
-    void removeExpiredStoredParameters() {
+    NO_INLINE void removeExpiredStoredParameters() {
         const auto removeFromAutoUpdateParameters = [this](const auto& begin, const auto& end) {
             for (auto it = begin; it != end; it++) {
                 _autoUpdateParameters.erase(it->first);
@@ -18874,7 +18854,7 @@ private:
         }
     }
 
-    [[nodiscard]] bool isContextPresentInTag(const Tag& tag) const {
+    [[nodiscard]] NO_INLINE bool isContextPresentInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
             const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
             if (std::holds_alternative<property_map>(pmtMetaInfo)) {
@@ -18887,7 +18867,7 @@ private:
         return false;
     }
 
-    [[nodiscard]] bool isTriggeredTimePresentInTag(const Tag& tag) const {
+    [[nodiscard]] NO_INLINE bool isTriggeredTimePresentInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
             const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
             if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
@@ -18897,7 +18877,7 @@ private:
         return false;
     }
 
-    [[nodiscard]] std::optional<SettingsCtx> createSettingsCtxFromTag(const Tag& tag) const {
+    [[nodiscard]] NO_INLINE std::optional<SettingsCtx> createSettingsCtxFromTag(const Tag& tag) const {
         // If TRIGGER_META_INFO or CONTEXT is not present then return std::nullopt
         // IF TRIGGER_TIME is not present then time = now()
 
@@ -18919,7 +18899,7 @@ private:
         }
     }
 
-    void storeCurrentParameters(property_map& parameters) {
+    NO_INLINE void storeCurrentParameters(property_map& parameters) {
         // take a copy of the field -> map value of the old settings
         if constexpr (refl::is_reflectable<TBlock>()) {
             auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
@@ -18929,17 +18909,10 @@ private:
                     parameters.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
                 }
             };
-            processMembers<TBlock>(processOneMember);
+            processMembers(processOneMember);
         }
     }
 
-    template<typename T, typename Func>
-    inline constexpr static void processMembers(Func func) {
-        if constexpr (detail::HasBaseType<T>) {
-            refl::util::for_each(refl::reflect<typename std::remove_cvref_t<T>::base_t>().members, func);
-        }
-        refl::util::for_each(refl::reflect<T>().members, func);
-    }
 }; // class CtxSettings
 
 } // namespace gr
@@ -18950,6 +18923,8 @@ struct hash<gr::SettingsCtx> {
     [[nodiscard]] size_t operator()(const gr::SettingsCtx& ctx) const noexcept { return ctx.hash(); }
 };
 } // namespace std
+
+#undef NO_INLINE
 
 #endif // GNURADIO_SETTINGS_HPP
 
