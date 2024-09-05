@@ -115,7 +115,9 @@ const boost::ut::suite SequenceTests = [] {
     "Sequence"_test = [] {
         using namespace gr;
         using signed_index_type = std::make_signed_t<std::size_t>;
+#if not defined(__APPLE__)
         expect(eq(alignof(Sequence), 64UZ));
+#endif
         expect(eq(0L, kInitialCursorValue));
         expect(nothrow([] { Sequence(); }));
         expect(nothrow([] { Sequence(2); }));
@@ -621,8 +623,9 @@ const boost::ut::suite StreamTagConcept = [] {
             int64_t     index;
             std::string data;
         };
-
+#if not defined(__APPLE__)
         expect(eq(sizeof(buffer_tag), 64UZ)) << "tag size";
+#endif
         BufferLike auto buffer    = CircularBuffer<int32_t>(1024);
         BufferLike auto tagBuffer = CircularBuffer<buffer_tag>(32);
         expect(ge(buffer.size(), 1024u));

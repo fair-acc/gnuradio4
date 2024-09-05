@@ -310,7 +310,7 @@ endif ()
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
-if (ENABLE_TESTING AND UNIX AND NOT APPLE)
+if (ENABLE_TESTING AND (UNIX OR APPLE))
     list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
     enable_testing()
     if (ENABLE_COVERAGE)

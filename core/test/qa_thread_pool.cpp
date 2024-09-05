@@ -43,7 +43,7 @@ const boost::ut::suite ThreadPoolTests = [] {
         expect(ret.get() == 42_i);
 
         auto taskName = pool.execute<"taskName", 0, -1>([] { return gr::thread_pool::thread::getThreadName(); });
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
         expect(taskName.get() == "unknown thread name"_b);
 #else
         expect(taskName.get() == "taskName"_b);
