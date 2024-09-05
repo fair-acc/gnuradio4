@@ -71,9 +71,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
  - Debug: best/complete debugging experience; as optimized as reasonable\n\
  - Release: full optimization; some runtime checks disabled\n\
  - RelWithAssert: full optimization; runtime checks enabled\n\
- - RelWithDebInfo: optimized; debug info; some runtime checks disabled"
+ - RelWithDebInfo: optimized; debug info; some runtime checks disabled\n\
+ - MinSizeRel: optimized with a focus on minimal code size"
                 FORCE)
     endif (NOT CMAKE_BUILD_TYPE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS None Debug Release RelWithAssert RelWithDebInfo MinSizeRel)
 
     if (CMAKE_BUILD_TYPE STREQUAL "" AND NOT CMAKE_CXX_FLAGS MATCHES "-O[123gs]")
         message(WARNING "It seems you are compiling without optimization. Please set CMAKE_BUILD_TYPE or CMAKE_CXX_FLAGS.")
