@@ -722,17 +722,17 @@ private:
     }
 
     template<std::size_t I>
-    constexpr auto apply_left(std::size_t offset, auto&& input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return invokeProcessOneWithOrWithoutOffset(left, offset, std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
+    constexpr auto apply_left(auto&& input_tuple) noexcept {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.processOne(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
     }
 
     template<std::size_t I, std::size_t J>
-    constexpr auto apply_right(std::size_t offset, auto&& input_tuple, auto&& tmp) noexcept {
+    constexpr auto apply_right(auto&& input_tuple, auto&& tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
             constexpr std::size_t first_offset  = traits::block::stream_input_port_types<Left>::size;
             constexpr std::size_t second_offset = traits::block::stream_input_port_types<Left>::size + sizeof...(Is);
             static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return invokeProcessOneWithOrWithoutOffset(right, offset, std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
+            return right.processOne(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
         }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
@@ -754,48 +754,44 @@ public:
 
     template<meta::any_simd... Ts>
     requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr vir::simdize<TReturnType, (Ts::size(), ...)> processOne(std::size_t offset, const Ts&... inputs) {
+    constexpr vir::simdize<TReturnType, (0, ..., Ts::size())> processOne(const Ts&... inputs) {
         static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::tie(inputs...)));
+        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::tie(inputs...)));
     }
 
-    constexpr auto processOne_simd(std::size_t offset, auto N)
+    constexpr auto processOne_simd(auto N)
     requires traits::block::can_processOne_simd<Right>
     {
         if constexpr (requires(Left& l) {
-                          { l.processOne_simd(offset, N) };
+                          { l.processOne_simd(N) };
                       }) {
-            return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(offset, N));
-        } else if constexpr (requires(Left& l) {
-                                 { l.processOne_simd(N) };
-                             }) {
-            return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(N));
+            return right.processOne(left.processOne_simd(N));
         } else {
             using LeftResult = typename traits::block::stream_return_type<Left>;
             using V          = vir::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0UZ; i < V::size(); ++i) {
-                tmp[i] = invokeProcessOneWithOrWithoutOffset(left, offset + i);
+                tmp[i] = left.processOne();
             }
-            return invokeProcessOneWithOrWithoutOffset(right, offset, V(tmp, stdx::vector_aligned));
+            return right.processOne(V(tmp, stdx::vector_aligned));
         }
     }
 
     template<typename... Ts>
     // Nicer error messages for the following would be good, but not at the expense of breaking can_processOne_simd.
     requires(TInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr TReturnType processOne(std::size_t offset, Ts&&... inputs) {
+    constexpr TReturnType processOne(Ts&&... inputs) {
         // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
         if constexpr (traits::block::stream_output_port_types<Left>::size == 1) {
             // only the result from the right block needs to be returned
-            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
-            auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
-            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
+            auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));

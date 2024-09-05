@@ -46,15 +46,6 @@ constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>&
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
-template<typename T, typename... Us>
-auto invokeProcessOneWithOrWithoutOffset(T& node, std::size_t offset, const Us&... inputs) {
-    if constexpr (traits::block::can_processOne_with_offset<T>) {
-        return node.processOne(offset, inputs...);
-    } else {
-        return node.processOne(inputs...);
-    }
-}
-
 template<std::size_t Index, PortType portType, typename Self>
 [[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
     using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::input_ports::template at<Index>;
@@ -756,30 +747,30 @@ public:
     }
 
     template<typename... Ts>
-    constexpr auto invoke_processOne(std::size_t offset, Ts&&... inputs) {
+    constexpr auto invoke_processOne(Ts&&... inputs) {
         if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-            invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
+            self().processOne(std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-            return std::tuple{invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...)};
+            return std::tuple{self().processOne(std::forward<Ts>(inputs)...)};
         } else {
-            return invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
+            return self().processOne(std::forward<Ts>(inputs)...);
         }
     }
 
     template<typename... Ts>
-    constexpr auto invoke_processOne_simd(std::size_t offset, auto width, Ts&&... input_simds) {
+    constexpr auto invoke_processOne_simd(auto width, Ts&&... input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
             if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-                self().processOne_simd(offset, width);
+                self().processOne_simd(width);
                 return std::tuple{};
             } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-                return std::tuple{self().processOne_simd(offset, width)};
+                return std::tuple{self().processOne_simd(width)};
             } else {
-                return self().processOne_simd(offset, width);
+                return self().processOne_simd(width);
             }
         } else {
-            return invoke_processOne(offset, std::forward<Ts>(input_simds)...);
+            return invoke_processOne(std::forward<Ts>(input_simds)...);
         }
     }
 
@@ -1342,12 +1333,12 @@ protected:
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
         std::size_t i = 0;
         for (; i + width <= nSamplesToProcess; i += width) {
-            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
+            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(width, input_simds...); });
             meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
         }
         simd_epilogue(width, [&](auto w) {
             if (i + w <= nSamplesToProcess) {
-                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
+                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(w, input_simds...); });
                 meta::tuple_for_each([i](auto& output_range, auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
                 i += w;
             }
@@ -1357,7 +1348,7 @@ protected:
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
         return work::Status::OK;
@@ -1374,7 +1365,7 @@ protected:
 
         std::size_t nOutSamplesBeforeRequestedStop = 0;
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
                 [i]<typename R>(auto& output_range, R&& result) {
                     if constexpr (meta::array_or_vector_type<std::remove_cvref<decltype(result)>>) {

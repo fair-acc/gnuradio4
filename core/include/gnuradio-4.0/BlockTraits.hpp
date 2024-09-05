@@ -206,18 +206,16 @@ template<typename TBlock, typename TPortType>
 using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<detail::is_port_or_collection_descriptor>::template filter<detail::member_descriptor_has_type<TPortType>::template matches>::template at<0>;
 
 // TODO: Why is this not done with requires?
+// mkretz: I don't understand the question. "this" in the question is unclear.
+/* Helper to determine the return type of `block.processOne` for the given inputs.
+ *
+ * This helper is necessary because we need a pack of indices to expand the input tuples. In princple we should be able
+ * to use std::apply to the same effect. Except that `block` would need to be the first element of the tuple. This here
+ * is simpler and cheaper.
+ */
 namespace detail {
 template<std::size_t... Is>
 auto can_processOne_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
-
-template<typename T>
-struct exact_argument_type {
-    template<std::same_as<T> U>
-    constexpr operator U() const noexcept;
-};
-
-template<std::size_t... Is>
-auto can_processOne_with_offset_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
 
 template<typename TBlock>
 using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBlock>, vir::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
@@ -230,7 +228,7 @@ using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBloc
  * The requirement of at least one function argument disallows sources.
  *
  * There is another (unnamed) concept for source nodes: Source nodes can implement
- * `processOne_simd(integral_constant)`, which returns SIMD object(s) of width N.
+ * `processOne_simd(integral_constant N)`, which returns SIMD object(s) of width N.
  */
 template<typename TBlock>
 concept can_processOne_simd =                                                     //
@@ -247,17 +245,6 @@ concept can_processOne_simd_const =                                             
     };
 
 template<typename TBlock>
-concept can_processOne_simd_with_offset =
-#if DISABLE_SIMD
-    false;
-#else
-    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-    traits::block::stream_input_port_types<TBlock>::size() > 0 && requires(TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
-        { detail::can_processOne_with_offset_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne_t<TBlock>>;
-    };
-#endif
-
-template<typename TBlock>
 concept can_processOne_scalar = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
     { detail::can_processOne_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
 };
@@ -268,18 +255,10 @@ concept can_processOne_scalar_const = requires(const TBlock& block, const stream
 };
 
 template<typename TBlock>
-concept can_processOne_scalar_with_offset = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
-    { detail::can_processOne_with_offset_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
-};
-
-template<typename TBlock>
-concept can_processOne = can_processOne_scalar<TBlock> or can_processOne_simd<TBlock> or can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
+concept can_processOne = can_processOne_scalar<TBlock> or can_processOne_simd<TBlock>;
 
 template<typename TBlock>
 concept can_processOne_const = can_processOne_scalar_const<TBlock> or can_processOne_simd_const<TBlock>;
-
-template<typename TBlock>
-concept can_processOne_with_offset = can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
 
 template<typename TBlock, typename TPort>
 concept can_processMessagesForPortConsumableSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };

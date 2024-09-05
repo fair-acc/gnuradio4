@@ -168,7 +168,7 @@ Commonly used for testing scenarios and signal termination where output is unnec
     template<gr::meta::t_or_simd<T> V>
     void processOne(V) noexcept {
         if constexpr (stdx::is_simd_v<V>) {
-            count += V::size();
+            count += gr::Size_t(V::size());
         } else {
             count++;
         }

@@ -119,10 +119,10 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         }
     }
 
-    T processOne(std::size_t offset) noexcept
+    T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag("processOne(...)", offset);
+        const auto [tagGenerated, tagRepeatStarted] = generateTag("processOne(...)");
         _nSamplesProduced++;
         if (!isInfinite() && _nSamplesProduced >= n_samples_max) {
             this->requestStop();
@@ -192,7 +192,7 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     }
 
 private:
-    [[nodiscard]] auto generateTag(std::string_view processFunctionName, std::size_t offset = 0) {
+    [[nodiscard]] auto generateTag(std::string_view processFunctionName) {
         struct {
             bool tagGenerated     = false;
             bool tagRepeatStarted = false;
@@ -203,7 +203,7 @@ private:
             if (verbose_console) {
                 print_tag(_tags[_tagIndex], fmt::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
-            out.publishTag(_tags[_tagIndex].map, static_cast<Tag::signed_index_type>(offset)); // indices > 0 write tags in the future ... handle with care
+            out.publishTag(_tags[_tagIndex].map, static_cast<Tag::signed_index_type>(0)); // indices > 0 write tags in the future ... handle with care
             this->_outputTagsChanged = true;
             _tagIndex++;
             if (repeat_tags && _tagIndex == _tags.size()) {
