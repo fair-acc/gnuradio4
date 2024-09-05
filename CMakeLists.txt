@@ -59,8 +59,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
             "Flags used by the compiler during debug builds.")
 
     # Add a build type that keeps runtime checks enabled
-    set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O3" CACHE INTERNAL
-            "Flags used by the compiler during release builds containing runtime checks.")
+    set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O3 -D_GLIBCXX_ASSERTIONS=1 -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE"
+        CACHE STRING "Flags used by the compiler during release builds containing runtime checks." FORCE)
 
     # The default value is often an empty string, but this is usually not desirable and one of the
     # other standard build types is usually more appropriate.
