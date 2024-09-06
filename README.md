@@ -50,7 +50,7 @@ If you want to start working on the GNURadio 4.0 source, the [DEVELOPMENT.md](DE
 
 ## License and Copyright
 
-Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-or-later
+Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-linking-exception
 All code contributions to GNU Radio will be integrated into a library under the LGPL, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
 For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
 
