@@ -3884,7 +3884,7 @@ template<Numeric T>
 std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
     static constexpr std::array  si_prefixes{'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'};
     static constexpr long double base  = 1000.0L;
-    long double                  value = value_base;
+    auto                  value = static_cast<long double>(value_base);
 
     std::size_t exponent = 10U;
     if (value == 0.0L) {
@@ -4089,7 +4089,7 @@ public:
             add_statistics(result_map, time_differences_ns);
 
             result_map.try_emplace("total time", duration_s, "s", _precision);
-            result_map.try_emplace("ops/s", _n_scale_results * N_ITERATIONS / duration_s, "", std::max(1, _precision));
+            result_map.try_emplace("ops/s", static_cast<long double>(_n_scale_results * N_ITERATIONS) / duration_s, "", std::max(1, _precision));
 
             if constexpr (MARKER_SIZE > 0) {
                 auto transposed_map = utils::convert<N_ITERATIONS>(marker_iter);
