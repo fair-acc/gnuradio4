@@ -10782,9 +10782,6 @@ class CircularBuffer {
 
         PublishableOutputRange() = delete;
         explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) {
-            _parent->_index        = 0UZ;
-            _parent->_offset       = 0;
-            _parent->_internalSpan = std::span<T>();
             _parent->_rangesCounter++;
         };
         explicit constexpr PublishableOutputRange(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
