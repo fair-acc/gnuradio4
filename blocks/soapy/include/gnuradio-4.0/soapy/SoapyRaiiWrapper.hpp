@@ -780,7 +780,7 @@ static_assert(std::is_default_constructible_v<Device::Stream<float, SOAPY_SDR_RX
 
 template<>
 struct fmt::formatter<SoapySDRRange> {
-    constexpr auto parse(format_parse_context& ctx) const noexcept { return ctx.begin(); }
+    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept { return ctx.begin(); }
 
     template<typename FormatContext>
     auto format(const gr::blocks::soapy::Range& range, FormatContext& ctx) const noexcept {

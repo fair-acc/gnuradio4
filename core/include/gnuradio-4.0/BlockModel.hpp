@@ -525,7 +525,7 @@ struct fmt::formatter<gr::Edge> {
     }
 
     template<typename FormatContext>
-    auto format(const gr::Edge& e, FormatContext& ctx) {
+    auto format(const gr::Edge& e, FormatContext& ctx) const {
         const auto& name = [this](const gr::BlockModel* block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
 
         const auto portIndex = [](const gr::PortDefinition& port) {
