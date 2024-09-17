@@ -2,20 +2,30 @@
 #define GNURADIO_STREAMTODATASET_HPP
 
 #include "gnuradio-4.0/TriggerMatcher.hpp"
-#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr::basic {
 
 template<typename T, bool streamOut = true, trigger::Matcher TMatcher = trigger::BasicTriggerNameCtxMatcher::Filter>
-    requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T>)
-struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>, Doc<R""(
+requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T>)
+struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>> {
+    using Description = Doc<R"(
 @brief Converts stream of input data into chunked discrete DataSet<T> based on tag-based pre- / post-conditions
+Notes:
+* n_pre must be less than the size of the output port's CircularBuffer. The block waits until all n_pre samples can be written to the output in a single iteration.
+* In stream-to-stream mode, the 'stop' Tag is not included in the output stream.
+* In stream-to-dataset mode, the 'stop' Tag is included in the DataSet output.
+* Stream-to-stream mode has limited support for overlapping triggers. Configurations such as Start-Stop-Start-Stop work as expected,
+but configurations like Start-Start-Stop-Stop result in undefined behavior.
+If data accumulation is active, the second 'start' is ignored, and the output may vary depending on subsequent tags.
+* Tags for pre-samples are not stored and are not included in the output.
+* It is expected that 'start' and 'stop' Tags will come from different iterations.
+If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataSet is created. This may lead to incorrect or unexpected output.)">;
 
-)"">> {
     constexpr static std::size_t MIN_BUFFER_SIZE = 1024U;
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments> // optional annotation shortening
     using A = Annotated<U, description, Arguments...>;
@@ -27,8 +37,7 @@ struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>, Doc<R"
 
     // settings
     A<std::string, "filter", Visible, Doc<"syntax: '[<start trigger name>/<ctx1>, <stop trigger name>/<ctx2>]'">> filter;
-    A<property_map, "filter state", Doc<"">>                                                                      filterState;
-    A<gr::Size_t, "n samples pre", Visible, Doc<"number of pre-trigger samples">>                                 n_pre  = 0U;
+    A<gr::Size_t, "n samples pre", Visible, Doc<"number of pre-trigger samples">>                                 n_pre  = 0U; // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
     A<gr::Size_t, "n samples post", Visible, Doc<"number of post-trigger samples">>                               n_post = 0U;
     A<gr::Size_t, "n samples max", Doc<"maximum number of samples (0: infinite)">>                                n_max  = 0U;
 
@@ -41,150 +50,285 @@ struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>, Doc<R"
     A<float, "signal_max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = 1.f;
 
     // internal trigger state
-    HistoryBuffer<T> _history{ MIN_BUFFER_SIZE + n_pre };
+    HistoryBuffer<T> _history{MIN_BUFFER_SIZE + n_pre};
     TMatcher         _matcher{};
-    bool             _accumulationActive  = false;
-    std::size_t      _nSamplesWritten     = 0UZ;
-    std::size_t      _nPostSamplesWritten = 0UZ;
-    DataSet<T>       _tempDataSet;
-    bool             _dataSetAccumulation = false;
 
-    void
-    reset() {
-        filterState.value.clear();
-        _accumulationActive  = false;
-        _dataSetAccumulation = false;
+    struct AccumulationState {
+        bool        isActive           = false;
+        bool        isPreActive        = false;
+        bool        isPostActive       = false;
+        bool        isSingleTrigger    = false;
+        std::size_t nPostSamplesRemain = 0UZ;
+        std::size_t nPreSamples        = 0UZ;
+        std::size_t nSamples           = 0UZ;
+
+        void update(bool startTrigger, bool endTrigger, bool isSingle, gr::Size_t nPre, gr::Size_t nPost) {
+            isSingleTrigger = isSingle;
+            if (!isActive) {
+                if (startTrigger) {
+                    isPreActive = nPre > 0; // No pre samples -> Done
+                    isActive    = true;
+                    nSamples    = 0UZ;
+                    if (isSingleTrigger) {
+                        isPostActive       = true;
+                        nPostSamplesRemain = nPost;
+                    }
+                }
+            }
+
+            if (isActive && !isPostActive && endTrigger) {
+                isPostActive       = true;
+                nPostSamplesRemain = nPost;
+            }
+        }
+
+        void updatePostSamples(std::size_t nPostSamplesToCopy) {
+            nPostSamplesRemain -= nPostSamplesToCopy;
+            nSamples += nPostSamplesToCopy;
+
+            if (nPostSamplesRemain == 0UZ) {
+                isActive     = false;
+                isPostActive = false;
+            }
+        }
+
+        void reset() {
+            isActive           = false;
+            isPreActive        = false;
+            isPostActive       = false;
+            nPostSamplesRemain = 0UZ;
+        }
+    };
+
+    std::conditional_t<streamOut, AccumulationState, std::deque<AccumulationState>> _accState{};
+    std::deque<DataSet<T>>                                                          _tempDataSets;
+    std::conditional_t<streamOut, property_map, std::deque<property_map>>           _filterState;
+
+    void reset() {
+        _filterState.clear();
+        if constexpr (streamOut) {
+            _accState.reset();
+        } else {
+            _tempDataSets.clear();
+            _accState.clear();
+        }
     }
 
-    void
-    settingsChanged(const gr::property_map & /*oldSettings*/, const gr::property_map &newSettings) {
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
         if (newSettings.contains("n_pre")) {
+            if constexpr (streamOut) {
+                if (n_pre.value > out.buffer().streamBuffer.size()) {
+                    using namespace gr::message;
+                    throw gr::exception("n_pre must be <= output port CircularBuffer size");
+                }
+            }
             auto newBuffer = HistoryBuffer<T>(MIN_BUFFER_SIZE + std::get<gr::Size_t>(newSettings.at("n_pre")));
             newBuffer.push_back_bulk(_history);
             _history = std::move(newBuffer);
         }
     }
 
-    gr::work::Status
-    processBulk(ConsumableSpan auto inSamples /* equivalent to std::span<const T> */, PublishableSpan auto &outSamples /* equivalent to std::span<T> */) {
-        bool firstTrigger = false;
-        bool lastTrigger  = false;
-        if (const trigger::MatchResult matchResult = _matcher(filter.value, this->mergedInputTag(), filterState.value); matchResult != trigger::MatchResult::Ignore) {
-            assert(filterState.value.contains("isSingleTrigger"));
-            _accumulationActive = (matchResult == trigger::MatchResult::Matching);
-            firstTrigger        = _accumulationActive;
-            lastTrigger         = !_accumulationActive || std::get<bool>(filterState.value.at("isSingleTrigger"));
-            if (std::get<bool>(filterState.value.at("isSingleTrigger"))) { // handled by the n_pre and n_post settings
-                _accumulationActive = false;
-            }
-            if constexpr (!streamOut) {
-                if (firstTrigger) {
-                    _tempDataSet = DataSet<T>();
-                    initNewDataSet(_tempDataSet);
-                }
-            }
+    gr::work::Status processBulk(ConsumableSpan auto& inSamples /* equivalent to std::span<const T> */, PublishableSpan auto& outSamples /* equivalent to std::span<T> */) {
+        if constexpr (streamOut) {
+            return processBulkStream(inSamples, outSamples);
+        } else {
+            return processBulkDataSet(inSamples, outSamples);
         }
-        if (lastTrigger) {
-            _nPostSamplesWritten = n_post;
-        }
+    }
 
-        const std::size_t nInAvailable      = inSamples.size();
-        std::size_t       nOutAvailable     = outSamples.size();
-        std::size_t       nSamplesToPublish = 0UZ;
+    gr::work::Status processBulkStream(ConsumableSpan auto& inSamples, PublishableSpan auto& outSamples) {
+        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(_filterState);
+        _accState.update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
 
-        if (firstTrigger) { // handle pre-trigger samples kept in _history
-            _nSamplesWritten = 0UZ;
-            if constexpr (streamOut) {
-                if (n_pre >= nOutAvailable) {
+        if (!_accState.isActive) { // If accumulation is not active, consume all input samples and publish 0 samples.
+            copyInputSamplesToHistory(inSamples, inSamples.size());
+            std::ignore = inSamples.consume(inSamples.size());
+            outSamples.publish(0UZ);
+        } else { // accumulation is active
+            std::size_t nOutAvailable     = outSamples.size();
+            std::size_t nSamplesToPublish = 0UZ;
+
+            // pre samples data accumulation
+            auto nPreSamplesToCopy = 0UZ;
+            if (_accState.isPreActive) {
+                // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
+                nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size()); // partially write pre samples if not enough samples stored in HistoryBuffer
+                if (nPreSamplesToCopy > nOutAvailable) {
                     std::ignore = inSamples.consume(0UZ);
                     outSamples.publish(0UZ);
                     return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
                 }
-                const auto nPreSamplesToPublish = static_cast<std::size_t>(n_pre.value);
-                std::ranges::copy_n(_history.cbegin(), static_cast<std::ptrdiff_t>(std::min(nPreSamplesToPublish, nOutAvailable)), outSamples.begin());
-                nSamplesToPublish += n_pre;
-                nOutAvailable -= n_pre;
-            } else {
-                _tempDataSet.signal_values.insert(_tempDataSet.signal_values.end(), _history.cbegin(), std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(n_pre.value)));
-                for (int i = -static_cast<int>(n_pre); i < 0; i++) {
-                    _tempDataSet.axis_values[0].emplace_back(static_cast<float>(i) / sample_rate);
-                }
+                auto startIt = std::next(_history.begin(), static_cast<std::ptrdiff_t>(nPreSamplesToCopy));
+                std::ranges::copy_n(std::make_reverse_iterator(startIt), static_cast<std::ptrdiff_t>(nPreSamplesToCopy), outSamples.begin());
+                nSamplesToPublish += nPreSamplesToCopy;
+                nOutAvailable -= nPreSamplesToCopy;
+                _accState.isPreActive = false;
+                _accState.nSamples += nPreSamplesToCopy;
             }
-            _nSamplesWritten += n_pre;
-        }
 
-        if constexpr (!streamOut) { // move tags into DataSet
-            const Tag &mergedTag = this->mergedInputTag();
-            if (!_tempDataSet.timing_events.empty() && !mergedTag.map.empty() && (_accumulationActive || _nPostSamplesWritten > 0 || std::get<bool>(filterState.value.at("isSingleTrigger")))) {
-                _tempDataSet.timing_events[0].emplace_back(Tag{ static_cast<Tag::signed_index_type>(_nSamplesWritten), mergedTag.map });
+            if (!_accState.isPostActive) { // normal data accumulation
+                const std::size_t nSamplesToCopy = std::min(inSamples.size(), nOutAvailable);
+                std::ranges::copy_n(inSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToCopy), std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
+                nSamplesToPublish += nSamplesToCopy;
+                _accState.nSamples += nSamplesToCopy;
+            } else { // post samples data accumulation
+                const std::size_t nPostSamplesToCopy = std::min(_accState.nPostSamplesRemain, std::min(inSamples.size(), nOutAvailable));
+                std::ranges::copy_n(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy), std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
+                nSamplesToPublish += nPostSamplesToCopy;
+                _accState.updatePostSamples(nPostSamplesToCopy);
             }
-            this->_mergedInputTag.map.clear(); // ensure that the input tag is only propagated once
-        }
 
-        std::size_t nSamplesToCopy = 0UZ;
-        if (_accumulationActive) { // handle normal data accumulation
-            if constexpr (streamOut) {
-                nSamplesToCopy += std::min(nInAvailable, nOutAvailable);
-                std::copy_n(inSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToCopy), std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
-                nOutAvailable -= nSamplesToCopy;
-            } else {
-                nSamplesToCopy += nInAvailable;
-                _tempDataSet.signal_values.insert(_tempDataSet.signal_values.end(), inSamples.begin(), inSamples.end());
-                _tempDataSet.axis_values[0].reserve(_nSamplesWritten + nInAvailable);
-                for (auto i = 0U; i < nInAvailable; i++) {
-                    _tempDataSet.axis_values[0].emplace_back(static_cast<float>(_nSamplesWritten - n_pre + i) / sample_rate);
-                }
-            }
-            _nSamplesWritten += nSamplesToCopy;
-            nSamplesToPublish += nSamplesToCopy;
-        }
-
-        if (_nPostSamplesWritten > 0) { // handle post-trigger samples
-            if constexpr (streamOut) {
-                const std::size_t nPostSamplesToPublish = std::min(_nPostSamplesWritten, std::min(nInAvailable, nOutAvailable));
-                std::copy_n(inSamples.begin(), nPostSamplesToPublish, std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
-                nSamplesToCopy += nPostSamplesToPublish;
-                nSamplesToPublish += nPostSamplesToPublish;
-                _nSamplesWritten += nPostSamplesToPublish;
-                _nPostSamplesWritten -= nPostSamplesToPublish;
-            } else {
-                const std::size_t nPostSamplesToPublish = std::min(_nPostSamplesWritten, nInAvailable);
-                _tempDataSet.signal_values.insert(_tempDataSet.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToPublish)));
-                for (std::size_t i = 0; i < nPostSamplesToPublish; i++) {
-                    _tempDataSet.axis_values[0].emplace_back(static_cast<float>(_nSamplesWritten - n_pre + i) / sample_rate);
-                }
-                _nSamplesWritten += nPostSamplesToPublish;
-                _nPostSamplesWritten -= nPostSamplesToPublish;
-            }
-        }
-
-        if (n_pre > 0) { // copy the last min(n_pre, nInAvailable) samples to the history buffer
-            _history.push_back_bulk(std::prev(inSamples.end(), static_cast<std::ptrdiff_t>(std::min(static_cast<std::size_t>(n_pre), nInAvailable))), inSamples.end());
-        }
-
-        std::ignore = inSamples.consume(nInAvailable);
-        if constexpr (streamOut) {
+            copyInputSamplesToHistory(inSamples, nSamplesToPublish - nPreSamplesToCopy);
+            std::ignore = inSamples.consume(nSamplesToPublish - nPreSamplesToCopy);
             outSamples.publish(nSamplesToPublish);
-        } else {
-            // publish a single sample if the DataSet<T> accumulation is complete, otherwise publish 0UZ
-            if (((lastTrigger || (std::get<bool>(filterState.value.at("isSingleTrigger")) && _nSamplesWritten > 0)) && _nPostSamplesWritten == 0)
-                || (_dataSetAccumulation && _tempDataSet.signal_values.size() >= n_max)) {
-                assert(!_tempDataSet.extents.empty());
-                _tempDataSet.extents[1] = static_cast<std::int32_t>(_nSamplesWritten);
-                gr::dataset::updateMinMax(_tempDataSet);
-                outSamples[0] = std::move(_tempDataSet);
-                outSamples.publish(1UZ);
-                _nSamplesWritten = 0UZ;
-            } else {
-                outSamples.publish(0UZ);
-            }
         }
         return work::Status::OK;
     }
 
+    gr::work::Status processBulkDataSet(ConsumableSpan auto& inSamples, PublishableSpan auto& outSamples) {
+        //    This is a workaround to support cases of overlapping datasets, for example, Start1-Start2-Stop1-Stop2 case.
+        //    always add new DataSet when Start trigger is present
+        property_map tmpFilterState;
+        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(tmpFilterState);
+        if (startTrigger) {
+            _tempDataSets.emplace_back();
+            initNewDataSet(_tempDataSets.back());
+
+            _accState.emplace_back();
+            _accState.back().update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
+
+            _filterState.push_back(tmpFilterState);
+        }
+
+        // Update state only for the front dataset which is not in the isPostActiveState
+        for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
+            if (!_accState[i].isPostActive) {
+                const auto [startTrigger2, endTrigger2, isSingleTrigger2] = detectTrigger(_filterState[i]);
+                if (endTrigger2) {
+                    _accState[i].update(startTrigger2, endTrigger2, isSingleTrigger2, n_pre, n_post);
+                }
+                break; // only the first one should be updated
+            }
+        }
+
+        if (_tempDataSets.empty()) { // If accumulation is not active (no active DataSets), consume all input samples and publish 0 samples.
+            copyInputSamplesToHistory(inSamples, inSamples.size());
+            std::ignore = inSamples.consume(inSamples.size());
+            outSamples.publish(0UZ);
+            return work::Status::OK;
+        } else { // accumulation is active (at least one DataSets is active)
+            for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
+                auto& ds       = _tempDataSets[i];
+                auto& accState = _accState[i];
+
+                // Note: Tags for pre-samples are not added to DataSet
+                const Tag& mergedTag = this->mergedInputTag();
+                if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
+                    ds.timing_events[0].emplace_back(Tag{static_cast<Tag::signed_index_type>(ds.signal_values.size()), mergedTag.map});
+                }
+
+                // pre samples data accumulation
+                if (accState.isPreActive) {
+                    const std::size_t nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size()); // partially write pre samples if not enough samples stored in HistoryBuffer
+                    const auto        historyEnd        = std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(nPreSamplesToCopy));
+                    ds.signal_values.insert(ds.signal_values.end(), std::make_reverse_iterator(historyEnd), std::make_reverse_iterator(_history.cbegin()));
+                    fillAxisValues(ds, -static_cast<int>(nPreSamplesToCopy), nPreSamplesToCopy);
+                    accState.isPreActive = false;
+                    accState.nPreSamples = nPreSamplesToCopy;
+                    accState.nSamples += nPreSamplesToCopy;
+                }
+
+                if (!accState.isPostActive) { // normal data accumulation
+                    ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.end());
+                    fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), inSamples.size());
+                    accState.nSamples += inSamples.size();
+                } else { // post samples data accumulation
+                    const std::size_t nPostSamplesToCopy = std::min(accState.nPostSamplesRemain, inSamples.size());
+                    ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy)));
+                    fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
+                    accState.updatePostSamples(nPostSamplesToCopy);
+                }
+            }
+            this->_mergedInputTag.map.clear(); // ensure that the input tag is only propagated once
+        }
+
+        copyInputSamplesToHistory(inSamples, inSamples.size());
+        std::ignore = inSamples.consume(inSamples.size());
+
+        // publish all completed DataSet<T>
+        std::size_t publishedCounter = 0UZ;
+        while (true) {
+            if (!_tempDataSets.empty() && !_accState.front().isActive) {
+                auto& ds = _tempDataSets.front();
+                assert(!ds.extents.empty());
+                ds.extents[1] = static_cast<std::int32_t>(ds.signal_values.size());
+                if (!ds.signal_values.empty()) { // TODO: do we need to publish empty  DataSet at all, empty DataSet can occur when n_max is set.
+                    gr::dataset::updateMinMax(ds);
+                }
+                outSamples[publishedCounter] = std::move(ds);
+                _tempDataSets.pop_front();
+                _accState.pop_front();
+                _filterState.pop_front();
+                publishedCounter++;
+            } else {
+                break;
+            }
+        }
+
+        // publish dataset partially if signal_values.size() > n_max
+        for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
+            auto& ds = _tempDataSets[i];
+            if (n_max != 0UZ && ds.signal_values.size() >= n_max) {
+                assert(!ds.extents.empty());
+                ds.extents[1] = static_cast<std::int32_t>(ds.signal_values.size());
+                gr::dataset::updateMinMax(ds);
+                outSamples[publishedCounter] = std::move(ds);
+                DataSet<T> newDs;
+                initNewDataSet(newDs);
+                _tempDataSets[i] = newDs; // start again from empty DataSet
+                publishedCounter++;
+            }
+        }
+        outSamples.publish(publishedCounter);
+
+        return work::Status::OK;
+    }
+
 private:
-    void
-    initNewDataSet(DataSet<T> &dataSet) const {
+    auto detectTrigger(property_map& filterState) {
+        struct {
+            bool startTrigger    = false;
+            bool endTrigger      = false;
+            bool isSingleTrigger = false;
+        } result;
+
+        const trigger::MatchResult matchResult = _matcher(filter.value, this->mergedInputTag(), filterState);
+        if (matchResult != trigger::MatchResult::Ignore) {
+            assert(filterState.contains("isSingleTrigger"));
+            result.startTrigger    = matchResult == trigger::MatchResult::Matching;
+            result.endTrigger      = matchResult == trigger::MatchResult::NotMatching;
+            result.isSingleTrigger = std::get<bool>(filterState.at("isSingleTrigger"));
+        }
+        return result;
+    }
+
+    void copyInputSamplesToHistory(ConsumableSpan auto& inSamples, std::size_t maxSamplesToCopy) {
+        if (n_pre > 0) {
+            const auto samplesToCopy          = std::min(maxSamplesToCopy, inSamples.size());
+            const auto end                    = std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy));
+            const auto optimizedSamplesToCopy = std::min(static_cast<std::size_t>(_history.capacity()), samplesToCopy);
+            _history.push_back_bulk(std::prev(end, static_cast<std::ptrdiff_t>(optimizedSamplesToCopy)), end);
+        }
+    }
+
+    void fillAxisValues(DataSet<T>& ds, int start, std::size_t nSamples) {
+        ds.axis_values[0].reserve(ds.axis_values[0].size() + nSamples);
+        for (int j = 0; j < static_cast<int>(nSamples); j++) {
+            ds.axis_values[0].emplace_back(static_cast<float>(start + j) / sample_rate);
+        }
+    }
+
+    void initNewDataSet(DataSet<T>& dataSet) const {
         dataSet.axis_names.emplace_back("time");
         dataSet.axis_units.emplace_back("s");
         dataSet.axis_values.resize(1UZ);
@@ -214,14 +358,9 @@ using StreamFilter = StreamFilterImpl<T, true>;
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool streamOut, typename Matcher), (gr::basic::StreamFilterImpl<T, streamOut, Matcher>), filter, in, out, filter, n_pre, n_post, n_max, sample_rate,
-                                    signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool streamOut, typename Matcher), (gr::basic::StreamFilterImpl<T, streamOut, Matcher>), filter, in, out, filter, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 static_assert(gr::HasProcessBulkFunction<gr::basic::StreamFilterImpl<float>>);
 
-inline static auto registerStreamFilters
-        = gr::registerBlock<gr::basic::StreamToDataSet, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(
-                  gr::globalBlockRegistry())
-        | gr::registerBlock<gr::basic::StreamFilter, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(
-                  gr::globalBlockRegistry());
+inline static auto registerStreamFilters = gr::registerBlock<gr::basic::StreamToDataSet, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::basic::StreamFilter, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_STREAMTODATASET_HPP
