@@ -71,7 +71,7 @@ inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_poi
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
-std::strong_ordering comparePmt(const pmtv::pmt& lhs, const pmtv::pmt& rhs) {
+inline std::strong_ordering comparePmt(const pmtv::pmt& lhs, const pmtv::pmt& rhs) {
     // If the types are different, cast rhs to the type of lhs and compare
     if (lhs.index() != rhs.index()) {
         // TODO: throw if types are not the same?
