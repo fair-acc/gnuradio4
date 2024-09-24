@@ -482,7 +482,7 @@ public:
 
     [[nodiscard]] work::Status processBulk(std::span<const T> inData) noexcept {
         std::optional<property_map> tagData;
-        if (this->input_tags_present()) {
+        if (this->inputTagsPresent()) {
             assert(this->mergedInputTag().index == 0);
             tagData = this->mergedInputTag().map;
         }

@@ -4,10 +4,10 @@
 #include "gnuradio-4.0/BlockRegistry.hpp"
 #include <algorithm>
 
-#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
-#include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/algorithm/ImChart.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -15,30 +15,25 @@
 namespace gr::testing {
 
 template<typename T>
-    requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
+requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
 struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawable<UICategory::ChartPane, "console">> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T>   in;
     float       sample_rate = 1000.0f;
     std::string signal_name = "unknown signal";
 
-    HistoryBuffer<T>   _historyBufferX{ 1000 };
-    HistoryBuffer<T>   _historyBufferY{ 1000 };
-    HistoryBuffer<Tag> _historyBufferTags{ 1000 };
+    HistoryBuffer<T>   _historyBufferX{1000};
+    HistoryBuffer<T>   _historyBufferY{1000};
+    HistoryBuffer<Tag> _historyBufferTags{1000};
 
-    void
-    start() {
+    void start() {
         fmt::println("started sink {} aka. '{}'", this->unique_name, this->name);
         in.max_samples = 10UZ;
     }
 
-    void
-    stop() {
-        fmt::println("stopped sink {} aka. '{}'", this->unique_name, this->name);
-    }
+    void stop() { fmt::println("stopped sink {} aka. '{}'", this->unique_name, this->name); }
 
-    constexpr void
-    processOne(const T &input) noexcept {
+    constexpr void processOne(const T& input) noexcept {
         if constexpr (std::is_arithmetic_v<T>) {
             in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
             const T Ts     = T(1.0f) / T(sample_rate);
@@ -46,7 +41,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         }
         _historyBufferY.push_back(input);
 
-        if (this->input_tags_present()) { // received tag
+        if (this->inputTagsPresent()) { // received tag
             _historyBufferTags.push_back(this->mergedInputTag());
             _historyBufferTags[1].index = 0;
             this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
@@ -55,8 +50,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         }
     }
 
-    work::Status
-    draw(const property_map &config = {}) noexcept {
+    work::Status draw(const property_map& config = {}) noexcept {
         [[maybe_unused]] const work::Status status = this->invokeWork(); // calls work(...) -> processOne(...) (all in the same thread as this 'draw()'
 
         if constexpr (std::is_arithmetic_v<T>) {
@@ -75,21 +69,19 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
             std::vector<T> reversedY(_historyBufferY.rbegin(), _historyBufferY.rend());
             std::vector<T> reversedTag(_historyBufferX.size());
             if constexpr (std::is_floating_point_v<T>) {
-                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(),
-                               [](const Tag &tag, const T &yValue) { return tag.index < 0 ? std::numeric_limits<T>::quiet_NaN() : yValue; });
+                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.index < 0 ? std::numeric_limits<T>::quiet_NaN() : yValue; });
             } else {
-                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(),
-                               [](const Tag &tag, const T &yValue) { return tag.index < 0 ? std::numeric_limits<T>::lowest() : yValue; });
+                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.index < 0 ? std::numeric_limits<T>::lowest() : yValue; });
             }
 
             auto adjustRange = [](T min, T max) {
                 min            = std::min(min, T(0));
                 max            = std::max(max, T(0));
                 const T margin = (max - min) * static_cast<T>(0.2);
-                return std::pair<double, double>{ min - margin, max + margin };
+                return std::pair<double, double>{min - margin, max + margin};
             };
 
-            auto chart = gr::graphs::ImChart<130, 28>({ { *xMin, *xMax }, adjustRange(*yMin, *yMax) });
+            auto chart = gr::graphs::ImChart<130, 28>({{*xMin, *xMax}, adjustRange(*yMin, *yMax)});
             chart.draw(reversedX, reversedY, signal_name);
             chart.draw<gr::graphs::Style::Marker>(reversedX, reversedTag, "Tags");
             chart.draw();
@@ -97,7 +89,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
             if (_historyBufferY.empty()) {
                 return status;
             }
-            gr::dataset::draw(_historyBufferY[0], { .reset_view = config.contains("reset_view") ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP });
+            gr::dataset::draw(_historyBufferY[0], {.reset_view = config.contains("reset_view") ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP});
         }
 
         return status;

@@ -268,6 +268,13 @@ concept ConsumablePortSpan = ConsumableSpan<T> && requires(T span) {
     { *span.tags.begin() } -> std::same_as<const gr::Tag&>;
 };
 
+template<typename T>
+concept PublishablePortSpan = PublishableSpan<T> && requires(T span, property_map& tagData, Tag::signed_index_type index) {
+    requires PublishableSpan<std::remove_cvref_t<decltype(span.tags)>>;
+    { *span.tags.begin() } -> std::same_as<gr::Tag&>;
+    { span.publishTag(tagData, index) } -> std::same_as<void>;
+};
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -324,6 +331,7 @@ struct Port {
     using TagWriterType     = decltype(std::declval<TagBufferType>().new_writer());
     using TagIoType         = std::conditional_t<kIsInput, TagReaderType, TagWriterType>;
     using TagReaderSpanType = decltype(std::declval<TagReaderType>().get());
+    using TagWriterSpanType = decltype(std::declval<TagWriterType>().reserve(0UZ));
 
     // public properties
     constexpr static bool kIsSynch      = !std::disjunction_v<std::is_same<Async, Attributes>...>;
@@ -354,7 +362,7 @@ struct Port {
                 if (tags.isConsumeRequested()) {                             // the user has already manually consumed tags
                     return;
                 }
-                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::getConsumeRequested() == 0) || this->empty()) {
+                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
                     return; // no samples to be consumed -> do not consume any tags
                 }
                 std::size_t tagsToConsume = 0;
@@ -365,12 +373,67 @@ struct Port {
                         break;
                     }
                 }
-                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitely and implicitly consumed
+                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitly and implicitly consumed
             }
         }
-    };
-
+    }; // end of ConsumablePortInputRange
     static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
+
+    template<SpanReleasePolicy spanReleasePolicy>
+    using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
+
+    template<SpanReleasePolicy spanReleasePolicy, PublishableSpanReservePolicy spanReservePolicy>
+    struct PublishablePortOutputRange : public WriterSpanType<spanReleasePolicy> {
+        TagWriterSpanType      tags;
+        Tag::signed_index_type streamIndex;
+        std::size_t            tagsPublished{0UZ};
+
+        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == PublishableSpanReservePolicy::Reserve)
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
+
+        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == PublishableSpanReservePolicy::TryReserve)
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
+
+        ~PublishablePortOutputRange() {
+            if (WriterSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
+                tags.publish(tagsPublished);
+            }
+        }
+
+        inline constexpr void publishTag(property_map&& tagData, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(std::move(tagData), tagOffset); }
+
+        inline constexpr void publishTag(const property_map& tagData, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(tagData, tagOffset); }
+
+    private:
+        template<PropertyMapType PropertyMap>
+        inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::signed_index_type tagOffset) noexcept {
+            const auto index = streamIndex + static_cast<gr::Tag::signed_index_type>(tagOffset);
+
+            if (tagsPublished > 0) {
+                auto& lastTag = tags[tagsPublished - 1];
+#ifndef NDEBUG
+
+                if (lastTag.index > index) { // check the order of published Tags.index
+                    fmt::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
+                    // std::abort();
+                }
+#endif
+                if (lastTag.index == index) { // -> merge tags with the same index
+                    for (auto&& [key, value] : tagData) {
+                        lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
+                    }
+                } else {
+                    tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
+                }
+            } else {
+                tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
+            }
+        }
+    }; // end of PublishablePortOutputRange
+
+    static_assert(PublishablePortSpan<PublishablePortOutputRange<gr::SpanReleasePolicy::ProcessAll, PublishableSpanReservePolicy::Reserve>>);
 
     std::span<const Tag>   tags;          // Range of tags for the currently processed stream range; only used in input ports
     Tag::signed_index_type streamIndex{}; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
@@ -591,18 +654,18 @@ public:
         return taggedStream;
     }
 
-    template<SpanReleasePolicy TSpanReleasePolicy>
+    template<SpanReleasePolicy spanReleasePolicy>
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return streamWriter().template reserve<TSpanReleasePolicy>(nSamples);
+        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
-    template<SpanReleasePolicy TSpanReleasePolicy>
+    template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return streamWriter().template tryReserve<TSpanReleasePolicy>(nSamples);
+        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
     /**

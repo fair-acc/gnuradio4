@@ -14,8 +14,8 @@
 namespace gr::testing {
 
 enum class ProcessFunction {
-    USE_PROCESS_BULK     = 0, ///
-    USE_PROCESS_ONE      = 1  ///
+    USE_PROCESS_BULK = 0, ///
+    USE_PROCESS_ONE  = 1  ///
 };
 
 inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept {
@@ -43,7 +43,7 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
 
 template<typename IterType>
 inline constexpr void mismatch_report(const IterType& mismatchedTag1, const IterType& mismatchedTag2, const IterType& tags1_begin, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
-    const auto index = static_cast<size_t>(std::distance(tags1_begin, mismatchedTag1));
+    const auto index = static_cast<std::size_t>(std::distance(tags1_begin, mismatchedTag1));
     fmt::print("mismatch at index {}", index);
     if (mismatchedTag1->index != mismatchedTag2->index) {
         fmt::print("  - different index: {} vs {}\n", mismatchedTag1->index, mismatchedTag2->index);
@@ -121,7 +121,10 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag("processOne(...)");
+        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                           //
+            [this](const auto& map, Tag::signed_index_type tagOffset) { this->publishTag(map, tagOffset); }, //
+            "processOne(...)");
+
         _nSamplesProduced++;
         if (!isInfinite() && _nSamplesProduced >= n_samples_max) {
             this->requestStop();
@@ -142,11 +145,14 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         return mark_tag ? (tagGenerated ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
     }
 
-    work::Status processBulk(PublishableSpan auto& output) noexcept
+    work::Status processBulk(PublishablePortSpan auto& outSpan) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag("processBulk(...)");
-        const auto nSamplesRemainder                = getNProducedSamplesRemainder();
+        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                           //
+            [&outSpan](const auto& map, Tag::signed_index_type offset) { outSpan.publishTag(map, offset); }, //
+            "processBulk(...)");
+
+        const auto nSamplesRemainder = getNProducedSamplesRemainder();
 
         gr::Size_t nextTagIn = 1U;
         if (isInfinite() && tagRepeatStarted) {
@@ -157,26 +163,26 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
                     nextTagIn = static_cast<gr::Size_t>(_tags[_tagIndex].index) - nSamplesRemainder;
                 }
             } else {
-                nextTagIn = isInfinite() ? static_cast<gr::Size_t>(output.size()) : n_samples_max - _nSamplesProduced;
+                nextTagIn = isInfinite() ? static_cast<gr::Size_t>(outSpan.size()) : n_samples_max - _nSamplesProduced;
             }
         }
 
-        const std::size_t nSamples = isInfinite() || _nSamplesProduced < n_samples_max ? std::min(static_cast<std::size_t>(std::max(1U, nextTagIn)), output.size()) : 0UZ; // '0UZ' -> DONE, produced enough samples
+        const std::size_t nSamples = isInfinite() || _nSamplesProduced < n_samples_max ? std::min(static_cast<std::size_t>(std::max(1U, nextTagIn)), outSpan.size()) : 0UZ; // '0UZ' -> DONE, produced enough samples
 
         if (!values.empty()) {
             for (std::size_t i = 0; i < nSamples; ++i) {
                 if (_valueIndex == values.size()) {
                     _valueIndex = 0;
                 }
-                output[i] = values[_valueIndex];
+                outSpan[i] = values[_valueIndex];
                 _valueIndex++;
             }
         } else {
             if (mark_tag) {
-                output[0] = tagGenerated ? static_cast<T>(1) : static_cast<T>(0);
+                outSpan[0] = tagGenerated ? static_cast<T>(1) : static_cast<T>(0);
             } else {
                 for (std::size_t i = 0; i < nSamples; ++i) {
-                    output[i] = static_cast<T>(_nSamplesProduced + i);
+                    outSpan[i] = static_cast<T>(_nSamplesProduced + i);
                 }
             }
         }
@@ -186,12 +192,13 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         } else {
             _nSamplesProduced += static_cast<gr::Size_t>(nSamples);
         }
-        output.publish(nSamples);
+        outSpan.publish(nSamples);
         return !isInfinite() && _nSamplesProduced >= n_samples_max ? work::Status::DONE : work::Status::OK;
     }
 
 private:
-    [[nodiscard]] auto generateTag(std::string_view processFunctionName) {
+    template<typename TPublishTagFunction>
+    [[nodiscard]] auto generateTag(TPublishTagFunction&& publishTagFn, std::string_view processFunctionName) {
         struct {
             bool tagGenerated     = false;
             bool tagRepeatStarted = false;
@@ -202,7 +209,7 @@ private:
             if (verbose_console) {
                 print_tag(_tags[_tagIndex], fmt::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
-            out.publishTag(_tags[_tagIndex].map, static_cast<Tag::signed_index_type>(0)); // indices > 0 write tags in the future ... handle with care
+            publishTagFn(_tags[_tagIndex].map, static_cast<Tag::signed_index_type>(0));
             this->_outputTagsChanged = true;
             _tagIndex++;
             if (repeat_tags && _tagIndex == _tags.size()) {
@@ -210,7 +217,6 @@ private:
                 result.tagRepeatStarted = true;
             }
             result.tagGenerated = true;
-            return result;
         }
         return result;
     }
@@ -253,7 +259,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     constexpr T processOne(const T& input) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        if (this->input_tags_present()) {
+        if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
                 print_tag(tag, fmt::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
@@ -272,7 +278,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (this->input_tags_present()) {
+        if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
                 print_tag(tag, fmt::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
@@ -330,7 +336,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     constexpr void processOne(const T& input) // N.B. non-SIMD since we need a sample-by-sample accurate tag detection
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        if (this->input_tags_present()) {
+        if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
                 print_tag(tag, fmt::format("{}::processOne(...1)    \t received tag at {:6}", this->name, _nSamplesProduced));
@@ -352,7 +358,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     constexpr work::Status processBulk(std::span<const T> input)
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (this->input_tags_present()) {
+        if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
                 print_tag(tag, fmt::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));

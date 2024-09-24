@@ -70,7 +70,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         if (newSettings.contains("rx_antennae")) {
             setAntennae();
         }
-        if (newSettings.contains("rx_center_frequency ") || newSettings.contains("sample_rate")) {
+        if (newSettings.contains("rx_center_frequency") || newSettings.contains("sample_rate")) {
             setCenterFrequency();
         }
         if (newSettings.contains("rx_gains")) {
