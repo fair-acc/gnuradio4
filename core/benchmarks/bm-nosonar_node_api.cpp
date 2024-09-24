@@ -20,10 +20,12 @@ inline constexpr gr::Size_t N_SAMPLES = gr::util::round_up(10'000, 1024);
 using namespace gr::blocks::math;
 
 template<typename T, char op>
-struct math_bulk_op : public gr::Block<math_bulk_op<T, op>, gr::PortInNamed<T, "in", gr::RequiredSamples<1, N_MAX>>, gr::PortOutNamed<T, "out", gr::RequiredSamples<1, N_MAX>>> {
+struct math_bulk_op : public gr::Block<math_bulk_op<T, op>> {
+    gr::PortIn<T, gr::RequiredSamples<1, N_MAX>>  in;
+    gr::PortOut<T, gr::RequiredSamples<1, N_MAX>> out;
     T value = static_cast<T>(1.0f);
 
-    GR_MAKE_REFLECTABLE(math_bulk_op, value);
+    GR_MAKE_REFLECTABLE(math_bulk_op, in, out, value);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& a) const noexcept {
@@ -133,10 +135,12 @@ static_assert(gr::traits::block::can_processOne_simd<add<float, 1>>);
 // It doesn't need to be enabled for reflection.
 //
 template<typename T, char op>
-struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>, gr::PortInNamed<T, "in", gr::RequiredSamples<1, N_MAX>>, gr::PortOutNamed<T, "out", gr::RequiredSamples<1, N_MAX>>> {
+struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>> {
+    gr::PortIn<T, gr::RequiredSamples<1, N_MAX>>  in;
+    gr::PortOut<T, gr::RequiredSamples<1, N_MAX>> out;
     T value = static_cast<T>(1.0f);
 
-    GR_MAKE_REFLECTABLE(gen_operation_SIMD, value);
+    GR_MAKE_REFLECTABLE(gen_operation_SIMD, in, out, value);
 
     gr::work::Result work(std::size_t requested_work) noexcept {
         auto& out_port = outputPort<0, gr::PortType::STREAM>(this);
@@ -161,19 +165,19 @@ struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>, gr::Port
             std::size_t i      = 0;
             const auto  _value = value;
             for (; i + V::size() <= n_to_publish; i += V::size()) {
-                V in(&input[i], element_aligned);
+                V x(&input[i], element_aligned);
                 if constexpr (op == '*') {
-                    in *= _value;
+                    x *= _value;
                 } else if constexpr (op == '/') {
-                    in /= _value;
+                    x /= _value;
                 } else if constexpr (op == '+') {
-                    in += _value;
+                    x += _value;
                 } else if constexpr (op == '-') {
-                    in -= _value;
+                    x -= _value;
                 } else {
                     static_assert(gr::meta::always_false<T>, "operation not implemented");
                 }
-                in.copy_to(&pSpan[i], element_aligned);
+                x.copy_to(&pSpan[i], element_aligned);
             }
 
             // #### N.B. later high-level user-function finishes here
@@ -272,13 +276,17 @@ constexpr std::size_t simd_size() noexcept {
 namespace stdx = vir::stdx;
 
 template<typename From, typename To, std::size_t N_MIN = 1 /* SIMD size */, std::size_t N_MAX = N_MAX>
-class convert : public gr::Block<convert<From, To, N_MIN, N_MAX>, gr::PortInNamed<From, "in", gr::RequiredSamples<N_MIN, N_MAX>>, gr::PortOutNamed<To, "out", gr::RequiredSamples<N_MIN, N_MAX>>> {
+class convert : public gr::Block<convert<From, To, N_MIN, N_MAX>> {
     static_assert(stdx::is_simd_v<From> != stdx::is_simd_v<To>, "either input xor output must be SIMD capable");
     constexpr static std::size_t from_simd_size = stdx::simd_size<From>();
     constexpr static std::size_t to_simd_size   = stdx::simd_size<To>();
     constexpr static std::size_t simd_size      = std::max(from_simd_size, to_simd_size);
 
 public:
+    gr::PortIn<From, gr::RequiredSamples<N_MIN, N_MAX>> in;
+    gr::PortOut<To, gr::RequiredSamples<N_MIN, N_MAX>>  out;
+    GR_MAKE_REFLECTABLE(convert, in, out);
+
     gr::work::Status work() noexcept {
         using namespace stdx;
         auto& out_port = outputPort<"out">(this);

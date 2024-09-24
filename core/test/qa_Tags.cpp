@@ -89,10 +89,10 @@ const boost::ut::suite TagTests = [] {
 
     "TagReflection"_test = [] {
         static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
-        static_assert(refl::descriptor::type_descriptor<gr::Tag>::name == "gr::Tag");
-        static_assert(refl::member_list<Tag>::size == 2, "index and map being declared");
-        static_assert(refl::trait::get_t<0, refl::member_list<Tag>>::name == "index", "class field index is public API");
-        static_assert(refl::trait::get_t<1, refl::member_list<Tag>>::name == "map", "class field map is public API");
+        static_assert(gr::refl::class_name<gr::Tag> == "gr::Tag");
+        static_assert(gr::refl::data_member_count<Tag> == 2, "index and map being declared");
+        static_assert(gr::refl::data_member_name<Tag, 0> == "index", "class field index is public API");
+        static_assert(gr::refl::data_member_name<Tag, 1> == "map", "class field map is public API");
     };
 
     "DefaultTags"_test = [] {

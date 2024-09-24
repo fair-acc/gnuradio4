@@ -233,7 +233,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         vir-reflect-light
         GIT_REPOSITORY https://github.com/mattkretz/vir-reflect-light.git
-        GIT_TAG 9f38bb3
+        GIT_TAG a585eeed9d5b49286cd3561ee72acac78f0c16bb
 )
 
 FetchContent_Declare(
@@ -251,6 +251,7 @@ endif ()
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
+target_link_libraries(pmtv INTERFACE refl-cpp)
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)

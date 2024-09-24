@@ -36,21 +36,21 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
     if (fileName1.contains("null")) {
         fmt::println("write channel0 to NullSink");
         auto& fileSink1 = flow.emplaceBlock<testing::NullSink<TDataType>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0UZ>(source).to<"in">(fileSink1))) << "error connecting NullSink1";
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out0">(source).to<"in">(fileSink1))) << "error connecting NullSink1";
     } else {
         fmt::println("write to fileName1: {}", fileName1);
         auto& fileSink1 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName1}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0UZ>(source).to<"in">(fileSink1))) << "error connecting BasicFileSink1";
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out0">(source).to<"in">(fileSink1))) << "error connecting BasicFileSink1";
     }
 
     if (fileName2.contains("null")) {
         fmt::println("write channel1 to NullSink");
         auto& fileSink2 = flow.emplaceBlock<testing::NullSink<TDataType>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0UZ>(source).to<"in">(fileSink2))) << "error connecting NullSink2";
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out1">(source).to<"in">(fileSink2))) << "error connecting NullSink2";
     } else {
         fmt::println("write to fileName2: {}", fileName2);
         auto& fileSink2 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName2}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 1UZ>(source).to<"in">(fileSink2))) << "error connecting BasicFileSink2";
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out1">(source).to<"in">(fileSink2))) << "error connecting BasicFileSink2";
     }
 
     return flow;

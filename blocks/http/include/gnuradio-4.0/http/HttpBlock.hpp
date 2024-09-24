@@ -293,8 +293,7 @@ public:
         _ready.release();
     }
 
-    void
-    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> message) {
+    void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> message) {
         gr::Block<HttpBlock<T>, BlockingIO<false>>::processMessages(port, message);
 
         std::ranges::for_each(message, [this](auto &m) {

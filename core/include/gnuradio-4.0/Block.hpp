@@ -46,29 +46,19 @@ constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>&
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
-template<std::size_t Index, PortType portType, typename Self>
+template<std::size_t Index, PortType portFlavor, PortReflectable Self>
 [[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
-    using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::input_ports::template at<Index>;
-    if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
-        using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
-        return member_descriptor()(*self);
-    } else {
-        return self->template getArgument<TRequestedPortType>();
-    }
+    using TRequestedPortType = typename traits::block::input_port_descriptors<Self, portFlavor>::template at<Index>;
+    return TRequestedPortType::getPortObject(*self);
 }
 
-template<std::size_t Index, PortType portType, typename Self>
+template<std::size_t Index, PortType portFlavor, PortReflectable Self>
 [[nodiscard]] constexpr auto& outputPort(Self* self) noexcept {
-    using TRequestedPortType = typename traits::block::ports_data<Self>::template for_type<portType>::output_ports::template at<Index>;
-    if constexpr (traits::block::block_defines_ports_as_member_variables<Self>) {
-        using member_descriptor = traits::block::get_port_member_descriptor<Self, TRequestedPortType>;
-        return member_descriptor()(*self);
-    } else {
-        return self->template getArgument<TRequestedPortType>();
-    }
+    using TRequestedPortType = typename traits::block::output_port_descriptors<Self, portFlavor>::template at<Index>;
+    return TRequestedPortType::getPortObject(*self);
 }
 
-template<fixed_string Name, typename Self>
+template<fixed_string Name, PortReflectable Self>
 [[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
     constexpr int Index = meta::indexForName<Name, traits::block::all_input_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
@@ -77,7 +67,7 @@ template<fixed_string Name, typename Self>
     return inputPort<Index, PortType::ANY, Self>(self);
 }
 
-template<fixed_string Name, typename Self>
+template<fixed_string Name, PortReflectable Self>
 [[nodiscard]] constexpr auto& outputPort(Self* self) noexcept {
     constexpr int Index = meta::indexForName<Name, traits::block::all_output_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
@@ -86,14 +76,14 @@ template<fixed_string Name, typename Self>
     return outputPort<Index, PortType::ANY, Self>(self);
 }
 
-template<PortType portType, typename Self>
+template<PortType portFlavor, PortReflectable Self>
 [[nodiscard]] constexpr auto inputPorts(Self* self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(inputPort<Idx, portType>(self)...); }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::input_ports::size()>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(inputPort<Idx, portFlavor>(self)...); }(traits::block::input_port_descriptors<Self, portFlavor>::index_sequence);
 }
 
-template<PortType portType, typename Self>
+template<PortType portFlavor, PortReflectable Self>
 [[nodiscard]] constexpr auto outputPorts(Self* self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portType>(self)...); }(std::make_index_sequence<traits::block::ports_data<Self>::template for_type<portType>::output_ports::size>());
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portFlavor>(self)...); }(traits::block::output_port_descriptors<Self, portFlavor>::index_sequence);
 }
 
 namespace work {
@@ -229,20 +219,11 @@ enum class Category {
  * struct UserDefinedBlock : Block<UserDefinedBlock> {
  *   PortIn<float> in;
  *   PortOut<float> out;
+ *   GR_MAKE_REFLECTABLE(UserDefinedBlock, in, out);
  *   // implement one of the possible processOne or processBulk functions
  * };
- * ENABLE_REFLECTION_FOR_TEMPLATE(UserDefinedBlock, in, out);
  * @endcode
- * The macro `ENABLE_REFLECTION_FOR_TEMPLATE` since it relies on a template specialisation needs to be declared on the global scope.
  *
- * As an alternative definition that does not require the 'ENABLE_REFLECTION_FOR_TEMPLATE' macro and that also supports arbitrary
- * types for input 'T' and for the return 'R':
- * @code
- * template<typename T, typename R>
- * struct UserDefinedBlock : Block<UserDefinedBlock, PortInNamed<T, "in">, PortInNamed<R, "out">> {
- *   // implement one of the possible processOne or processBulk functions
- * };
- * @endcode
  * This implementation provides efficient compile-time static polymorphism (i.e. access to the ports, settings, etc. does
  * not require virtual functions or inheritance, which can have performance penalties in high-performance computing contexts).
  * Note: The template parameter '<Derived>' can be dropped once C++23's 'deducing this' is widely supported by compilers.
@@ -348,7 +329,7 @@ enum class Category {
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : public lifecycle::StateMachine<Derived>, public std::tuple<Arguments...> {
+class Block : public lifecycle::StateMachine<Derived> {
     static std::atomic_size_t _uniqueIdCounter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -363,7 +344,7 @@ public:
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
 
-    constexpr static bool            blockingIO    = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...> || std::disjunction_v<std::is_same<BlockingIO<false>, Arguments>...>;
+    constexpr static bool            blockingIO    = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
     template<typename T>
@@ -432,11 +413,13 @@ public:
 
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
 
+    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, unique_name, name, meta_information);
+
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
     // so these are handled in a special way
-    MsgPortInNamed<"__Builtin">  msgIn;
-    MsgPortOutNamed<"__Builtin"> msgOut;
+    MsgPortInBuiltin  msgIn;
+    MsgPortOutBuiltin msgOut;
 
     using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
     std::map<std::string, PropertyCallback> propertyCallbacks{
@@ -483,18 +466,18 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-    Block(property_map initParameters) noexcept(false)                                                                                    // N.B. throws in case of on contract violations
-        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameters) noexcept(false)                                                        // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
 
-        if constexpr (refl::is_reflectable<Derived>()) {
+        if constexpr (refl::reflectable<Derived>) {
             settings().setInitBlockParameters(initParameters);
         }
     }
 
-    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), std::tuple<Arguments...>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(std::move(other._settings)) {}
+    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(std::move(other._settings)) {}
 
     // There are a few const or conditionally const member variables,
     // we can not have a move-assignment that is equivalent to
@@ -524,25 +507,15 @@ public:
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
-        auto setPortName = [&]([[maybe_unused]] std::size_t index, auto* t) {
-            using CurrentPortType = std::remove_pointer_t<decltype(t)>;
-            if constexpr (traits::port::is_port_v<CurrentPortType>) {
-                using PortDescriptor = typename CurrentPortType::ReflDescriptor;
-                if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
-                    auto& port = (self().*(PortDescriptor::pointer));
-                    port.name  = CurrentPortType::Name;
-                }
-            } else if constexpr (traits::port::is_port_collection_v<CurrentPortType>) {
-                using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
-                if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
-                    auto&       collection     = (self().*(PortCollectionDescriptor::pointer));
-                    std::string collectionName = refl::descriptor::get_name(PortCollectionDescriptor()).data;
-                    for (auto& port : collection) {
-                        port.name = collectionName;
-                    }
+        auto setPortName = [&](std::size_t, auto* t) {
+            using Description = std::remove_pointer_t<decltype(t)>;
+            auto& port        = Description::getPortObject(self());
+            if constexpr (Description::kIsDynamicCollection) {
+                for (auto& actualPort : port) {
+                    actualPort.name = Description::Name;
                 }
             } else {
-                meta::print_types<meta::message_type<"Not a port, not a collection of ports">, CurrentPortType>{};
+                port.name = Description::Name;
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
@@ -1717,7 +1690,7 @@ public:
         return {accumulatedRequestedWork, performedWork, ioLastWorkStatus.load()};
     }
 
-    void processMessages([[maybe_unused]] const MsgPortInNamed<"__Builtin">& port, std::span<const Message> messages) {
+    void processMessages([[maybe_unused]] const MsgPortInBuiltin& port, std::span<const Message> messages) {
         using enum gr::message::Command;
         assert(std::addressof(port) == std::addressof(msgIn) && "got a message on wrong port");
 
@@ -1786,62 +1759,38 @@ inline constexpr auto for_each_type_to_string(StringFunction func) -> std::strin
 }
 
 template<typename T>
-inline constexpr std::string container_type_name() {
-    if constexpr (requires { typename T::allocator_type; }) {
-        return fmt::format("std::vector<{}>", gr::meta::type_name<typename T::value_type>());
-    } else if constexpr (requires { std::tuple_size<T>::value; }) {
-        return fmt::format("std::array<{}, {}>", gr::meta::type_name<typename T::value_type>(), std::tuple_size<T>::value);
-    } else if constexpr (requires(T a) {
-                             { std::real(a) } -> std::convertible_to<typename T::value_type>;
-                             { std::imag(a) } -> std::convertible_to<typename T::value_type>;
-                         }) {
-        return fmt::format("std::complex<{}>", gr::meta::type_name<typename T::value_type>());
-    } else { // fallback
-        return gr::meta::type_name<T>();
+constexpr std::string_view shortTypeName() {
+    if constexpr (std::is_same_v<T, gr::property_map>) {
+        return "gr::property_map";
+    } else {
+        return refl::type_name<T>;
     }
-}
+};
+
 } // namespace detail
 
 template<typename TBlock, typename TDecayedBlock>
 inline void checkBlockContracts() {
     // N.B. some checks could be evaluated during compile time but the expressed intent is to do this during runtime to allow
     // for more verbose feedback on method signatures etc.
-    constexpr static auto processMembers = []<typename Func>(Func func) {
-        if constexpr (detail::HasBaseType<TDecayedBlock>) {
-            using BaseType = typename TDecayedBlock::base_t;
-            if constexpr (refl::is_reflectable<BaseType>()) {
-                refl::util::for_each(refl::reflect<BaseType>().members, func);
-            }
-        }
-        if constexpr (refl::is_reflectable<TDecayedBlock>()) {
-            refl::util::for_each(refl::reflect<TDecayedBlock>().members, func);
-        }
-    };
-
-    constexpr static auto shortTypeName = []<typename T>() {
-        if constexpr (std::is_same_v<T, gr::property_map>) {
-            return "gr::property_map";
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            return "std::string";
-        } else if constexpr (requires { typename T::value_type; }) {
-            return detail::container_type_name<T>();
-        } else {
-            return gr::meta::type_name<T>();
-        }
-    };
-
-    constexpr static auto checkSettingsTypes = [](auto member) {
-        using MemberType           = decltype(member)::value_type;
-        using RawType              = std::remove_cvref_t<MemberType>;
-        using Type                 = std::remove_cvref_t<unwrap_if_wrapped_t<RawType>>;
-        constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
-        // N.B. this function is compile-time ready but static_assert does not allow for configurable error messages
-        if constexpr (!gr::settings::isSupportedType<Type>() && !(traits::port::is_port_v<Type> || traits::port::is_port_collection_v<Type>)) {
-            throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
-                gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", get_display_name(member), shortTypeName.template operator()<Type>()));
-        }
-    };
-    processMembers(checkSettingsTypes);
+    if constexpr (refl::reflectable<TDecayedBlock>) {
+        []<std::size_t... Idxs>(std::index_sequence<Idxs...>) {
+            (
+                [] {
+                    using MemberType           = refl::data_member_type<TDecayedBlock, Idxs>;
+                    using RawType              = std::remove_cvref_t<MemberType>;
+                    using Type                 = std::remove_cvref_t<unwrap_if_wrapped_t<RawType>>;
+                    constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
+                    // N.B. this function is compile-time ready but static_assert does not allow for configurable error
+                    // messages
+                    if constexpr (!gr::settings::isSupportedType<Type>() && !traits::port::AnyPort<Type>) {
+                        throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
+                            gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>()));
+                    }
+                }(),
+                ...);
+        }(std::make_index_sequence<refl::data_member_count<TDecayedBlock>>());
+    }
 
     using TDerived = typename TDecayedBlock::derived_t;
     if constexpr (requires { &TDerived::work; }) {
@@ -1862,21 +1811,21 @@ fmt::format(R"(auto processOne({}) const noexcept {{
     /* add code here */
     return {}{}{};
 }})",
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }),
-    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2),
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2),
 fmt::format(R"(auto processOne({}) {{
     /* add code here */
     return {}{}{};
 }})",
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }),
-    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2),
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2),
 fmt::format(R"(std::tuple<{}> processOne({}) {{
     /* add code here */
     return {}{}{};
 }})",
-   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}", shortTypeName.template operator()<T>()); }), //
-   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", shortTypeName.template operator()<T>(), index); }), //
-   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", shortTypeName.template operator()<T>()); }), b2)
+   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}", detail::shortTypeName<T>()); }), //
+   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }), //
+   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2)
 );
 
 std::string signaturesProcessBulk = fmt::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
@@ -1884,23 +1833,23 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
     /* add code here */
     return gr::work::Status::OK;
 }})", //
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<{}> out{}", shortTypeName.template operator()<T>(), index); })),
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<{}> out{}", detail::shortTypeName<T>(), index); })),
 fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
     /* add code here */
     return gr::work::Status::OK;
 }})", //
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("OutputSpanLike auto out{}", shortTypeName.template operator()<T>(), index); })));
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("OutputSpanLike auto out{}", detail::shortTypeName<T>(), index); })));
         // clang-format on
 
         bool has_port_collection = false;
         TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
-        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", shortTypeName.template operator()<TDecayedBlock>(), signatures));
+        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
     }
 
     // test for optional Drawable interface
@@ -1914,8 +1863,6 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
 template<typename Derived, typename... Arguments>
 inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{0UZ};
 } // namespace gr
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename... Arguments), (gr::Block<T, Arguments...>), input_chunk_size, output_chunk_size, stride, disconnect_on_done, unique_name, name, meta_information);
 
 namespace gr {
 
@@ -1937,22 +1884,20 @@ template<BlockLike TBlock>
         ret += fmt::format("{}:{} ", index, type_name);
     });
     ret += fmt::format("\n**Parameters:**\n");
-    if constexpr (refl::is_reflectable<DerivedBlock>()) {
-        for_each(refl::reflect<DerivedBlock>().members, [&]<typename TFieldMeta>(TFieldMeta member) {
-            using RawType = std::remove_cvref_t<typename TFieldMeta::value_type>;
+    if constexpr (refl::reflectable<DerivedBlock>) {
+        refl::for_each_data_member_index<DerivedBlock>([&](auto kIdx) {
+            using RawType = std::remove_cvref_t<refl::data_member_type<DerivedBlock, kIdx>>;
             using Type    = unwrap_if_wrapped_t<RawType>;
-
-            if constexpr (is_readable(member) && (std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
+            if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
-                        RawType::visible() ? "" : "_", //
-                        refl::detail::get_type_name<Type>().c_str(),
-                        get_display_name_const(member).c_str(), //
+                        RawType::visible() ? "" : "_",                                                             //
+                        refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view(), //
                         RawType::description(), RawType::unit(),
                         RawType::documentation(), //
                         RawType::visible() ? "" : "_");
                 } else {
-                    ret += fmt::format("_{:10} {}_\n", refl::detail::get_type_name<Type>().c_str(), get_display_name_const(member).c_str());
+                    ret += fmt::format("_{:10} {}_\n", refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view());
                 }
             }
         });
@@ -1963,70 +1908,29 @@ template<BlockLike TBlock>
 
 namespace detail {
 
-template<typename Type>
-std::string reflFirstTypeName() {
-    //
-    // Using refl cpp for getting names of types does not work
-    // with class templates. It returns "Template<T...>" as the name
-    // instead of replacing "T..." with the names of types.
-    //
-    // Until we get proper reflection support in C++, we need to
-    // cover the special cases manually.
-    //
-    if constexpr (DataSetLike<Type>) {
-        return fmt::format("gr::DataSet<{}>", reflFirstTypeName<typename Type::value_type>());
-    } else if constexpr (UncertainValueLike<Type>) {
-        return fmt::format("gr::UncertainValue<{}>", reflFirstTypeName<typename Type::value_type>());
-    } else if constexpr (pmtv::Complex<Type>) {
-        return fmt::format("std::complex<{}>", reflFirstTypeName<typename Type::value_type>());
-    } else if constexpr (refl::is_reflectable<Type>()) {
-        return refl::reflect<Type>().name.str();
+template<vir::fixed_string_arg Acc>
+struct fixed_string_concat_helper {
+    static constexpr auto value = Acc;
 
-    } else {
-        return meta::type_name<Type>;
+    template<vir::fixed_string_arg Append>
+    constexpr auto operator%(vir::fixed_string<Append>) const {
+        if constexpr (Acc.empty) {
+            return fixed_string_concat_helper<Append>{};
+        } else {
+            return fixed_string_concat_helper<Acc + "," + Append>{};
+        }
     }
-}
+};
 
 template<typename... Types>
-std::string encodeListOfTypes() {
-    using namespace std::string_literals;
-    struct accumulator {
-        std::string value;
-
-        accumulator& operator%(const std::string& type) {
-            if (value.empty()) {
-                value = type;
-            } else {
-                value += ","s + type;
-            }
-
-            return *this;
-        }
-    };
-
-    return (accumulator{} % ... % reflFirstTypeName<Types>()).value;
-}
-
-template<typename TBlock>
-std::string blockBaseName() {
-    auto blockName = reflFirstTypeName<TBlock>();
-    auto it        = std::ranges::find(blockName, '<');
-    return std::string(blockName.begin(), it);
-}
-
-template<auto Value>
-std::string nttpToString() {
-    if constexpr (magic_enum::is_scoped_enum_v<decltype(Value)> || magic_enum::is_unscoped_enum_v<decltype(Value)>) {
-        return std::string(magic_enum::enum_name(Value));
-    } else {
-        return std::to_string(Value);
-    }
+constexpr auto encodeListOfTypes() {
+    return vir::fixed_string<(fixed_string_concat_helper<"">{} % ... % refl::type_name<Types>).value>();
 }
 } // namespace detail
 
 template<typename... Types>
 struct BlockParameters : meta::typelist<Types...> {
-    static std::string toString() { return detail::encodeListOfTypes<Types...>(); }
+    static constexpr /*vir::fixed_string*/ auto toString() { return detail::encodeListOfTypes<Types...>(); }
 };
 
 /**
@@ -2046,7 +1950,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         using ThisBlock = TBlock<Type>;
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<TBlock<Type>>(), detail::reflFirstTypeName<Type>());
+        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<TBlock<Type>>, vir::refl::type_name<Type>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2070,7 +1974,7 @@ inline constexpr int registerBlockTT(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type1, typename Type2> {
         using ThisBlock = TBlock<Type1, Type2>;
         registerInstance.template addBlockType<ThisBlock>( //
-            detail::blockBaseName<ThisBlock>(), detail::reflFirstTypeName<Type1>() + "," + detail::reflFirstTypeName<Type2>());
+            vir::refl::class_name<ThisBlock>, vir::refl::type_name<Type1> + vir::fixed_string<",">() + vir::refl::type_name<Type2>);
     };
 
     std::apply(
@@ -2086,16 +1990,17 @@ inline constexpr int registerBlockTT(TRegisterInstance& registerInstance) {
     return {};
 }
 
-template<template<typename, typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type> {
-        using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>>;
-        static_assert(meta::is_instantiation_of<Type, BlockParameters>);
-        static_assert(Type::size == 2);
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), Type::toString());
-    };
-    ((addBlockType.template operator()<TBlockParameters>()), ...);
-    return {};
+template<template<typename, typename> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
+inline int registerBlock(auto& registerInstance) {
+    using ThisBlock = TBlock<typename TBlockParameter0::template at<0>, typename TBlockParameter0::template at<1>>;
+    static_assert(meta::is_instantiation_of<TBlockParameter0, BlockParameters>);
+    static_assert(TBlockParameter0::size == 2);
+    registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, TBlockParameter0::toString());
+    if constexpr (sizeof...(TBlockParameters) != 0) {
+        return registerBlock<TBlock, TBlockParameters...>(registerInstance);
+    } else {
+        return {};
+    }
 }
 
 template<template<typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
@@ -2103,8 +2008,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-            detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>());
+        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
+            vir::refl::type_name<Type> + vir::fixed_string<",">() + vir::refl::nttp_name<Value0>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2116,8 +2021,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-            Type::toString() + "," + detail::nttpToString<Value0>());
+        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
+            Type::toString() + vir::fixed_string<",">() + vir::refl::nttp_name<Value0>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2128,8 +2033,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-            detail::reflFirstTypeName<Type>() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
+        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
+            vir::refl::type_name<Type> + vir::fixed_string<",">() + vir::refl::nttp_name<Value0> + vir::fixed_string<",">() + vir::refl::nttp_name<Value1>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2141,8 +2046,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(detail::blockBaseName<ThisBlock>(), //
-            Type::toString() + "," + detail::nttpToString<Value0>() + "," + detail::nttpToString<Value1>());
+        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
+            Type::toString() + vir::fixed_string<",">() + vir::refl::nttp_name<Value0> + vir::fixed_string<",">() + vir::refl::nttp_name<Value1>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};

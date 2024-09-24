@@ -60,11 +60,11 @@ struct ProcessMessageStdSpanBlock : gr::Block<ProcessMessageStdSpanBlock<T>> {
 
     T processOne(T) { return {}; }
 
-    void processMessages(gr::MsgPortInNamed<"__Builtin">&, std::span<const gr::Message>) {}
+    void processMessages(gr::MsgPortInBuiltin&, std::span<const gr::Message>) {}
 };
 
-static_assert(gr::traits::block::can_processMessagesForPortReaderSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
-static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(gr::traits::block::can_processMessagesForPortReaderSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInBuiltin>);
+static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInBuiltin>);
 
 template<typename T>
 struct ProcessMessageReaderSpanBlock : gr::Block<ProcessMessageReaderSpanBlock<T>> {
@@ -72,11 +72,11 @@ struct ProcessMessageReaderSpanBlock : gr::Block<ProcessMessageReaderSpanBlock<T
 
     T processOne(T) { return {}; }
 
-    void processMessages(gr::MsgPortInNamed<"__Builtin">&, gr::ReaderSpanLike auto) {}
+    void processMessages(gr::MsgPortInBuiltin&, gr::ReaderSpanLike auto) {}
 };
 
-static_assert(gr::traits::block::can_processMessagesForPortReaderSpan<ProcessMessageReaderSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
-static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageReaderSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(gr::traits::block::can_processMessagesForPortReaderSpan<ProcessMessageReaderSpanBlock<int>, gr::MsgPortInBuiltin>);
+static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageReaderSpanBlock<int>, gr::MsgPortInBuiltin>);
 
 using namespace boost::ut;
 using namespace gr;

@@ -42,10 +42,10 @@ protected:
     std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
     JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
-    MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
-    MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
-    std::vector<gr::Message>         _pendingMessagesToChildren;
-    bool                             _messagePortsConnected = false;
+    MsgPortOutForChildren    _toChildMessagePort;
+    MsgPortInFromChildren    _fromChildMessagePort;
+    std::vector<gr::Message> _pendingMessagesToChildren;
+    bool                     _messagePortsConnected = false;
 
 public:
     using base_t = Block<Derived>;
@@ -101,7 +101,7 @@ public:
         _pendingMessagesToChildren.clear();
     }
 
-    void processMessages(gr::MsgPortInNamed<"__Builtin">& port, std::span<const gr::Message> messages) {
+    void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> messages) {
         base_t::processMessages(port, messages); // filters messages and calls own property handler
         for (const gr::Message& msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
@@ -237,7 +237,6 @@ protected:
         std::lock_guard lock(_jobListsMutex);
         _graph.forEachBlockMutable([this](auto& block) {
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING));
-            for_each_port([](auto& port) { port.publishPendingTags(); }, outputPorts<PortType::STREAM>(this));
         });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);

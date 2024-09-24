@@ -84,7 +84,7 @@ public:
 class BlockModel {
 public:
     struct NamedPortCollection {
-        std::string                  name;
+        std::string_view             name;
         std::vector<gr::DynamicPort> ports;
 
         [[nodiscard]] auto disconnect() {
@@ -157,10 +157,10 @@ public:
         }
     }
 
-    MsgPortInNamed<"__Builtin">*  msgIn;
-    MsgPortOutNamed<"__Builtin">* msgOut;
+    MsgPortInBuiltin*  msgIn;
+    MsgPortOutBuiltin* msgOut;
 
-    static std::string portName(const DynamicPortOrCollection& portOrCollection) {
+    static std::string_view portName(const DynamicPortOrCollection& portOrCollection) {
         return std::visit(meta::overloaded{                                          //
                               [](const gr::DynamicPort& port) { return port.name; }, //
                               [](const NamedPortCollection& namedCollection) { return namedCollection.name; }},
@@ -412,42 +412,25 @@ private:
             return;
         }
 
-        auto registerPort = [this]<typename Direction, typename ConstIndex, typename CurrentPortType>(DynamicPorts& where, [[maybe_unused]] Direction direction, [[maybe_unused]] ConstIndex index, CurrentPortType*) noexcept {
-            if constexpr (traits::port::is_port_v<CurrentPortType>) {
-                using PortDescriptor = typename CurrentPortType::ReflDescriptor;
-                if constexpr (refl::trait::is_descriptor_v<PortDescriptor>) {
-                    auto& port = (blockRef().*(PortDescriptor::pointer));
-                    if (port.name.empty()) {
-                        port.name = refl::descriptor::get_name(PortDescriptor()).data;
-                    }
-                    processPort(where, port);
-                } else {
-                    // We can also have ports defined as template parameters
-                    if constexpr (Direction::value == PortDirection::INPUT) {
-                        processPort(where, gr::inputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
-                    } else {
-                        processPort(where, gr::outputPort<ConstIndex::value, PortType::ANY>(&blockRef()));
-                    }
+        auto registerPort = [this]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
+            if constexpr (CurrentPortType::kIsDynamicCollection) {
+                auto&               collection = CurrentPortType::getPortObject(blockRef());
+                NamedPortCollection result;
+                result.name = CurrentPortType::Name;
+                for (auto& port : collection) {
+                    processPort(result.ports, port);
                 }
+                where.push_back(std::move(result));
             } else {
-                using PortCollectionDescriptor = typename CurrentPortType::value_type::ReflDescriptor;
-                if constexpr (refl::trait::is_descriptor_v<PortCollectionDescriptor>) {
-                    auto&               collection = (blockRef().*(PortCollectionDescriptor::pointer));
-                    NamedPortCollection result;
-                    result.name = refl::descriptor::get_name(PortCollectionDescriptor()).data;
-                    for (auto& port : collection) {
-                        processPort(result.ports, port);
-                    }
-                    where.push_back(std::move(result));
-                } else {
-                    static_assert(meta::always_false<PortCollectionDescriptor>, "Port collections are only supported for member variables");
-                }
+                auto& port = CurrentPortType::getPortObject(blockRef());
+                port.name  = CurrentPortType::Name;
+                processPort(where, port);
             }
         };
 
         using Node = std::remove_cvref_t<decltype(blockRef())>;
-        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts, std::integral_constant<PortDirection, PortDirection::INPUT>{});
-        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts, std::integral_constant<PortDirection, PortDirection::OUTPUT>{});
+        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts);
+        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts);
 
         _dynamicPortsLoaded = true;
     }
