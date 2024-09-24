@@ -21,6 +21,8 @@ public:
     gr::PortOut<T> out;
     T              value = 1;
 
+    GR_MAKE_REFLECTABLE(FixedSource, out);
+
     [[nodiscard]] constexpr auto
     processOne() noexcept {
         return value;
@@ -32,12 +34,13 @@ public:
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(FixedSource, out);
-
 template<typename T>
 class HttpTestSink : public gr::Block<HttpTestSink<T>> {
 public:
     gr::PortIn<T>         in;
+
+    GR_MAKE_REFLECTABLE(HttpTestSink, in);
+
     T                     value{};
     std::function<void()> stopFunc;
 
@@ -54,8 +57,6 @@ public:
         value = {};
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(HttpTestSink, in);
 
 const boost::ut::suite HttpBlocktests = [] {
     using namespace boost::ut;

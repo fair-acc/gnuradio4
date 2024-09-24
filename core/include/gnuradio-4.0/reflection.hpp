@@ -5,7 +5,9 @@
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
-#include <refl.hpp>
+#include <vir/reflect-light.h>
+
+#define GR_MAKE_REFLECTABLE VIR_MAKE_REFLECTABLE
 
 /**
  * The following macros are helpers to wrap around the existing refl-cpp macros: https://github.com/veselink1/refl-cpp

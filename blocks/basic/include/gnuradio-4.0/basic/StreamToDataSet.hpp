@@ -49,6 +49,8 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     A<float, "signal_min", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_min = 0.f;
     A<float, "signal_max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = 1.f;
 
+    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, out, filter, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+
     // internal trigger state
     HistoryBuffer<T> _history{MIN_BUFFER_SIZE + n_pre};
     TMatcher         _matcher{};
@@ -362,7 +364,6 @@ using StreamFilter = StreamFilterImpl<T, true>;
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool streamOut, typename Matcher), (gr::basic::StreamFilterImpl<T, streamOut, Matcher>), filter, in, out, filter, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 static_assert(gr::HasProcessBulkFunction<gr::basic::StreamFilterImpl<float>>);
 
 inline static auto registerStreamFilters = gr::registerBlock<gr::basic::StreamToDataSet, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::basic::StreamFilter, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());

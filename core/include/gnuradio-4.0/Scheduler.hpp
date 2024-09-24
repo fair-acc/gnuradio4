@@ -54,6 +54,8 @@ public:
     Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
     Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
 
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio);
+
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
     [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
@@ -480,7 +482,5 @@ private:
     }
 };
 } // namespace gr::scheduler
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::scheduler::ExecutionPolicy execution, gr::profiling::ProfilerLike TProfiler), (gr::scheduler::SchedulerBase<T, execution, TProfiler>), timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio);
 
 #endif // GNURADIO_SCHEDULER_HPP

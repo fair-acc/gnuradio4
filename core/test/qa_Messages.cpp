@@ -24,6 +24,8 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
     gr::PortOut<T> out{};
     T              factor = static_cast<T>(1.0f);
 
+    GR_MAKE_REFLECTABLE(TestBlock, in, out, factor);
+
     void settingsChanged(const property_map& /* oldSettings */, const property_map& newSettings) {
         if (newSettings.contains("factor")) {
             this->notifyListeners("Settings", {{"factor", newSettings.at("factor")}});
@@ -51,8 +53,6 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
 };
 
 } // namespace gr::testing
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::TestBlock, in, out, factor);
 
 template<typename T>
 struct ProcessMessageStdSpanBlock : gr::Block<ProcessMessageStdSpanBlock<T>> {

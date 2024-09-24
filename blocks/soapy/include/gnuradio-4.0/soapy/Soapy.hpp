@@ -54,6 +54,8 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     A<gr::Size_t, "max overflow count", Doc<"0: disable">>                                    max_overflow_count = 10U;
     A<gr::Size_t, "max fragment count", Doc<"0: disable">>                                    max_fragment_count = 100U;
 
+    GR_MAKE_REFLECTABLE(SoapyBlock, out, device, device_parameter, sample_rate, rx_channels, rx_antennae, rx_center_frequency, rx_bandwdith, rx_gains, max_chunck_size, max_time_out_us, max_overflow_count);
+
     Device                          _device{};
     Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
     gr::Size_t                      _fragmentCount = 0U;
@@ -290,11 +292,6 @@ static_assert(std::is_constructible_v<SoapyBlock<std::complex<float>>, gr::prope
 static_assert(std::is_constructible_v<SoapySimpleSource<std::complex<float>>, gr::property_map>, "SoapyBlock not default constructible w/ property_map");
 
 } // namespace gr::blocks::soapy
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t nPorts), (gr::blocks::soapy::SoapyBlock<T, nPorts>), out, //
-    device, device_parameter, sample_rate,                                                                             //
-    rx_channels, rx_antennae, rx_center_frequency, rx_bandwdith, rx_gains,                                             //
-    max_chunck_size, max_time_out_us, max_overflow_count)
 
 const inline auto registerSoapy = gr::registerBlock<gr::blocks::soapy::SoapySimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry()) //
                                   | gr::registerBlock<gr::blocks::soapy::SoapyDualSimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry());

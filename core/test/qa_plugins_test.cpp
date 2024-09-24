@@ -21,6 +21,8 @@ public:
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
+    GR_MAKE_REFLECTABLE(builtin_multiply, in, out);
+
     builtin_multiply() = delete;
 
     template<typename Arg, typename ArgV = std::remove_cvref_t<Arg>>
@@ -31,8 +33,6 @@ public:
 
     [[nodiscard]] constexpr auto processOne(T a) const noexcept { return a * _factor; }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out);
 
 struct TestContext {
     gr::PluginLoader loader;

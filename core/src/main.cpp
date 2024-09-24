@@ -10,24 +10,26 @@ template<typename T>
 struct CountSource : public gr::Block<CountSource<T>> {
     gr::PortOut<T> random;
 
+    GR_MAKE_REFLECTABLE(CountSource, random);
+
     constexpr T processOne() { return 42; }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, random);
 
 template<typename T>
 struct ExpectSink : public gr::Block<ExpectSink<T>> {
     gr::PortIn<T> sink;
 
+    GR_MAKE_REFLECTABLE(ExpectSink, sink);
+
     void processOne(T value) { std::cout << value << std::endl; }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(ExpectSink, sink);
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 struct scale : public gr::Block<scale<T, Scale, R>> {
     gr::PortIn<T>  original;
     gr::PortOut<R> scaled;
+
+    GR_MAKE_REFLECTABLE(scale, original, scaled);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a) const noexcept {
@@ -35,22 +37,19 @@ struct scale : public gr::Block<scale<T, Scale, R>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
-
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 struct adder : public gr::Block<adder<T>> {
     gr::PortIn<T>  addend0;
     gr::PortIn<T>  addend1;
     gr::PortOut<R> sum;
 
+    GR_MAKE_REFLECTABLE(adder, addend0, addend1, sum);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
         return a + b;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
-using gr::PortType::STREAM, gr::PortDirection::INPUT, gr::PortDirection::OUTPUT;
 
 template<typename T, std::size_t Count = 2>
 class duplicate : public gr::Block<duplicate<T, Count>, gr::meta::typelist<gr::PortInNamed<T, "in">>, gr::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
@@ -72,6 +71,8 @@ struct delay : public gr::Block<delay<T, Depth>> {
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
 
+    GR_MAKE_REFLECTABLE(delay, in, out);
+
     [[nodiscard]] constexpr T processOne(T val) noexcept {
         T ret       = buffer[pos];
         buffer[pos] = val;
@@ -83,8 +84,6 @@ struct delay : public gr::Block<delay<T, Depth>> {
         return ret;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t Depth), (delay<T, Depth>), in, out);
 
 int main() {
     using gr::merge;

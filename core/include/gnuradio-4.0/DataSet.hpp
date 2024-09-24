@@ -103,6 +103,8 @@ struct DataSet {
     // meta data
     std::vector<pmt_map>          meta_information{};
     std::vector<std::vector<Tag>> timing_events{};
+
+    GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges, meta_information, timing_events);
 };
 
 static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
@@ -124,6 +126,8 @@ struct Tensor {
 
     // meta data
     std::vector<pmt_map> meta_information{};
+
+    GR_MAKE_REFLECTABLE(Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information);
 };
 
 static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
@@ -138,6 +142,8 @@ struct Packet {
     std::int64_t         timestamp = 0;   // UTC timestamp [ns]
     std::vector<T>       signal_values{}; // size = \PI_i extents[i
     std::vector<pmt_map> meta_information{};
+
+    GR_MAKE_REFLECTABLE(Packet, timestamp, signal_values, meta_information);
 };
 
 static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
@@ -145,10 +151,5 @@ static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity")
 static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
 
 } // namespace gr
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges,
-                               meta_information, timing_events)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::Packet, timestamp, signal_values, meta_information)
 
 #endif // GNURADIO_DATASET_HPP

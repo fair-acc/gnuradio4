@@ -22,6 +22,8 @@ public:
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
+    GR_MAKE_REFLECTABLE(builtin_multiply, in, out, factor);
+
     builtin_multiply() = delete;
 
     builtin_multiply(gr::property_map properties) {
@@ -34,8 +36,6 @@ public:
     [[nodiscard]] constexpr auto processOne(T a) const noexcept { return a * factor; }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out, factor);
-
 template<typename T>
 class builtin_counter : public gr::Block<builtin_counter<T>> {
 public:
@@ -43,6 +43,8 @@ public:
 
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(builtin_counter, in, out);
 
     [[nodiscard]] constexpr auto processOne(T a) const noexcept {
         s_event_count++;
@@ -52,7 +54,6 @@ public:
 
 template<typename T>
 std::size_t builtin_counter<T>::s_event_count = 0;
-ENABLE_REFLECTION_FOR_TEMPLATE(builtin_counter, in, out);
 
 template<typename T>
 struct MultiAdder : public gr::Block<MultiAdder<T>> {
@@ -60,6 +61,8 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
     gr::PortOut<T>             out;
 
     gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Doc<"variable number of inputs">, gr::Limits<1U, 32U>> n_inputs{0U};
+
+    GR_MAKE_REFLECTABLE(MultiAdder, inputs, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
@@ -93,8 +96,6 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
         return gr::work::Status::OK;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (MultiAdder<T>), inputs, out, n_inputs);
 static_assert(gr::HasProcessBulkFunction<MultiAdder<float>>);
 
 auto registerMultiply = gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry());

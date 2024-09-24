@@ -77,6 +77,8 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     A<std::string, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>    mode               = std::string(magic_enum::enum_name(_mode));
     A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible> max_bytes_per_file = 0U;
 
+    GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file);
+
     std::size_t   _totalBytesWritten{0UZ};
     std::size_t   _totalBytesWrittenFile{0UZ};
     std::ofstream _file;
@@ -185,6 +187,8 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible> length       = 0U;
     A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>            trigger_name = "BasicFileSource::start";
 
+    GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, trigger_name);
+
     std::ifstream                      _file;
     std::vector<std::filesystem::path> _filesToRead;
     bool                               _emittedStartTrigger = false;
@@ -291,9 +295,6 @@ private:
 };
 
 } // namespace gr::blocks::fileio
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::fileio::BasicFileSink, in, file_name, mode, max_bytes_per_file)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::fileio::BasicFileSource, out, file_name, mode, repeat, offset, length, trigger_name)
 
 const inline auto registerBasicFileIo = gr::registerBlock<gr::blocks::fileio::BasicFileSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) //
                                         | gr::registerBlock<gr::blocks::fileio::BasicFileSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());

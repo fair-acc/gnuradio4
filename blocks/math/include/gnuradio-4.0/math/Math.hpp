@@ -28,6 +28,8 @@ struct MathOpImpl : public gr::Block<MathOpImpl<T, op>> {
     PortOut<T> out;
     T          value = detail::defaultValue<T>();
 
+    GR_MAKE_REFLECTABLE(MathOpImpl, in, out, value);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V
     processOne(const V &a) const noexcept {
@@ -56,8 +58,6 @@ template<typename T>
 using DivideConst = MathOpImpl<T, '/'>;
 
 } // namespace gr::blocks::math
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (gr::blocks::math::MathOpImpl<T, op>), in, out, value);
 
 // clang-format off
 const inline auto registerConstMath = gr::registerBlock<gr::blocks::math::AddConst,      uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double /*, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> */>(gr::globalBlockRegistry())

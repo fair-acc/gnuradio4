@@ -72,6 +72,8 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
     Annotated<T, "offset", Visible>                                                   offset      = T(0.);
     Annotated<T, "phase", Visible, Doc<"in rad">>                                     phase       = T(0.);
 
+    GR_MAKE_REFLECTABLE(SignalGenerator, in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
+
     T _currentTime = T(0.);
 
     signal_generator::Type _signalType = signal_generator::parse(signal_type);
@@ -118,7 +120,6 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::SignalGenerator, in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
 auto registerSignalGenerator = gr::registerBlock<gr::basic::SignalGenerator, double, float>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_SIGNAL_GENERATOR_HPP

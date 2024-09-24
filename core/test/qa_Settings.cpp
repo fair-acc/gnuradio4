@@ -71,6 +71,8 @@ struct Source : public Block<Source<T>> {
     gr::Size_t n_samples_max = 1024;
     float      sample_rate   = 1000.0f;
 
+    GR_MAKE_REFLECTABLE(Source, out, n_samples_max, sample_rate);
+
     gr::Size_t _nSamplesProduced = 0;
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& fwdSettings) {
@@ -108,6 +110,8 @@ some test doc documentation
     A<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
     std::vector<T>                                                                   vector_setting{T(3), T(2), T(1)};
     A<std::vector<std::string>, "string vector">                                     string_vector_setting = {};
+
+    GR_MAKE_REFLECTABLE(TestBlock, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
 
     bool       _debug            = true;
     int        _updateCount      = 0;
@@ -154,6 +158,8 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
     // settings
     A<float, "sample rate", Visible> sample_rate = 1.f;
 
+    GR_MAKE_REFLECTABLE(Decimate, in, out, sample_rate);
+
     void settingsChanged(const property_map& /*old_settings*/, property_map& new_settings, property_map& fwd_settings) noexcept {
         if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("input_chunk_size")) {
             const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->input_chunk_size);
@@ -195,16 +201,13 @@ struct Sink : public Block<Sink<T>> {
     gr::Size_t n_samples_max = 0;
     float      sample_rate   = 1.0f;
 
+    GR_MAKE_REFLECTABLE(Sink, in, n_samples_max, sample_rate);
+
     gr::Size_t _nSamplesConsumed = 0;
 
     [[nodiscard]] constexpr auto processOne(T) noexcept { _nSamplesConsumed++; }
 };
 } // namespace gr::setting_test
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Source, out, n_samples_max, sample_rate)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::TestBlock, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting)
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool Average), (gr::setting_test::Decimate<T, Average>), in, out, sample_rate)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::setting_test::Sink, in, n_samples_max, sample_rate)
 
 const boost::ut::suite SettingsTests = [] {
     using namespace boost::ut;

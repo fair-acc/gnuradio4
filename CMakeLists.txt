@@ -231,12 +231,18 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
+        vir-reflect-light
+        GIT_REPOSITORY https://github.com/mattkretz/vir-reflect-light.git
+        GIT_TAG 9f38bb3
+)
+
+FetchContent_Declare(
         cpp-httplib
         GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
         GIT_TAG v0.15.3
 )
 
-FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd cpp-httplib)
+FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd vir-reflect-light cpp-httplib)
 
 # Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
 if (CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
@@ -248,6 +254,9 @@ target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
+
+add_library(vir-refl INTERFACE)
+target_include_directories(vir-refl INTERFACE ${vir-reflect-light_SOURCE_DIR}/)
 
 # FFTW3 is build 2 times for float and double precisions
 SET(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)

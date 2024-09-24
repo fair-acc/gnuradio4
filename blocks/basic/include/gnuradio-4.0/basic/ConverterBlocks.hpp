@@ -17,6 +17,8 @@ struct Convert : public gr::Block<Convert<T, R>> {
     PortIn<T>  in;
     PortOut<R> out;
 
+    GR_MAKE_REFLECTABLE(Convert, in, out);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
         if constexpr (gr::meta::any_simd<V>) { // simd case
@@ -39,6 +41,8 @@ Performs scaling, i.e. 'R output = R(input * scale)'
     PortOut<R> out;
     T          scale = static_cast<T>(1);
 
+    GR_MAKE_REFLECTABLE(ScalingConvert, in, out, scale);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
         if constexpr (gr::meta::any_simd<V>) { // simd case
@@ -58,6 +62,8 @@ struct Abs : public gr::Block<Abs<T>> {
     PortIn<T>  in;
     PortOut<R> abs;
 
+    GR_MAKE_REFLECTABLE(Abs, in, abs);
+
     [[nodiscard]] constexpr R processOne(T input) const noexcept {
         if constexpr (std::is_unsigned_v<T>) {
             using TSigned = std::make_signed_t<T>;
@@ -76,6 +82,8 @@ struct Imag : public gr::Block<Imag<T>> {
     PortIn<T>  in;
     PortOut<R> imag;
 
+    GR_MAKE_REFLECTABLE(Imag, in, imag);
+
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::imag(input); }
 };
 
@@ -86,6 +94,8 @@ struct Real : public gr::Block<Real<T>> {
     using Description = Doc<"@brief basic block to the real component of a complex input stream">;
     PortIn<T>  in;
     PortOut<R> real;
+
+    GR_MAKE_REFLECTABLE(Real, in, real);
 
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::real(input); }
 };
@@ -98,6 +108,8 @@ struct Arg : public gr::Block<Arg<T>> {
     PortIn<T>  in;
     PortOut<R> arg;
 
+    GR_MAKE_REFLECTABLE(Arg, in, arg);
+
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::arg(input); }
 };
 
@@ -107,6 +119,8 @@ struct RadiansToDegree : public gr::Block<RadiansToDegree<T>> {
     using Description = Doc<"@brief convert radians to degree">;
     PortIn<T>  rad;
     PortOut<R> deg;
+
+    GR_MAKE_REFLECTABLE(RadiansToDegree, rad, deg);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& radians) const noexcept {
@@ -120,6 +134,8 @@ struct DegreeToRadians : public gr::Block<DegreeToRadians<T>> {
     using Description = Doc<"@brief convert radians to degree">;
     PortIn<T>  deg;
     PortOut<R> rad;
+
+    GR_MAKE_REFLECTABLE(DegreeToRadians, deg, rad);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& degree) const noexcept {
@@ -136,6 +152,8 @@ struct ToRealImag : public gr::Block<ToRealImag<T>> {
     PortOut<R> real;
     PortOut<R> imag;
 
+    GR_MAKE_REFLECTABLE(ToRealImag, in, real, imag);
+
     [[nodiscard]] constexpr std::tuple<R, R> processOne(T complexIn) const noexcept { // some SIMD-fication potential here
         return {static_cast<R>(std::real(complexIn)), static_cast<R>(std::imag(complexIn))};
     }
@@ -148,6 +166,8 @@ struct RealImagToComplex : public gr::Block<RealImagToComplex<T>> {
     PortIn<T>  real;
     PortIn<T>  imag;
     PortOut<R> out;
+
+    GR_MAKE_REFLECTABLE(RealImagToComplex, real, imag, out);
 
     [[nodiscard]] constexpr R processOne(T re, T im) const noexcept { // some SIMD-fication potential here
         return {re, im};
@@ -163,6 +183,8 @@ struct ToMagPhase : public gr::Block<ToMagPhase<T>> {
     PortOut<R> mag;
     PortOut<R> phase;
 
+    GR_MAKE_REFLECTABLE(ToMagPhase, in, mag, phase);
+
     [[nodiscard]] constexpr std::tuple<R, R> processOne(T complexIn) const noexcept { // some SIMD-fication potential here
         return {static_cast<R>(std::abs(complexIn)), static_cast<R>(std::arg(complexIn))};
     }
@@ -176,6 +198,8 @@ struct MagPhaseToComplex : public gr::Block<MagPhaseToComplex<T>> {
     PortIn<T>  mag;
     PortIn<T>  phase;
     PortOut<R> out;
+
+    GR_MAKE_REFLECTABLE(MagPhaseToComplex, mag, phase, out);
 
     [[nodiscard]] constexpr std::complex<T> processOne(T r, T theta) const noexcept { // some SIMD-fication potential here
         return std::polar(r, theta);
@@ -191,6 +215,8 @@ The output stream contains twice as many output items as input items.
 For every complex input item, we produce two output items that alternate between the real and imaginary component of the complex value.)"">;
     PortIn<T>  in;
     PortOut<R> interleaved;
+
+    GR_MAKE_REFLECTABLE(ComplexToInterleaved, in, interleaved);
 
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> complexInput, std::span<R> interleavedOut) const noexcept { // some SIMD-fication potential here (needs permute)
         for (std::size_t i = 0; i < complexInput.size(); ++i) {
@@ -212,6 +238,8 @@ For every pair of interleaved input items (real, imag), we produce one complex o
     gr::PortIn<T>  interleaved;
     gr::PortOut<R> out;
 
+    GR_MAKE_REFLECTABLE(InterleavedToComplex, interleaved, out);
+
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> interleavedInput, std::span<R> complexOut) const noexcept { // some SIMD-fication potential here (needs permute)
         for (std::size_t i = 0; i < complexOut.size(); ++i) {
             complexOut[i] = R{static_cast<typename R::value_type>(interleavedInput[2 * i]), static_cast<typename R::value_type>(interleavedInput[2 * i + 1])};
@@ -221,24 +249,6 @@ For every pair of interleaved input items (real, imag), we produce one complex o
 };
 
 } // namespace gr::blocks::type::converter
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::Convert, in, out)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::ScalingConvert, in, out, scale)
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::Abs, in, abs)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::Imag, in, imag)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::Real, in, real)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::Arg, in, arg)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::RadiansToDegree, rad, deg)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::DegreeToRadians, deg, rad)
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::ToRealImag, in, real, imag)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::RealImagToComplex, real, imag, out)
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::ToMagPhase, in, mag, phase)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::MagPhaseToComplex, mag, phase, out)
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::ComplexToInterleaved, in, interleaved)
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::blocks::type::converter::InterleavedToComplex, interleaved, out)
 
 /*
  TODO: temporarily disabled due to excessive compile-times on CI

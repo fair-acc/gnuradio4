@@ -150,6 +150,8 @@ The parameters will automatically update when a Tag containing the "context" fie
 
     Annotated<property_map, "trigger_meta_info"> trigger_meta_info{};
 
+    GR_MAKE_REFLECTABLE(FunctionGenerator, in, out, sample_rate, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, trigger_meta_info);
+
     T   _currentTime   = T(0.);
     int _sampleCounter = 0;
 
@@ -215,7 +217,6 @@ private:
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::FunctionGenerator, in, out, sample_rate, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, trigger_meta_info);
 auto registerFunctionGenerator = gr::registerBlock<gr::basic::FunctionGenerator, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_FUNCTION_GENERATOR_HPP
