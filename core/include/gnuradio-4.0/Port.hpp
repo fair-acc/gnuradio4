@@ -183,6 +183,8 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     Annotated<float, "signal min,", Doc<"minimum expected signal value">>                                            signal_min = std::numeric_limits<float>::lowest();
     Annotated<float, "signal max,", Doc<"maximum expected signal value">>                                            signal_max = std::numeric_limits<float>::max();
 
+    GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+
     // controls automatic (if set) or manual update of above parameters
     std::set<std::string, std::less<>> auto_update{"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"};
 
@@ -242,7 +244,6 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 };
 
 } // namespace gr
-ENABLE_REFLECTION(gr::PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max)
 
 namespace gr {
 
@@ -379,6 +380,8 @@ struct Port {
 
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
     PortMetaInfo metaInfo{};
+
+    GR_MAKE_REFLECTABLE(Port, kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
@@ -1106,6 +1109,5 @@ inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& 
 inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
 
 } // namespace gr
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)
 
 #endif // GNURADIO_PORT_HPP

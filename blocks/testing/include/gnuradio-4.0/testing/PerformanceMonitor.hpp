@@ -76,6 +76,8 @@ Additionally, the block provides three optional output ports for real-time strea
     gr::Annotated<float, "in sec", Doc<"write output approx. every `N` seconds">, Visible>                   publish_rate{1.f};
     gr::Annotated<std::string, "file path", Doc<"path to output csv file, `` -> print to console">, Visible> output_csv_file_path = "";
 
+    GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outRate, publish_rate, evaluate_perf_rate, output_csv_file_path);
+
     // statistics of updates
     gr::Size_t n_writes{0U};
     gr::Size_t n_updates_res{0U};
@@ -179,8 +181,6 @@ private:
 };
 
 } // namespace gr::testing
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::testing::PerformanceMonitor<T>), in, outRes, outRate, publish_rate, evaluate_perf_rate, output_csv_file_path);
 
 auto registerPerformanceMonitor = gr::registerBlock<gr::testing::PerformanceMonitor, float, double>(gr::globalBlockRegistry());
 

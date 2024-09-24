@@ -78,6 +78,8 @@ you can set the `backPressure` property to false.
     A<std::vector<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>        map_out{};
     A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">> back_pressure = false;
 
+    GR_MAKE_REFLECTABLE(Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure);
+
     std::map<gr::Size_t, std::vector<gr::Size_t>> _internalMapping{};
     gr::Size_t                                    _selectedSrc = -1U;
 
@@ -190,7 +192,6 @@ you can set the `backPressure` property to false.
 };
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure)
 auto registerSelector = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 

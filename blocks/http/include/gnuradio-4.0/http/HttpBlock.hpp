@@ -248,6 +248,8 @@ public:
     std::string type       = std::string(magic_enum::enum_name(_type));
     std::string parameters; // x-www-form-urlencoded encoded POST parameters
 
+    GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
+
     ~HttpBlock() { stopThread(); }
 
     void
@@ -318,8 +320,6 @@ public:
 static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
 } // namespace gr::http
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::http::HttpBlock, out, url, endpoint, type, parameters);
 auto registerHttpBlock = gr::registerBlock<gr::http::HttpBlock, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_HTTP_BLOCK_HPP

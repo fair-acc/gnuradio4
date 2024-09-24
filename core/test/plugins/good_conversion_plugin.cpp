@@ -13,6 +13,8 @@ public:
     gr::PortIn<From> in;
     gr::PortOut<To>  out;
 
+    GR_MAKE_REFLECTABLE(convert, in, out);
+
     [[nodiscard]] constexpr auto
     processOne(From value) const noexcept {
         return static_cast<To>(value);
@@ -20,8 +22,6 @@ public:
 };
 
 } // namespace good
-
-ENABLE_REFLECTION_FOR_TEMPLATE(good::convert, in, out);
 
 // Another is to use the same macro for both single-parametrised
 // and mulciple-parametrised nodes, just to have the parameter

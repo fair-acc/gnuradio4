@@ -30,6 +30,9 @@ template<typename T>
 struct CountSource : public gr::Block<CountSource<T>> {
     gr::PortOut<T>          out;
     gr::Size_t              n_samples_max = 0;
+
+    GR_MAKE_REFLECTABLE(CountSource, out, n_samples_max);
+
     std::shared_ptr<Tracer> tracer{};
     gr::Size_t              count = 0;
 
@@ -49,14 +52,15 @@ struct CountSource : public gr::Block<CountSource<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, out, n_samples_max);
-
 static_assert(gr::BlockLike<CountSource<float>>);
 
 template<typename T>
 struct ExpectSink : public gr::Block<ExpectSink<T>> {
     gr::PortIn<T>                                   in;
     gr::Size_t                                      n_samples_max = 0;
+
+    GR_MAKE_REFLECTABLE(ExpectSink, in, n_samples_max);
+
     std::shared_ptr<Tracer>                         tracer{};
     gr::Size_t                                      count       = 0;
     gr::Size_t                                      false_count = 0;
@@ -83,8 +87,6 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(ExpectSink, in, n_samples_max);
-
 template<typename T>
 struct Scale : public gr::Block<Scale<T>> {
     using R = decltype(std::declval<T>() * std::declval<T>());
@@ -93,13 +95,13 @@ struct Scale : public gr::Block<Scale<T>> {
     std::shared_ptr<Tracer> tracer{};
     T                       scale_factor = T(1.);
 
+    GR_MAKE_REFLECTABLE(Scale, original, scaled, scale_factor);
+
     [[nodiscard]] constexpr auto processOne(T a) noexcept {
         tracer->trace(this->name);
         return a * scale_factor;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(Scale, original, scaled, scale_factor);
 
 template<typename T>
 struct Adder : public gr::Block<Adder<T>> {
@@ -107,6 +109,9 @@ struct Adder : public gr::Block<Adder<T>> {
     gr::PortIn<T>           addend0;
     gr::PortIn<T>           addend1;
     gr::PortOut<R>          sum;
+
+    GR_MAKE_REFLECTABLE(Adder, addend0, addend1, sum);
+
     std::shared_ptr<Tracer> tracer;
 
     [[nodiscard]] constexpr auto processOne(T a, T b) noexcept {
@@ -114,8 +119,6 @@ struct Adder : public gr::Block<Adder<T>> {
         return a + b;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(Adder, addend0, addend1, sum);
 
 gr::Graph getGraphLinear(std::shared_ptr<Tracer> tracer) {
     using gr::PortDirection::INPUT;
@@ -239,6 +242,9 @@ void checkBlockNames(const std::vector<TBlock>& joblist, std::set<std::string> s
 template<typename T>
 struct LifecycleSource : public gr::Block<LifecycleSource<T>> {
     gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(LifecycleSource, out);
+
     std::int32_t   n_samples_produced = 0;
     std::int32_t   n_samples_max      = 10;
 
@@ -252,12 +258,12 @@ struct LifecycleSource : public gr::Block<LifecycleSource<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(LifecycleSource, out);
-
 template<typename T>
 struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
     gr::PortIn<T>                in{};
     gr::PortOut<T, gr::Optional> out{};
+
+    GR_MAKE_REFLECTABLE(LifecycleBlock, in, out);
 
     int process_one_count{};
     int start_count{};
@@ -282,13 +288,14 @@ struct LifecycleBlock : public gr::Block<LifecycleBlock<T>> {
     void resume() { resume_count++; }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(LifecycleBlock, in, out);
-
 template<typename T>
 struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
     using enum gr::work::Status;
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(BusyLoopBlock, in, out);
+
     gr::Sequence   _produceCount{0};
     gr::Sequence   _invokeCount{0};
 
@@ -308,8 +315,6 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
         return OK;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(BusyLoopBlock, in, out);
 
 bool awaitCondition(std::chrono::milliseconds timeout, std::function<bool()> condition) {
     auto start = std::chrono::steady_clock::now();

@@ -32,6 +32,9 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
     gr::PortIn<T, gr::Doc<"In">, gr::RequiredSamples<24, 24, false>> inPort;
     // gr::PortIn<T, Doc<"In">> inPort;
     gr::PortOut<T>                            outPort;
+
+    GR_MAKE_REFLECTABLE(RealignTagsToChunks, inPort, outPort);
+
     double                                    sampling_rate = 1.0;
     constexpr static gr::TagPropagationPolicy tag_policy    = gr::TagPropagationPolicy::TPP_DONT;
 
@@ -58,7 +61,6 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         }
     }
 };
-ENABLE_REFLECTION_FOR_TEMPLATE(RealignTagsToChunks, inPort, outPort);
 
 static_assert(gr::HasProcessBulkFunction<RealignTagsToChunks<float>>);
 

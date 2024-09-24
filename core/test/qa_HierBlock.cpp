@@ -114,6 +114,8 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
     gr::PortOut<T, gr::RequiredSamples<1, 1024>> out;
     std::size_t                                  remaining_events_count;
 
+    GR_MAKE_REFLECTABLE(fixed_source, out, remaining_events_count);
+
     T value = 1;
 
     gr::work::Result work(std::size_t requested_work) {
@@ -145,12 +147,12 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(fixed_source, out, remaining_events_count);
-
 template<typename T>
 struct cout_sink : public gr::Block<cout_sink<T>> {
     gr::PortIn<T, gr::RequiredSamples<1, 1024>> in;
     std::size_t                                 remaining = 0;
+
+    GR_MAKE_REFLECTABLE(cout_sink, in, remaining);
 
     void processOne(T value) {
         remaining--;
@@ -159,8 +161,6 @@ struct cout_sink : public gr::Block<cout_sink<T>> {
         }
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(cout_sink, in, remaining);
 
 gr::Graph make_graph(std::size_t events_count) {
     gr::Graph graph;

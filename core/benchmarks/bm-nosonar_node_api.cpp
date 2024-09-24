@@ -23,6 +23,8 @@ template<typename T, char op>
 struct math_bulk_op : public gr::Block<math_bulk_op<T, op>, gr::PortInNamed<T, "in", gr::RequiredSamples<1, N_MAX>>, gr::PortOutNamed<T, "out", gr::RequiredSamples<1, N_MAX>>> {
     T value = static_cast<T>(1.0f);
 
+    GR_MAKE_REFLECTABLE(math_bulk_op, value);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& a) const noexcept {
         if constexpr (op == '*') {
@@ -59,8 +61,6 @@ struct math_bulk_op : public gr::Block<math_bulk_op<T, op>, gr::PortInNamed<T, "
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (math_bulk_op<T, op>), value);
-
 template<typename T>
 using multiply_bulk = math_bulk_op<T, '*'>;
 template<typename T>
@@ -90,12 +90,12 @@ struct converting_multiply : public gr::Block<converting_multiply<T, R>> {
     gr::PortIn<T>  in;
     gr::PortOut<R> out;
 
+    GR_MAKE_REFLECTABLE(converting_multiply, in, out, value);
+
     [[nodiscard]] constexpr auto processOne(T a) const noexcept { return static_cast<R>(a * value); }
 
     [[nodiscard]] constexpr auto processOne(const gr::meta::any_simd<T> auto& a) const noexcept { return vir::stdx::static_simd_cast<R>(a * value); }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(converting_multiply, in, out, value);
 #if !DISABLE_SIMD
 static_assert(gr::traits::block::can_processOne_simd<converting_multiply<float, double>>);
 #endif
@@ -114,13 +114,13 @@ public:
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
+    GR_MAKE_REFLECTABLE(add, in, out);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
         return a + static_cast<T>(addend);
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, int addend), (add<T, addend>), in, out);
 #if !DISABLE_SIMD
 static_assert(gr::traits::block::can_processOne_simd<add<float, 1>>);
 #endif
@@ -135,6 +135,8 @@ static_assert(gr::traits::block::can_processOne_simd<add<float, 1>>);
 template<typename T, char op>
 struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>, gr::PortInNamed<T, "in", gr::RequiredSamples<1, N_MAX>>, gr::PortOutNamed<T, "out", gr::RequiredSamples<1, N_MAX>>> {
     T value = static_cast<T>(1.0f);
+
+    GR_MAKE_REFLECTABLE(gen_operation_SIMD, value);
 
     gr::work::Result work(std::size_t requested_work) noexcept {
         auto& out_port = outputPort<0, gr::PortType::STREAM>(this);
@@ -198,8 +200,6 @@ struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>, gr::Port
         return {requested_work, n_to_publish, gr::work::Status::OK};
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (gen_operation_SIMD<T, op>), value);
 // no reflection needed because ports are defined via the gr::node<...> base class
 
 // gen_operation_SIMD has built-in SIMD-enabled work function, that means
@@ -217,6 +217,8 @@ class copy : public gr::Block<copy<T, N_MIN, N_MAX, use_bulk_operation, use_memc
 public:
     gr::PortIn<T, gr::RequiredSamples<N_MIN, N_MAX>>  in;
     gr::PortOut<T, gr::RequiredSamples<N_MIN, N_MAX>> out;
+
+    GR_MAKE_REFLECTABLE(copy, in, out);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
@@ -254,8 +256,6 @@ public:
         return {requested_work, 0UL, gr::work::Status::OK};
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t N_MIN, std::size_t N_MAX, bool use_bulk_operation, bool use_memcopy), (copy<T, N_MIN, N_MAX, use_bulk_operation, use_memcopy>), in, out);
 
 namespace detail {
 template<typename T>

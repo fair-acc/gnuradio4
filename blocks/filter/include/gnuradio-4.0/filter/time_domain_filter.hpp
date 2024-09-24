@@ -22,6 +22,9 @@ H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
     PortIn<T>        in;
     PortOut<T>       out;
     std::vector<T>   b{}; // feedforward coefficients
+
+    GR_MAKE_REFLECTABLE(fir_filter, in, out, b);
+
     HistoryBuffer<T> inputHistory{ 32 };
 
     void
@@ -58,6 +61,9 @@ a are the feedback coefficients
     PortOut<T>       out;
     std::vector<T>   b{ 1 }; // feed-forward coefficients
     std::vector<T>   a{ 1 }; // feedback coefficients
+
+    GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a);
+
     HistoryBuffer<T> inputHistory{ 32 };
     HistoryBuffer<T> outputHistory{ 32 };
 
@@ -106,9 +112,6 @@ a are the feedback coefficients
 };
 
 } // namespace gr::filter
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::filter::fir_filter, in, out, b);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::filter::IIRForm form), (gr::filter::iir_filter<T, form>), in, out, b, a);
 
 auto registerFirFilter = gr::registerBlock<gr::filter::fir_filter, double, float>(gr::globalBlockRegistry());
 auto registerIirFilter = gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_I, double, float>(gr::globalBlockRegistry())

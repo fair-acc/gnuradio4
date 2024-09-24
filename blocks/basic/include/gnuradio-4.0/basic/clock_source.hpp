@@ -48,6 +48,8 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
     A<bool, "perform zero-order-hold", Doc<"if tag_times>tag_values: true=publish last tag, false=publish empty">> do_zero_order_hold{false};
     A<bool, "verbose console">                                                                                     verbose_console = false;
 
+    GR_MAKE_REFLECTABLE(ClockSource, out, tag_times, tag_values, repeat_period, do_zero_order_hold, n_samples_max, chunk_size, sample_rate, verbose_console);
+
     // Ready-to-use tags set by user
     std::vector<Tag>             tags{};
     std::shared_ptr<std::thread> userProvidedThread;
@@ -251,9 +253,6 @@ private:
 template<typename T>
 using DefaultClockSource = ClockSource<T, true, std::chrono::system_clock, true>;
 } // namespace gr::basic
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool useIoThread, typename ClockSourceType), (gr::basic::ClockSource<T, useIoThread, ClockSourceType>), //
-    out, tag_times, tag_values, repeat_period, do_zero_order_hold, n_samples_max, chunk_size, sample_rate, verbose_console);
 
 auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, std::uint8_t, std::uint32_t, std::int32_t, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<float>>);

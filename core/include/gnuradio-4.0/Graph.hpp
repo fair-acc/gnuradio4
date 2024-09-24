@@ -174,6 +174,8 @@ private:
     };
 
 public:
+    GR_MAKE_REFLECTABLE(Graph);
+
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
     Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
@@ -910,9 +912,5 @@ inline std::ostream& operator<<(std::ostream& os, const T& value) {
 }
 
 } // namespace gr
-
-// minimal reflection declaration
-REFL_TYPE(gr::Graph)
-REFL_END
 
 #endif // include guard
