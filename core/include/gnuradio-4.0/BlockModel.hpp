@@ -305,16 +305,6 @@ public:
     [[nodiscard]] virtual lifecycle::State state() const noexcept = 0;
 
     /**
-     * @brief number of available readable samples at the block's input ports
-     */
-    [[nodiscard]] virtual constexpr std::size_t availableInputSamples(std::vector<std::size_t>&) const noexcept = 0;
-
-    /**
-     * @brief number of available writable samples at the block's output ports
-     */
-    [[nodiscard]] virtual constexpr std::size_t availableOutputSamples(std::vector<std::size_t>&) const noexcept = 0;
-
-    /**
      * @brief user defined name
      */
     [[nodiscard]] virtual std::string_view name() const = 0;
@@ -495,8 +485,6 @@ public:
 
     [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
     [[nodiscard]] lifecycle::State           state() const noexcept override { return blockRef().state(); }
-    [[nodiscard]] constexpr std::size_t      availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
-    [[nodiscard]] constexpr std::size_t      availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
     [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
     void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
     [[nodiscard]] std::string_view           typeName() const override { return _type_name; }

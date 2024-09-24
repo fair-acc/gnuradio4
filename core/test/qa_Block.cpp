@@ -114,7 +114,7 @@ static_assert(gr::HasProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<
 static_assert(gr::HasConstProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
 
-enum class ProcessBulkVariant { SPAN_SPAN, SPAN_PUBLISHABLE, SPAN_PUBLISHABLE2, CONSUMABLE_SPAN, CONSUMABLE_SPAN2, CONSUMABLE_PUBLISHABLE, CONSUMABLE_PUBLISHABLE2 };
+enum class ProcessBulkVariant { SPAN_SPAN, SPAN_PUBLISHABLE, SPAN_PUBLISHABLE2, CONSUMABLE_SPAN, CONSUMABLE_SPAN2, CONSUMABLE_PUBLISHABLE, CONSUMABLE_PUBLISHABLE2, CONSUMABLE_PUBLISHABLE_PORT, CONSUMABLE_PUBLISHABLE_PORT2 };
 
 template<typename T, ProcessBulkVariant processVariant>
 struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessBulkSpan<T, processVariant>> {
@@ -124,49 +124,54 @@ struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessB
     gr::work::Status processBulk(std::span<const T>, std::span<T>)
     requires(processVariant == ProcessBulkVariant::SPAN_SPAN)
     {
-        // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
     gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&)
     requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE)
     {
-        // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
     gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto)
     requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE2)
     {
-        // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
     gr::work::Status processBulk(gr::ConsumableSpan auto, std::span<T>)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN)
     {
-        // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
     gr::work::Status processBulk(gr::ConsumableSpan auto&, std::span<T>)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN2)
     {
-        // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
     gr::work::Status processBulk(gr::ConsumableSpan auto&, gr::PublishableSpan auto&)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE)
     {
-        // do some bulk-type processing
         return gr::work::Status::OK;
     }
 
     gr::work::Status processBulk(gr::ConsumableSpan auto, gr::PublishableSpan auto)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE2)
     {
-        // do some bulk-type processing
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status processBulk(gr::ConsumablePortSpan auto&, gr::PublishablePortSpan auto&)
+    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT)
+    {
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status processBulk(gr::ConsumablePortSpan auto, gr::PublishablePortSpan auto)
+    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT2)
+    {
         return gr::work::Status::OK;
     }
 };
@@ -183,6 +188,8 @@ static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, P
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_SPAN2>>);
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE2>>); // TODO: fix the signature is required to work
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT>>);
+static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT2>>); // TODO: fix the signature is required to work
 
 static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_SPAN>, 0>);
 static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_PUBLISHABLE>, 0>);
@@ -844,12 +851,12 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         gr::Size_t nSamples = 1000000;
 
         gr::Graph graph;
-        auto&     src   = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"disconnect_on_done", false}});
-        auto&     block = graph.emplaceBlock<IntDecBlock<float>>({{"disconnect_on_done", false}});
-        auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
+        auto&     src       = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"disconnect_on_done", false}});
+        auto&     testBlock = graph.emplaceBlock<IntDecBlock<float>>({{"disconnect_on_done", false}});
+        auto&     sink      = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(block)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(block).template to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(testBlock)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(testBlock).template to<"in">(sink)));
 
         graph.reconnectAllEdges();
         auto blockInit = [](auto& block) {
@@ -860,30 +867,30 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
             expect(block.state() == lifecycle::State::RUNNING);
         };
         blockInit(src);
-        blockInit(block);
+        blockInit(testBlock);
         blockInit(sink);
 
         auto resultSrc = src.work(100);
         expect(eq(resultSrc.performed_work, 100UZ));
 
-        auto resultBlock = block.work(10); // requestedWork is applied, process 10 samples
+        auto resultBlock = testBlock.work(10); // requestedWork is applied, process 10 samples
         expect(eq(resultBlock.requested_work, 10UZ));
         expect(eq(resultBlock.performed_work, 10UZ));
 
-        expect(block.settings().set({{"output_chunk_size", gr::Size_t(7)}, {"input_chunk_size", gr::Size_t(7)}}).empty());
-        expect(block.settings().activateContext() != std::nullopt);
-        resultBlock = block.work(8); // requestedWork is applied, process only one `input_chunk_size` which fits to requestedWork
+        expect(testBlock.settings().set({{"output_chunk_size", gr::Size_t(7)}, {"input_chunk_size", gr::Size_t(7)}}).empty());
+        expect(testBlock.settings().activateContext() != std::nullopt);
+        resultBlock = testBlock.work(8); // requestedWork is applied, process only one `input_chunk_size` which fits to requestedWork
         expect(eq(resultBlock.requested_work, 8UZ));
         expect(eq(resultBlock.performed_work, 7UZ));
-        resultBlock = block.work(28); // requestedWork is applied, process 4 `input_chunk_size` which fits to requestedWork
+        resultBlock = testBlock.work(28); // requestedWork is applied, process 4 `input_chunk_size` which fits to requestedWork
         expect(eq(resultBlock.requested_work, 28UZ));
         expect(eq(resultBlock.performed_work, 28UZ));
-        resultBlock = block.work(5); // requestedWork is clamped to `input_chunk_size`
+        resultBlock = testBlock.work(5); // requestedWork is clamped to `input_chunk_size`
         expect(eq(resultBlock.requested_work, 5UZ));
         expect(eq(resultBlock.performed_work, 7UZ)); // 7 samples are processed
-        expect(block.settings().set({{"output_chunk_size", gr::Size_t(1)}, {"input_chunk_size", gr::Size_t(1)}}).empty());
-        expect(block.settings().activateContext() != std::nullopt);
-        resultBlock = block.work(); // process last 48 samples
+        expect(testBlock.settings().set({{"output_chunk_size", gr::Size_t(1)}, {"input_chunk_size", gr::Size_t(1)}}).empty());
+        expect(testBlock.settings().activateContext() != std::nullopt);
+        resultBlock = testBlock.work(); // process last 48 samples
         expect(eq(resultBlock.requested_work, std::numeric_limits<std::size_t>::max()));
         expect(eq(resultBlock.performed_work, 48UZ));
         auto resultSink = sink.work(100);

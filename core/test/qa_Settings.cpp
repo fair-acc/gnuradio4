@@ -197,9 +197,7 @@ struct Sink : public Block<Sink<T>> {
 
     gr::Size_t _nSamplesConsumed = 0;
 
-    [[nodiscard]] constexpr auto processOne(T) noexcept {
-        _nSamplesConsumed++;
-    }
+    [[nodiscard]] constexpr auto processOne(T) noexcept { _nSamplesConsumed++; }
 };
 } // namespace gr::setting_test
 

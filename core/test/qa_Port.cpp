@@ -83,40 +83,32 @@ const boost::ut::suite PortTests = [] {
         {
             auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
-            out.publishTag({{"id", "tag@-1"}}, -1);
-            out.publishPendingTags();
-            out.publishTag({{"id", "tag@101"}}, 1);
-            out.publishPendingTags();
-            out.publishTag({{"id", "tag@104"}}, 4);
-            out.publishPendingTags();
+            data.publishTag({{"id", "tag@0"}}, 0);
+            data.publishTag({{"id", "tag@101"}}, 1);
+            data.publishTag({{"id", "tag@104"}}, 4);
             std::iota(data.begin(), data.end(), 100);
-            out.publishPendingTags();
             data.publish(5); // should be automatic
         }
         {
             auto data = reader.get<SpanReleasePolicy::ProcessAll>();
             auto tags = tagReader.get<SpanReleasePolicy::ProcessAll>();
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5)));
-            expect(std::ranges::equal(tags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}}}, {1, {{"id", "tag@101"}}}, {4, {{"id", "tag@104"}}}}));
+            expect(std::ranges::equal(tags, std::vector<gr::Tag>{{0, {{"id", "tag@0"}}}, {1, {{"id", "tag@101"}}}, {4, {{"id", "tag@104"}}}}));
         }
         {
             auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
-            out.publishTag({{"id", "tag@-1"}}, -1);
-            out.publishPendingTags();
-            out.publishTag({{"id", "tag@106"}}, 1);
-            out.publishPendingTags();
-            out.publishTag({{"id", "tag@109"}}, 4);
-            out.publishPendingTags();
+            data.publishTag({{"id", "tag@0"}}, 0);
+            data.publishTag({{"id", "tag@106"}}, 1);
+            data.publishTag({{"id", "tag@109"}}, 4);
             std::iota(data.begin(), data.end(), 105);
-            out.publishPendingTags();
             data.publish(5); // should be automatic
         }
         {
             auto data = reader.get();
             auto tags = tagReader.get();
             expect(std::ranges::equal(data, std::views::iota(105) | std::views::take(5)));
-            expect(std::ranges::equal(tags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}}}, {6, {{"id", "tag@106"}}}, {9, {{"id", "tag@109"}}}}));
+            expect(std::ranges::equal(tags, std::vector<gr::Tag>{{5, {{"id", "tag@0"}}}, {6, {{"id", "tag@106"}}}, {9, {{"id", "tag@109"}}}}));
         }
     };
 };

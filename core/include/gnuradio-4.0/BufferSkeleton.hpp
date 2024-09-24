@@ -24,7 +24,7 @@ class BufferSkeleton {
         std::vector<T>    _data;
 
         BufferImpl() = delete;
-        explicit BufferImpl(const std::size_t min_size) : _size(min_size), _data(_size){};
+        explicit BufferImpl(const std::size_t min_size) : _size(min_size), _data(_size) {};
         ~BufferImpl() = default;
     };
 
@@ -73,7 +73,7 @@ class BufferSkeleton {
     public:
         [[nodiscard]] BufferSkeleton buffer() const noexcept { return BufferSkeleton(_buffer); };
 
-        [[nodiscard]] constexpr std::size_t nSamplesPublished() const noexcept { return 0UZ; };
+        [[nodiscard]] constexpr std::size_t nRequestedSamplesToPublish() const noexcept { return 0UZ; };
 
         [[nodiscard]] constexpr auto reserve(std::size_t n) noexcept -> std::span<U> { return {&_buffer->_data[0], n}; }
 

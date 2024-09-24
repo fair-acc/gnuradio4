@@ -87,7 +87,7 @@ concept BufferWriterLike = requires(T t, const std::size_t nItems) {
     { t.reserve(nItems) };// TODO: reserve() returns CircularBuffer::Writer::PublishableOutputRange
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
-    { t.nSamplesPublished()} -> std::same_as<std::size_t>;
+    { t.nRequestedSamplesToPublish()} -> std::same_as<std::size_t>;
 };
 
 template<class T, typename ...Args>
