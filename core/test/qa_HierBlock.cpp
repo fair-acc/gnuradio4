@@ -5,7 +5,11 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public gr::Block<scale<T, R>, gr::PortInNamed<T, "original">, gr::PortOutNamed<R, "scaled">> {
+struct scale : public gr::Block<scale<T, R>> {
+    gr::PortIn<T>  original;
+    gr::PortOut<R> scaled;
+    GR_MAKE_REFLECTABLE(scale, original, scaled);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a) const noexcept {
         return a * 2;
@@ -13,7 +17,12 @@ struct scale : public gr::Block<scale<T, R>, gr::PortInNamed<T, "original">, gr:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public gr::Block<adder<T>, gr::PortInNamed<T, "addend0">, gr::PortInNamed<T, "addend1">, gr::PortOutNamed<R, "sum">> {
+struct adder : public gr::Block<adder<T>> {
+    gr::PortIn<T>  addend0;
+    gr::PortIn<T>  addend1;
+    gr::PortOut<R> sum;
+    GR_MAKE_REFLECTABLE(adder, addend0, addend1, sum);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
         return a + b;

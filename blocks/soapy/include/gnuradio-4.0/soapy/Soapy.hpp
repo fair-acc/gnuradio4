@@ -90,34 +90,33 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     void resume() { _rxStream.activate(); }
     void stop() { _device.reset(); }
 
-    constexpr work::Status processBulk(OutputSpanLike auto& output)
-    requires(nPorts == 1U)
+    constexpr work::Status processBulk(OutputSpanLike auto&... outputs)
+    requires(nPorts == sizeof...(outputs))
     {
         // special case single ouput -> simplifies connect API because this doesn't require sub-indices
-        auto maxSamples = static_cast<std::uint32_t>(output.size()); // max available samples
-        maxSamples      = std::min(maxSamples, max_chunck_size.value);
+        const auto maxSamples = std::min({max_chunck_size.value, static_cast<std::uint32_t>(outputs.size())...}); // max available samples
 
         int       flags   = 0;
         long long time_ns = 0; // driver specifc
 
         // non-blocking/blocking depending on the value of max_time_out_us (0...)
-        int ret = _rxStream.readStream(flags, time_ns, max_time_out_us, std::span<T>(output).subspan(0, maxSamples));
+        int ret = _rxStream.readStream(flags, time_ns, max_time_out_us, std::span<T>(outputs).subspan(0, maxSamples)...);
         // for detailed debugging: detail::printSoapyReturnDebugInfo(ret, flags, time_ns);
 
         auto status = handleDeviceStreamingErrors(ret, flags);
         if (ret >= 0 && status == work::Status::OK) {
-            output.publish(static_cast<std::size_t>(ret));
+            (outputs.publish(static_cast<std::size_t>(ret)), ...);
             return work::Status::OK;
         }
 
         // no data or some failure occured
-        output.publish(0UZ);
+        (outputs.publish(0UZ), ...);
         return status;
     }
 
     template<OutputSpanLike TOutputBuffer>
     constexpr work::Status processBulk(std::span<TOutputBuffer>& outputs)
-    requires(nPorts > 1U)
+    requires(nPorts == std::dynamic_extent)
     {
         // general case multiple ouputs
         auto maxSamples = static_cast<std::uint32_t>(outputs[0].size()); // max available samples
@@ -126,23 +125,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         int       flags   = 0;
         int       ret     = SOAPY_SDR_TIMEOUT;
         long long time_ns = 0; // driver specifc
-        if constexpr (nPorts == 2UZ) {
-            ret = _rxStream.readStream(flags, time_ns, max_time_out_us, //
-                std::span<T>(outputs[0]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[1]).subspan(0, maxSamples));
-        } else if constexpr (nPorts == 3UZ) {
-            ret = _rxStream.readStream(flags, time_ns, max_time_out_us, //
-                std::span<T>(outputs[0]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[1]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[2]).subspan(0, maxSamples));
-        } else if constexpr (nPorts == 4UZ) {
-            ret = _rxStream.readStream(flags, time_ns, max_time_out_us, //
-                std::span<T>(outputs[0]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[1]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[2]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[3]).subspan(0, maxSamples));
-        } else {
-            // fully dynamic case
+        {
             std::vector<std::span<T>> output(rx_channels->size());
             for (std::size_t i = 0UZ; i < rx_channels->size(); ++i) {
                 output[i] = std::span<T>(outputs[i]).subspan(0, maxSamples);

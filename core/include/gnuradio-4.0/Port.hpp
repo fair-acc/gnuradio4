@@ -23,6 +23,8 @@ enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not
 
 enum class ConnectionResult { SUCCESS, FAILED };
 
+// FIXME: can we still rename this to e.g. PortFlavor? "type" has a very specific meaning in C++ already. And since
+// we're doing a lot of reflection on ports there's ambiguity all over the place.
 enum class PortType {
     STREAM,  /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
@@ -309,6 +311,60 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
     { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
+namespace detail {
+enum TupleIdxSpecialValues : int { SinglePort = -1, PortCollection = -2 };
+
+template<typename T, vir::fixed_string_arg portName, PortType portType, PortDirection portDirection, size_t MemberIdx, int TupleIdx, typename... Attributes>
+struct PortDescriptor {
+    static_assert(not portName.empty());
+    static_assert(MemberIdx != size_t(-1));
+
+    // descriptor for a std::vector<Port> (or similar dynamically sized container)
+    static constexpr bool kIsDynamicCollection = TupleIdx == PortCollection;
+
+    // tuple-like
+    static constexpr bool kPartOfTuple = TupleIdx >= 0;
+
+    static constexpr PortDirection kDirection = portDirection;
+    static constexpr PortType      kPortType  = portType;
+    static constexpr bool          kIsInput   = portDirection == PortDirection::INPUT;
+    static constexpr bool          kIsOutput  = portDirection == PortDirection::OUTPUT;
+
+    using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
+
+    // directly used as the return type of processOne (if there are multiple PortDescriptors a tuple of all value_types)
+    using value_type = std::conditional_t<kIsDynamicCollection, std::vector<T>, T>;
+
+    template<typename TBlock>
+    requires std::same_as<std::remove_cvref_t<TBlock>, typename std::remove_cvref_t<TBlock>::derived_t>
+    static constexpr decltype(auto) getPortObject(TBlock&& obj) {
+        if constexpr (kPartOfTuple) {
+            return refl::data_member<MemberIdx>(obj)[std::integral_constant<int, TupleIdx>()];
+        } else {
+            return refl::data_member<MemberIdx>(obj);
+        }
+    }
+
+    using NameT = vir::fixed_string<portName>;
+
+    static constexpr NameT Name{};
+
+    PortDescriptor() = delete;
+    ~PortDescriptor() = delete;
+};
+
+template<typename T>
+concept PortDescription = requires {
+    typename T::value_type;
+    typename T::NameT;
+    typename T::Required;
+    { auto(T::kIsDynamicCollection) } -> std::same_as<bool>;
+    { auto(T::kPartOfTuple) } -> std::same_as<bool>;
+    { auto(T::kIsInput) } -> std::same_as<bool>;
+    { auto(T::kIsOutput) } -> std::same_as<bool>;
+};
+} // namespace detail
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -328,15 +384,14 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  *
  * @tparam T the data type of the port. It can be any copyable preferably cache-aligned (i.e. 64 byte-sized) type.
- * @tparam portName a string to identify the port, notably to be used in an UI- and hand-written explicit code context.
  * @tparam portType STREAM  or MESSAGE
  * @tparam portDirection either input or output
  * @tparam Attributes optional: default to 'DefaultStreamBuffer' and DefaultTagBuffer' based on 'gr::circular_buffer', and CPU domain
  */
-template<typename T, fixed_string portName, PortType portType, PortDirection portDirection, typename... Attributes>
+template<typename T, PortType portType, PortDirection portDirection, typename... Attributes>
 struct Port {
-    template<fixed_string newName, typename ReflDescriptor>
-    using with_name_and_descriptor = Port<T, newName, portType, portDirection, ReflDescriptor, Attributes...>;
+    template<vir::fixed_string_arg newName, size_t Idx, int TupleIdx>
+    using make_port_descriptor = detail::PortDescriptor<T, newName, portType, portDirection, Idx, TupleIdx, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
     static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
@@ -348,14 +403,12 @@ struct Port {
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
     using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
-    using ReflDescriptor    = AttributeTypeList::template find_or_default<refl::trait::is_descriptor, std::false_type>;
 
     // constexpr members:
     static constexpr PortDirection kDirection = portDirection;
     static constexpr PortType      kPortType  = portType;
     static constexpr bool          kIsInput   = portDirection == PortDirection::INPUT;
     static constexpr bool          kIsOutput  = portDirection == PortDirection::OUTPUT;
-    static constexpr fixed_string  Name       = portName;
 
     // dependent types
     using ReaderType        = decltype(std::declval<BufferType>().new_reader());
@@ -370,7 +423,9 @@ struct Port {
     // public properties
     constexpr static bool kIsSynch      = !std::disjunction_v<std::is_same<Async, Attributes>...>;
     constexpr static bool kIsOptional   = std::disjunction_v<std::is_same<Optional, Attributes>...>;
-    std::string           name          = static_cast<std::string>(portName);
+
+    std::string_view name;
+
     std::int16_t          priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     T                     default_value = T{};
 
@@ -536,8 +591,8 @@ private:
 
 public:
     constexpr Port() noexcept = default;
-    Port(std::string port_name, std::int16_t priority_ = 0, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : name(std::move(port_name)), priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} { static_assert(portName.empty(), "port name must be exclusively declared via NTTP or constructor parameter"); }
-    constexpr Port(Port&& other) noexcept : name(std::move(other.name)), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
+    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                       = delete;
     auto            operator=(const Port&)  = delete;
     constexpr Port& operator=(Port&& other) = delete;
@@ -611,12 +666,6 @@ public:
     }
 
     [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.buffer().size(); }
-
-    [[nodiscard]] constexpr static decltype(portName) static_name() noexcept
-    requires(!portName.empty())
-    {
-        return portName;
-    }
 
     [[nodiscard]] std::any defaultValue() const noexcept { return default_value; }
 
@@ -819,46 +868,29 @@ private:
     friend class DynamicPort;
 };
 
-namespace detail {
-template<typename T, auto>
-using just_t = T;
-
-template<typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Attributes, std::size_t... Is>
-consteval gr::meta::typelist<just_t<Port<T, baseName + meta::make_fixed_string<Is>(), portType, portDirection, Attributes...>, Is>...> repeated_ports_impl(std::index_sequence<Is...>) {
-    return {};
-}
-} // namespace detail
-
-template<std::size_t count, typename T, fixed_string baseName, PortType portType, PortDirection portDirection, typename... Attributes>
-using repeated_ports = decltype(detail::repeated_ports_impl<T, baseName, portType, portDirection, Attributes...>(std::make_index_sequence<count>()));
-
-static_assert(repeated_ports<3, float, "out", PortType::STREAM, PortDirection::OUTPUT, Optional>::at<0>::Name == fixed_string("out0"));
-static_assert(repeated_ports<3, float, "out", PortType::STREAM, PortDirection::OUTPUT, Optional>::at<1>::Name == fixed_string("out1"));
-static_assert(repeated_ports<3, float, "out", PortType::STREAM, PortDirection::OUTPUT, Optional>::at<2>::Name == fixed_string("out2"));
-
 template<typename T, typename... Attributes>
-using PortIn = Port<T, "", PortType::STREAM, PortDirection::INPUT, Attributes...>;
+using PortIn = Port<T, PortType::STREAM, PortDirection::INPUT, Attributes...>;
 template<typename T, typename... Attributes>
-using PortOut = Port<T, "", PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
-template<typename T, fixed_string PortName, typename... Attributes>
-using PortInNamed = Port<T, PortName, PortType::STREAM, PortDirection::INPUT, Attributes...>;
-template<typename T, fixed_string PortName, typename... Attributes>
-using PortOutNamed = Port<T, PortName, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
+using PortOut = Port<T, PortType::STREAM, PortDirection::OUTPUT, Attributes...>;
 
-using MsgPortIn  = Port<Message, "", PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer>;
-using MsgPortOut = Port<Message, "", PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer>;
-template<fixed_string PortName, typename... Attributes>
-using MsgPortInNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, Attributes...>;
-template<fixed_string PortName, typename... Attributes>
-using MsgPortOutNamed = Port<Message, PortName, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, Attributes...>;
+using MsgPortIn  = Port<Message, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer>;
+using MsgPortOut = Port<Message, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer>;
+
+struct BuiltinTag {};
+using MsgPortInBuiltin  = Port<Message, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, BuiltinTag>;
+using MsgPortOutBuiltin = Port<Message, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, BuiltinTag>;
+
+struct FromChildrenTag {};
+using MsgPortInFromChildren = Port<Message, PortType::MESSAGE, PortDirection::INPUT, DefaultMessageBuffer, FromChildrenTag>;
+
+struct ForChildrenTag {};
+using MsgPortOutForChildren = Port<Message, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, ForChildrenTag>;
 
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
 static_assert(PortLike<MsgPortIn>);
 static_assert(PortLike<MsgPortOut>);
-static_assert(PortLike<PortInNamed<float, "test">>);
-static_assert(PortLike<PortOutNamed<float, "test">>);
 
 static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
@@ -866,10 +898,6 @@ static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);
 static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>>::Domain, CPU>);
 static_assert(std::same_as<PortIn<float, RequiredSamples<1, 2>, GPU>::Domain, GPU>);
-
-static_assert(MsgPortOutNamed<"out_msg">::static_name() == fixed_string("out_msg"));
-static_assert(!(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message", std::false_type>::static_name() == fixed_string("out_msg")));
-static_assert(MsgPortOutNamed<"out_msg">::with_name_and_descriptor<"out_message", std::false_type>::static_name() == fixed_string("out_message"));
 
 static_assert(PortIn<float>::kPortType == PortType::STREAM);
 static_assert(PortIn<Message>::kPortType == PortType::STREAM);
@@ -892,7 +920,7 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  */
 class DynamicPort {
 public:
-    const std::string& name;
+    std::string_view   name;
     std::int16_t&      priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t&       min_samples;
     std::size_t&       max_samples;

@@ -91,12 +91,6 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(PortLike<MsgPortIn>);
         static_assert(PortLike<MsgPortOut>);
 
-        static_assert(PortLike<PortInNamed<float, "in">>);
-        static_assert(PortLike<decltype(PortInNamed<float, "">("in"))>);
-        static_assert(PortLike<PortOutNamed<float, "out">>);
-        static_assert(PortLike<MsgPortInNamed<"in_msg">>);
-        static_assert(PortLike<MsgPortOutNamed<"out_msg">>);
-
         static_assert(PortIn<float, RequiredSamples<>>::Required::kMinSamples == 1LU);
         static_assert(PortIn<float, RequiredSamples<>>::Required::kMaxSamples == std::numeric_limits<std::size_t>::max());
         static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1LU);

@@ -237,8 +237,8 @@ enum class ProcessBulkVectorVariant { STD_STD, STD_STD_REF, INPUT_STD, STD_OUTPU
 
 template<typename T, ProcessBulkVectorVariant processVariant>
 struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProcessBulkVector<T, processVariant>> {
-    std::array<gr::PortIn<T>, 3>  inputs{};
-    std::array<gr::PortOut<T>, 6> outputs{};
+    std::vector<gr::PortIn<T>>  inputs{};
+    std::vector<gr::PortOut<T>> outputs{};
 
     GR_MAKE_REFLECTABLE(BlockSignaturesProcessBulkVector, inputs, outputs);
 
@@ -415,25 +415,33 @@ template<typename T>
 struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
     static constexpr std::size_t nPorts = 4;
 
-    std::array<gr::PortIn<T, gr::Async>, nPorts>  inputs;
-    std::array<gr::PortOut<T, gr::Async>, nPorts> outputs;
+    std::array<gr::PortIn<T, gr::Async>, nPorts>  input;
+    std::array<gr::PortOut<T, gr::Async>, nPorts> output;
 
-    GR_MAKE_REFLECTABLE(ArrayPortsNode, inputs, outputs);
+    GR_MAKE_REFLECTABLE(ArrayPortsNode, input, output);
 
-    template<typename TInSpan, typename TOutSpan>
-    gr::work::Status processBulk(std::span<TInSpan>& ins, std::span<TOutSpan>& outs) {
-        for (std::size_t channelIndex = 0; channelIndex < ins.size(); ++channelIndex) {
-            gr::InputSpanLike auto  inputSpan  = ins[channelIndex];
-            gr::OutputSpanLike auto outputSpan = outs[channelIndex];
-            auto                    available  = std::min(inputSpan.size(), outputSpan.size());
+    template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
+    gr::work::Status processBulk(TInSpan& in0, TInSpan& in1, TInSpan& in2, TInSpan& in3, TOutSpan& out0, TOutSpan& out1, TOutSpan& out2, TOutSpan& out3) {
+        auto available = std::min(in0.size(), out0.size());
+        std::copy_n(in0.begin(), available, out0.begin());
+        std::ignore = in0.consume(available);
+        out0.publish(available);
 
-            for (std::size_t valueIndex = 0; valueIndex < available; ++valueIndex) {
-                outputSpan[valueIndex] = inputSpan[valueIndex];
-            }
+        available = std::min(in1.size(), out1.size());
+        std::copy_n(in1.begin(), available, out1.begin());
+        std::ignore = in1.consume(available);
+        out1.publish(available);
 
-            std::ignore = inputSpan.consume(available);
-            outputSpan.publish(available);
-        }
+        available = std::min(in2.size(), out2.size());
+        std::copy_n(in2.begin(), available, out2.begin());
+        std::ignore = in2.consume(available);
+        out2.publish(available);
+
+        available = std::min(in3.size(), out3.size());
+        std::copy_n(in3.begin(), available, out3.begin());
+        std::ignore = in3.consume(available);
+        out3.publish(available);
+
         return gr::work::Status::OK;
     }
 };
@@ -730,7 +738,7 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         std::array<TagSource<double>*, 4>                                 sources;
         std::array<TagSink<double, ProcessFunction::USE_PROCESS_ONE>*, 4> sinks;
 
-        auto* testNode = std::addressof(graph.emplaceBlock<TestNode>());
+        auto& testNode = graph.emplaceBlock<TestNode>();
 
         sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
         sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
@@ -742,16 +750,16 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"inputs", 0UZ>(*testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"inputs", 1UZ>(*testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"inputs", 2UZ>(*testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"inputs", 3UZ>(*testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input0">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input1">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input2">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input3">(testNode)));
 
         // test also different connect API
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#0"s, *sinks[0], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#1"s, *sinks[1], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#2"s, *sinks[2], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#3"s, *sinks[3], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output0"s, *sinks[0], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output1"s, *sinks[1], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output2"s, *sinks[2], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output3"s, *sinks[3], "in"s)));
 
         gr::scheduler::Simple sched{std::move(graph)};
         expect(sched.runAndWait().has_value());
@@ -896,11 +904,11 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
 const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
     using namespace boost::ut;
     using namespace gr::detail;
-    using namespace std::literals::string_literals;
+    using namespace std::literals::string_view_literals;
 
     "std::complex"_test = []() {
-        expect(eq(reflFirstTypeName<std::complex<double>>(), "std::complex<double>"s));
-        expect(eq(reflFirstTypeName<std::complex<float>>(), "std::complex<float>"s));
+        expect(eq(gr::refl::type_name<std::complex<double>>.view(), "std::complex<double>"sv));
+        expect(eq(gr::refl::type_name<std::complex<float>>.view(), "std::complex<float>"sv));
     };
 };
 

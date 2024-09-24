@@ -7,7 +7,7 @@ gr_plugin_metadata plugin_metadata [[maybe_unused]]{ "Bad Plugin", "Unknown", "P
 
 class bad_plugin : public gr_plugin_base {
 private:
-    std::vector<std::string> block_types;
+    std::vector<std::string_view> block_types;
 
 public:
     std::unique_ptr<gr::BlockModel>
@@ -20,10 +20,7 @@ public:
         return 0;
     }
 
-    [[nodiscard]] std::span<const std::string>
-    providedBlocks() const override {
-        return block_types;
-    }
+    [[nodiscard]] std::span<const std::string_view> providedBlocks() const override { return block_types; }
 };
 
 } // namespace
