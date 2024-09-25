@@ -330,16 +330,9 @@ void loop_over_processOne(auto& node) {
     using namespace benchmark;
     bm::test::n_samples_produced = 0LU;
     bm::test::n_samples_consumed = 0LU;
-#if DISABLE_SIMD
     for (std::size_t i = 0; i < N_SAMPLES; i++) {
         node.processOne();
     }
-#else
-    constexpr int N = 32;
-    for (std::size_t i = 0; i < N_SAMPLES / N; i++) {
-        node.template processOne_simd(std::integral_constant<std::size_t, N>{});
-    }
-#endif
     expect(eq(bm::test::n_samples_produced, N_SAMPLES)) << "produced too many/few samples";
     expect(eq(bm::test::n_samples_consumed, N_SAMPLES)) << "consumed too many/few samples";
 }
