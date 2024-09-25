@@ -1590,24 +1590,27 @@ protected:
                 // this limitation, a source block can implement `processOne_simd(vir::constexpr_value auto width)`
                 // instead of `processOne()` and then return simd objects with simd::size() == width.
                 constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(Derived& d) { d.processOne_simd(vir::cw<kMaxWidth>); };
-                if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
-                    // SIMD loop
-                    constexpr auto kWidth = [&] {
-                        if constexpr (kIsSourceBlock)
-                            return vir::cw<kMaxWidth>;
-                        else
-                            return vir::cw<std::min(kMaxWidth, vir::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
-                    }();
-                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
-                } else {                                                 // Non-SIMD loop
-                    if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                    if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
+                        // SIMD loop
+                        constexpr auto kWidth = [&] {
+                            if constexpr (kIsSourceBlock) {
+                                return vir::cw<kMaxWidth>;
+                            } else {
+                                return vir::cw<std::min(kMaxWidth, vir::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
+                            }
+                        }();
+                        invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
+                    } else { // Non-SIMD loop
                         invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
-                    } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
-                        const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                        userReturnStatus  = result.status;
-                        processedIn       = result.processedIn;
-                        processedOut      = result.processedOut;
                     }
+                } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state
+                         // after each sample
+                    static_assert(not kIsSimdSourceBlock and not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
+                    const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
+                    userReturnStatus  = result.status;
+                    processedIn       = result.processedIn;
+                    processedOut      = result.processedOut;
                 }
             }
         } else { // block does not define any valid processing function
