@@ -22,27 +22,24 @@ using enum ParameterType;
 constexpr auto SignalTypeList = magic_enum::enum_values<SignalType>();
 
 template<typename T>
-    requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
-constexpr std::string
-toString(T type) {
+requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
+constexpr std::string toString(T type) {
     return std::string(magic_enum::enum_name(type));
 }
 
 template<typename EnumType, typename T>
-    requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, ParameterType>
-[[nodiscard]] std::pair<std::string, pmtv::pmt>
-createPropertyMapEntry(EnumType enumType, T value) {
+requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, ParameterType>
+[[nodiscard]] std::pair<std::string, pmtv::pmt> createPropertyMapEntry(EnumType enumType, T value) {
     if constexpr (std::is_same_v<T, SignalType>) {
-        return { toString(enumType), static_cast<pmtv::pmt>(toString(value)) };
+        return {toString(enumType), static_cast<pmtv::pmt>(toString(value))};
     } else {
-        return { toString(enumType), static_cast<pmtv::pmt>(value) };
+        return {toString(enumType), static_cast<pmtv::pmt>(value)};
     }
 }
 
 template<typename T>
-    requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
-constexpr T
-parse(std::string_view name) {
+requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
+constexpr T parse(std::string_view name) {
     auto type = magic_enum::enum_cast<T>(name, magic_enum::case_insensitive);
     if (!type.has_value()) {
         throw std::invalid_argument(fmt::format("parser error, unknown function_generator::{} - '{}'", meta::type_name<T>(), name));
@@ -51,43 +48,34 @@ parse(std::string_view name) {
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createConstPropertyMap(T startValue) {
-    return { createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue) };
+[[nodiscard]] property_map createConstPropertyMap(T startValue) {
+    return {createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createLinearRampPropertyMap(T startValue, T finalValue, T durationValue) {
-    return { createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(duration, durationValue) };
+[[nodiscard]] property_map createLinearRampPropertyMap(T startValue, T finalValue, T durationValue) {
+    return {createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createParabolicRampPropertyMap(T startValue, T finalValue, T durationValue, T roundOffTime) {
-    return { createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime) };
+[[nodiscard]] property_map createParabolicRampPropertyMap(T startValue, T finalValue, T durationValue, T roundOffTime) {
+    return {createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createCubicSplinePropertyMap(T startValue, T finalValue, T durationValue) {
-    return { createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(duration, durationValue) };
+[[nodiscard]] property_map createCubicSplinePropertyMap(T startValue, T finalValue, T durationValue) {
+    return {createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map
-createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
-    return { createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue),
-             createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1) };
+[[nodiscard]] property_map createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
+    return {createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
 }
 
 } // namespace function_generator
 
 template<typename T>
-    requires(std::floating_point<T>)
+requires(std::floating_point<T>)
 struct FunctionGenerator : public gr::Block<FunctionGenerator<T>, BlockingIO<true>> {
     using Description = Doc<R""(
 @brief The `FunctionGenerator` class generates a variety of functions and their combinations.
@@ -119,55 +107,29 @@ Supported function types and their configurable parameters:
   - Creates a function that spikes from 'time0' for a duration of 'time1'.
   To create a `property_map` use `createImpulseResponsePropertyMap(tagIndex, startValue, finalValue, time0, time1)`.
 
-To create a chain of functions one can use `ClockSource`. There are 2 ways to do it:
-1) Using times + property_map
-Firstly, add time Tag entries, with time and command string:
+To create a chain of functions one can use `ClockSource`:
+1) add time Tag entries, with time and command string:
 @code
+auto addTimeTagEntry = []<typename T>(gr::basic::ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
+    clockSource.tag_times.value.push_back(timeInNanoseconds);
+    clockSource.tag_values.value.push_back(value);
+};
+
 auto &clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({ gr::tag::SAMPLE_RATE(100.f), { "n_samples_max", 100 }, { "name", "ClockSource" } });
-clockSrc.addTimeTagEntry(1'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1");
-clockSrc.addTimeTagEntry(10'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2");
-clockSrc.addTimeTagEntry(30'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3");
+addTimeTagEntry(1'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1");
+addTimeTagEntry(10'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2");
+addTimeTagEntry(30'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3");
 @endcode
 
-Secondly, create table to match command and functions:
+2) set parameters for all required contexts:
 @code
-funcGen.addFunctionTableEntry({ { "context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1" } }, createConstPropertyMap(5.f));
-funcGen.addFunctionTableEntry({ { "context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2" } }, createLinearRampPropertyMap(5.f, 30.f, .2f));
-funcGen.addFunctionTableEntry({ { "context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3" } }, createConstPropertyMap(30.f));
+funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1"});
+funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2"});
+funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3"});
 @endcode
 
-Lastly create a matching predicate with the following signature:
-@code
-std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
-@endcode
-
-
-2) Using user defined ready-to-use Tags.
-@code
-auto &clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({ gr::tag::SAMPLE_RATE(100.f), { "n_samples_max", 100 }, { "name", "ClockSource" } });
-clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
-                  Tag(100, createLinearRampPropertyMap(5.f, 30.f, .2f)),
-                  Tag(300, createConstPropertyMap(30.f)),
-                  Tag(350, createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f)),
-                  Tag(550, createConstPropertyMap(20.f)),
-                  Tag(650, createCubicSplinePropertyMap(20.f, 10.f, .1f)),
-                  Tag(800, createConstPropertyMap(10.f)),
-                  Tag(850, createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f)) };
-@endcode
-
+The parameters will automatically update when a Tag containing the "context" field arrives.
 )"">;
-    /**
-     * TODO: Taken from CtxSettings
-     * A predicate for matching two contexts
-     * The third "attempt" parameter indicates the current round of matching being done.
-     * This is useful for hierarchical matching schemes,
-     * e.g. in the first round the predicate could look for almost exact matches only,
-     * then in a a second round (attempt=1) it could be more forgiving, given that there are no exact matches available.
-     *
-     * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
-     * which indicates that no matches were found and there is no chance of matching anything in a further round.
-     */
-    using MatchPredicate = std::function<std::optional<bool>(const property_map &, const property_map &, std::size_t)>;
 
     PortIn<T>  in; // ClockSource input
     PortOut<T> out;
@@ -187,38 +149,23 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
     Annotated<T, "impulse_time1", Doc<"Specific to ImpulseResponse, in sec">> impulse_time1  = T(0.);
 
     Annotated<property_map, "trigger_meta_info"> trigger_meta_info{};
-    // TODO; need to use 2 std::vectors, can not use property_map as std::map key.
-    std::vector<property_map> function_keys{};   // matches the trigger tag map to the prestored settings
-    std::vector<property_map> function_values{}; // matches the trigger tag map to the prestored settings
 
-    MatchPredicate match_pred = [](auto, auto, auto) { return std::nullopt; };
-
-    T   _currentTime  = T(0.);
-    int sampleCounter = 0;
+    T   _currentTime   = T(0.);
+    int _sampleCounter = 0;
 
     function_generator::SignalType _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
     T                              _timeTick   = T(1.) / static_cast<T>(sample_rate);
 
-    void
-    settingsChanged(const property_map & /*old_settings*/, const property_map &new_settings) {
-        if (new_settings.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
-            const auto funcSettings = bestMatch(trigger_meta_info);
-            if (funcSettings.has_value()) {
-                applyFunctionSettings(funcSettings.value());
-                _currentTime = T(0.);
-                _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
-            }
-        }
-        if (new_settings.contains(function_generator::toString(function_generator::signal_type))) {
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) {
+        if (new_settings.contains(gr::tag::TRIGGER_META_INFO.shortKey()) || new_settings.contains(function_generator::toString(function_generator::signal_type))) {
             _currentTime = T(0.);
             _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
         }
         _timeTick = T(1.) / static_cast<T>(sample_rate);
     }
 
-    [[nodiscard]] constexpr T
-    processOne(T /*input*/) noexcept {
-        sampleCounter++;
+    [[nodiscard]] constexpr T processOne(T /*input*/) noexcept {
+        _sampleCounter++;
         using enum function_generator::SignalType;
         T value{};
 
@@ -241,38 +188,8 @@ clockSrc.tags = { Tag(0, createConstPropertyMap(5.f)),
         return value;
     }
 
-    constexpr void
-    addFunctionTableEntry(const property_map &key, const property_map &value) {
-        function_keys.push_back(key);
-        function_values.push_back(value);
-    }
-
 private:
-    void
-    applyFunctionSettings(const property_map &properties) {
-        auto getProperty = []<typename U>(const property_map &m, function_generator::ParameterType paramType, U &&) -> std::optional<U> {
-            const auto it = m.find(function_generator::toString(paramType));
-            if (it == m.end()) {
-                return std::nullopt;
-            }
-            try {
-                return std::get<U>(it->second);
-            } catch (const std::bad_variant_access &) {
-                return std::nullopt;
-            }
-        };
-
-        signal_type    = getProperty(properties, function_generator::signal_type, std::string("")).value_or(function_generator::toString(function_generator::Const));
-        start_value    = getProperty(properties, function_generator::start_value, T{}).value_or(T(0.));
-        final_value    = getProperty(properties, function_generator::final_value, T{}).value_or(T(0.));
-        duration       = getProperty(properties, function_generator::duration, T{}).value_or(T(0.));
-        round_off_time = getProperty(properties, function_generator::round_off_time, T{}).value_or(T(0.));
-        impulse_time0  = getProperty(properties, function_generator::impulse_time0, T{}).value_or(T(0.));
-        impulse_time1  = getProperty(properties, function_generator::impulse_time1, T{}).value_or(T(0.));
-    }
-
-    [[nodiscard]] constexpr T
-    calculateParabolicRamp() {
+    [[nodiscard]] constexpr T calculateParabolicRamp() {
         const T roundOnTime  = round_off_time; // assume that round ON and OFF times are equal
         const T linearLength = duration - (roundOnTime + round_off_time);
         const T a            = (final_value - start_value) / (T(2.) * roundOnTime * (linearLength + round_off_time));
@@ -293,27 +210,6 @@ private:
         const T shiftedTime   = _currentTime - (duration - round_off_time);
         const T transitPoint2 = final_value - ar2;
         return transitPoint2 + slope * shiftedTime - a * std::pow(shiftedTime, T(2.));
-    }
-
-    std::optional<property_map>
-    bestMatch(const property_map &context) const {
-        if (function_keys.size() != function_values.size()) {
-            throw std::invalid_argument(fmt::format("function_keys size ({}) and function_values size ({}) must be equal", function_keys.size(), function_values.size()));
-        }
-        if (function_keys.empty() || function_values.empty()) {
-            return std::nullopt;
-        }
-        // retry until we either get a match or std::nullopt
-        for (std::size_t attempt = 0;; attempt++) {
-            for (std::size_t i = 0; i < function_values.size(); i++) {
-                const auto isMatched = match_pred(function_keys[i], context, attempt);
-                if (!isMatched) {
-                    return std::nullopt;
-                } else if (*isMatched) {
-                    return function_values[i];
-                }
-            }
-        }
     }
 };
 

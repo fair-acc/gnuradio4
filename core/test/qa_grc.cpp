@@ -157,7 +157,7 @@ const boost::ut::suite GrcTests = [] {
         }
     };
 
-#ifndef __EMSCRIPTEN__
+#if not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
     "Basic graph loading and storing using plugins"_test = [] {
         try {
             using namespace gr;

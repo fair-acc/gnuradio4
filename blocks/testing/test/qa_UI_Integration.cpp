@@ -44,44 +44,16 @@ const boost::ut::suite TagTests = [] {
         clockSrc.repeat_period      = 1000 * ms;
         clockSrc.do_zero_order_hold = true;
 
-        auto& funcGen      = testGraph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
-        funcGen.match_pred = [](const auto& tableEntry, const auto& searchEntry, const auto attempt) -> std::optional<bool> {
-            if (searchEntry.find("context") == searchEntry.end()) {
-                return std::nullopt;
-            }
-            if (tableEntry.find("context") == tableEntry.end()) {
-                return false;
-            }
-
-            const pmtv::pmt searchEntryContext = searchEntry.at("context");
-            const pmtv::pmt tableEntryContext  = tableEntry.at("context");
-            if (std::holds_alternative<std::string>(searchEntryContext) && std::holds_alternative<std::string>(tableEntryContext)) {
-                const auto searchString = std::get<std::string>(searchEntryContext);
-                const auto tableString  = std::get<std::string>(tableEntryContext);
-
-                if (!searchString.starts_with("CMD_BP_START:")) {
-                    return std::nullopt;
-                }
-
-                if (attempt >= searchString.length()) {
-                    return std::nullopt;
-                }
-                auto [it1, it2] = std::ranges::mismatch(searchString, tableString);
-                if (std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(searchString.length() - attempt)) {
-                    return true;
-                }
-            }
-            return false;
-        };
-
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1"}}, createConstPropertyMap(5.f));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2"}}, createLinearRampPropertyMap(5.f, 30.f, 0.2f /* [s]*/));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3"}}, createConstPropertyMap(30.f));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=4"}}, createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f /* [s]*/));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=5"}}, createConstPropertyMap(20.f));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=6"}}, createCubicSplinePropertyMap(20.f, 10.f, 0.1f /* [s]*/));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=7"}}, createConstPropertyMap(10.f));
-        funcGen.addFunctionTableEntry({{"context", "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=8"}}, createImpulseResponsePropertyMap(10.f, 20.f, 0.02f /* [s]*/, 0.06f /* [s]*/));
+        const auto now     = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        auto&      funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
+        expect(funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(20.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap(20.f, 10.f, .1f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap(10.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
 
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
 

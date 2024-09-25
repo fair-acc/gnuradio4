@@ -19,7 +19,6 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <gnuradio-4.0/Settings.hpp>
-#include <gnuradio-4.0/Transactions.hpp>
 #include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
 #include <gnuradio-4.0/reflection.hpp>
 
@@ -464,7 +463,7 @@ protected:
     Tag  _mergedInputTag{};
 
     // intermediate non-real-time<->real-time setting states
-    std::unique_ptr<SettingsBase> _settings;
+    CtxSettings<Derived> _settings;
 
     [[nodiscard]] constexpr auto& self() noexcept { return *static_cast<Derived*>(this); }
 
@@ -490,16 +489,14 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-    Block(property_map initParameter) noexcept(false)                                                                                                       // N.B. throws in case of on contract violations
-        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(std::make_unique<CtxSettings<Derived>>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameters) noexcept(false)                                                                                    // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(), std::tuple<Arguments...>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
 
-        if (initParameter.size() != 0) {
-            if (const property_map failed = settings().set(std::move(initParameter)); !failed.empty()) {
-                throw gr::exception(fmt::format("settings could not be applied: {}", failed));
-            }
+        if constexpr (refl::is_reflectable<Derived>()) {
+            settings().setInitBlockParameters(initParameters);
         }
     }
 
@@ -556,7 +553,9 @@ public:
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
         traits::block::all_output_ports<Derived>::for_each(setPortName);
-        // Handle settings
+
+        settings().init();
+
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
@@ -626,14 +625,11 @@ public:
 
     [[nodiscard]] Tag mergedInputTag() const noexcept { return _mergedInputTag; }
 
-    [[nodiscard]] constexpr SettingsBase& settings() const noexcept { return *_settings; }
+    [[nodiscard]] constexpr const SettingsBase& settings() const noexcept { return _settings; }
 
-    [[nodiscard]] constexpr SettingsBase& settings() noexcept { return *_settings; }
+    [[nodiscard]] constexpr SettingsBase& settings() noexcept { return _settings; }
 
-    template<typename T>
-    void setSettings(std::unique_ptr<T>& settings) {
-        _settings = std::move(settings);
-    }
+    void setSettings(CtxSettings<Derived>& settings) { _settings = std::move(settings); }
 
     template<std::size_t Index, typename Self>
     friend constexpr auto& inputPort(Self* self) noexcept;
@@ -844,7 +840,7 @@ public:
                 }
             }
 
-            settings()._changed.store(false);
+            settings().setChanged(false);
 
             if (!applyResult.appliedParameters.empty()) {
                 notifyListeners(block::property::kStagedSetting, applyResult.appliedParameters);
@@ -1084,8 +1080,8 @@ protected:
                 throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
+            property_map notSet          = self().settings().setStaged(*message.data);
             property_map stagedParameter = self().settings().stagedParameters();
-            property_map notSet          = self().settings().set(*message.data);
 
             if (notSet.empty()) {
                 if (!message.clientRequestID.empty()) {
@@ -1239,7 +1235,10 @@ protected:
         return 0UZ;
     }
 
-    auto computeResampling(std::size_t minSyncIn, std::size_t maxSyncIn, std::size_t minSyncOut, std::size_t maxSyncOut) {
+    auto computeResampling(std::size_t minSyncIn, std::size_t maxSyncIn, std::size_t minSyncOut, std::size_t maxSyncOut, std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) {
+        if (requestedWork == 0UZ) {
+            requestedWork = std::numeric_limits<std::size_t>::max();
+        }
         struct ResamplingResult {
             std::size_t  resampledIn;
             std::size_t  resampledOut;
@@ -1247,24 +1246,28 @@ protected:
         };
 
         if constexpr (!ResamplingControl::kEnabled) { // no resampling
-            const std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            if (n < minSyncIn) {
+            const std::size_t maxSync = std::min(maxSyncIn, maxSyncOut);
+            if (maxSync < minSyncIn) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
             }
-            if (n < minSyncOut) {
+            if (maxSync < minSyncOut) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_OUTPUT_ITEMS};
             }
-            return ResamplingResult{.resampledIn = n, .resampledOut = n};
+            const auto minSync   = std::max(minSyncIn, minSyncOut);
+            const auto resampled = std::clamp(requestedWork, minSync, maxSync);
+            return ResamplingResult{.resampledIn = resampled, .resampledOut = resampled};
         }
         if (input_chunk_size == 1UL && output_chunk_size == 1UL) { // no resampling
-            const std::size_t n = std::min(maxSyncIn, maxSyncOut);
-            if (n < minSyncIn) {
+            const std::size_t maxSync = std::min(maxSyncIn, maxSyncOut);
+            if (maxSync < minSyncIn) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
             }
-            if (n < minSyncOut) {
+            if (maxSync < minSyncOut) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_OUTPUT_ITEMS};
             }
-            return ResamplingResult{.resampledIn = n, .resampledOut = n};
+            const auto minSync   = std::max(minSyncIn, minSyncOut);
+            const auto resampled = std::clamp(requestedWork, minSync, maxSync);
+            return ResamplingResult{.resampledIn = resampled, .resampledOut = resampled};
         }
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
@@ -1282,6 +1285,14 @@ protected:
         } else if (nResamplingChunks * output_chunk_size < minSyncOut) {
             return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_OUTPUT_ITEMS};
         } else {
+            if (requestedWork < nResamplingChunks * input_chunk_size) { // if we still can apply requestedWork soft cut
+                const auto minSync                   = std::max(minSyncIn, static_cast<std::size_t>(input_chunk_size));
+                requestedWork                        = std::clamp(requestedWork, minSync, maxSyncIn);
+                const std::size_t nResamplingChunks2 = std::min(requestedWork / input_chunk_size, maxSyncOut / output_chunk_size);
+                if (static_cast<std::size_t>(nResamplingChunks2 * input_chunk_size) >= minSyncIn && static_cast<std::size_t>(nResamplingChunks2 * output_chunk_size) >= minSyncOut) {
+                    return ResamplingResult{.resampledIn = static_cast<std::size_t>(nResamplingChunks2 * input_chunk_size), .resampledOut = static_cast<std::size_t>(nResamplingChunks2 * output_chunk_size)};
+                }
+            }
             return ResamplingResult{.resampledIn = static_cast<std::size_t>(nResamplingChunks * input_chunk_size), .resampledOut = static_cast<std::size_t>(nResamplingChunks * output_chunk_size)};
         }
     }
@@ -1468,7 +1479,7 @@ protected:
      *   - consume in samples (has to be last to correctly propagate back-pressure)
      * @return struct { std::size_t produced_work, work_return_t}
      */
-    work::Result workInternal(std::size_t requested_work) {
+    work::Result workInternal(std::size_t requestedWork) {
         using enum gr::work::Status;
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
@@ -1490,7 +1501,7 @@ protected:
 
         if (this->state() == lifecycle::State::STOPPED) {
             disconnectFromUpStreamParents();
-            return {requested_work, 0UZ, DONE};
+            return {requestedWork, 0UZ, DONE};
         }
 
         // evaluate number of available and processable samples
@@ -1503,7 +1514,7 @@ protected:
         const auto  ensureMinimalDecimation                                   = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
         const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
         const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
-        const auto [resampledIn, resampledOut, resampledStatus]               = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish);
+        auto [resampledIn, resampledOut, resampledStatus]                     = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
         const auto nextEosTagSkipBefore                                       = nextEosTag - inputSkipBefore;
         const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
@@ -1517,10 +1528,11 @@ protected:
             emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
             publishEoS();
             this->setAndNotifyState(lifecycle::State::STOPPED);
-            return {requested_work, 0UZ, DONE};
+            return {requestedWork, 0UZ, DONE};
         }
+
         if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
-            return {requested_work, 0UZ, resampledStatus};
+            return {requestedWork, 0UZ, resampledStatus};
         }
 
         // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
@@ -1530,11 +1542,12 @@ protected:
         work::Status userReturnStatus = ERROR; // default if nothing has been set
         std::size_t  processedIn      = limitByFirstTag ? 1UZ : resampledIn;
         std::size_t  processedOut     = limitByFirstTag ? 1UZ : resampledOut;
-        const auto   inputSpans       = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
-        auto         outputSpans      = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+
+        const auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+        auto       outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
         if (containsEmptyOutputSpans(outputSpans)) {
-            return {requested_work, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
+            return {requestedWork, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
         }
 
         updateInputAndOutputTags();
@@ -1652,7 +1665,7 @@ protected:
         if (userReturnStatus == OK) {
             constexpr bool kIsSourceBlock = traits::block::stream_input_port_types<Derived>::size == 0;
             constexpr bool kIsSinkBlock   = traits::block::stream_output_port_types<Derived>::size == 0;
-            if constexpr (kIsSourceBlock && kIsSinkBlock) {
+            if constexpr (!kIsSourceBlock && !kIsSinkBlock) { // normal block with input(s) and output(s)
                 performedWork = processedIn;
             } else if constexpr (kIsSinkBlock) {
                 performedWork = processedIn;
@@ -1667,8 +1680,8 @@ protected:
                 progress->notify_all();
             }
         }
-        return {requested_work, performedWork, userReturnStatus};
-    } // end: work::Result workInternal(std::size_t requested_work) { ... }
+        return {requestedWork, performedWork, userReturnStatus};
+    } // end: work::Result workInternal(std::size_t requestedWork) { ... }
 
 public:
     work::Status invokeWork()

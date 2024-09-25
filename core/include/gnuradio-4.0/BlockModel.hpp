@@ -343,7 +343,9 @@ public:
      */
     [[nodiscard]] virtual std::string_view uniqueName() const = 0;
 
-    [[nodiscard]] virtual SettingsBase& settings() const = 0;
+    [[nodiscard]] virtual SettingsBase& settings() = 0;
+
+    [[nodiscard]] virtual const SettingsBase& settings() const = 0;
 
     [[nodiscard]] virtual work::Result work(std::size_t requested_work) = 0;
 
@@ -501,7 +503,8 @@ public:
     [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; }
     [[nodiscard]] const property_map&        metaInformation() const override { return blockRef().meta_information; }
     [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
-    [[nodiscard]] SettingsBase&              settings() const override { return blockRef().settings(); }
+    [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
+    [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 };
 

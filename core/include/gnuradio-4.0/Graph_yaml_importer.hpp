@@ -151,9 +151,8 @@ inline gr::Graph loadGrc(PluginLoader& loader, const std::string& yamlSrc) {
         auto parameters = grcBlock["parameters"];
         if (parameters && parameters.IsMap()) {
             // TODO this applyStagedParameters is a workaround to make sure that currentBlock_settings is not empty
-            // but contains the default values of the block (needed to covert the parameter values to the right type)
-            // should this be based on metadata/reflection?
-            std::ignore               = currentBlock->settings().applyStagedParameters();
+            // but contains the default values of the block (needed to covert the parameter values to the right type) should this be based on metadata/reflection?
+            currentBlock->settings().updateActiveParameters();
             auto currentBlockSettings = currentBlock->settings().get();
             for (const auto& kv : parameters) {
                 const auto& key = kv.first.as<std::string>();
@@ -223,8 +222,9 @@ inline gr::Graph loadGrc(PluginLoader& loader, const std::string& yamlSrc) {
         }
 
         std::ignore         = currentBlock->settings().set(newProperties);
+        std::ignore         = currentBlock->settings().activateContext();
         createdBlocks[name] = &testGraph.addBlock(std::move(currentBlock));
-    }
+    } // for blocks
 
     for (const auto& connection : tree["connections"]) {
         if (connection.size() != 4) {
@@ -262,7 +262,7 @@ inline gr::Graph loadGrc(PluginLoader& loader, const std::string& yamlSrc) {
             testGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
         } else {
         }
-    }
+    } // for connections
 
     return testGraph;
 }

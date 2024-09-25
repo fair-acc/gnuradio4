@@ -1,6 +1,7 @@
 #ifndef GNURADIO_FORMATTER_HPP
 #define GNURADIO_FORMATTER_HPP
 
+#include <chrono>
 #include <complex>
 #include <expected>
 #include <fmt/chrono.h>
@@ -81,13 +82,10 @@ struct fmt::formatter<std::complex<T>> {
 // simplified formatter for UncertainValue
 template<gr::arithmetic_or_complex_like T>
 struct fmt::formatter<gr::UncertainValue<T>> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template<typename FormatContext>
-    constexpr auto format(const gr::UncertainValue<T>& value, FormatContext& ctx) const {
+    constexpr auto format(const gr::UncertainValue<T>& value, FormatContext& ctx) const noexcept {
         if constexpr (gr::meta::complex_like<T>) {
             return fmt::format_to(ctx.out(), "({} ± {})", value.value, value.uncertainty);
         } else {
@@ -96,16 +94,99 @@ struct fmt::formatter<gr::UncertainValue<T>> {
     }
 };
 
-template<>
-struct fmt::formatter<gr::property_map> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
+// pmt formatter
+
+namespace gr {
+
+template<typename OutputIt, typename Container, typename Separator>
+constexpr auto format_join(OutputIt out, const Container& container, const Separator& separator) {
+    auto it = container.begin();
+    if (it != container.end()) {
+        out = fmt::format_to(out, "{}", *it); // format first element
+        ++it;
     }
 
+    for (; it != container.end(); ++it) {
+        out = fmt::format_to(out, "{}", separator); // insert separator
+        out = fmt::format_to(out, "{}", *it);       // format remaining element
+    }
+
+    return out;
+}
+
+template<typename Container, typename Separator>
+constexpr std::string join(const Container& container, const Separator& separator) {
+    std::ostringstream ss;
+    auto               out = std::ostream_iterator<char>(ss);
+    format_join(out, container, separator);
+    return ss.str();
+}
+
+} // namespace gr
+
+template<>
+struct fmt::formatter<pmtv::map_t::value_type> {
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
     template<typename FormatContext>
-    constexpr auto format(const gr::property_map& value, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{{ {} }}", fmt::join(value, ", "));
+    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
+        return fmt::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
+    }
+};
+
+template<pmtv::IsPmt T>
+struct fmt::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const T& value, FormatContext& ctx) const noexcept {
+        // if the std::visit dispatch is too expensive then maybe manually loop-unroll this
+        return std::visit([&ctx](const auto& format_arg) { return format_value(format_arg, ctx); }, value);
+    }
+
+private:
+    template<typename FormatContext, typename U>
+    static auto format_value(const U& arg, FormatContext& ctx) -> decltype(fmt::format_to(ctx.out(), "")) {
+        if constexpr (pmtv::Scalar<U> || pmtv::Complex<U>) {
+            return fmt::format_to(ctx.out(), "{}", arg);
+        } else if constexpr (std::same_as<U, std::string>) {
+            return fmt::format_to(ctx.out(), "{}", arg);
+        } else if constexpr (pmtv::UniformVector<U> || pmtv::UniformStringVector<U>) { // format vector
+            fmt::format_to(ctx.out(), "[");
+            gr::format_join(ctx.out(), arg, ", ");
+            return fmt::format_to(ctx.out(), "]");
+        } else if constexpr (std::same_as<U, std::vector<pmtv::pmt>>) { // format vector of pmts
+            fmt::format_to(ctx.out(), "[");
+            gr::format_join(ctx.out(), arg, ", ");
+            return fmt::format_to(ctx.out(), "]");
+        } else if constexpr (pmtv::PmtMap<U>) { // format map
+            fmt::format_to(ctx.out(), "{{ ");
+            for (auto it = arg.begin(); it != arg.end(); ++it) {
+                format_value(it->first, ctx); // Format key
+                fmt::format_to(ctx.out(), ": ");
+                format_value(it->second, ctx); // Format value
+                if (std::next(it) != arg.end()) {
+                    fmt::format_to(ctx.out(), ", ");
+                }
+            }
+            return fmt::format_to(ctx.out(), " }}");
+        } else if constexpr (std::same_as<std::monostate, U>) {
+            return fmt::format_to(ctx.out(), "null");
+        } else {
+            return fmt::format_to(ctx.out(), "unknown type {}", typeid(U).name());
+        }
+    }
+};
+
+template<>
+struct fmt::formatter<pmtv::map_t> {
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
+        fmt::format_to(ctx.out(), "{{ ");
+        gr::format_join(ctx.out(), value, ", ");
+        return fmt::format_to(ctx.out(), " }}");
     }
 };
 
@@ -125,7 +206,7 @@ struct fmt::formatter<std::vector<bool>> {
     }
 
     template<typename FormatContext>
-    auto format(const std::vector<bool>& v, FormatContext& ctx) const -> decltype(ctx.out()) {
+    auto format(const std::vector<bool>& v, FormatContext& ctx) const noexcept -> decltype(ctx.out()) {
         auto   sep = (presentation == 'c' ? ", " : " ");
         size_t len = v.size();
         fmt::format_to(ctx.out(), "[");
@@ -142,9 +223,8 @@ struct fmt::formatter<std::vector<bool>> {
 
 template<typename Value, typename Error>
 struct fmt::formatter<std::expected<Value, Error>> {
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
-    // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const std::expected<Value, Error>& ret, FormatContext& ctx) const -> decltype(ctx.out()) {
         if (ret.has_value()) {

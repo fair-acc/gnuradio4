@@ -98,6 +98,15 @@
         "design",
         "review"
       ]
+    },
+    {
+      "login": "daniestevez",
+      "name": "Daniel Estévez",
+      "avatar_url": "https://avatars.githubusercontent.com/u/15093841?v=4",
+      "profile": "http://destevez.net",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "commitType": "docs",

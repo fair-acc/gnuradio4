@@ -245,7 +245,7 @@ class SpinWait {
             yieldProcessor();
         }
     }
-#ifndef __EMSCRIPTEN__
+#if not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
     static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
 #else
     static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }

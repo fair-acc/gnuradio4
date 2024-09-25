@@ -72,7 +72,7 @@ def process_bulk(ins, outs):
 )";
 
         PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
-        myBlock.applyChangedSettings(); // needed for unit-test only when executed outside a Scheduler/Graph
+        myBlock.init(myBlock.progress, myBlock.ioThreadPool); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
         std::vector<std::int32_t>                  data1 = {1, 2, 3};
@@ -136,6 +136,7 @@ def process_bulk(ins, outs):
 
         bool throws = false;
         try {
+            myBlock.settings().init();
             std::ignore = myBlock.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
         } catch (const std::exception& ex) {
             throws = true;
@@ -154,7 +155,7 @@ def process_bulk(ins, outs):
 )";
 
         PythonBlock<float> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
-        myBlock.applyChangedSettings(); // needed for unit-test only when executed outside a Scheduler/Graph
+        myBlock.init(myBlock.progress, myBlock.ioThreadPool); // needed for unit-test only when executed outside a Scheduler/Graph
 
         std::vector<float>                  data1 = {1, 2, 3};
         std::vector<float>                  data2 = {4, 5, 6};
@@ -200,7 +201,7 @@ def process_bulk(ins, outs):
         }
         expect(!throws);
 
-        expect(eq(sink.n_samples_produced, 5U)) << "sinkOne did not consume enough input samples";
+        expect(eq(sink._nSamplesProduced, 5U)) << "sinkOne did not consume enough input samples";
         expect(eq(sink._samples, std::vector<std::int32_t>{0, 2, 4, 6, 8})) << fmt::format("mismatch of vector {}", sink._samples);
     };
 
@@ -264,7 +265,7 @@ def process_bulk(ins, outs):
         }
         expect(!throws);
 
-        expect(eq(sink.n_samples_produced, 5U)) << "sinkOne did not consume enough input samples";
+        expect(eq(sink._nSamplesProduced, 5U)) << "sinkOne did not consume enough input samples";
         expect(eq(sink._samples, std::vector<float>{0.f, 2.f, 4.f, 6.f, 8.f})) << fmt::format("mismatch of vector {}", sink._samples);
     };
 };
