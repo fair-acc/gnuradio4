@@ -39,8 +39,8 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
         std::size_t tagsForwarded = 0;
         for (gr::Tag tag : inSamples.tags) {
-            if (tag.index < (inPort.streamIndex + (static_cast<gr::Tag::signed_index_type>(inSamples.size()) + 1) / 2)) {
-                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inPort.streamIndex));
+            if (tag.index < (inSamples.streamIndex + (static_cast<gr::Tag::signed_index_type>(inSamples.size()) + 1) / 2)) {
+                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
             } else {

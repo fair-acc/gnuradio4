@@ -53,26 +53,26 @@ const boost::ut::suite PortTests = [] {
             // fmt::print("idx: {}: data: {}\ntags: {}\nmergedTag: {}\n", data.streamIndex, std::span(data), in.tags, in.getMergedTag());
             expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {2, {{"id", "tag@102"}, {"id2", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5)));
-            expect(in.getMergedTag() == gr::Tag{-1, {{"id", "tag@-1"}, {"id0", true}}});
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@-1"}, {"id0", true}}});
             expect(data.consume(2));
         }
         { // full consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(2);
             expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{1, {{"id", "tag@101"}, {"id1", true}}}, {2, {{"id", "tag@102"}, {"id2", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(2) | std::views::take(2)));
-            expect(in.getMergedTag() == gr::Tag{-1, {{"id", "tag@102"}, {"id1", true}, {"id2", true}}});
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@102"}, {"id1", true}, {"id2", true}}});
         }
         { // get empty range
             auto data = in.get<SpanReleasePolicy::ProcessAll>(0);
             expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{3, {{"id", "tag@103"}, {"id3", true}}}}));
             expect(std::ranges::equal(data, std::vector<int>()));
-            expect(in.getMergedTag() == gr::Tag{-1, {{"id", "tag@103"}, {"id3", true}}});
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@103"}, {"id3", true}}});
         }
         { // get last sample
             auto data = in.get<SpanReleasePolicy::ProcessAll>(1);
             expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(4) | std::views::take(1)));
-            expect(in.getMergedTag() == gr::Tag{-1, {{"id", "tag@104"}, {"id3", true}, {"id4", true}}});
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@104"}, {"id3", true}, {"id4", true}}});
         }
     };
 

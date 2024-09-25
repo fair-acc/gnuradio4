@@ -355,9 +355,9 @@ struct Port {
         TagReaderSpanType      tags;
         Tag::signed_index_type streamIndex;
 
-        ConsumablePortInputRange(std::size_t nSamples, ReaderType& streamReader, TagReaderSpanType _tags, Tag::signed_index_type _currentStreamOffset) : ReaderSpanType<spanReleasePolicy>(streamReader.template get<spanReleasePolicy>(nSamples)), tags(_tags), streamIndex{_currentStreamOffset} {};
+        ConsumablePortInputRange(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), tags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
 
-        ~ConsumablePortInputRange() {
+        ~ConsumablePortInputRange() override {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
                 if (tags.isConsumeRequested()) {                             // the user has already manually consumed tags
                     return;
@@ -365,16 +365,57 @@ struct Port {
                 if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
                     return; // no samples to be consumed -> do not consume any tags
                 }
-                std::size_t tagsToConsume = 0;
-                for (auto& t : tags) {
-                    if (t.index <= streamIndex) {
-                        tagsToConsume++;
-                    } else {
-                        break;
-                    }
-                }
-                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitly and implicitly consumed
+                consumeTags(0); // consume all tags including the one on the first sample
             }
+        }
+
+        void consumeTags(gr::Tag::signed_index_type untilLocalIndex) {
+            std::size_t tagsToConsume = 0;
+            for (auto& t : tags) {
+                if (t.index <= streamIndex + untilLocalIndex) {
+                    tagsToConsume++;
+                } else {
+                    break;
+                }
+            }
+            std::ignore = tags.tryConsume(tagsToConsume); // todo: allow to alternatively do tags.tryConsume(nSamples)
+        }
+
+        [[nodiscard]] inline Tag getMergedTag() const {
+            Tag  result{};
+            auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
+                assert(&sourceMap != &destinationMap);
+                for (const auto& [key, value] : sourceMap) {
+                    destinationMap.insert_or_assign(key, value);
+                }
+            };
+
+            result.index = -1;
+            std::ranges::for_each(tags, [&mergeSrcMapInto, &result, this](const Tag& tag) {
+                if (tag.index <= streamIndex) {
+                    mergeSrcMapInto(tag.map, result.map);
+                }
+            });
+
+            return result;
+        }
+
+    private:
+        auto getTags(gr::Tag::signed_index_type nSamples, TagReaderType& reader, gr::Tag::signed_index_type _currentStreamOffset) {
+            std::size_t nTagsProcessed    = 0UZ;
+            bool        properTagDistance = false;
+            for (const Tag& tag : reader.get(reader.available())) {
+                const bool tagIsWithinRange = (tag.index != -1) && tag.index < _currentStreamOffset + nSamples;
+                if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
+                    nTagsProcessed++;
+                    if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
+                        properTagDistance = true;
+                    }
+                } else {
+                    break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
+                }
+            }
+            return reader.get(nTagsProcessed);
         }
     }; // end of ConsumablePortInputRange
     static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
@@ -434,9 +475,6 @@ struct Port {
     }; // end of PublishablePortOutputRange
 
     static_assert(PublishablePortSpan<PublishablePortOutputRange<gr::SpanReleasePolicy::ProcessAll, PublishableSpanReservePolicy::Reserve>>);
-
-    std::span<const Tag>   tags;          // Range of tags for the currently processed stream range; only used in input ports
-    Tag::signed_index_type streamIndex{}; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
 
 private:
     IoType    _ioHandler    = newIoHandler();
@@ -648,10 +686,7 @@ public:
     ConsumablePortInputRange<spanReleasePolicy> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        auto taggedStream = ConsumablePortInputRange<spanReleasePolicy>(nSamples, streamReader(), getTags(static_cast<gr::Tag::signed_index_type>(nSamples)), streamReader().position());
-        tags              = std::span(taggedStream.tags.data(), taggedStream.tags.size());
-        streamIndex       = streamReader().position();
-        return taggedStream;
+        return ConsumablePortInputRange<spanReleasePolicy>(nSamples, streamReader(), tagReader());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
@@ -666,52 +701,6 @@ public:
     requires(kIsOutput)
     {
         return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
-    }
-
-    /**
-     * @return get all (incl. past unconsumed) tags () until the read-position + optional offset
-     */
-    inline constexpr ConsumableSpan auto getTags(Tag::signed_index_type untilOffset = 0) noexcept
-    requires(kIsInput)
-    {
-        const auto  readPos           = streamReader().position();
-        const auto  inputTags         = tagReader().get(); // N.B. returns all old/available/pending tags
-        std::size_t nTagsProcessed    = 0UZ;
-        bool        properTagDistance = false;
-
-        for (const Tag& tag : inputTags) {
-            const auto relativeTagPosition = (tag.index - readPos); // w.r.t. present stream reader position
-            const bool tagIsWithinRange    = (tag.index != -1) && relativeTagPosition < untilOffset;
-            if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
-                nTagsProcessed++;
-                if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
-                    properTagDistance = true;
-                }
-            } else {
-                break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
-            }
-        }
-        return tagReader().get(nTagsProcessed);
-    }
-
-    inline const Tag getMergedTag() {
-        Tag result{};
-
-        auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
-            assert(&sourceMap != &destinationMap);
-            for (const auto& [key, value] : sourceMap) {
-                destinationMap.insert_or_assign(key, value);
-            }
-        };
-
-        result.index = -1;
-        std::ranges::for_each(tags, [&mergeSrcMapInto, &result, this](const Tag& tag) {
-            if (tag.index <= streamIndex) {
-                mergeSrcMapInto(tag.map, result.map);
-            }
-        });
-
-        return result;
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
@@ -977,9 +966,7 @@ public:
     DynamicPort(DynamicPort&& arg)            = default;
     DynamicPort& operator=(DynamicPort&& arg) = delete;
 
-    // TODO: The lifetime of ports is a problem here, if we keep
-    // a reference to the port in DynamicPort, the port object
-    // can not be reallocated
+    // TODO: The lifetime of ports is a problem here, if we keep a reference to the port in DynamicPort, the port object/ can not be reallocated
     template<PortLike T>
     explicit constexpr DynamicPort(T& arg, non_owned_reference_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, false>>(arg)} {}
 
