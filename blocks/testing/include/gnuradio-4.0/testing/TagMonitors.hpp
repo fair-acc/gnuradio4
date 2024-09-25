@@ -15,8 +15,7 @@ namespace gr::testing {
 
 enum class ProcessFunction {
     USE_PROCESS_BULK     = 0, ///
-    USE_PROCESS_ONE      = 1, ///
-    USE_PROCESS_ONE_SIMD = 2  ///
+    USE_PROCESS_ONE      = 1  ///
 };
 
 inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept {
@@ -267,36 +266,6 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             _samples.push_back(input);
         }
         _nSamplesProduced++;
-        return input;
-    }
-
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr V processOne(const V& input) noexcept // to note: the SIMD-version does not support adding tags mid-way since this is chunked at V::size()
-    requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE_SIMD)
-    {
-        if (this->input_tags_present()) {
-            const Tag& tag = this->mergedInputTag();
-            if (verbose_console) {
-                print_tag(tag, fmt::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
-            }
-            if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
-            }
-        }
-        if (log_samples) {
-            if constexpr (gr::meta::any_simd<V>) {
-                alignas(stdx::memory_alignment_v<stdx::native_simd<T>>) std::array<T, V::size()> mem = {};
-                input.copy_to(&mem[0], stdx::vector_aligned);
-                _samples.insert(_samples.end(), mem.begin(), mem.end());
-            } else {
-                _samples.emplace_back(input);
-            }
-        }
-        if constexpr (gr::meta::any_simd<V>) {
-            _nSamplesProduced += static_cast<gr::Size_t>(V::size());
-        } else {
-            _nSamplesProduced++;
-        }
         return input;
     }
 
