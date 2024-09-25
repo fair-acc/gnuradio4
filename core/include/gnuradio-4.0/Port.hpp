@@ -262,10 +262,27 @@ namespace gr {
  */
 struct Async {};
 
+/**
+ * @brief API for access to the input samples and tags from the process_bulk function.
+ *
+ * This concept is used for the input parameters of the process_bulk function to allow:
+ * - access to the samples (via conversion to std::span)
+ * - consumption of samples. By default all available samples get consumed.
+ * - access to tags
+ *   - via a range::view returned by `tag()` which returns the index relative to first sample in this span. The index can be negative for tags that were not consumed before.
+ *   - via rawTags, which gives access to the bare ConsumableSpan<Tag>
+ * - consumption of tags. By default the tags belonging to up to and including the first sample get consumed. This can be manually changed by calling consumeTags with the index of a stream sample.
+ * - get a merged tag which contains the data of all tags belonging to up to and including the first sample. Optionally this can be changed to merge all tags until a supplied local stream index.
+ */
 template<typename T>
-concept ConsumablePortSpan = ConsumableSpan<T> && requires(T span) {
-    requires ConsumableSpan<std::remove_cvref_t<decltype(span.tags)>>;
-    { *span.tags.begin() } -> std::same_as<const gr::Tag&>;
+concept InputSpan = requires(T span, gr::Tag::signed_index_type n) {
+    { span } -> std::ranges::contiguous_range;
+    { span.consume(0) };
+    { span.rawTags };
+    requires ConsumableSpan<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
+    { span.tags() } -> std::ranges::range;
+    { span.consumeTags(n) };
+    { span.getMergedTag(n) } -> std::same_as<gr::Tag>;
 };
 
 template<typename T>
@@ -351,15 +368,15 @@ struct Port {
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
 
     template<SpanReleasePolicy spanReleasePolicy>
-    struct ConsumablePortInputRange : public ReaderSpanType<spanReleasePolicy> {
-        TagReaderSpanType      tags;
+    struct PortInputSpan : public ReaderSpanType<spanReleasePolicy> {
+        TagReaderSpanType      rawTags;
         Tag::signed_index_type streamIndex;
 
-        ConsumablePortInputRange(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), tags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
+        PortInputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
 
-        ~ConsumablePortInputRange() override {
+        ~PortInputSpan() override {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (tags.isConsumeRequested()) {                             // the user has already manually consumed tags
+                if (rawTags.isConsumeRequested()) {                             // the user has already manually consumed tags
                     return;
                 }
                 if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
@@ -369,34 +386,27 @@ struct Port {
             }
         }
 
-        void consumeTags(gr::Tag::signed_index_type untilLocalIndex) {
-            std::size_t tagsToConsume = 0;
-            for (auto& t : tags) {
-                if (t.index <= streamIndex + untilLocalIndex) {
-                    tagsToConsume++;
-                } else {
-                    break;
-                }
-            }
-            std::ignore = tags.tryConsume(tagsToConsume); // todo: allow to alternatively do tags.tryConsume(nSamples)
+        [[nodiscard]] auto tags() {
+            return std::views::transform(rawTags, [this](auto &tag) { return std::make_pair(std::max(tag.index, 0l) - streamIndex, std::ref(tag.map)); });
         }
 
-        [[nodiscard]] inline Tag getMergedTag() const {
-            Tag  result{};
+        void consumeTags(gr::Tag::signed_index_type untilLocalIndex) {
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(
+                    rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }),
+                    [](auto /*v*/) {return true;} ));
+            std::ignore = rawTags.tryConsume(tagsToConsume);
+        }
+
+        [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type untilLocalIndex = 0) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
                     destinationMap.insert_or_assign(key, value);
                 }
             };
-
-            result.index = -1;
-            std::ranges::for_each(tags, [&mergeSrcMapInto, &result, this](const Tag& tag) {
-                if (tag.index <= streamIndex) {
-                    mergeSrcMapInto(tag.map, result.map);
-                }
-            });
-
+            Tag  result{-1, {}};
+            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }),
+                                  [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
             return result;
         }
 
@@ -418,7 +428,8 @@ struct Port {
             return reader.get(nTagsProcessed);
         }
     }; // end of ConsumablePortInputRange
-    static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
+    static_assert(ConsumableSpan<PortInputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    static_assert(InputSpan<PortInputSpan<gr::SpanReleasePolicy::ProcessAll>>);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
@@ -683,10 +694,10 @@ public:
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
-    ConsumablePortInputRange<spanReleasePolicy> get(std::size_t nSamples)
+    PortInputSpan<spanReleasePolicy> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        return ConsumablePortInputRange<spanReleasePolicy>(nSamples, streamReader(), tagReader());
+        return PortInputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>

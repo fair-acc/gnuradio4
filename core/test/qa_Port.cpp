@@ -35,44 +35,57 @@ const boost::ut::suite PortTests = [] {
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();
         { // put testdata into buffer
-            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(6);
             auto tagSpan   = tagWriter.tryReserve(5);
-            expect(eq(writeSpan.size(), 5UZ));
+            expect(eq(writeSpan.size(), 6UZ));
             expect(eq(tagSpan.size(), 5UZ));
             tagSpan[0] = {-1, {{"id", "tag@-1"}, {"id0", true}}};
             tagSpan[1] = {1, {{"id", "tag@101"}, {"id1", true}}};
-            tagSpan[2] = {2, {{"id", "tag@102"}, {"id2", true}}};
-            tagSpan[3] = {3, {{"id", "tag@103"}, {"id3", true}}};
-            tagSpan[4] = {4, {{"id", "tag@104"}, {"id4", true}}};
+            tagSpan[2] = {3, {{"id", "tag@103"}, {"id3", true}}};
+            tagSpan[3] = {4, {{"id", "tag@104"}, {"id4", true}}};
+            tagSpan[4] = {5, {{"id", "tag@105"}, {"id5", true}}};
             std::iota(writeSpan.begin(), writeSpan.end(), 100);
             tagSpan.publish(5);   // this should not be necessary as the ProcessAll policy should publish automatically
-            writeSpan.publish(5); // this should not be necessary as the ProcessAll policy should publish automatically
+            writeSpan.publish(6); // this should not be necessary as the ProcessAll policy should publish automatically
         }
         { // partial consume
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(5);
-            // fmt::print("idx: {}: data: {}\ntags: {}\nmergedTag: {}\n", data.streamIndex, std::span(data), in.tags, in.getMergedTag());
-            expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {2, {{"id", "tag@102"}, {"id2", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}}));
-            expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5)));
+            auto data = in.get<SpanReleasePolicy::ProcessAll>(6);
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            auto tags = data.tags(); // ranges::equal does not work for the range view adapters returned by data.tags() in gcc13 and 14.0
+            expect(std::ranges::equal(std::vector(tags.begin(), tags.end()), std::vector{
+                std::make_pair(0L, gr::property_map{{"id", "tag@-1"}, {"id0", true}}),
+                std::make_pair(1L, gr::property_map{{"id", "tag@101"}, {"id1", true}}),
+                std::make_pair(3L, gr::property_map{{"id", "tag@103"}, {"id3", true}}),
+                std::make_pair(4L, gr::property_map{{"id", "tag@104"}, {"id4", true}}),
+                std::make_pair(5L, gr::property_map{{"id", "tag@105"}, {"id5", true}})
+            }));
+            expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(6)));
             expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@-1"}, {"id0", true}}});
-            expect(data.consume(2));
+            expect(data.consume(3));
         }
         { // full consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(2);
-            expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{1, {{"id", "tag@101"}, {"id1", true}}}, {2, {{"id", "tag@102"}, {"id2", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}}));
-            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(2) | std::views::take(2)));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@102"}, {"id1", true}, {"id2", true}}});
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}}));
+            auto tags = data.tags();
+            expect(std::ranges::equal(std::vector(tags.begin(), tags.end()), std::vector{std::make_pair(-2L, gr::property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(0L, gr::property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, gr::property_map{{"id", "tag@104"}, {"id4", true}})}));
+            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3) | std::views::take(2)));
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@103"}, {"id1", true}, {"id3", true}}});
         }
         { // get empty range
             auto data = in.get<SpanReleasePolicy::ProcessAll>(0);
-            expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{3, {{"id", "tag@103"}, {"id3", true}}}}));
-            expect(std::ranges::equal(data, std::vector<int>()));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@103"}, {"id3", true}}});
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{4, {{"id", "tag@104"}, {"id4", true}}}}));
+            auto tags = data.tags();
+            expect(std::ranges::equal(std::vector(tags.begin(), tags.end()), std::vector{std::make_pair(-1L, gr::property_map{{"id", "tag@104"}, {"id4", true}})}));
+            expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@104"}, {"id4", true}}});
         }
         { // get last sample
             auto data = in.get<SpanReleasePolicy::ProcessAll>(1);
-            expect(std::ranges::equal(data.tags, std::vector<gr::Tag>{{3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}}));
-            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(4) | std::views::take(1)));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@104"}, {"id3", true}, {"id4", true}}});
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            auto tags = data.tags();
+            expect(std::ranges::equal(std::vector(tags.begin(), tags.end()), std::vector{std::make_pair(-1L, gr::property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(0L, property_map {{"id", "tag@105"}, {"id5", true}})}));
+            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5) | std::views::take(1)));
+            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@105"}, {"id4", true}, {"id5", true}}});
         }
     };
 

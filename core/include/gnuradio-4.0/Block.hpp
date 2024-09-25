@@ -744,10 +744,10 @@ public:
                         destinationMap.insert_or_assign(key, value);
                     }
                 };
-                if constexpr (ConsumablePortSpan<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
-                    mergeSrcMapInto(inputSpanOrVector.getMergedTag().map, _mergedInputTag.map);
+                if constexpr (InputSpan<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
+                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(0).map, _mergedInputTag.map);
                 } else {
-                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag().map, _mergedInputTag.map); });
+                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(0).map, _mergedInputTag.map); });
                 }
             },
             inputSpans);
