@@ -6468,25 +6468,236 @@ using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelis
 #include <typeinfo>
 #include <unordered_map>
 
-#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 // #include <vir/simd.h>
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
-/* Copyright © 2022-2023 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+/* Copyright © 2022–2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
  *                       Matthias Kretz <m.kretz@gsi.de>
  */
 
 #ifndef VIR_SIMD_H_
 #define VIR_SIMD_H_
 
+#ifdef _MSVC_LANG
+#if _MSVC_LANG < 201703L
+#error "simd requires C++17 or later"
+#endif
+#else
 #if __cplusplus < 201703L
 #error "simd requires C++17 or later"
 #endif
+#endif
+
+// #include "simd_version.h"
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2024      GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_SIMD_VERSION_H_
+#define VIR_SIMD_VERSION_H_
+
+#if __cpp_impl_three_way_comparison >= 201907L and __cpp_lib_three_way_comparison >= 201907L
+#define VIR_HAVE_SPACESHIP 1
+#include <compare>
+#else
+#define VIR_HAVE_SPACESHIP 0
+#endif
+
+//     release >= 0x00
+// development >= 0x64
+//       alpha >= 0xbe
+//        beta >= 0xc8
+#define VIR_SIMD_VERSION 0x0'04'00
+
+#define VIR_SIMD_VERSION_MAJOR (VIR_SIMD_VERSION / 0x10000)
+
+#define VIR_SIMD_VERSION_MINOR ((VIR_SIMD_VERSION % 0x10000) / 0x100)
+
+#define VIR_SIMD_VERSION_PATCHLEVEL (VIR_SIMD_VERSION % 0x100)
+
+namespace vir
+{
+  struct simd_version_t
+  {
+    int major, minor, patchlevel;
+
+    friend constexpr bool
+    operator==(simd_version_t a, simd_version_t b)
+    { return a.major == b.major and a.minor == b.minor and a.patchlevel == b.patchlevel; }
+
+    friend constexpr bool
+    operator!=(simd_version_t a, simd_version_t b)
+    { return not (a == b); }
+
+#if VIR_HAVE_SPACESHIP
+    friend constexpr std::strong_ordering
+    operator<=>(simd_version_t, simd_version_t) = default;
+#else
+    friend constexpr bool
+    operator<(simd_version_t a, simd_version_t b)
+    {
+      return a.major < b.major
+               or (a.major == b.major and a.minor < b.minor)
+               or (a.major == b.major and a.minor == b.minor and a.patchlevel < b.patchlevel);
+    }
+
+    friend constexpr bool
+    operator<=(simd_version_t a, simd_version_t b)
+    {
+      return a.major < b.major
+               or (a.major == b.major and a.minor < b.minor)
+               or (a.major == b.major and a.minor == b.minor and a.patchlevel <= b.patchlevel);
+    }
+
+    friend constexpr bool
+    operator>(simd_version_t a, simd_version_t b)
+    { return b < a; }
+
+    friend constexpr bool
+    operator>=(simd_version_t a, simd_version_t b)
+    { return b <= a; }
+#endif
+  };
+
+  inline constexpr simd_version_t
+    simd_version = { VIR_SIMD_VERSION_MAJOR, VIR_SIMD_VERSION_MINOR, VIR_SIMD_VERSION_PATCHLEVEL };
+}
+
+#endif  // VIR_SIMD_VERSION_H_
+
+
+#include <cstdlib> // std::abort
 
 #if __has_include (<experimental/simd>) && !defined VIR_DISABLE_STDX_SIMD && !defined __clang__
 #include <experimental/simd>
 #endif
 
+#ifndef VIR_ALWAYS_INLINE
+#ifdef __GNUC__
+#define VIR_ALWAYS_INLINE [[gnu::always_inline]] inline
+#define VIR_GNU_COLD [[gnu::cold]]
+#define VIR_GNU_ATTR_COLD __attribute__((cold))
+#else
+#define VIR_ALWAYS_INLINE __forceinline
+#define VIR_GNU_COLD
+#define VIR_GNU_ATTR_COLD
+#endif
+#endif
+
+namespace vir::detail
+{
+  [[noreturn]] VIR_GNU_COLD VIR_ALWAYS_INLINE void
+  unreachable()
+  {
+#if defined __GNUC__
+    __builtin_unreachable();
+#elif defined __has_cpp_attribute and __has_cpp_attribute(assume)
+    [[assume(false)]];
+#else
+    __assume(false);
+#endif
+  }
+
+  [[noreturn]] VIR_GNU_COLD VIR_ALWAYS_INLINE void
+  trap()
+  {
+#if defined __GNUC__
+    __builtin_trap();
+#else
+    std::abort();
+#endif
+  }
+
+  template <typename... Args>
+    [[noreturn]] VIR_GNU_COLD VIR_ALWAYS_INLINE void
+    invoke_ub([[maybe_unused]] const char* msg,
+              [[maybe_unused]] const Args&... args)
+    {
+#if VIR_CHECK_PRECONDITIONS < 2
+      unreachable();
+#elif defined __GNUC__ and VIR_CHECK_PRECONDITIONS < 4
+      __builtin_trap();
+#else
+      [&] VIR_GNU_ATTR_COLD () {
+        std::fprintf(stderr, msg, args...);
+      }();
+      std::abort();
+#endif
+    }
+}
+
+#define VIR_SIMD_TOSTRING_IMPL(x) #x
+#define VIR_SIMD_TOSTRING(x) VIR_SIMD_TOSTRING_IMPL(x)
+#define VIR_SIMD_LOC __FILE__ ":" VIR_SIMD_TOSTRING(__LINE__) ": "
+
+/* VIR_CHECK_PRECONDITIONS:
+ * 0: Compile-time warning, invoke UB on run-time failure.
+ * 1: Compile-time   error, invoke UB on run-time failure.
+ * 2: Compile-time warning, trap on run-time failure.
+ * 3: Compile-time   error, trap on run-time failure.
+ * 4: Compile-time warning, print error and abort on run-time failure.
+ * 5: Compile-time   error, print error and abort on run-time failure.
+ */
+
+#ifndef VIR_CHECK_PRECONDITIONS
+#define VIR_CHECK_PRECONDITIONS 3
+#endif
+
+#if VIR_CHECK_PRECONDITIONS > 5 or VIR_CHECK_PRECONDITIONS < 0
+#warning "Invalid value for VIR_CHECK_PRECONDITIONS."
+#endif
+
+#ifdef __GNUC__
+#define VIR_PRETTY_FUNCTION_ __PRETTY_FUNCTION__
+#else
+#define VIR_PRETTY_FUNCTION_ __FUNCSIG__
+#endif
+
+#if VIR_CHECK_PRECONDITIONS < 0
+#define vir_simd_precondition(expr, msg, ...)                                             \
+  (void) bool(expr)
+#elif defined __clang__ or __GNUC__ >= 10
+#if (VIR_CHECK_PRECONDITIONS & 1) == 1
+#define VIR_CONSTPROP_PRECONDITION_FAILURE_ACTION __error__
+#else
+#define VIR_CONSTPROP_PRECONDITION_FAILURE_ACTION __warning__
+#endif
+#if defined __GNUC__ and not defined __clang__
+#define VIR_ATTR_NOIPA __noipa__,
+#else
+#define VIR_ATTR_NOIPA
+#endif
+#define vir_simd_precondition(expr, msg, ...)                                               \
+  do {                                                                                      \
+    const bool precondition_result = bool(expr);                                            \
+    if (__builtin_constant_p(precondition_result) and not precondition_result)              \
+      []() __attribute__((__noinline__, __noreturn__, VIR_ATTR_NOIPA                        \
+        VIR_CONSTPROP_PRECONDITION_FAILURE_ACTION("precondition failure."                   \
+        "\n" VIR_SIMD_LOC "note: " msg " (precondition '" #expr "' does not hold)")))       \
+        { vir::detail::trap(); }();                                                         \
+    else if (__builtin_expect(not precondition_result, false))                              \
+      vir::detail::invoke_ub(                                                               \
+        VIR_SIMD_LOC "precondition failure in '%s': " msg " ('" #expr "' does not hold)\n", \
+        VIR_PRETTY_FUNCTION_ __VA_OPT__(,) __VA_ARGS__);                                    \
+  } while(false)
+#else
+#define vir_simd_precondition(expr, msg, ...)                                               \
+  do {                                                                                      \
+    const bool precondition_result = bool(expr);                                            \
+    if (not precondition_result) [[unlikely]]                                               \
+      vir::detail::invoke_ub(                                                               \
+        VIR_SIMD_LOC "precondition failure in '%s': " msg " ('" #expr "' does not hold)\n", \
+        VIR_PRETTY_FUNCTION_ __VA_OPT__(,) __VA_ARGS__);                                    \
+  } while(false)
+#endif
+
+
 #if defined __cpp_lib_experimental_parallel_simd && __cpp_lib_experimental_parallel_simd >= 201803
+
+#define VIR_HAVE_STD_SIMD 1
 
 namespace vir::stdx
 {
@@ -6496,6 +6707,7 @@ namespace vir::stdx
 
 #else
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #ifdef _GLIBCXX_DEBUG_UB
@@ -6506,6 +6718,8 @@ namespace vir::stdx
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
+#define VIR_HAVE_VIR_SIMD 1
 
 #ifdef VIR_SIMD_TS_DROPIN
 namespace std::experimental
@@ -6569,19 +6783,6 @@ namespace vir::stdx
 
       constexpr operator bool() const { return data; }
     };
-
-    template <typename... Args>
-      [[noreturn]] [[gnu::always_inline]] inline void
-      invoke_ub([[maybe_unused]] const char* msg,
-                [[maybe_unused]] const Args&... args)
-      {
-#ifdef _GLIBCXX_DEBUG_UB
-        std::fprintf(stderr, msg, args...);
-        __builtin_trap();
-#else
-        __builtin_unreachable();
-#endif
-      }
 
     template <typename T>
       using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
@@ -6977,24 +7178,26 @@ namespace vir::stdx
 
       // load constructor
       template <typename Flags>
+        constexpr
         simd_mask(const value_type* mem, Flags)
         : data(mem[0])
         {}
 
       template <typename Flags>
+        constexpr
         simd_mask(const value_type* mem, simd_mask k, Flags)
         : data(k ? mem[0] : false)
         {}
 
       // loads [simd_mask.load]
       template <typename Flags>
-        void
+        constexpr void
         copy_from(const value_type* mem, Flags)
         { data = mem[0]; }
 
       // stores [simd_mask.store]
       template <typename Flags>
-        void
+        constexpr void
         copy_to(value_type* mem, Flags) const
         { mem[0] = data; }
 
@@ -7002,16 +7205,14 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data;
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data;
       }
 
@@ -7079,7 +7280,8 @@ namespace vir::stdx
     {
     private:
       template <typename V, int M, size_t Parts>
-        friend std::enable_if_t<M == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
+        friend constexpr
+        std::enable_if_t<M == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
         split(const simd_mask<typename V::simd_type::value_type, simd_abi::fixed_size<M>>&);
 
       bool data[N];
@@ -7108,7 +7310,7 @@ namespace vir::stdx
       // explicit broadcast constructor
       explicit constexpr
       simd_mask(bool x)
-      : simd_mask([x](size_t) { return x; })
+      : simd_mask(std::make_index_sequence<N>(), [x](size_t) { return x; })
       {}
 
       template <typename F>
@@ -7123,18 +7325,19 @@ namespace vir::stdx
       template <typename U>
         constexpr
         simd_mask(const simd_mask<U, abi_type>& x)
-        : simd_mask([&x](auto i) { return x[i]; })
+        : simd_mask(std::make_index_sequence<N>(), [&x](size_t i) { return x[i]; })
         {}
 
       // load constructor
       template <typename Flags>
         simd_mask(const value_type* mem, Flags)
-        : simd_mask([mem](size_t i) { return mem[i]; })
+        : simd_mask(std::make_index_sequence<N>(), [mem](size_t i) { return mem[i]; })
         {}
 
       template <typename Flags>
         simd_mask(const value_type* mem, const simd_mask& k, Flags)
-        : simd_mask([mem, &k](size_t i) { return k[i] ? mem[i] : false; })
+        : simd_mask(std::make_index_sequence<N>(),
+                    [mem, &k](size_t i) { return k[i] ? mem[i] : false; })
         {}
 
       // loads [simd_mask.load]
@@ -7153,16 +7356,14 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data[i];
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data[i];
       }
 
@@ -7296,8 +7497,7 @@ namespace vir::stdx
     constexpr int
     find_first_set(simd_mask<T, simd_abi::scalar> k) noexcept
     {
-      if (not k[0])
-        detail::invoke_ub("find_first_set(empty mask) is UB");
+      vir_simd_precondition(k[0], "find_first_set(empty mask) is UB");
       return 0;
     }
 
@@ -7305,8 +7505,7 @@ namespace vir::stdx
     constexpr int
     find_last_set(simd_mask<T, simd_abi::scalar> k) noexcept
     {
-      if (not k[0])
-        detail::invoke_ub("find_last_set(empty mask) is UB");
+      vir_simd_precondition(k[0], "find_last_set(empty mask) is UB");
       return 0;
     }
 
@@ -7373,24 +7572,26 @@ namespace vir::stdx
     constexpr int
     find_first_set(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
     {
+      vir_simd_precondition(any_of(k), "find_first_set(empty mask) is UB");
       for (int i = 0; i < N; ++i)
         {
           if (k[i])
             return i;
         }
-      detail::invoke_ub("find_first_set(empty mask) is UB");
+      vir::detail::unreachable();
     }
 
   template <typename T, int N>
     constexpr int
     find_last_set(const simd_mask<T, simd_abi::fixed_size<N>>& k) noexcept
     {
+      vir_simd_precondition(any_of(k), "find_last_set(empty mask) is UB");
       for (int i = N - 1; i >= 0; --i)
         {
           if (k[i])
             return i;
         }
-      detail::invoke_ub("find_last_set(empty mask) is UB");
+      vir::detail::unreachable();
     }
 
   constexpr bool
@@ -7552,6 +7753,14 @@ namespace vir::stdx
 
       T data;
 
+      friend constexpr T&
+      _data_(simd& x)
+      { return x.data; }
+
+      friend constexpr const T&
+      _data_(const simd& x)
+      { return x.data; }
+
     public:
       using value_type = T;
       using reference = T&;
@@ -7585,19 +7794,20 @@ namespace vir::stdx
 
       // load constructor
       template <typename U, typename Flags>
+        constexpr
         simd(const U* mem, Flags)
         : data(mem[0])
         {}
 
       // loads [simd.load]
       template <typename U, typename Flags>
-        void
+        constexpr void
         copy_from(const detail::Vectorizable<U>* mem, Flags)
         { data = mem[0]; }
 
       // stores [simd.store]
       template <typename U, typename Flags>
-        void
+        constexpr void
         copy_to(detail::Vectorizable<U>* mem, Flags) const
         { mem[0] = data; }
 
@@ -7605,16 +7815,14 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data;
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data;
       }
 
@@ -7791,39 +7999,39 @@ namespace vir::stdx
 
       friend constexpr Derived
       operator%(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] % y[i]; }); }
+      { return Derived([&](size_t i) -> T { return x[i] % y[i]; }); }
 
       friend constexpr Derived
       operator&(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] & y[i]; }); }
+      { return Derived([&](size_t i) -> T { return x[i] & y[i]; }); }
 
       friend constexpr Derived
       operator|(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] | y[i]; }); }
+      { return Derived([&](size_t i) -> T { return x[i] | y[i]; }); }
 
       friend constexpr Derived
       operator^(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] ^ y[i]; }); }
+      { return Derived([&](size_t i) -> T { return x[i] ^ y[i]; }); }
 
       friend constexpr Derived
       operator<<(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] << y[i]; }); }
+      { return Derived([&](size_t i) -> T { return x[i] << y[i]; }); }
 
       friend constexpr Derived
       operator>>(const Derived& x, const Derived& y)
-      { return Derived([&](auto i) -> T { return x[i] >> y[i]; }); }
+      { return Derived([&](size_t i) -> T { return x[i] >> y[i]; }); }
 
       friend constexpr Derived
       operator<<(const Derived& x, int y)
-      { return Derived([&](auto i) -> T { return x[i] << y; }); }
+      { return Derived([&](size_t i) -> T { return x[i] << y; }); }
 
       friend constexpr Derived
       operator>>(const Derived& x, int y)
-      { return Derived([&](auto i) -> T { return x[i] >> y; }); }
+      { return Derived([&](size_t i) -> T { return x[i] >> y; }); }
 
       constexpr Derived
       operator~() const
-      { return Derived([&](auto i) -> T { return ~d(i); }); }
+      { return Derived([&](size_t i) -> T { return ~d(i); }); }
     };
 
   // simd (fixed_size)
@@ -7835,14 +8043,26 @@ namespace vir::stdx
       friend class fixed_simd_int_base<T, N>;
 
       template <typename V, int M, size_t Parts>
-        friend std::enable_if_t<M == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
+        friend constexpr
+        std::enable_if_t<M == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
         split(const simd<typename V::value_type, simd_abi::fixed_size<M>>&);
 
       template <size_t... Sizes, typename U>
-        friend std::tuple<simd<U, simd_abi::deduce_t<U, int(Sizes)>>...>
+        friend constexpr
+        std::tuple<simd<U, simd_abi::deduce_t<U, int(Sizes)>>...>
         split(const simd<U, simd_abi::fixed_size<int((Sizes + ...))>>&);
 
       T data[N];
+
+      using _data_type_ = T[N];
+
+      friend constexpr _data_type_&
+      _data_(simd& x)
+      { return x.data; }
+
+      friend constexpr const _data_type_&
+      _data_(const simd& x)
+      { return x.data; }
 
       template <typename F, size_t... Is>
         constexpr
@@ -7869,7 +8089,8 @@ namespace vir::stdx
       template <typename U>
         constexpr
         simd(detail::ValuePreservingOrInt<U, value_type>&& value) noexcept
-        : simd([v = static_cast<value_type>(value)](size_t) { return v; })
+        : simd(std::make_index_sequence<N>(),
+               [v = static_cast<value_type>(value)](size_t) { return v; })
         {}
 
       // conversion constructors
@@ -7879,7 +8100,8 @@ namespace vir::stdx
                                                 detail::is_higher_integer_rank<value_type, U>>>>
         constexpr
         simd(const simd<U, abi_type>& x)
-        : simd([&x](auto i) { return static_cast<value_type>(x[i]); })
+        : simd(std::make_index_sequence<N>(),
+               [&x](size_t i) { return static_cast<value_type>(x[i]); })
         {}
 
       // generator constructor
@@ -7893,13 +8115,14 @@ namespace vir::stdx
 
       // load constructor
       template <typename U, typename Flags>
+        constexpr
         simd(const U* mem, Flags)
-        : simd([mem](auto i) -> value_type { return mem[i]; })
+        : simd(std::make_index_sequence<N>(), [mem](size_t i) -> value_type { return mem[i]; })
         {}
 
       // loads [simd.load]
       template <typename U, typename Flags>
-        void
+        constexpr void
         copy_from(const detail::Vectorizable<U>* mem, Flags)
         {
           for (int i = 0; i < N; ++i)
@@ -7908,7 +8131,7 @@ namespace vir::stdx
 
       // stores [simd.store]
       template <typename U, typename Flags>
-        void
+        constexpr void
         copy_to(detail::Vectorizable<U>* mem, Flags) const
         {
           for (int i = 0; i < N; ++i)
@@ -7919,16 +8142,14 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data[i];
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        if (i >= size())
-          detail::invoke_ub("Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
         return data[i];
       }
 
@@ -7970,7 +8191,7 @@ namespace vir::stdx
       // unary operators
       constexpr mask_type
       operator!() const
-      { return mask_type([&](auto i) { return !data[i]; }); }
+      { return mask_type([&](size_t i) { return !data[i]; }); }
 
       constexpr simd
       operator+() const
@@ -7978,7 +8199,7 @@ namespace vir::stdx
 
       constexpr simd
       operator-() const
-      { return simd([&](auto i) -> value_type { return -data[i]; }); }
+      { return simd([&](size_t i) -> value_type { return -data[i]; }); }
 
       // compound assignment [simd.cassign]
       constexpr friend simd&
@@ -8016,44 +8237,44 @@ namespace vir::stdx
       // binary operators [simd.binary]
       constexpr friend simd
       operator+(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] + y.data[i]; }); }
+      { return simd([&](size_t i) { return x.data[i] + y.data[i]; }); }
 
       constexpr friend simd
       operator-(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] - y.data[i]; }); }
+      { return simd([&](size_t i) { return x.data[i] - y.data[i]; }); }
 
       constexpr friend simd
       operator*(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] * y.data[i]; }); }
+      { return simd([&](size_t i) { return x.data[i] * y.data[i]; }); }
 
       constexpr friend simd
       operator/(const simd& x, const simd& y)
-      { return simd([&](auto i) { return x.data[i] / y.data[i]; }); }
+      { return simd([&](size_t i) { return x.data[i] / y.data[i]; }); }
 
       // compares [simd.comparison]
       constexpr friend mask_type
       operator==(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] == y.data[i]; }); }
+      { return mask_type([&](size_t i) { return x.data[i] == y.data[i]; }); }
 
       constexpr friend mask_type
       operator!=(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] != y.data[i]; }); }
+      { return mask_type([&](size_t i) { return x.data[i] != y.data[i]; }); }
 
       constexpr friend mask_type
       operator<(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] < y.data[i]; }); }
+      { return mask_type([&](size_t i) { return x.data[i] < y.data[i]; }); }
 
       constexpr friend mask_type
       operator<=(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] <= y.data[i]; }); }
+      { return mask_type([&](size_t i) { return x.data[i] <= y.data[i]; }); }
 
       constexpr friend mask_type
       operator>(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] > y.data[i]; }); }
+      { return mask_type([&](size_t i) { return x.data[i] > y.data[i]; }); }
 
       constexpr friend mask_type
       operator>=(const simd& x, const simd& y)
-      { return mask_type([&](auto i) { return x.data[i] >= y.data[i]; }); }
+      { return mask_type([&](size_t i) { return x.data[i] >= y.data[i]; }); }
     };
 
   // casts [simd.casts]
@@ -8062,25 +8283,25 @@ namespace vir::stdx
             typename = std::enable_if_t<detail::is_vectorizable_v<T>>>
     constexpr simd<T, A>
     static_simd_cast(const simd<U, A>& x)
-    { return simd<T, A>([&x](auto i) { return static_cast<T>(x[i]); }); }
+    { return simd<T, A>([&x](size_t i) { return static_cast<T>(x[i]); }); }
 
   template <typename V, typename U, typename A,
             typename = std::enable_if_t<is_simd_v<V>>>
     constexpr V
     static_simd_cast(const simd<U, A>& x)
-    { return V([&x](auto i) { return static_cast<typename V::value_type>(x[i]); }); }
+    { return V([&x](size_t i) { return static_cast<typename V::value_type>(x[i]); }); }
 
   template <typename T, typename U, typename A,
             typename = std::enable_if_t<detail::is_vectorizable_v<T>>>
     constexpr simd_mask<T, A>
     static_simd_cast(const simd_mask<U, A>& x)
-    { return simd_mask<T, A>([&x](auto i) { return x[i]; }); }
+    { return simd_mask<T, A>([&x](size_t i) { return x[i]; }); }
 
   template <typename M, typename U, typename A,
             typename = std::enable_if_t<M::size() == simd_size_v<U, A>>>
     constexpr M
     static_simd_cast(const simd_mask<U, A>& x)
-    { return M([&x](auto i) { return x[i]; }); }
+    { return M([&x](size_t i) { return x[i]; }); }
 
   // simd_cast
   template <typename T, typename U, typename A,
@@ -8135,6 +8356,7 @@ namespace vir::stdx
 
   // split(simd)
   template <typename V, int N, size_t Parts = N / V::size()>
+    constexpr
     std::enable_if_t<N == Parts * V::size() && is_simd_v<V>, std::array<V, Parts>>
     split(const simd<typename V::value_type, simd_abi::fixed_size<N>>& x)
     {
@@ -8147,6 +8369,7 @@ namespace vir::stdx
 
   // split(simd_mask)
   template <typename V, int N, size_t Parts = N / V::size()>
+    constexpr
     std::enable_if_t<N == Parts * V::size() && is_simd_mask_v<V>, std::array<V, Parts>>
     split(const simd_mask<typename V::simd_type::value_type, simd_abi::fixed_size<N>>& x)
     {
@@ -8159,6 +8382,7 @@ namespace vir::stdx
 
   // split<Sizes...>
   template <size_t... Sizes, typename T>
+    constexpr
     std::tuple<simd<T, simd_abi::deduce_t<T, int(Sizes)>>...>
     split(const simd<T, simd_abi::fixed_size<int((Sizes + ...))>>& x)
     {
@@ -8178,6 +8402,7 @@ namespace vir::stdx
 
   // split<V>(V)
   template <typename V>
+    constexpr
     std::enable_if_t<std::disjunction_v<is_simd<V>, is_simd_mask<V>>, std::array<V, 1>>
     split(const V& x)
     { return {x}; }
@@ -8214,7 +8439,7 @@ namespace vir::stdx
     {
       constexpr int K = simd_size_v<T, A>;
       using R = simd<T, simd_abi::deduce_t<T, N * K>>;
-      return R([&](auto i) {
+      return R([&](size_t i) {
                return x[i / K][i % K];
              });
     }
@@ -8227,7 +8452,7 @@ namespace vir::stdx
     {
       constexpr int K = simd_size_v<T, A>;
       using R = simd_mask<T, simd_abi::deduce_t<T, N * K>>;
-      return R([&](auto i) -> bool {
+      return R([&](size_t i) -> bool {
                return x[i / K][i % K];
              });
     }
@@ -8265,7 +8490,7 @@ namespace vir::stdx
       constexpr V
       operator-() const &&
       {
-        return V([&](auto i) {
+        return V([&](size_t i) {
                  return m_k[i] ? static_cast<value_type>(-m_value[i]) : m_value[i];
                });
       }
@@ -8274,7 +8499,7 @@ namespace vir::stdx
         [[nodiscard]] constexpr V
         copy_from(const detail::LoadStorePtr<Up, value_type>* mem, Flags) const &&
         {
-          return V([&](auto i) {
+          return V([&](size_t i) {
                    return m_k[i] ? static_cast<value_type>(mem[i]) : m_value[i];
                  });
         }
@@ -8595,7 +8820,7 @@ namespace vir::stdx
     }
 
   template <typename M, typename V, typename BinaryOperation = std::plus<>>
-    typename V::value_type
+    constexpr typename V::value_type
     reduce(const const_where_expression<M, V>& x,
         typename V::value_type identity_element,
         BinaryOperation binary_op)
@@ -8613,27 +8838,27 @@ namespace vir::stdx
     }
 
   template <typename M, typename V>
-    typename V::value_type
+    constexpr typename V::value_type
     reduce(const const_where_expression<M, V>& x, std::plus<> binary_op = {})
     { return reduce(x, 0, binary_op); }
 
   template <typename M, typename V>
-    typename V::value_type
+    constexpr typename V::value_type
     reduce(const const_where_expression<M, V>& x, std::multiplies<> binary_op)
     { return reduce(x, 1, binary_op); }
 
   template <typename M, typename V>
-    typename V::value_type
+    constexpr typename V::value_type
     reduce(const const_where_expression<M, V>& x, std::bit_and<> binary_op)
     { return reduce(x, ~typename V::value_type(), binary_op); }
 
   template <typename M, typename V>
-    typename V::value_type
+    constexpr typename V::value_type
     reduce(const const_where_expression<M, V>& x, std::bit_or<> binary_op)
     { return reduce(x, 0, binary_op); }
 
   template <typename M, typename V>
-    typename V::value_type
+    constexpr typename V::value_type
     reduce(const const_where_expression<M, V>& x, std::bit_xor<> binary_op)
     { return reduce(x, 0, binary_op); }
 
@@ -8696,12 +8921,12 @@ namespace vir::stdx
   template <typename T, typename A>
     constexpr simd<T, A>
     min(const simd<T, A>& a, const simd<T, A>& b)
-    { return simd<T, A>([&](auto i) { return std::min(a[i], b[i]); }); }
+    { return simd<T, A>([&](size_t i) { return std::min(a[i], b[i]); }); }
 
   template <typename T, typename A>
     constexpr simd<T, A>
     max(const simd<T, A>& a, const simd<T, A>& b)
-    { return simd<T, A>([&](auto i) { return std::max(a[i], b[i]); }); }
+    { return simd<T, A>([&](size_t i) { return std::max(a[i], b[i]); }); }
 
   template <typename T, typename A>
     constexpr
@@ -8713,71 +8938,71 @@ namespace vir::stdx
     constexpr simd<T, A>
     clamp(const simd<T, A>& v, const simd<T, A>& lo,
         const simd<T, A>& hi)
-    { return simd<T, A>([&](auto i) { return std::clamp(v[i], lo[i], hi[i]); }); }
+    { return simd<T, A>([&](size_t i) { return std::clamp(v[i], lo[i], hi[i]); }); }
 
   // math
 #define SIMD_MATH_1ARG(name, return_temp)                                                          \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const simd<detail::FloatingPoint<T>, A>& x) noexcept                                      \
-    { return return_temp<T, A>([&x](auto i) { return std::name(x[i]); }); }
+    { return return_temp<T, A>([&x](size_t i) { return std::name(x[i]); }); }
 
 #define SIMD_MATH_1ARG_FIXED(name, R)                                                              \
   template <typename T, typename A>                                                                \
     constexpr fixed_size_simd<R, simd_size_v<T, A>>                                                \
     name(const simd<detail::FloatingPoint<T>, A>& x) noexcept                                      \
-    { return fixed_size_simd<R, simd_size_v<T, A>>([&x](auto i) { return std::name(x[i]); }); }
+    { return fixed_size_simd<R, simd_size_v<T, A>>([&x](size_t i) { return std::name(x[i]); }); }
 
 #define SIMD_MATH_2ARG(name, return_temp)                                                          \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const simd<detail::FloatingPoint<T>, A>& x, const simd<T, A>& y) noexcept                 \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }                   \
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i]); }); }                 \
                                                                                                    \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
          const detail::type_identity_t<simd<T, A>>& y) noexcept                                    \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }                   \
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i]); }); }                 \
                                                                                                    \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const detail::type_identity_t<simd<T, A>>& x,                                             \
          const simd<detail::FloatingPoint<T>, A>& y) noexcept                                      \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i]); }); }
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i]); }); }
 
 #define SIMD_MATH_3ARG(name, return_temp)                                                          \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
          const simd<T, A>& y, const simd<T, A> &z) noexcept                                        \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i], z[i]); }); }           \
                                                                                                    \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const simd<detail::FloatingPoint<T>, A>& x,                                               \
          const detail::type_identity_t<simd<T, A>>& y,                                             \
          const detail::type_identity_t<simd<T, A>> &z) noexcept                                    \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i], z[i]); }); }           \
                                                                                                    \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const detail::type_identity_t<simd<T, A>>& x,                                             \
          const simd<detail::FloatingPoint<T>, A>& y,                                               \
          const detail::type_identity_t<simd<T, A>> &z) noexcept                                    \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }             \
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i], z[i]); }); }           \
                                                                                                    \
   template <typename T, typename A>                                                                \
     constexpr return_temp<T, A>                                                                    \
     name(const detail::type_identity_t<simd<T, A>>& x,                                             \
          const detail::type_identity_t<simd<T, A>>& y,                                             \
          const simd<detail::FloatingPoint<T>, A> &z) noexcept                                      \
-    { return return_temp<T, A>([&](auto i) { return std::name(x[i], y[i], z[i]); }); }
+    { return return_temp<T, A>([&](size_t i) { return std::name(x[i], y[i], z[i]); }); }
 
   template <typename T, typename A, typename U = detail::SignedIntegral<T>>
     constexpr simd<T, A>
     abs(const simd<T, A>& x) noexcept
-    { return simd<T, A>([&x](auto i) { return std::abs(x[i]); }); }
+    { return simd<T, A>([&x](size_t i) { return std::abs(x[i]); }); }
 
   SIMD_MATH_1ARG(abs, simd)
   SIMD_MATH_1ARG(isnan, simd_mask)
@@ -8794,7 +9019,7 @@ namespace vir::stdx
     constexpr simd<T, A>
     remquo(const simd<T, A>& x, const simd<T, A>& y,
            fixed_size_simd<int, simd_size_v<T, A>>* quo) noexcept
-    { return simd<T, A>([&x, &y, quo](auto i) { return std::remquo(x[i], y[i], &(*quo)[i]); }); }
+    { return simd<T, A>([&x, &y, quo](size_t i) { return std::remquo(x[i], y[i], &(*quo)[i]); }); }
 
   SIMD_MATH_1ARG(erf, simd)
   SIMD_MATH_1ARG(erfc, simd)
@@ -8819,31 +9044,31 @@ namespace vir::stdx
   template <typename T, typename A>
     constexpr simd<T, A>
     modf(const simd<detail::FloatingPoint<T>, A>& x, simd<T, A>* iptr) noexcept
-    { return simd<T, A>([&x, iptr](auto i) { return std::modf(x[i], &(*iptr)[i]); }); }
+    { return simd<T, A>([&x, iptr](size_t i) { return std::modf(x[i], &(*iptr)[i]); }); }
 
   template <typename T, typename A>
     constexpr simd<T, A>
     frexp(const simd<detail::FloatingPoint<T>, A>& x,
           fixed_size_simd<int, simd_size_v<T, A>>* exp) noexcept
-    { return simd<T, A>([&x, exp](auto i) { return std::frexp(x[i], &(*exp)[i]); }); }
+    { return simd<T, A>([&x, exp](size_t i) { return std::frexp(x[i], &(*exp)[i]); }); }
 
   template <typename T, typename A>
     constexpr simd<T, A>
     scalbln(const simd<detail::FloatingPoint<T>, A>& x,
             const fixed_size_simd<long int, simd_size_v<T, A>>& exp) noexcept
-    { return simd<T, A>([&x, &exp](auto i) { return std::scalbln(x[i], exp[i]); }); }
+    { return simd<T, A>([&x, &exp](size_t i) { return std::scalbln(x[i], exp[i]); }); }
 
   template <typename T, typename A>
     constexpr simd<T, A>
     scalbn(const simd<detail::FloatingPoint<T>, A>& x,
            const fixed_size_simd<int, simd_size_v<T, A>>& exp) noexcept
-    { return simd<T, A>([&x, &exp](auto i) { return std::scalbn(x[i], exp[i]); }); }
+    { return simd<T, A>([&x, &exp](size_t i) { return std::scalbn(x[i], exp[i]); }); }
 
   template <typename T, typename A>
     constexpr simd<T, A>
     ldexp(const simd<detail::FloatingPoint<T>, A>& x,
           const fixed_size_simd<int, simd_size_v<T, A>>& exp) noexcept
-    { return simd<T, A>([&x, &exp](auto i) { return std::ldexp(x[i], exp[i]); }); }
+    { return simd<T, A>([&x, &exp](size_t i) { return std::ldexp(x[i], exp[i]); }); }
 
   SIMD_MATH_1ARG(sqrt, simd)
 
@@ -8900,6 +9125,7 @@ namespace vir::stdx
 #endif
 #endif  // VIR_SIMD_H_
 
+#pragma GCC diagnostic pop
 
 // #include "typelist.hpp"
 
@@ -9117,80 +9343,7 @@ template<typename V, typename T>
 concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
 
 template<typename T>
-concept vectorizable_v = std::constructible_from<stdx::simd<T>>;
-
-template<typename T>
-using vectorizable = std::integral_constant<bool, vectorizable_v<T>>;
-
-template<typename T>
 concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
-
-/**
- * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
- * tuple-like of stdx::simd (recursively). The latter requires that the SIMD width is homogeneous.
- * If T is not a simd (or tuple thereof), value is 0.
- */
-template<typename T>
-struct simdize_size : std::integral_constant<std::size_t, 0> {};
-
-template<typename T, typename A>
-struct simdize_size<stdx::simd<T, A>> : stdx::simd_size<T, A> {};
-
-template<tuple_like Tup>
-struct simdize_size<Tup> : simdize_size<std::tuple_element_t<0, Tup>> {
-    static_assert([]<std::size_t... Is>(std::index_sequence<Is...>) { return ((simdize_size<std::tuple_element_t<0, Tup>>::value == simdize_size<std::tuple_element_t<Is, Tup>>::value) && ...); }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
-};
-
-template<typename T>
-inline constexpr std::size_t simdize_size_v = simdize_size<T>::value;
-
-namespace detail {
-/**
- * Shortcut to determine the stdx::simd specialization with the most efficient ABI tag for the
- * requested element type T and width N.
- */
-template<typename T, std::size_t N>
-using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
-
-template<typename T, std::size_t N>
-struct simdize_impl {
-    using type = T;
-};
-
-template<vectorizable_v T, std::size_t N>
-requires requires { typename stdx::native_simd<T>; }
-struct simdize_impl<T, N> {
-    using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>;
-};
-
-template<std::size_t N>
-struct simdize_impl<std::tuple<>, N> {
-    using type = std::tuple<>;
-};
-
-template<tuple_like Tup, std::size_t N>
-requires requires { typename simdize_impl<std::tuple_element_t<0, Tup>, N>::type; }
-struct simdize_impl<Tup, N> {
-    static inline constexpr std::size_t size = N > 0 ? N
-                                                     : []<std::size_t... Is>(std::index_sequence<Is...>) constexpr { return std::max({simdize_size_v<typename simdize_impl<std::tuple_element_t<Is, Tup>, 0>::type>...}); }
-
-                                                   (std::make_index_sequence<std::tuple_size_v<Tup>>());
-
-    using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>) -> std::tuple<typename simdize_impl<std::tuple_element_t<Is, Tup>, size>::type...> { return {}; }(std::make_index_sequence<std::tuple_size_v<Tup>>()));
-};
-} // namespace detail
-
-/**
- * Meta-function that turns a vectorizable type or a tuple-like (recursively) of vectorizable types
- * into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N determines the
- * resulting SIMD width. Otherwise, of all vectorizable types U the maximum
- * stdx::native_simd<U>::size() determines the resulting SIMD width.
- * If T is neither vectorizable nor a std::tuple with at least one member, simdize produces T.
- */
-template<typename T, std::size_t N = 0>
-using simdize = typename detail::simdize_impl<T, N>::type;
-
-static_assert(std::same_as<simdize<std::tuple<std::tuple<int, double>, short, std::tuple<float>>>, std::tuple<std::tuple<detail::deduced_simd<int, stdx::native_simd<short>::size()>, detail::deduced_simd<double, stdx::native_simd<short>::size()>>, stdx::native_simd<short>, std::tuple<detail::deduced_simd<float, stdx::native_simd<short>::size()>>>>);
 
 template<fixed_string Name, typename PortList>
 consteval std::size_t indexForName() {
@@ -15653,9 +15806,2638 @@ constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_f
 // #include "reflection.hpp"
 
 
-#include <algorithm> // TODO: simd misses the algorithm dependency for std::clamp(...) -> add to simd
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 // #include <vir/simd.h>
 
+// #include <vir/simdize.h>
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2023–2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_SIMD_SIMDIZE_H_
+#define VIR_SIMD_SIMDIZE_H_
+
+// #include "struct_reflect.h"
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2018–2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_STRUCT_SIZE_H_
+#define VIR_STRUCT_SIZE_H_
+
+#if defined __cpp_structured_bindings && defined __cpp_concepts && __cpp_concepts >= 201907
+#define VIR_HAVE_STRUCT_REFLECT 1
+#include <utility>
+#include <tuple>
+#include <climits>
+
+namespace vir
+{
+  namespace detail
+  {
+    using std::remove_cvref_t;
+    using std::size_t;
+
+    // struct_size implementation
+    template <typename Struct>
+      struct anything_but_base_of
+      {
+	anything_but_base_of() = default;
+
+	anything_but_base_of(const anything_but_base_of&) = delete;
+
+	template <typename T>
+	  requires (not std::is_base_of_v<T, Struct>)
+	  operator T&() const&;
+      };
+
+    template <typename Struct>
+      struct any_empty_base_of
+      {
+	template <typename T>
+	  requires (std::is_base_of_v<T, Struct> and std::is_empty_v<T>)
+	  operator T();
+      };
+
+    template <typename T, size_t... Indexes>
+      concept brace_constructible_impl
+	= requires { T{{((void)Indexes, anything_but_base_of<T>())}...}; }
+	    or requires
+	  {
+	    T{any_empty_base_of<T>(), {((void)Indexes, anything_but_base_of<T>())}...};
+	  }
+	    or requires
+	  {
+	    T{any_empty_base_of<T>(), any_empty_base_of<T>(),
+	      {((void)Indexes, anything_but_base_of<T>())}...};
+	  }
+	    or requires
+	  {
+	    T{any_empty_base_of<T>(), any_empty_base_of<T>(), any_empty_base_of<T>(),
+	      {((void)Indexes, anything_but_base_of<T>())}...};
+	  };
+
+    template <typename T, size_t N>
+      concept aggregate_with_n_members = []<size_t... Is>(std::index_sequence<Is...>) {
+	return brace_constructible_impl<T, Is...>;
+      }(std::make_index_sequence<N>());
+
+    template <typename T, size_t Lo = 0, size_t Hi = sizeof(T) * CHAR_BIT, size_t N = 8>
+      constexpr size_t
+      struct_size()
+      {
+	constexpr size_t left_index = Lo + (N - Lo) / 2;
+	constexpr size_t right_index = N + (Hi - N + 1) / 2;
+	if constexpr (aggregate_with_n_members<T, N>) // N is a valid size
+	  {
+	    if constexpr (N == Hi)
+	      // we found the best valid size inside [Lo, Hi]
+	      return N;
+	    else
+	      { // there may be a larger size in [N+1, Hi]
+		constexpr size_t right = struct_size<T, N + 1, Hi, right_index>();
+		if constexpr (right == 0)
+		  // no, there isn't
+		  return N;
+		else
+		  // yes, there is
+		  return right;
+	      }
+	  }
+	else if constexpr (N == Lo)
+	  { // we can only look for a valid size in [N+1, Hi]
+	    if constexpr (N == Hi)
+	      // but [N+1, Hi] is empty
+	      return 0; // no valid size found
+	    else
+	      // [N+1, Hi] is non-empty
+	      return struct_size<T, N + 1, Hi, right_index>();
+	  }
+	else
+	  { // the answer could be in [Lo, N-1] or [N+1, Hi]
+	    constexpr size_t left = struct_size<T, Lo, N - 1, left_index>();
+	    if constexpr (left > 0)
+	      // valid size in [Lo, N-1] => there can't be a valid size in [N+1, Hi] anymore
+	      return left;
+	    else if constexpr (N == Hi)
+	      // [N+1, Hi] is empty => [Lo, Hi] has no valid size
+	      return 0;
+	    else
+	      // there can only be a valid size in [N+1, Hi], if there is none the
+	      // recursion returns 0 anyway
+	      return struct_size<T, N + 1, Hi, right_index>();
+	  }
+      }
+
+    // struct_get implementation
+    template <size_t Total>
+      struct struct_get;
+
+    template <typename T>
+      struct remove_ref_in_tuple;
+
+    template <typename... Ts>
+      struct remove_ref_in_tuple<std::tuple<Ts...>>
+      { using type = std::tuple<std::remove_reference_t<Ts>...>; };
+
+    template <typename T1, typename T2>
+      struct remove_ref_in_tuple<std::pair<T1, T2>>
+      { using type = std::pair<std::remove_reference_t<T1>, std::remove_reference_t<T2>>; };
+
+    template <>
+      struct struct_get<0>
+      {
+	template <typename T>
+	  constexpr std::tuple<>
+	  to_tuple_ref(T &&)
+	  { return {}; }
+
+	template <typename T>
+	  constexpr std::tuple<>
+	  to_tuple(const T &)
+	  { return {}; }
+      };
+
+    template <>
+      struct struct_get<1>
+      {
+	template <typename T>
+	  constexpr auto
+	  to_tuple_ref(T &&obj)
+	  {
+	    auto && [a] = obj;
+	    return std::forward_as_tuple(a);
+	  }
+
+	template <typename T>
+	  constexpr auto
+	  to_tuple(const T &obj)
+	  -> typename remove_ref_in_tuple<decltype(to_tuple_ref(std::declval<T>()))>::type
+	  {
+	    const auto &[a] = obj;
+	    return {a};
+	  }
+
+	template <size_t N, typename T>
+	  constexpr const auto &
+	  get(const T &obj)
+	  {
+	    static_assert(N == 0);
+	    auto && [a] = obj;
+	    return a;
+	  }
+
+	template <size_t N, typename T>
+	  constexpr auto &
+	  get(T &obj)
+	  {
+	    static_assert(N == 0);
+	    auto && [a] = obj;
+	    return a;
+	  }
+      };
+
+    template <>
+      struct struct_get<2>
+      {
+	template <typename T>
+	  constexpr auto
+	  to_tuple_ref(T &&obj)
+	  {
+	    auto &&[a, b] = obj;
+	    return std::forward_as_tuple(a, b);
+	  }
+
+	template <typename T>
+	  constexpr auto
+	  to_tuple(const T &obj)
+	  -> typename remove_ref_in_tuple<decltype(to_tuple_ref(std::declval<T>()))>::type
+	  {
+	    const auto &[a, b] = obj;
+	    return {a, b};
+	  }
+
+	template <typename T>
+	  constexpr auto
+	  to_pair_ref(T &&obj)
+	  {
+	    auto &&[a, b] = obj;
+	    return std::pair<decltype((a)), decltype((b))>(a, b);
+	  }
+
+	template <typename T>
+	  constexpr auto
+	  to_pair(const T &obj)
+	  -> typename remove_ref_in_tuple<decltype(to_pair_ref(std::declval<T>()))>::type
+	  {
+	    const auto &[a, b] = obj;
+	    return {a, b};
+	  }
+
+	template <size_t N, typename T>
+	  constexpr auto &
+	  get(T &&obj)
+	  {
+	    static_assert(N < 2);
+	    auto &&[a, b] = obj;
+	    return std::get<N>(std::forward_as_tuple(a, b));
+	  }
+      };
+
+#define VIR_STRUCT_GET_(size_, ...)                                                      \
+  template <>                                                                            \
+    struct struct_get<size_>                                                             \
+    {                                                                                    \
+      template <typename T>                                                              \
+	constexpr auto                                                                   \
+	to_tuple_ref(T &&obj)                                                            \
+	{                                                                                \
+	  auto &&[__VA_ARGS__] = obj;                                                    \
+	  return std::forward_as_tuple(__VA_ARGS__);                                     \
+	}                                                                                \
+      \
+      template <typename T>                                                              \
+	constexpr auto                                                                   \
+	to_tuple(const T &obj)                                                           \
+	-> typename remove_ref_in_tuple<decltype(to_tuple_ref(std::declval<T>()))>::type \
+	{                                                                                \
+	  const auto &[__VA_ARGS__] = obj;                                               \
+	  return {__VA_ARGS__};                                                          \
+	}                                                                                \
+      \
+      template <size_t N, typename T>                                                    \
+	constexpr auto &                                                                 \
+	get(T &&obj)                                                                     \
+	{                                                                                \
+	  static_assert(N < size_);                                                      \
+	  auto &&[__VA_ARGS__] = obj;                                                    \
+	  return std::get<N>(std::forward_as_tuple(__VA_ARGS__));                        \
+	}                                                                                \
+    }
+    VIR_STRUCT_GET_(3, x0, x1, x2);
+    VIR_STRUCT_GET_(4, x0, x1, x2, x3);
+    VIR_STRUCT_GET_(5, x0, x1, x2, x3, x4);
+    VIR_STRUCT_GET_(6, x0, x1, x2, x3, x4, x5);
+    VIR_STRUCT_GET_(7, x0, x1, x2, x3, x4, x5, x6);
+    VIR_STRUCT_GET_(8, x0, x1, x2, x3, x4, x5, x6, x7);
+    VIR_STRUCT_GET_(9, x0, x1, x2, x3, x4, x5, x6, x7, x8);
+    VIR_STRUCT_GET_(10, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9);
+    VIR_STRUCT_GET_(11, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10);
+    VIR_STRUCT_GET_(12, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11);
+    VIR_STRUCT_GET_(13, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12);
+    VIR_STRUCT_GET_(14, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13);
+    VIR_STRUCT_GET_(15, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14);
+    VIR_STRUCT_GET_(16, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15);
+    VIR_STRUCT_GET_(17, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16);
+    VIR_STRUCT_GET_(18, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17);
+    VIR_STRUCT_GET_(19, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18);
+    VIR_STRUCT_GET_(20, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19);
+    VIR_STRUCT_GET_(21, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20);
+    VIR_STRUCT_GET_(22, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21);
+    VIR_STRUCT_GET_(23, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22);
+    VIR_STRUCT_GET_(24, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23);
+    VIR_STRUCT_GET_(25, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24);
+    VIR_STRUCT_GET_(26, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25);
+    VIR_STRUCT_GET_(27, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26);
+    VIR_STRUCT_GET_(28, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27);
+    VIR_STRUCT_GET_(29, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28);
+    VIR_STRUCT_GET_(30, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29);
+    VIR_STRUCT_GET_(31, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29,
+		    x30);
+    VIR_STRUCT_GET_(32, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31);
+    VIR_STRUCT_GET_(33, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32);
+    VIR_STRUCT_GET_(34, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33);
+    VIR_STRUCT_GET_(35, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34);
+    VIR_STRUCT_GET_(36, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35);
+    VIR_STRUCT_GET_(37, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36);
+    VIR_STRUCT_GET_(38, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37);
+    VIR_STRUCT_GET_(39, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38);
+    VIR_STRUCT_GET_(40, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39);
+    VIR_STRUCT_GET_(41, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40);
+    VIR_STRUCT_GET_(42, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41);
+    VIR_STRUCT_GET_(43, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42);
+    VIR_STRUCT_GET_(44, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43);
+    VIR_STRUCT_GET_(45, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43, x44);
+    VIR_STRUCT_GET_(46, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43, x44,
+		    x45);
+    VIR_STRUCT_GET_(47, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43, x44, x45,
+		    x46);
+    VIR_STRUCT_GET_(48, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43, x44, x45,
+		    x46, x47);
+    VIR_STRUCT_GET_(49, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43, x44, x45,
+		    x46, x47, x48);
+    VIR_STRUCT_GET_(50, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15,
+		    x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30,
+		    x31, x32, x33, x34, x35, x36, x37, x38, x39, x40, x41, x42, x43, x44, x45,
+		    x46, x47, x48, x49);
+#undef VIR_STRUCT_GET_
+
+    // concept definitions
+    template <typename T>
+      concept has_tuple_size
+	= requires(T x, std::tuple_size<T> ts) { {static_cast<int>(ts)} -> std::same_as<int>; };
+
+    template <typename T>
+      concept aggregate_without_tuple_size
+	= std::is_aggregate_v<T> and not has_tuple_size<T>
+	    and requires (const T& x) { detail::struct_size<T>(); };
+
+    // traits
+    template <typename From, typename To>
+      struct copy_cvref
+      {
+	using From2 = std::remove_reference_t<From>;
+	using with_const = std::conditional_t<std::is_const_v<From2>, const To, To>;
+	using with_volatile
+	  = std::conditional_t<std::is_volatile_v<From2>, volatile with_const, with_const>;
+	using type = std::conditional_t<std::is_lvalue_reference_v<From>, with_volatile &,
+					std::conditional_t<std::is_rvalue_reference_v<From>,
+							   with_volatile &&, with_volatile>>;
+      };
+  }  // namespace detail
+
+  /**
+   * Satisfied if \p T can be used with the following functions and types.
+   */
+  template <typename T>
+    concept reflectable_struct = detail::has_tuple_size<std::remove_cvref_t<T>>
+				   or detail::aggregate_without_tuple_size<std::remove_cvref_t<T>>;
+
+  /**
+   * The value of struct_size_v is the number of non-static data members of the type \p T.
+   * More precisely, struct_size_v is the number of elements in the identifier-list of a
+   * structured binding declaration.
+   *
+   * \tparam T An aggregate type or a type specializing `std::tuple_size` that can be
+   *           destructured via a structured binding. This implies that either \p T has only
+   *           empty bases (only up to 3 are supported) or \p T has no non-static data
+   *           members and a single base class with non-static data members. Using
+   *           aggregate types that do not support destructuring is ill-formed. Using
+   *           non-aggregate types that do not support destructuring results in a
+   *           substitution failure.
+   */
+  template <typename T>
+    requires (detail::aggregate_without_tuple_size<T> or detail::has_tuple_size<T>)
+    constexpr inline std::size_t struct_size_v = 0;
+
+  template <detail::aggregate_without_tuple_size T>
+    constexpr inline std::size_t struct_size_v<T> = detail::struct_size<T>();
+
+  template <detail::has_tuple_size T>
+    constexpr inline std::size_t struct_size_v<T> = std::tuple_size_v<T>;
+
+  /**
+   * Returns a cv-qualified reference to the \p N -th non-static data member in \p obj.
+   */
+  template <std::size_t N, reflectable_struct T>
+    requires (N < struct_size_v<std::remove_cvref_t<T>>)
+    constexpr decltype(auto)
+    struct_get(T &&obj)
+    {
+      return detail::struct_get<struct_size_v<std::remove_cvref_t<T>>>()
+	       .template get<N>(std::forward<T>(obj));
+    }
+
+  template <std::size_t N, reflectable_struct T>
+    struct struct_element
+    {
+      using type = std::remove_reference_t<decltype(struct_get<N>(std::declval<T &>()))>;
+    };
+
+  /**
+   * `struct_element_t` is an alias for the type of the \p N -th non-static data member of
+   * \p T.
+   */
+  template <std::size_t N, reflectable_struct T>
+    using struct_element_t
+      = std::remove_reference_t<decltype(struct_get<N>(std::declval<T &>()))>;
+
+  /**
+   * Returns a std::tuple with a copy of all the non-static data members of \p obj.
+   */
+  template <reflectable_struct T>
+    constexpr auto
+    to_tuple(T &&obj)
+    {
+      return detail::struct_get<struct_size_v<std::remove_cvref_t<T>>>().to_tuple(
+	       std::forward<T>(obj));
+    }
+
+  /**
+   * Returns a std::tuple of lvalue references to all the non-static data members of \p obj.
+   */
+  template <reflectable_struct T>
+    constexpr auto
+    to_tuple_ref(T &&obj)
+    {
+      return detail::struct_get<struct_size_v<std::remove_cvref_t<T>>>().to_tuple_ref(
+	       std::forward<T>(obj));
+    }
+
+  /**
+   * Defines the member type \p type to a std::tuple specialization matching the non-static
+   * data members of \p T.
+   */
+  template <reflectable_struct T>
+    struct as_tuple
+    : detail::copy_cvref<
+	T, decltype(detail::struct_get<struct_size_v<std::remove_cvref_t<T>>>().to_tuple(
+		      std::declval<T>()))>
+    {};
+
+  /**
+   * Alias for a std::tuple specialization matching the non-static data members of \p T.
+   */
+  template <typename T>
+    using as_tuple_t = typename as_tuple<T>::type;
+
+  /**
+   * Returns a std::pair with a copy of all the non-static data members of \p obj.
+   */
+  template <typename T>
+    requires(struct_size_v<std::remove_cvref_t<T>> == 2)
+    constexpr auto
+    to_pair(T &&obj)
+    { return detail::struct_get<2>().to_pair(std::forward<T>(obj)); }
+
+  /**
+   * Returns a std::pair of lvalue references to all the non-static data members of \p obj.
+   */
+  template <typename T>
+    requires(struct_size_v<std::remove_cvref_t<T>> == 2)
+    constexpr auto
+    to_pair_ref(T &&obj)
+    { return detail::struct_get<2>().to_pair_ref(std::forward<T>(obj)); }
+
+  /**
+   * Defines the member type \p type to a std::pair specialization matching the non-static
+   * data members of \p T.
+   */
+  template <typename T>
+    requires (struct_size_v<std::remove_cvref_t<T>> == 2)
+    struct as_pair
+    : detail::copy_cvref<T, decltype(detail::struct_get<2>().to_pair(std::declval<T>()))>
+    {};
+
+  /**
+   * Alias for a std::pair specialization matching the non-static data members of \p T.
+   */
+  template <typename T>
+    using as_pair_t = typename as_pair<T>::type;
+
+}  // namespace vir
+
+#endif // structured bindings & concepts
+#endif // VIR_STRUCT_SIZE_H_
+
+// vim: noet cc=101 tw=100 sw=2 ts=8
+
+// #include "constexpr_wrapper.h"
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2023-2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_CONSTEXPR_WRAPPER_H_
+#define VIR_CONSTEXPR_WRAPPER_H_
+
+#if defined __cpp_concepts && __cpp_concepts >= 201907 && __has_include(<concepts>) \
+  && (__GNUC__ > 10 || defined __clang__)
+#define VIR_HAVE_CONSTEXPR_WRAPPER 1
+#include <algorithm>
+#include <array>
+#include <concepts>
+#include <limits>
+#include <type_traits>
+#include <utility>
+
+namespace vir
+{
+  /**
+   * Implements P2781 with modifications:
+   *
+   * - Overload operator-> to return value.operator->() if well-formed, otherwise act like a pointer
+   *   dereference to underlying value (allows calling functions on wrapped type).
+   *
+   * - Overload operator() to act like integral_constant::operator(), unless value() is
+   *   well-formed.
+   */
+  template <auto Xp, typename = std::remove_cvref_t<decltype(Xp)>>
+    struct constexpr_wrapper;
+
+  // *** constexpr_value<T, U = void> ***
+  // If U is given, T must be convertible to U (`constexpr_value<int> auto` is analogous to `int`).
+  // If U is void (default), the type of the value is unconstrained.
+  template <typename Tp, typename Up = void>
+    concept constexpr_value = (std::same_as<Up, void> or std::convertible_to<Tp, Up>)
+#if defined __GNUC__ and __GNUC__ < 13
+                                and not std::is_member_pointer_v<decltype(&Tp::value)>
+#endif
+                                and requires { typename constexpr_wrapper<Tp::value>; };
+
+  namespace detail
+  {
+    // exposition-only
+    // Note: `not _any_constexpr_wrapper` is not equivalent to `not derived_from<T,
+    // constexpr_wrapper<T::value>>` because of SFINAE (i.e. SFINAE would be reversed)
+    template <typename Tp>
+      concept _any_constexpr_wrapper = std::derived_from<Tp, constexpr_wrapper<Tp::value>>;
+
+    // exposition-only
+    // Concept that enables declaring a single binary operator overload per operation:
+    // 1. LHS is derived from This, then RHS is either also derived from This (and there's only a
+    //    single candidate) or RHS is not a constexpr_wrapper (LHS provides the only operator
+    //    candidate).
+    // 2. LHS is not a constexpr_wrapper, then RHS is derived from This (RHS provides the only
+    //    operator candidate).
+    template <typename Tp, typename This>
+      concept _lhs_constexpr_wrapper
+        = constexpr_value<Tp> and (std::derived_from<Tp, This> or not _any_constexpr_wrapper<Tp>);
+  }
+
+  // Prefer to use `constexpr_value<type> auto` instead of `template <typename T> void
+  // f(constexpr_wrapper<T, type> ...` to constrain the type of the constant.
+  template <auto Xp, typename Tp>
+    struct constexpr_wrapper
+    {
+      using value_type = Tp;
+
+      using type = constexpr_wrapper;
+
+      static constexpr value_type value{ Xp };
+
+      constexpr
+      operator value_type() const
+      { return Xp; }
+
+      // overloads the following:
+      //
+      // unary:
+      // + - ~ ! & * ++ -- ->
+      //
+      // binary:
+      // + - * / % & | ^ && || , << >> == != < <= > >= ->* = += -= *= /= %= &= |= ^= <<= >>=
+      //
+      // [] and () are overloaded for constexpr_value or not constexpr_value, the latter not
+      // wrapping the result in constexpr_wrapper
+
+      // The overload of -> is inconsistent because it cannot wrap its return value in a
+      // constexpr_wrapper. The compiler/standard requires a pointer type. However, -> can work if
+      // it unwraps. The utility is questionable though, which it why may be interesting to
+      // "dereferencing" the wrapper to its value if Tp doesn't implement operator->.
+      constexpr const auto*
+      operator->() const
+      {
+        if constexpr (requires{value.operator->();})
+          return value.operator->();
+        else
+          return std::addressof(value);
+      }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<+Yp>
+        operator+() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<-Yp>
+        operator-() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<~Yp>
+        operator~() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<!Yp>
+        operator!() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<&Yp>
+        operator&() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<*Yp>
+        operator*() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<++Yp>
+        operator++() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<Yp++>
+        operator++(int) const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<--Yp>
+        operator--() const
+        { return {}; }
+
+      template <auto Yp = Xp>
+        constexpr constexpr_wrapper<Yp-->
+        operator--(int) const
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value + Bp::value>
+        operator+(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value - Bp::value>
+        operator-(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value * Bp::value>
+        operator*(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value / Bp::value>
+        operator/(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value % Bp::value>
+        operator%(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value & Bp::value>
+        operator&(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value | Bp::value>
+        operator|(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value ^ Bp::value>
+        operator^(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value && Bp::value>
+        operator&&(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<Ap::value || Bp::value>
+        operator||(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value , Bp::value)>
+        operator,(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value << Bp::value)>
+        operator<<(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value >> Bp::value)>
+        operator>>(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value == Bp::value)>
+        operator==(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value != Bp::value)>
+        operator!=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value < Bp::value)>
+        operator<(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value <= Bp::value)>
+        operator<=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value > Bp::value)>
+        operator>(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value >= Bp::value)>
+        operator>=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value <=> Bp::value)>
+        operator<=>(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value ->* Bp::value)>
+        operator->*(Ap, Bp)
+        { return {}; }
+
+      template <constexpr_value Ap>
+        requires requires { typename constexpr_wrapper<(Xp = Ap::value)>; }
+        constexpr auto
+        operator=(Ap) const
+        { return constexpr_wrapper<(Xp = Ap::value)>{}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value += Bp::value)>
+        operator+=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value -= Bp::value)>
+        operator-=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value *= Bp::value)>
+        operator*=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value /= Bp::value)>
+        operator/=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value %= Bp::value)>
+        operator%=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value &= Bp::value)>
+        operator&=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value |= Bp::value)>
+        operator|=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value ^= Bp::value)>
+        operator^=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value <<= Bp::value)>
+        operator<<=(Ap, Bp)
+        { return {}; }
+
+      template <detail::_lhs_constexpr_wrapper<constexpr_wrapper> Ap, constexpr_value Bp>
+        friend constexpr constexpr_wrapper<(Ap::value >>= Bp::value)>
+        operator>>=(Ap, Bp)
+        { return {}; }
+
+#if defined __cpp_static_call_operator && __cplusplus >= 202302L
+#define _static static
+#define _const
+#else
+#define _static
+#define _const const
+#endif
+
+      // overload operator() for constexpr_value and non-constexpr_value
+      template <constexpr_value... Args>
+        requires requires { typename constexpr_wrapper<value(Args::value...)>; }
+        _static constexpr auto
+        operator()(Args...) _const
+        { return constexpr_wrapper<value(Args::value...)>{}; }
+
+      template <typename... Args>
+        requires (not constexpr_value<std::remove_cvref_t<Args>> || ...)
+        _static constexpr decltype(value(std::declval<Args>()...))
+        operator()(Args&&... _args) _const
+        { return value(std::forward<Args>(_args)...); }
+
+      _static constexpr Tp
+      operator()() _const
+      requires (not requires { value(); })
+        { return value; }
+
+      // overload operator[] for constexpr_value and non-constexpr_value
+#if __cpp_multidimensional_subscript
+      template <constexpr_value... Args>
+        requires std::is_compound_v<value_type>
+        _static constexpr constexpr_wrapper<value[Args::value...]>
+        operator[](Args...) _const
+        { return {}; }
+
+      template <typename... Args>
+        requires (not constexpr_value<std::remove_cvref_t<Args>> || ...)
+          && std::is_compound_v<value_type>
+        _static constexpr decltype(value[std::declval<Args>()...])
+        operator[](Args&&... _args) _const
+        { return value[std::forward<Args>(_args)...]; }
+#else
+      template <constexpr_value Arg>
+        requires std::is_compound_v<value_type>
+        _static constexpr constexpr_wrapper<value[Arg::value]>
+        operator[](Arg) _const
+        { return {}; }
+
+      template <typename Arg>
+        requires (not constexpr_value<std::remove_cvref_t<Arg>>)
+          && std::is_compound_v<value_type>
+        _static constexpr decltype(value[std::declval<Arg>()])
+        operator[](Arg&& _arg) _const
+        { return value[std::forward<Arg>(_arg)]; }
+#endif
+
+#undef _static
+#undef _const
+    };
+
+  // constexpr_wrapper constant (cw)
+  template <auto Xp>
+    inline constexpr constexpr_wrapper<Xp> cw{};
+
+  namespace detail
+  {
+    template <char... Chars>
+      consteval auto
+      cw_prepare_array()
+      {
+	constexpr auto not_digit_sep = [](char c) { return c != '\''; };
+	constexpr char arr0[sizeof...(Chars)] = {Chars...};
+	constexpr auto size
+	  = std::count_if(std::begin(arr0), std::end(arr0), not_digit_sep);
+	std::array<char, size> tmp = {};
+	std::copy_if(std::begin(arr0), std::end(arr0), tmp.begin(), not_digit_sep);
+	return tmp;
+      }
+
+    template <char... Chars>
+      consteval auto
+      cw_parse()
+      {
+        constexpr std::array arr = cw_prepare_array<Chars...>();
+        constexpr int base = arr[0] == '0' and 2 < arr.size()
+                               ? arr[1] == 'x' or arr[1] == 'X' ? 16
+                                                                : arr[1] == 'b' ? 2 : 8
+                               : 10;
+        constexpr int offset = base == 10 ? 0 : base == 8 ? 1 : 2;
+        constexpr bool valid_chars = std::all_of(arr.begin() + offset, arr.end(), [=](char c) {
+                                       if constexpr (base == 16)
+                                         return (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F')
+                                                  or (c >= '0' and c <= '9');
+                                       else
+                                         return c >= '0' and c < char('0' + base);
+                                     });
+        static_assert(valid_chars, "invalid characters in constexpr_wrapper literal");
+
+        // common values, freeing values for error conditions
+        if constexpr (arr.size() == 1 and arr[0] =='0')
+          return static_cast<signed char>(0);
+        else if constexpr (arr.size() == 1 and arr[0] =='1')
+          return static_cast<signed char>(1);
+        else if constexpr (arr.size() == 1 and arr[0] =='2')
+          return static_cast<signed char>(2);
+        else
+          {
+            constexpr unsigned long long x = [&]() {
+              unsigned long long x = {};
+              constexpr auto max = std::numeric_limits<unsigned long long>::max();
+              auto it = arr.begin() + offset;
+              for (; it != arr.end(); ++it)
+                {
+                  unsigned nextdigit = *it - '0';
+                  if constexpr (base == 16)
+                    {
+                      if (*it >= 'a')
+                        nextdigit = *it - 'a' + 10;
+                      else if (*it >= 'A')
+                        nextdigit = *it - 'A' + 10;
+                    }
+                  if (x > max / base)
+                    return 0ull;
+                  x *= base;
+                  if (x > max - nextdigit)
+                    return 0ull;
+                  x += nextdigit;
+                }
+              return x;
+            }();
+            static_assert(x != 0, "constexpr_wrapper literal value out of range");
+            if constexpr (x <= std::numeric_limits<signed char>::max())
+              return static_cast<signed char>(x);
+            else if constexpr (x <= std::numeric_limits<signed short>::max())
+              return static_cast<signed short>(x);
+            else if constexpr (x <= std::numeric_limits<signed int>::max())
+              return static_cast<signed int>(x);
+            else if constexpr (x <= std::numeric_limits<signed long>::max())
+              return static_cast<signed long>(x);
+            else if constexpr (x <= std::numeric_limits<signed long long>::max())
+              return static_cast<signed long long>(x);
+            else
+              return x;
+          }
+      }
+  }
+
+  namespace literals
+  {
+    template <char... Chars>
+      constexpr auto operator"" _cw()
+      { return vir::cw<vir::detail::cw_parse<Chars...>()>; }
+  }
+
+} // namespace vir
+
+#endif // has concepts
+#endif // VIR_CONSTEXPR_WRAPPER_H_
+// vim: et tw=100 ts=8 sw=2 cc=101
+
+
+#if VIR_HAVE_STRUCT_REFLECT and VIR_HAVE_CONSTEXPR_WRAPPER
+#define VIR_HAVE_SIMDIZE 1
+
+#include <tuple>
+#include <iterator>
+// #include "simd.h"
+
+// #include "detail.h"
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2022–2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_DETAILS_H
+#define VIR_DETAILS_H
+
+// #include "simd.h"
+
+// #include "constexpr_wrapper.h"
+
+#include <type_traits>
+
+#if defined _GLIBCXX_EXPERIMENTAL_SIMD_H && defined __cpp_lib_experimental_parallel_simd
+#define VIR_GLIBCXX_STDX_SIMD 1
+#else
+#define VIR_GLIBCXX_STDX_SIMD 0
+#endif
+
+#if defined __GNUC__ and not defined __clang__
+#define VIR_LAMBDA_ALWAYS_INLINE __attribute__((__always_inline__))
+#else
+#define VIR_LAMBDA_ALWAYS_INLINE
+#endif
+
+#ifdef __has_builtin
+// Clang 17 miscompiles permuting loads and stores for simdized types. I was unable to pin down the
+// cause, but it seems highly likely that some __builtin_shufflevector calls get miscompiled. So
+// far, not using __builtin_shufflevector has resolved all failures.
+#if __has_builtin(__builtin_shufflevector) and __clang_major__ != 17
+#define VIR_HAVE_WORKING_SHUFFLEVECTOR 1
+#endif
+#if __has_builtin(__builtin_bit_cast)
+#define VIR_HAVE_BUILTIN_BIT_CAST 1
+#endif
+#endif
+#ifndef VIR_HAVE_WORKING_SHUFFLEVECTOR
+#define VIR_HAVE_WORKING_SHUFFLEVECTOR 0
+#endif
+#ifndef VIR_HAVE_BUILTIN_BIT_CAST
+#define VIR_HAVE_BUILTIN_BIT_CAST 0
+#endif
+
+
+namespace vir::meta
+{
+  template <typename T>
+    using is_simd_or_mask = std::disjunction<stdx::is_simd<T>, stdx::is_simd_mask<T>>;
+
+  template <typename T>
+    inline constexpr bool is_simd_or_mask_v = std::disjunction_v<stdx::is_simd<T>,
+                                                                 stdx::is_simd_mask<T>>;
+
+    template <typename T>
+      struct type_identity
+      { using type = T; };
+
+    template <typename T>
+      using type_identity_t = typename type_identity<T>::type;
+
+    template <typename T, typename U = long long, bool = (sizeof(T) == sizeof(U))>
+      struct as_int;
+
+    template <typename T, typename U>
+      struct as_int<T, U, true>
+      { using type = U; };
+
+    template <typename T>
+      struct as_int<T, long long, false>
+      : as_int<T, long> {};
+
+    template <typename T>
+      struct as_int<T, long, false>
+      : as_int<T, int> {};
+
+    template <typename T>
+      struct as_int<T, int, false>
+      : as_int<T, short> {};
+
+    template <typename T>
+      struct as_int<T, short, false>
+      : as_int<T, signed char> {};
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+    template <typename T>
+      struct as_int<T, signed char, false>
+  #ifdef __SIZEOF_INT128__
+      : as_int<T, __int128> {};
+
+    template <typename T>
+      struct as_int<T, __int128, false>
+  #endif // __SIZEOF_INT128__
+      {};
+#pragma GCC diagnostic pop
+
+    template <typename T>
+      using as_int_t = typename as_int<T>::type;
+
+    template <typename T, typename U = unsigned long long, bool = (sizeof(T) == sizeof(U))>
+      struct as_unsigned;
+
+    template <typename T, typename U>
+      struct as_unsigned<T, U, true>
+      { using type = U; };
+
+    template <typename T>
+      struct as_unsigned<T, unsigned long long, false>
+      : as_unsigned<T, unsigned long> {};
+
+    template <typename T>
+      struct as_unsigned<T, unsigned long, false>
+      : as_unsigned<T, unsigned int> {};
+
+    template <typename T>
+      struct as_unsigned<T, unsigned int, false>
+      : as_unsigned<T, unsigned short> {};
+
+    template <typename T>
+      struct as_unsigned<T, unsigned short, false>
+      : as_unsigned<T, unsigned char> {};
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+    template <typename T>
+      struct as_unsigned<T, unsigned char, false>
+  #ifdef __SIZEOF_INT128__
+      : as_unsigned<T, unsigned __int128> {};
+
+    template <typename T>
+      struct as_unsigned<T, unsigned __int128, false>
+  #endif // __SIZEOF_INT128__
+      {};
+#pragma GCC diagnostic pop
+
+    template <typename T>
+      using as_unsigned_t = typename as_unsigned<T>::type;
+}
+
+namespace vir::detail
+{
+  template <typename T, typename = std::enable_if_t<std::is_floating_point_v<T>>>
+    using FloatingPoint = T;
+
+  using namespace vir::stdx;
+
+    /**
+     * Shortcut to determine the stdx::simd specialization with the most efficient ABI tag for the
+     * requested element type T and width N.
+     */
+  template <typename T, int N>
+    using deduced_simd = stdx::simd<T, stdx::simd_abi::deduce_t<T, N>>;
+
+  template <typename T, int N>
+    using deduced_simd_mask = stdx::simd_mask<T, stdx::simd_abi::deduce_t<T, N>>;
+
+  template <typename T>
+    constexpr T
+    bit_ceil(T x)
+    { return (x & (x - 1)) == 0 ? x : bit_ceil((x | (x >> 1)) + 1); }
+
+#ifdef __GNUC__
+  template <typename T, int N, unsigned Bytes = sizeof(T) * bit_ceil(unsigned(N))>
+    using gnu_vector [[gnu::vector_size(Bytes)]] = T;
+
+  template <typename T>
+    std::true_type
+    is_vec_builtin_impl(gnu_vector<std::remove_cv_t<std::remove_reference_t<decltype(T()[0])>>,
+                                   0, sizeof(T)>);
+#endif
+
+  template <typename T>
+    std::false_type
+    is_vec_builtin_impl(...);
+
+  template <typename T>
+    struct is_vec_builtin
+    : decltype(is_vec_builtin_impl<T>(std::declval<T>()))
+    {};
+
+  template <typename T>
+    constexpr bool is_vec_builtin_v = is_vec_builtin<T>::value;
+
+  namespace test
+  {
+    static_assert(not is_vec_builtin_v<int>);
+#ifdef __GNUC__
+    static_assert(is_vec_builtin_v<gnu_vector<int, 4>>);
+#endif
+  }
+
+  template <typename T>
+    T
+    internal_data_hack(T&& x, float)
+    { return x; }
+
+  template <typename T>
+    auto
+    internal_data_hack(T&& x, int) -> std::enable_if_t<sizeof(T) == sizeof(decltype(__data(x))),
+                                                       decltype(__data(x))>
+    { return __data(x); }
+
+  template <typename T>
+    auto
+    internal_data_hack(T&& x, int) -> std::enable_if_t<sizeof(T) == sizeof(decltype(_data_(x))),
+                                                       decltype(_data_(x))>
+    { return _data_(x); }
+
+  template <typename To, typename From>
+    constexpr To
+    bit_cast(const From& x)
+    {
+      static_assert(sizeof(To) == sizeof(From));
+#ifdef __cpp_lib_bit_cast
+      return std::bit_cast<To>(x);
+#elif VIR_HAVE_BUILTIN_BIT_CAST
+      return __builtin_bit_cast(To, x);
+#else
+      if constexpr (is_vec_builtin_v<To>)
+        return reinterpret_cast<To>(x);
+      else
+        {
+          To r;
+          std::memcpy(&internal_data_hack(r, 0), &internal_data_hack(x, 0), sizeof(x));
+          return r;
+        }
+#endif
+    }
+
+#if VIR_HAVE_CONSTEXPR_WRAPPER
+  template <int Iterations, auto I = 0, typename F>
+    [[gnu::always_inline, gnu::flatten]]
+    constexpr void
+    unroll(F&& fun)
+    {
+      if constexpr (Iterations != 0)
+        {
+          fun(vir::cw<I>);
+          unroll<Iterations - 1, I + 1>(static_cast<F&&>(fun));
+        }
+    }
+
+  template <int Iterations>
+    [[gnu::always_inline, gnu::flatten]]
+    constexpr void
+    unroll2(auto&& fun0, auto&& fun1)
+    {
+      [&]<int... Is>(std::integer_sequence<int, Is...>) VIR_LAMBDA_ALWAYS_INLINE {
+        [&](auto&&... r0s) VIR_LAMBDA_ALWAYS_INLINE {
+          (fun1(vir::cw<Is>, static_cast<decltype(r0s)>(r0s)), ...);
+        }(fun0(vir::cw<Is>)...);
+      }(std::make_integer_sequence<int, Iterations>());
+    }
+#endif
+}
+
+#endif // VIR_DETAILS_H
+
+// #include "simd_concepts.h"
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2023–2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+#ifndef VIR_SIMD_CONCEPTS_H_
+#define VIR_SIMD_CONCEPTS_H_
+
+#if defined __cpp_concepts && __cpp_concepts >= 201907 && __has_include(<concepts>) \
+  && (__GNUC__ > 10 || defined __clang__)
+#define VIR_HAVE_SIMD_CONCEPTS 1
+#include <concepts>
+
+// #include "simd.h"
+
+
+namespace vir
+{
+  using std::size_t;
+
+  template <typename T>
+    concept arithmetic = std::floating_point<T> or std::integral<T>;
+
+  template <typename T>
+    concept vectorizable = arithmetic<T> and not std::same_as<T, bool>;
+
+  template <typename T>
+    concept simd_abi_tag = stdx::is_abi_tag_v<T>;
+
+  template <typename V>
+    concept any_simd
+      = stdx::is_simd_v<V> and vectorizable<typename V::value_type>
+	  and simd_abi_tag<typename V::abi_type>;
+
+  template <typename V>
+    concept any_simd_mask
+      = stdx::is_simd_mask_v<V> and any_simd<typename V::simd_type>
+	  and simd_abi_tag<typename V::abi_type>;
+
+  template <typename V>
+    concept any_simd_or_mask = any_simd<V> or any_simd_mask<V>;
+
+  template <typename V, typename T>
+    concept typed_simd = any_simd<V> and std::same_as<T, typename V::value_type>;
+
+  template <typename V, size_t Width>
+    concept sized_simd = any_simd<V> and V::size() == Width;
+
+  template <typename V, size_t Width>
+    concept sized_simd_mask = any_simd_mask<V> and V::size() == Width;
+}
+
+#endif // has concepts
+#endif // VIR_SIMD_CONCEPTS_H_
+
+// vim: noet cc=101 tw=100 sw=2 ts=8
+
+// #include "simd_permute.h"
+/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* Copyright © 2023–2024 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+ *                       Matthias Kretz <m.kretz@gsi.de>
+ */
+
+// Implements non-members of P2664
+
+#ifndef VIR_SIMD_PERMUTE_H_
+#define VIR_SIMD_PERMUTE_H_
+
+// #include "simd_concepts.h"
+
+
+#if VIR_HAVE_SIMD_CONCEPTS
+#define VIR_HAVE_SIMD_PERMUTE 1
+
+// #include "simd.h"
+
+// #include "constexpr_wrapper.h"
+
+#include <bit>
+
+namespace vir
+{
+  namespace detail
+  {
+    template <typename F>
+      concept index_permutation_function_nosize = requires(F const& f)
+      {
+	{ f(vir::cw<0>) } -> std::integral;
+      };
+
+    template <typename F, std::size_t Size>
+      concept index_permutation_function_size = requires(F const& f)
+      {
+	{ f(vir::cw<0>, vir::cw<Size>) } -> std::integral;
+      };
+
+    template <typename F, std::size_t Size>
+      concept index_permutation_function
+	= index_permutation_function_size<F, Size> or index_permutation_function_nosize<F>;
+  }
+
+  constexpr int simd_permute_zero = std::numeric_limits<int>::max();
+
+  constexpr int simd_permute_uninit = simd_permute_zero - 1;
+
+  namespace simd_permutations
+  {
+    struct DuplicateEven
+    {
+      consteval unsigned
+      operator()(unsigned i) const
+      { return i & ~1u; }
+    };
+
+    inline constexpr DuplicateEven duplicate_even {};
+
+    struct DuplicateOdd
+    {
+      consteval unsigned
+      operator()(unsigned i) const
+      { return i | 1u; }
+    };
+
+    inline constexpr DuplicateOdd duplicate_odd {};
+
+    template <unsigned N>
+      struct SwapNeighbors
+      {
+	consteval unsigned
+	operator()(unsigned i, auto size) const
+	{
+	  static_assert(size % (2 * N) == 0,
+			"swap_neighbors<N> permutation requires a multiple of 2N elements");
+	  if (std::has_single_bit(N))
+	    return i ^ N;
+	  else if (i % (2 * N) >= N)
+	    return i - N;
+	  else
+	    return i + N;
+	}
+      };
+
+    template <unsigned N = 1u>
+      inline constexpr SwapNeighbors<N> swap_neighbors {};
+
+    template <int Position>
+      struct Broadcast
+      {
+	consteval int
+	operator()(int) const
+	{ return Position; }
+      };
+
+    template <int Position>
+      inline constexpr Broadcast<Position> broadcast {};
+
+    inline constexpr Broadcast<0> broadcast_first {};
+
+    inline constexpr Broadcast<-1> broadcast_last {};
+
+    struct Reverse
+    {
+      consteval int
+      operator()(int i) const
+      { return -1 - i; }
+    };
+
+    inline constexpr Reverse reverse {};
+
+    template <int O>
+      struct Rotate
+      {
+	static constexpr int Offset = O;
+	static constexpr bool is_even_rotation = Offset % 2 == 0;
+
+	consteval int
+	operator()(int i, auto size) const
+	{ return (i + Offset) % size.value; }
+      };
+
+    template <int Offset>
+      inline constexpr Rotate<Offset> rotate {};
+
+    template <int Offset>
+      struct Shift
+      {
+	consteval int
+	operator()(int i, int size) const
+	{
+	  const int j = i + Offset;
+	  if constexpr (Offset >= 0)
+	    return j >= size ? simd_permute_zero : j;
+	  else
+	    return j < 0 ? simd_permute_zero : j;
+	}
+      };
+
+    template <int Offset>
+      inline constexpr Shift<Offset> shift {};
+  }
+
+  template <std::size_t N = 0, vir::any_simd_or_mask V,
+	    detail::index_permutation_function<V::size()> F>
+    VIR_ALWAYS_INLINE constexpr stdx::resize_simd_t<N == 0 ? V::size() : N, V>
+    simd_permute(V const& v, F const idx_perm) noexcept
+    {
+      using T = typename V::value_type;
+      using R = stdx::resize_simd_t<N == 0 ? V::size() : N, V>;
+
+#if defined __GNUC__
+      if (not std::is_constant_evaluated())
+	if constexpr (std::has_single_bit(sizeof(V)) and V::size() <= stdx::native_simd<T>::size())
+	  {
+#if defined __AVX2__
+	    using v4df [[gnu::vector_size(32)]] = double;
+	    if constexpr (std::same_as<T, float> and std::is_trivially_copyable_v<V>
+			    and sizeof(v4df) == sizeof(V)
+			    and requires {
+			      F::is_even_rotation;
+			      F::Offset;
+			      { std::bool_constant<F::is_even_rotation>() }
+				-> std::same_as<std::true_type>;
+			    })
+	      {
+		const v4df intrin = detail::bit_cast<v4df>(v);
+		constexpr int control = ((F::Offset / 2) << 0)
+					  | (((F::Offset / 2 + 1) % 4) << 2)
+					  | (((F::Offset / 2 + 2) % 4) << 4)
+					  | (((F::Offset / 2 + 3) % 4) << 6);
+		return detail::bit_cast<R>(__builtin_ia32_permdf256(intrin, control));
+	      }
+#endif
+#if VIR_HAVE_WORKING_SHUFFLEVECTOR
+	    using VecType [[gnu::vector_size(sizeof(V))]] = T;
+	    if constexpr (std::is_trivially_copyable_v<V> and std::is_constructible_v<R, VecType>)
+	      {
+		const VecType vec = detail::bit_cast<VecType>(v);
+		const auto idx_perm2 = [&](constexpr_value auto i) -> int {
+		  constexpr int j = [&]() {
+		    if constexpr (detail::index_permutation_function_nosize<F>)
+		      return idx_perm(i);
+		    else
+		      return idx_perm(i, vir::cw<V::size()>);
+		  }();
+		  if constexpr (j == simd_permute_zero)
+		    return V::size();
+		  else if constexpr (j == simd_permute_uninit)
+		    return -1;
+		  else if constexpr (j < 0)
+		    {
+		      static_assert (-j <= int(V::size()));
+		      return int(V::size()) + j;
+		    }
+		  else
+		    {
+		      static_assert (j < int(V::size()));
+		      return j;
+		    }
+		};
+		return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+		  return R(__builtin_shufflevector(vec, VecType{}, (idx_perm2(vir::cw<Is>))...));
+		}(std::make_index_sequence<V::size()>());
+	      }
+#endif
+	  }
+#endif // __GNUC__
+
+      return R([&](auto i) -> T {
+	       constexpr int j = [&] {
+		 if constexpr (detail::index_permutation_function_nosize<F>)
+		   return idx_perm(i);
+		 else
+		   return idx_perm(i, vir::cw<V::size()>);
+	       }();
+	       if constexpr (j == simd_permute_zero)
+		 return 0;
+	       else if constexpr (j == simd_permute_uninit)
+		 {
+		   T uninit;
+		   return uninit;
+		 }
+	       else if constexpr (j < 0)
+		 {
+		   static_assert(-j <= int(V::size()));
+		   return v[v.size() + j];
+		 }
+	       else
+		 {
+		   static_assert(j < int(V::size()));
+		   return v[j];
+		 }
+	     });
+    }
+
+  template <std::size_t N = 0, vir::vectorizable T, detail::index_permutation_function<1> F>
+    VIR_ALWAYS_INLINE constexpr
+    std::conditional_t<N <= 1, T, stdx::resize_simd_t<N == 0 ? 1 : N, stdx::simd<T>>>
+    simd_permute(T const& v, F const idx_perm) noexcept
+    {
+      if constexpr (N <= 1)
+	{
+	  constexpr auto i = vir::cw<0>;
+	  constexpr int j = [&] {
+	    if constexpr (detail::index_permutation_function_nosize<F>)
+	      return idx_perm(i);
+	    else
+	      return idx_perm(i, vir::cw<std::size_t(1)>);
+	  }();
+	  if constexpr (j == simd_permute_zero)
+	    return 0;
+	  else if constexpr (j == simd_permute_uninit)
+	    {
+	      T uninit;
+	      return uninit;
+	    }
+	  else
+	    {
+	      static_assert(j == 0 or j == -1);
+	      return v;
+	    }
+	}
+      else
+	return simd_permute<N>(stdx::simd<T, stdx::simd_abi::scalar>(v), idx_perm);
+    }
+
+  template <int Offset, vir::any_simd_or_mask V>
+    VIR_ALWAYS_INLINE constexpr V
+    simd_shift_in(V const& a, std::convertible_to<V> auto const&... more) noexcept
+    {
+      return V([&](auto i) -> typename V::value_type {
+	       constexpr int ninputs = 1 + sizeof...(more);
+	       constexpr int w = V::size();
+	       constexpr int j = Offset + int(i);
+	       if constexpr (j >= w * ninputs)
+		 return 0;
+	       else if constexpr (j >= 0)
+		 {
+		   const V tmp[] = {a, more...};
+		   return tmp[j / w][j % w];
+		 }
+	       else if constexpr (j < -w)
+		 return 0;
+	       else
+		 return a[w + j];
+      });
+    }
+}
+
+#endif // has concepts
+#endif // VIR_SIMD_PERMUTE_H_
+
+// vim: noet cc=101 tw=100 sw=2 ts=8
+
+
+namespace vir
+{
+  /**
+   * Determines the SIMD width of the given structure. This can either be a stdx::simd object or a
+   * tuple-like of stdx::simd (recursively). The latter requires that the SIMD width is homogeneous.
+   * If T is not a simd (or tuple thereof), value is 0.
+   */
+  // Implementation note: partial specialization via concepts is broken on clang < 16
+  template <typename T>
+    struct simdize_size
+    : vir::constexpr_wrapper<[]() -> int {
+	if constexpr (stdx::is_simd_v<T>)
+	  return T::size();
+	else if constexpr (reflectable_struct<T> and []<std::size_t... Is>(
+			     std::index_sequence<Is...>) {
+			     return ((simdize_size<vir::struct_element_t<0, T>>::value
+					== simdize_size<vir::struct_element_t<Is, T>>::value) and ...);
+			   }(std::make_index_sequence<vir::struct_size_v<T>>()))
+	  return simdize_size<vir::struct_element_t<0, T>>::value;
+	else
+	  return 0;
+      }()>
+    {};
+
+  template <typename T>
+    inline constexpr int simdize_size_v = simdize_size<T>::value;
+
+  template <typename T, int N>
+    class simd_tuple;
+
+  template <typename T, int N>
+    class vectorized_struct;
+
+  namespace detail
+  {
+    template <typename V, bool... Values>
+      inline constexpr typename V::mask_type mask_constant
+	= typename V::mask_type(std::array<bool, sizeof...(Values)>{Values...}.data(),
+				stdx::element_aligned);
+
+#if VIR_HAVE_WORKING_SHUFFLEVECTOR
+    /**
+     * Return a with a[i] replaced by b[i] for all i in {Indexes...}.
+     */
+    template <int... Indexes, typename T>
+      VIR_ALWAYS_INLINE T
+      blend(T a, T b)
+      {
+	constexpr int N = sizeof(a) / sizeof(a[0]);
+	static_assert(sizeof...(Indexes) <= N);
+	static_assert(((Indexes <= N) && ...));
+	constexpr auto selected = [](int i) {
+	  return ((i == Indexes) || ...);
+	};
+	return [&]<int... Is>(std::integer_sequence<int, Is...>) {
+	  return __builtin_shufflevector(a, b, (selected(Is) ? Is + N : Is)...);
+	}(std::make_integer_sequence<int, N>());
+      }
+#endif
+
+    template <typename T, int N>
+      struct simdize_impl
+      { using type = T; };
+
+    template <vectorizable T, int N>
+      struct simdize_impl<T, N>
+      { using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>; };
+
+    template <typename T>
+      struct recursively_vectorizable
+      : std::false_type
+      {};
+
+    template <vectorizable T>
+      struct recursively_vectorizable<T>
+      : std::true_type
+      {};
+
+    template <vir::reflectable_struct T>
+      requires (vir::struct_size_v<T> == 1)
+      struct recursively_vectorizable<T>
+      : recursively_vectorizable<vir::struct_element_t<0, T>>
+      {};
+
+    template <vir::reflectable_struct T>
+      requires (vir::struct_size_v<T> > 1)
+      struct recursively_vectorizable<T>
+      : std::bool_constant<
+	  []<std::size_t... Is>(std::index_sequence<Is...>) {
+	    return (... and recursively_vectorizable<
+			      vir::struct_element_t<Is, T>>::value);
+	  }(std::make_index_sequence<vir::struct_size_v<T>>())>
+      {};
+
+    template <typename>
+      struct default_simdize_size;
+
+    template <vectorizable T>
+      struct default_simdize_size<T>
+      {
+	static inline constexpr int value = stdx::native_simd<T>::size();
+
+	static_assert(value > 0);
+      };
+
+    template <typename Tup>
+      requires (not vectorizable<Tup>)
+	and recursively_vectorizable<Tup>::value
+      struct default_simdize_size<Tup>
+      {
+	static inline constexpr int value
+	  = []<std::size_t... Is>(std::index_sequence<Is...>) {
+	    return std::max({int(simdize_impl<vir::struct_element_t<Is, Tup>, 0>::type::size())...});
+	  }(std::make_index_sequence<vir::struct_size_v<Tup>>());
+
+	static_assert(value > 0);
+      };
+
+    template <typename Tup>
+      inline constexpr int default_simdize_size_v = default_simdize_size<Tup>::value;
+
+    template <reflectable_struct Tup, int N>
+      requires (vir::struct_size_v<Tup> > 0 and N > 0)
+      struct make_simd_tuple
+      {
+	using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>)
+				-> std::tuple<typename simdize_impl<
+						vir::struct_element_t<Is, Tup>, N>::type...> {
+		       return {};
+		     }(std::make_index_sequence<vir::struct_size_v<Tup>>()));
+      };
+
+    /**
+     * Recursively simdize all type template arguments.
+     */
+    template <std::size_t N, template <typename...> class Tpl, typename... Ts>
+      Tpl<typename simdize_impl<Ts, N>::type...>
+      simdize_template_arguments_impl(const Tpl<Ts...>&);
+
+    template <std::size_t N, template <typename, auto...> class Tpl, typename T, auto... X>
+      requires(sizeof...(X) > 0)
+      Tpl<typename simdize_impl<T, N>::type, X...>
+      simdize_template_arguments_impl(const Tpl<T, X...>&);
+
+    template <std::size_t N, template <typename, typename, auto...> class Tpl,
+	      typename... Ts, auto... X>
+      requires(sizeof...(X) > 0)
+      Tpl<typename simdize_impl<Ts, N>::type..., X...>
+      simdize_template_arguments_impl(const Tpl<Ts..., X...>&);
+
+    template <std::size_t N, template <typename, typename, typename, auto...> class Tpl,
+	      typename... Ts, auto... X>
+      requires(sizeof...(X) > 0)
+      Tpl<typename simdize_impl<Ts, N>::type..., X...>
+      simdize_template_arguments_impl(const Tpl<Ts..., X...>&);
+
+    template <typename T, int N = 0>
+      requires requires(const T& tt) {
+	simdize_template_arguments_impl<default_simdize_size<T>::value>(tt);
+      }
+      struct simdize_template_arguments
+      {
+	using type = decltype(simdize_template_arguments_impl<
+				N == 0 ? default_simdize_size_v<T> : N>(std::declval<const T&>()));
+      };
+
+    template <typename T, int N = 0>
+      using simdize_template_arguments_t = typename simdize_template_arguments<T, N>::type;
+
+    /**
+     * flat_member_count: count data members in T recursively.
+     * IOW, count all non-reflectable data members. If a data member can be reflected, count its
+     * members instead.
+     */
+    template <typename T>
+      struct flat_member_count;
+
+    template <typename T>
+      inline constexpr int flat_member_count_v = flat_member_count<T>::value;
+
+    template <typename T>
+      requires (not vir::reflectable_struct<T>)
+      struct flat_member_count<T>
+      : vir::constexpr_wrapper<1>
+      {};
+
+    template <vir::reflectable_struct T>
+      struct flat_member_count<T>
+      {
+	static constexpr int value = []<int... Is>(std::integer_sequence<int, Is...>) {
+	  return (flat_member_count_v<vir::struct_element_t<Is, T>> + ...);
+	}(std::make_integer_sequence<int, vir::struct_size_v<T>>());
+      };
+
+    /**
+     * Determine the type of the I-th non-reflectable data member.
+     */
+    template <int I, typename T>
+      struct flat_element;
+
+    template <int I, typename T>
+      using flat_element_t = typename flat_element<I, T>::type;
+
+    template <typename T>
+      requires (not vir::reflectable_struct<T>)
+      struct flat_element<0, T>
+      { using type = T; };
+
+    template <int I, vir::reflectable_struct T>
+      requires (flat_member_count_v<T> == struct_size_v<T> and I < struct_size_v<T>)
+      struct flat_element<I, T>
+      { using type = struct_element_t<I, T>; };
+
+    template <int I, vir::reflectable_struct T>
+      requires (flat_member_count_v<T> > struct_size_v<T>
+		  and I < flat_member_count_v<struct_element_t<0, T>>)
+      struct flat_element<I, T>
+      { using type = flat_element_t<I, struct_element_t<0, T>>; };
+
+    /**
+     * Return the value of the I-th non-reflectable data member.
+     */
+    template <int I, int Offset = 0, vir::reflectable_struct T>
+      constexpr decltype(auto)
+      flat_get(T&& s)
+      {
+	using TT = std::remove_cvref_t<T>;
+	if constexpr (flat_member_count_v<TT> == struct_size_v<TT>)
+	  {
+	    static_assert(I < struct_size_v<TT>);
+	    static_assert(Offset == 0);
+	    return vir::struct_get<I>(s);
+	  }
+	else
+	  {
+	    static_assert(flat_member_count_v<TT> > struct_size_v<TT>);
+	    constexpr auto size = flat_member_count_v<struct_element_t<Offset, TT>>;
+	    if constexpr (I < size)
+	      return flat_get<I>(vir::struct_get<Offset>(s));
+	    else
+	      return flat_get<I - size, size>(s);
+	  }
+      }
+
+    template <template <typename...> class Comp,
+	      template <std::size_t, typename> class Element1, typename T1,
+	      template <std::size_t, typename> class Element2, typename T2, std::size_t... Is>
+      constexpr std::bool_constant<(Comp<typename Element1<Is, T1>::type,
+					 typename Element2<Is, T2>::type>::value and ...)>
+      test_all_of(std::index_sequence<Is...>)
+      { return {}; }
+
+    /**
+     * Conjunction of Trait::value<I> for I in {Is...}.
+     */
+    template <typename Trait, std::size_t... Is>
+      constexpr std::bool_constant<(Trait::template value<Is> and ...)>
+      test_all_of(std::index_sequence<Is...>)
+      { return {}; }
+
+    /**
+     * Test that make_simd_tuple and simdize_template_arguments produce equivalent results.
+     */
+    template <typename T, int N = default_simdize_size<T>::value,
+	      typename TTup = typename make_simd_tuple<T, N>::type,
+	      typename TS = simdize_template_arguments_t<T>>
+      struct is_consistent_struct_vectorization
+      {
+	template <std::size_t I, typename L = flat_element_t<I, TTup>,
+		  typename R = flat_element_t<I, TS>>
+	  static constexpr bool value = std::same_as<L, R>;
+      };
+  }
+
+  /**
+   * A type T is a vectorizable struct template if all of its data-members can be vectorized via
+   * template argument simdization.
+   */
+  template <typename T>
+    concept vectorizable_struct_template
+      = reflectable_struct<T> and vir::struct_size_v<T> != 0
+	  and reflectable_struct<detail::simdize_template_arguments_t<T>>
+	  and struct_size_v<T> == struct_size_v<detail::simdize_template_arguments_t<T>>
+	  and bool(detail::test_all_of<detail::is_consistent_struct_vectorization<T>>(
+		     std::make_index_sequence<vir::detail::flat_member_count_v<T>>()));
+
+  namespace detail
+  {
+    template <reflectable_struct Tup, int N>
+      requires (vir::struct_size_v<Tup> > 0 and not vectorizable_struct_template<Tup>)
+	and requires { default_simdize_size<Tup>::value; }
+      struct simdize_impl<Tup, N>
+      {
+	static_assert(requires { typename simdize_impl<vir::struct_element_t<0, Tup>, N>::type; });
+
+	using type = simd_tuple<Tup, N == 0 ? default_simdize_size_v<Tup> : N>;
+      };
+
+    template <vectorizable_struct_template T, int N>
+      requires requires { default_simdize_size<T>::value; }
+      struct simdize_impl<T, N>
+      { using type = vectorized_struct<T, N == 0 ? default_simdize_size_v<T> : N>; };
+  } // namespace detail
+
+  /**
+   * stdx::simd-like interface for tuples of vectorized data members of T.
+   */
+  template <reflectable_struct T, int N>
+    class simd_tuple<T, N>
+    {
+      using tuple_type = typename detail::make_simd_tuple<T, N>::type;
+
+      tuple_type elements;
+
+      static constexpr auto tuple_size_idx_seq = std::make_index_sequence<vir::struct_size_v<T>>();
+
+    public:
+      using value_type = T;
+      using mask_type = typename std::tuple_element_t<0, tuple_type>::mask_type;
+
+      static constexpr auto size = vir::cw<N>;
+
+      template <typename U = T>
+	inline static constexpr std::size_t memory_alignment = alignof(U);
+
+      template <typename... Ts>
+	requires (sizeof...(Ts) == std::tuple_size_v<tuple_type>
+		    and detail::test_all_of<std::is_constructible, std::tuple_element, tuple_type,
+					    std::tuple_element, std::tuple<Ts...>
+					   >(tuple_size_idx_seq).value)
+	constexpr
+	simd_tuple(Ts&&... args)
+	: elements{static_cast<Ts&&>(args)...}
+	{}
+
+      constexpr
+      simd_tuple(const tuple_type& init)
+      : elements(init)
+      {}
+
+      /**
+       * Constructs from a compatible aggregate. Potentially broadcasts all or some elements.
+       */
+      template <reflectable_struct U>
+	requires (struct_size_v<U> == struct_size_v<T>
+		    and detail::test_all_of<std::is_constructible, std::tuple_element, tuple_type,
+					    struct_element, U>(tuple_size_idx_seq).value)
+	constexpr
+	explicit(not detail::test_all_of<std::is_convertible, struct_element, U,
+					 std::tuple_element, tuple_type>(tuple_size_idx_seq).value)
+	simd_tuple(const U& init)
+	: elements([&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	    return tuple_type {std::tuple_element_t<Is, tuple_type>(vir::struct_get<Is>(init))...};
+	  }(tuple_size_idx_seq))
+	{}
+
+      template <reflectable_struct U>
+	requires (struct_size_v<U> == struct_size_v<T>
+		    and detail::test_all_of<std::is_constructible, struct_element, U,
+					    std::tuple_element, tuple_type>(tuple_size_idx_seq)
+		    .value)
+	constexpr
+	explicit(not detail::test_all_of<std::is_same, struct_element, U,
+					 std::tuple_element, tuple_type>(tuple_size_idx_seq).value)
+	operator U() const
+	{
+	  return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	    return U {static_cast<struct_element_t<Is, U>>(std::get<Is>(elements))...};
+	  }(tuple_size_idx_seq);
+	}
+
+      constexpr tuple_type&
+      as_tuple()
+      { return elements; }
+
+      constexpr tuple_type const&
+      as_tuple() const
+      { return elements; }
+
+      constexpr auto
+      operator[](std::size_t i) const
+      requires (not std::is_array_v<T>)
+      {
+	return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	  return T{std::get<Is>(elements)[i]...};
+	}(tuple_size_idx_seq);
+      }
+
+      /**
+       * Copies all values from the range starting at `it` into `*this`.
+       *
+       * Precondition: [it, it + N) is a valid range.
+       */
+      template <std::contiguous_iterator It, typename Flags = stdx::element_aligned_tag>
+	requires std::same_as<std::iter_value_t<It>, T>
+	constexpr
+	simd_tuple(It it, Flags = {})
+	: elements([&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	    return tuple_type {std::tuple_element_t<Is, tuple_type>([&](size_t i) {
+				 return struct_get<Is>(it[i]);
+			       })...};
+	  }(tuple_size_idx_seq))
+	{}
+
+      template <std::contiguous_iterator It, typename Flags = stdx::element_aligned_tag>
+	requires std::same_as<std::iter_value_t<It>, T>
+	constexpr void
+	copy_from(It it, Flags = {})
+	{
+	  [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	    ((std::get<Is>(elements) = std::tuple_element_t<Is, tuple_type>([&](size_t i) {
+					 return struct_get<Is>(it[i]);
+				       })), ...);
+	  }(tuple_size_idx_seq);
+	}
+
+      /**
+       * Copies all values from `*this` to the range starting at `it`.
+       *
+       * Precondition: [it, it + N) is a valid range.
+       */
+      template <std::contiguous_iterator It, typename Flags = stdx::element_aligned_tag>
+	requires std::output_iterator<It, T>
+	constexpr void
+	copy_to(It it, Flags = {}) const
+	{
+	  for (std::size_t i = 0; i < size(); ++i)
+	    it[i] = operator[](i);
+	}
+    };
+
+  /**
+   * Implements structured bindings interface.
+   *
+   * \see std::tuple_size, std::tuple_element
+   */
+  template <std::size_t I, reflectable_struct T, int N>
+    requires (not vectorizable_struct_template<T>)
+    constexpr decltype(auto)
+    get(const simd_tuple<T, N>& tup)
+    { return std::get<I>(tup.as_tuple()); }
+
+  template <std::size_t I, reflectable_struct T, int N>
+    requires (not vectorizable_struct_template<T>)
+    constexpr decltype(auto)
+    get(simd_tuple<T, N>& tup)
+    { return std::get<I>(tup.as_tuple()); }
+
+  /**
+   * stdx::simd-like interface on top of vectorized types (template argument substitution).
+   */
+  template <vectorizable_struct_template T, int N>
+    class vectorized_struct<T, N> : public detail::simdize_template_arguments_t<T, N>
+    {
+      using tuple_type = typename detail::make_simd_tuple<T, N>::type;
+      using base_type = detail::simdize_template_arguments_t<T, N>;
+
+      static constexpr auto _flat_member_count = detail::flat_member_count_v<T>;
+      static constexpr auto _flat_member_idx_seq = std::make_index_sequence<_flat_member_count>();
+      static constexpr auto _struct_size = struct_size_v<T>;
+      static constexpr auto _struct_size_idx_seq = std::make_index_sequence<_struct_size>();
+
+      constexpr base_type&
+      _as_base_type()
+      { return *this; }
+
+      constexpr base_type const&
+      _as_base_type() const
+      { return *this; }
+
+    public:
+      using value_type = T;
+      using mask_type = typename detail::flat_element_t<0, base_type>::mask_type;
+
+      static constexpr auto size = vir::cw<N>;
+
+      template <typename U = T>
+	inline static constexpr std::size_t memory_alignment = alignof(U);
+
+      template <typename... Ts>
+	requires requires(Ts&&... args) { base_type{static_cast<Ts&&>(args)...}; }
+	VIR_ALWAYS_INLINE constexpr
+	vectorized_struct(Ts&&... args)
+	: base_type{static_cast<Ts&&>(args)...}
+	{}
+
+      VIR_ALWAYS_INLINE constexpr
+      vectorized_struct(const base_type& init)
+      : base_type(init)
+      {}
+
+      // broadcast and or vector copy/conversion
+      template <reflectable_struct U>
+	requires (struct_size_v<U> == _struct_size
+		    and detail::test_all_of<std::is_constructible, std::tuple_element, tuple_type,
+					    struct_element, U>(_struct_size_idx_seq).value)
+	constexpr
+	explicit(not detail::test_all_of<std::is_convertible, struct_element, U,
+					 std::tuple_element, tuple_type>(_struct_size_idx_seq).value)
+	vectorized_struct(const U& init)
+	: base_type([&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	    return base_type {std::tuple_element_t<Is, tuple_type>(vir::struct_get<Is>(init))...};
+	  }(_struct_size_idx_seq))
+	{}
+
+      VIR_ALWAYS_INLINE constexpr T
+      operator[](std::size_t i) const
+      {
+	return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	  return T{detail::flat_get<Is>(*this)[i]...};
+	}(_flat_member_idx_seq);
+      }
+
+      VIR_ALWAYS_INLINE
+      static constexpr base_type
+      _load_elements_via_permute(const T* addr)
+      {
+#if VIR_HAVE_WORKING_SHUFFLEVECTOR
+	if (not std::is_constant_evaluated())
+	  if constexpr (N > 1 and sizeof(T) * N == sizeof(base_type) and _flat_member_count >= 2
+			  and std::has_single_bit(unsigned(N)))
+	    {
+	      const std::byte* byte_ptr = reinterpret_cast<const std::byte*>(addr);
+	      // struct_size_v == 2 doesn't need anything, the fallback works fine, unless
+	      // we allow unordered access
+	      using V0 = detail::flat_element_t<0, tuple_type>;
+	      using V1 = detail::flat_element_t<1, tuple_type>;
+	      if constexpr (_flat_member_count == 2 and N > 2)
+		{
+		  static_assert(N == V0::size());
+		  constexpr int N2 = N / 2;
+		  using U = typename V0::value_type;
+		  if constexpr (sizeof(U) == sizeof(vir::struct_element_t<0, T>)
+				  and sizeof(U) == sizeof(vir::struct_element_t<1, T>)
+				  and std::has_single_bit(V0::size())
+				  and V0::size() <= stdx::native_simd<U>::size())
+		    {
+		      using V [[gnu::vector_size(sizeof(U) * N)]] = U;
+
+		      V x0, x1;
+		      // [a0 b0 a1 b1 a2 b2 a3 b3]
+		      std::memcpy(&x0, std::addressof(vir::struct_get<0>(addr[0])), sizeof(V));
+		      // [a4 b4 a5 b5 a6 b6 a7 b7]
+		      std::memcpy(&x1, std::addressof(vir::struct_get<0>(addr[N2])), sizeof(V));
+
+		      return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+			return base_type {
+			  std::bit_cast<V0>(
+			    __builtin_shufflevector(x0, x1, (Is * 2)..., (N + Is * 2)...)),
+			  std::bit_cast<V1>(
+			    __builtin_shufflevector(x0, x1, (1 + Is * 2)..., (1 + N + Is * 2)...))
+			};
+		      }(std::make_index_sequence<N2>());
+
+		      /*		    if constexpr (sizeof(V) == 32)
+					    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+					    constexpr auto N4 = N2 / 2;
+					    const auto tmp = x0;
+		      // [a0 b0 a1 b1 a4 b4 a5 b5]
+		      x0 = __builtin_shufflevector(tmp, x1, Is..., (Is + N)...);
+		      // [a2 b2 a3 b3 a6 b6 a7 b7]
+		      x1 = __builtin_shufflevector(tmp, x1, (Is + N2) ..., (Is + N + N2)...);
+		      const lo0 = __builtin_shufflevector(x0, x1, ((Is & 1 ? N : 0) + Is / 2)...,
+		      N2 + ((Is & 1 ? N : 0) + Is / 2)...);
+		      const hi0 = __builtin_shufflevector(x0, x1, N4 + ((Is & 1 ? N : 0) + Is / 2)...,
+		      N4 + N2 + ((Is & 1 ? N : 0) + Is / 2)...);
+		      }(std::make_index_sequence<N2>());
+
+		      V0 x0(std::addressof(vir::struct_get<0>(addr[0])), stdx::element_aligned);
+		      V0 x1(std::addressof(vir::struct_get<0>(addr[V0::size()])), stdx::element_aligned);
+
+
+		      // [b4 a4 b5 a5 b6 a6 b7 a7]
+		      x1 = simd_permute(x1, simd_permutations::swap_neighbors<>);
+		      // [0 1 0 1 0 1 0 1]
+		      constexpr auto mask = []<std::size_t... Is>(std::index_sequence<Is...>) {
+		      return detail::mask_constant<V0, (Is & 1)...>;
+		      }(std::make_index_sequence<V0::size()>());
+		      V0 tmp = x1;
+		      // [b4 b0 b5 b1 b6 b2 b7 b3]
+		      stdx::where(mask, x1) = x0;
+		      // [b0 b4 b1 b5 b2 b6 b3 b7]
+		      x1 = simd_permute(x1, simd_permutations::swap_neighbors<>);
+		      // [a0 a4 a1 a5 a2 a6 a3 a7]
+		      stdx::where(mask, x0) = tmp;
+		      return base_type {x0, x1};*/
+		    }
+		}
+	      else if constexpr (std::same_as<vir::as_tuple_t<T>, std::tuple<float, float, float>>)
+		{
+		  if constexpr (std::same_as<tuple_type, std::tuple<V0, V0, V0>>
+				  and V0::size() == 8 and std::is_trivially_copyable_v<V0>)
+		    {
+		      // Implementation notes:
+		      // 1. Three gather instructions with indexes 0, 3, 6, 9, 12, 15, 18, 21 is super
+		      //    slow
+		      // 2. Eight 3/4-element loads -> concat to 8 elements -> unpack also much slower
+
+		      //                               abc   abc abc
+		      // a = [a0 b0 c0 a1 b1 c1 a2 b2] 332 = 211+121
+		      // b = [c2 a3 b3 c3 a4 b4 c4 a5] 323 = 112+211
+		      // c = [b5 c5 a6 b6 c6 a7 b7 c7] 233 = 121+112
+
+		      using v8sf [[gnu::vector_size(32)]] = float;
+		      if constexpr (true) // allow_unordered
+			{
+			  v8sf x0, x1, x2, a0, b0, c0;
+			  std::memcpy(&x0, byte_ptr +  0, 32);
+			  std::memcpy(&x1, byte_ptr + 32, 32);
+			  std::memcpy(&x2, byte_ptr + 64, 32);
+
+			  a0 = detail::blend<1, 4, 7>(x0, x1);
+			  a0 = detail::blend<2, 5>(a0, x2);
+			  // a0 a3 a6 a1 a4 a7 a2 a5
+
+			  b0 = detail::blend<2, 5>(x0, x1);
+			  b0 = detail::blend<0, 3, 6>(b0, x2);
+			  // b5 b0 b3 b6 b1 b4 b7 b2
+
+			  c0 = detail::blend<0, 3, 6>(x0, x1);
+			  c0 = detail::blend<1, 4, 7>(c0, x2);
+			  // c2 c5 c0 c3 c6 c1 c4 c7
+
+			  V0 a = std::bit_cast<V0>(a0);
+			  V0 b = simd_permute(std::bit_cast<V0>(b0), simd_permutations::rotate<1>);
+			  V0 c = simd_permute(std::bit_cast<V0>(c0), simd_permutations::rotate<2>);
+			  return base_type {a, b, c};
+			}
+		      else
+			{
+			  v8sf a, b, c;
+			  std::memcpy(&a, byte_ptr +  0, 32);
+			  std::memcpy(&b, byte_ptr + 32, 32);
+			  std::memcpy(&c, byte_ptr + 64, 32);
+
+			  // a0 b0 c0 a1 b5 c5 a6 b6
+			  v8sf ac0 = __builtin_shufflevector(a, c, 0, 1, 2, 3, 8, 9, 10, 11);
+
+			  // b1 c1 a2 b2 c6 a7 b7 c7
+			  v8sf ac1 = __builtin_shufflevector(a, c, 4, 5, 6, 7, 12, 13, 14, 15);
+
+			  // a0 a3 a2 a1 a4 a7 a6 a5
+			  V0 tmp0 = std::bit_cast<V0>(detail::blend<2, 5>(
+							detail::blend<1, 4, 7>(ac0, b), ac1));
+
+			  // b1 b0 b3 b2 b5 b4 b7 b6
+			  V0 tmp1 = std::bit_cast<V0>(detail::blend<0, 3, 6>(
+							detail::blend<2, 5>(ac0, b), ac1));
+
+			  // c2 c1 c0 c3 c6 c5 c4 c7
+			  V0 tmp2 = std::bit_cast<V0>(detail::blend<1, 4, 7>(
+							detail::blend<0, 3, 6>(ac0, b), ac1));
+
+			  return {
+			    simd_permute(tmp0, [](size_t i) {
+			      return std::array{0, 3, 2, 1, 4, 7, 6, 5}[i];
+			    }),
+			    simd_permute(tmp1, [](size_t i) {
+			      return std::array{1, 0, 3, 2, 5, 4, 7, 6}[i];
+			    }),
+			    simd_permute(tmp2, [](size_t i) {
+			      return std::array{2, 1, 0, 3, 6, 5, 4, 7}[i];
+			    })
+			  };
+			}
+		    }
+		  if constexpr (std::same_as<tuple_type, std::tuple<V0, V0, V0>>
+				  and V0::size() == 4 and std::is_trivially_copyable_v<V0>)
+		    {
+		      // abca = [a0 b0 c0 a1]
+		      // bcab = [b1 c1 a2 b2]
+		      // cabc = [c2 a3 b3 c3]
+
+		      using v4sf [[gnu::vector_size(16)]] = float;
+		      v4sf abca, bcab, cabc, a, b, c;
+		      std::memcpy(&abca, byte_ptr +  0, 16);
+		      std::memcpy(&bcab, byte_ptr + 16, 16);
+		      std::memcpy(&cabc, byte_ptr + 32, 16);
+
+		      // [a0 a1 a2 a3]
+		      a = __builtin_shufflevector(abca, detail::blend<2, 3>(cabc, bcab), 0, 3, 6, 5);
+
+		      // [b0 b1 b2 b3]
+		      b = __builtin_shufflevector(detail::blend<0>(abca, bcab), // [b1 b0 c0 a1]
+						  detail::blend<2>(bcab, cabc), // [b1 c1 b3 b2]
+						  1, 0, 7, 6);
+
+		      c = __builtin_shufflevector(detail::blend<2, 3>(bcab, abca), // [b1 c1 c0 a1]
+						  cabc, 2, 1, 4, 7);
+
+		      return base_type {std::bit_cast<V0>(a), std::bit_cast<V0>(b),
+				       	std::bit_cast<V0>(c)};
+		    }
+		}
+	      if constexpr (_flat_member_count == 3 and N > 2)
+		{
+		  using V2 = detail::flat_element_t<2, tuple_type>;
+		  static_assert(N == V0::size());
+		  static_assert(std::has_single_bit(unsigned(N)));
+		  using U = typename V0::value_type;
+		  if constexpr (sizeof(U) == sizeof(detail::flat_element_t<0, T>)
+				  and sizeof(U) == sizeof(detail::flat_element_t<1, T>)
+				  and sizeof(U) == sizeof(detail::flat_element_t<2, T>)
+				  and V0::size() <= stdx::native_simd<U>::size())
+		    {
+		      using V [[gnu::vector_size(sizeof(U) * N)]] = U;
+
+		      V x0, x1, x2;
+		      // [a0 b0 c0 a1 b1 c1 a2 b2]
+		      std::memcpy(&x0, byte_ptr, sizeof(V));
+		      // [c2 a3 b3 c3 a4 b4 c4 a5]
+		      std::memcpy(&x1, byte_ptr + sizeof(V), sizeof(V));
+		      // [b5 c5 a6 b6 c6 a7 b7 c7]
+		      std::memcpy(&x2, byte_ptr + 2 * sizeof(V), sizeof(V));
+
+		      return [&]<int... Is>(std::integer_sequence<int, Is...>)
+			     VIR_LAMBDA_ALWAYS_INLINE {
+			       return base_type {
+				 std::bit_cast<V0>(
+				   __builtin_shufflevector(
+				     __builtin_shufflevector(
+				       x0, x1, (Is % 3 == 0 ? Is : (Is + N) % 3 == 0 ? Is + N : -1)...),
+				     x2, (Is * 3 < N ? Is * 3 : Is * 3 - N)...)),
+				 std::bit_cast<V1>(
+				   __builtin_shufflevector(
+				     __builtin_shufflevector(
+				       x0, x1, (Is % 3 == 1 ? Is : (Is + N) % 3 == 1 ? Is + N : -1)...),
+				     x2, (Is * 3 + 1 < N ? Is * 3 + 1 : Is * 3 - N + 1)...)),
+				 std::bit_cast<V2>(
+				   __builtin_shufflevector(
+				     __builtin_shufflevector(
+				       x0, x1, (Is % 3 == 2 ? Is : (Is + N) % 3 == 2 ? Is + N : -1)...),
+				     x2, (Is * 3 + 2 < N ? Is * 3 + 2 : Is * 3 - N + 2)...))
+			       };
+			     }(std::make_integer_sequence<int, N>());
+		    }
+		}
+	    }
+#endif // VIR_HAVE_WORKING_SHUFFLEVECTOR
+
+	// not optimized fallback
+	return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+	  return base_type {detail::flat_element_t<Is, tuple_type>([&](size_t i) {
+			      return detail::flat_get<Is>(addr[i]);
+			    })...};
+	}(_flat_member_idx_seq);
+      }
+
+      template <int... Is>
+	VIR_ALWAYS_INLINE constexpr void
+	_store_elements_via_permute(T* addr, std::integer_sequence<int, Is...>) const
+	{
+#if VIR_HAVE_WORKING_SHUFFLEVECTOR
+	  if (not std::is_constant_evaluated())
+	    if constexpr (N > 2 and _flat_member_count >= 2
+			    and sizeof(T) * N == sizeof(base_type)
+			    and std::has_single_bit(unsigned(N)))
+	      {
+		using V0 = detail::flat_element_t<0, tuple_type>;
+		//using V1 = detail::flat_element_t<1, tuple_type>;
+		static_assert(N == V0::size());
+		using U = typename V0::value_type;
+		using V [[gnu::vector_size(sizeof(U) * N)]] = U;
+		std::byte* byte_ptr = reinterpret_cast<std::byte*>(addr);
+
+		if constexpr (_flat_member_count == 3
+				and V0::size() <= stdx::native_simd<U>::size())
+		  {
+		    //using V2 = detail::flat_element_t<2, tuple_type>;
+		    if constexpr (sizeof(U) == sizeof(detail::flat_element_t<0, T>)
+				    and sizeof(U) == sizeof(detail::flat_element_t<1, T>)
+				    and sizeof(U) == sizeof(detail::flat_element_t<2, T>))
+		      {
+			// [a0 a1 a2 a3 a4 a5 a6 ...]
+			V a = std::bit_cast<V>(detail::flat_get<0>(_as_base_type()));
+			// [b0 b1 b2 b3 b4 b5 b6 ...]
+			V b = std::bit_cast<V>(detail::flat_get<1>(_as_base_type()));
+			// [c0 c1 c2 c3 c4 c5 c6 ...]
+			V c = std::bit_cast<V>(detail::flat_get<2>(_as_base_type()));
+			constexpr auto idx = [](int i, int pos, int a, int b, int c) {
+			  constexpr int N3 = N / 3;
+			  switch(i % 3)
+			  {
+			    case 0:
+			      return i / 3 + a + pos * N3;
+			    case 1:
+			      return i / 3 + b + pos * N3 + N;
+			    case 2:
+			      return i / 3 + c + ((pos + N % 3) % 3) * N3;
+			    default:
+			      __builtin_unreachable();
+			  }
+			};
+			if constexpr (N % 3 == 1)
+			  {
+			    // [a0 b0 a6 a1|b1 a7 a2 b2|a8 a3 b3 a9|a4 b4 a10 a5]
+			    const V aba = __builtin_shufflevector(a, b, idx(Is, 0, 0, 0, 1)...);
+			    // [b5 c5 b11 b6|c6 b12 b7 c7|b13 b8 c8 b14|b9 c9 b15 b10]
+			    const V bcb = __builtin_shufflevector(b, c, idx(Is, 1, 0, 0, 1)...);
+			    // [c10 a11 c0 c11|a12 c1 c12 a13|c2 c13 a14 c3|c14 a15 c4 c15]
+			    const V cac = __builtin_shufflevector(c, a, idx(Is, 2, 0, 1, 0)...);
+			    // [a0 b0 c0 a1|b1 c1 a2 b2|c2 a3 b3 c3|a4 b4 c4 a5]
+			    a = __builtin_shufflevector(aba, cac, (Is % 3 != 2 ? Is : Is + N)...);
+			    // [b5 c5 a6 b6|c6 a7 b7 c7|a8 b8 c8 a9|b9 c9 a10 b10]
+			    b = __builtin_shufflevector(bcb, aba, (Is % 3 != 2 ? Is : Is + N)...);
+			    // [c10 a11 b11 c11|a12 b12 c12 a13|b13 c13 a14 b14|c14 a15 b15 c15]
+			    c = __builtin_shufflevector(cac, bcb, (Is % 3 != 2 ? Is : Is + N)...);
+			  }
+			else
+			  {
+			    static_assert(N % 3 == 2);
+			    // [a0 b0 a6 a1|b1 a7 a2 b2]
+			    const V aba = __builtin_shufflevector(a, b, idx(Is, 0, 0, 0, 2)...);
+			    // [c2 a3 c0 c3|a4 c1 c4 a5]
+			    const V cac = __builtin_shufflevector(c, a, idx(Is, 1, 0, 1, 0)...);
+			    // [b5 c5 b3 b6|c6 b4 b7 c7]
+			    const V bcb = __builtin_shufflevector(b, c, idx(Is, 2, 1, 1, 1)...);
+			    // [a0 b0 c0 a1|b1 c1 a2 b2]
+			    a = __builtin_shufflevector(aba, cac, (Is % 3 != 2 ? Is : Is + N)...);
+			    // [c2 a3 b3 c3|a4 b4 c4 a5]
+			    b = __builtin_shufflevector(cac, bcb, (Is % 3 != 2 ? Is : Is + N)...);
+			    // [b5 c5 a6 b6|c6 a7 b7 c7]
+			    c = __builtin_shufflevector(bcb, aba, (Is % 3 != 2 ? Is : Is + N)...);
+			  }
+			std::memcpy(byte_ptr, &a, sizeof(V));
+			std::memcpy(byte_ptr + sizeof(V), &b, sizeof(V));
+			std::memcpy(byte_ptr + 2 * sizeof(V), &c, sizeof(V));
+			return;
+		      }
+		  }
+	      }
+#endif
+	  for (int i = 0; i < N; ++i)
+	    addr[i] = operator[](i);
+	}
+
+      /**
+       * Copies all values from the range starting at `it` into `*this`.
+       *
+       * Precondition: [it, it + N) is a valid range.
+       */
+      template <std::contiguous_iterator It, typename Flags = stdx::element_aligned_tag>
+	requires std::same_as<std::iter_value_t<It>, T>
+	constexpr
+	vectorized_struct(It it, Flags = {})
+	: base_type(_load_elements_via_permute(std::to_address(it)))
+	{}
+
+      template <std::contiguous_iterator It, typename Flags = stdx::element_aligned_tag>
+	requires std::same_as<std::iter_value_t<It>, T>
+	constexpr void
+	copy_from(It it, Flags = {})
+	{ static_cast<base_type&>(*this) = _load_elements_via_permute(std::to_address(it)); }
+
+      /**
+       * Copies all values from `*this` to the range starting at `it`.
+       *
+       * Precondition: [it, it + N) is a valid range.
+       */
+      template <std::contiguous_iterator It, typename Flags = stdx::element_aligned_tag>
+	requires std::output_iterator<It, T>
+	constexpr void
+	copy_to(It it, Flags = {}) const
+	{ _store_elements_via_permute(std::to_address(it), std::make_integer_sequence<int, N>()); }
+
+      // The following enables implicit conversions added by vectorized_struct. E.g.
+      // `simdize<Point> + Point` will broadcast the latter to a `simdize<Point>` before applying
+      // operator+.
+      template <typename R>
+	using _op_return_type = std::conditional_t<std::same_as<R, base_type>, vectorized_struct, R>;
+
+#define VIR_OPERATOR_FWD(op)                                                                       \
+      VIR_ALWAYS_INLINE friend constexpr auto                                                      \
+      operator op(vectorized_struct const& a, vectorized_struct const& b)                          \
+      requires requires(base_type const& x) { {x op x}; }                                          \
+      {                                                                                            \
+	return static_cast<_op_return_type<decltype(a._as_base_type() op b._as_base_type())>>(     \
+		 a._as_base_type() op b._as_base_type());                                          \
+      }                                                                                            \
+                                                                                                   \
+      VIR_ALWAYS_INLINE friend constexpr auto                                                      \
+      operator op(base_type const& a, vectorized_struct const& b)                                  \
+      requires requires(base_type const& x) { {x op x}; }                                          \
+      {                                                                                            \
+	return static_cast<_op_return_type<decltype(a op b._as_base_type())>>(                     \
+		 a op b._as_base_type());                                                          \
+      }                                                                                            \
+                                                                                                   \
+      VIR_ALWAYS_INLINE friend constexpr auto                                                      \
+      operator op(vectorized_struct const& a, base_type const& b)                                  \
+      requires requires(base_type const& x) { {x op x}; }                                          \
+      {                                                                                            \
+	return static_cast<_op_return_type<decltype(a._as_base_type() op b)>>(                     \
+		 a._as_base_type() op b);                                                          \
+      }
+
+      VIR_OPERATOR_FWD(+)
+      VIR_OPERATOR_FWD(-)
+      VIR_OPERATOR_FWD(*)
+      VIR_OPERATOR_FWD(/)
+      VIR_OPERATOR_FWD(%)
+      VIR_OPERATOR_FWD(&)
+      VIR_OPERATOR_FWD(|)
+      VIR_OPERATOR_FWD(^)
+      VIR_OPERATOR_FWD(<<)
+      VIR_OPERATOR_FWD(>>)
+      VIR_OPERATOR_FWD(==)
+      VIR_OPERATOR_FWD(!=)
+      VIR_OPERATOR_FWD(>=)
+      VIR_OPERATOR_FWD(>)
+      VIR_OPERATOR_FWD(<=)
+      VIR_OPERATOR_FWD(<)
+#undef VIR_OPERATOR_FWD
+    };
+
+  /**
+   * Implements structured bindings interface.
+   *
+   * \see std::tuple_size, std::tuple_element
+   */
+  template <std::size_t I, vectorizable_struct_template T, int N>
+    constexpr decltype(auto)
+    get(const vectorized_struct<T, N>& tup)
+    {
+      return vir::struct_get<I>(
+	       static_cast<const detail::simdize_template_arguments_t<T, N>&>(tup));
+    }
+
+  template <std::size_t I, vectorizable_struct_template T, int N>
+    constexpr decltype(auto)
+    get(vectorized_struct<T, N>& tup)
+    {
+      return vir::struct_get<I>(
+	       static_cast<detail::simdize_template_arguments_t<T, N>&>(tup));
+    }
+
+  /**
+   * A type T is a vectorizable struct if the struct member types can recursively be reflected and
+   * all leaf types satisfy vectorizable.
+   */
+  template <typename T>
+    concept vectorizable_struct
+      = reflectable_struct<T> and detail::recursively_vectorizable<T>::value;
+
+  /**
+   * Meta-function that turns a vectorizable type or a tuple-like (recursively) of vectorizable
+   * types into a stdx::simd or std::tuple (recursively) of stdx::simd. If N is non-zero, N
+   * determines the resulting SIMD width. Otherwise, of all vectorizable types U the maximum
+   * stdx::native_simd<U>::size() determines the resulting SIMD width.
+   */
+  template <typename T, int N = 0>
+    using simdize = typename detail::simdize_impl<T, N>::type;
+
+  template <int N, typename V>
+    requires requires {
+      V::size();
+      typename V::value_type;
+    } and (reflectable_struct<typename V::value_type> or vectorizable<typename V::value_type>)
+    using resize_simdize_t = simdize<typename V::value_type, N>;
+} // namespace vir
+
+/**
+ * Implements structured bindings interface for simd_tuple.
+ */
+template <vir::reflectable_struct T, int N>
+  struct std::tuple_size<vir::simd_tuple<T, N>>
+    : std::integral_constant<std::size_t, vir::struct_size_v<T>>
+  {};
+
+/**
+ * Implements structured bindings interface for simd_tuple (std::tuple based).
+ */
+template <std::size_t I, vir::reflectable_struct T, int N>
+  struct std::tuple_element<I, vir::simd_tuple<T, N>>
+    : std::tuple_element<I, typename vir::detail::make_simd_tuple<T, N>::type>
+  {};
+
+/**
+ * Implements structured bindings interface for simd_tuple (template argument substitution based).
+ */
+template <vir::vectorizable_struct_template T, int N>
+  struct std::tuple_size<vir::vectorized_struct<T, N>>
+    : std::integral_constant<std::size_t, vir::struct_size_v<T>>
+  {};
+
+template <std::size_t I, vir::vectorizable_struct_template T, int N>
+  struct std::tuple_element<I, vir::vectorized_struct<T, N>>
+    : vir::struct_element<I, vir::detail::simdize_template_arguments_t<T, N>>
+  {};
+
+#endif  // VIR_HAVE_STRUCT_REFLECT
+#endif  // VIR_SIMD_SIMDIZE_H_
+
+// vim: noet cc=101 tw=100 sw=2 ts=8
+
+#pragma GCC diagnostic pop
 
 namespace gr::work {
 enum class Status;
@@ -15849,21 +18631,19 @@ template<typename TBlock, typename TPortType>
 using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<detail::is_port_or_collection_descriptor>::template filter<detail::member_descriptor_has_type<TPortType>::template matches>::template at<0>;
 
 // TODO: Why is this not done with requires?
+// mkretz: I don't understand the question. "this" in the question is unclear.
+/* Helper to determine the return type of `block.processOne` for the given inputs.
+ *
+ * This helper is necessary because we need a pack of indices to expand the input tuples. In princple we should be able
+ * to use std::apply to the same effect. Except that `block` would need to be the first element of the tuple. This here
+ * is simpler and cheaper.
+ */
 namespace detail {
 template<std::size_t... Is>
 auto can_processOne_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
 
-template<typename T>
-struct exact_argument_type {
-    template<std::same_as<T> U>
-    constexpr operator U() const noexcept;
-};
-
-template<std::size_t... Is>
-auto can_processOne_with_offset_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(exact_argument_type<std::size_t>(), std::get<Is>(input)...));
-
 template<typename TBlock>
-using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlock>, meta::simdize_size_v<meta::simdize<stream_input_port_types_tuple<TBlock>>>>;
+using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBlock>, vir::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
 } // namespace detail
 
 /* A block "can process simd" if its `processOne` function takes at least one argument and all
@@ -15873,32 +18653,21 @@ using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlo
  * The requirement of at least one function argument disallows sources.
  *
  * There is another (unnamed) concept for source nodes: Source nodes can implement
- * `processOne_simd(integral_constant)`, which returns SIMD object(s) of width N.
+ * `processOne_simd(integral_constant N)`, which returns SIMD object(s) of width N.
  */
 template<typename TBlock>
 concept can_processOne_simd =                                                     //
     traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
         { detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
     };
 
 template<typename TBlock>
 concept can_processOne_simd_const =                                               //
     traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
         { detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
     };
-
-template<typename TBlock>
-concept can_processOne_simd_with_offset =
-#if DISABLE_SIMD
-    false;
-#else
-    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-    traits::block::stream_input_port_types<TBlock>::size() > 0 && requires(TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
-        { detail::can_processOne_with_offset_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
-    };
-#endif
 
 template<typename TBlock>
 concept can_processOne_scalar = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
@@ -15911,18 +18680,10 @@ concept can_processOne_scalar_const = requires(const TBlock& block, const stream
 };
 
 template<typename TBlock>
-concept can_processOne_scalar_with_offset = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
-    { detail::can_processOne_with_offset_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
-};
-
-template<typename TBlock>
-concept can_processOne = can_processOne_scalar<TBlock> or can_processOne_simd<TBlock> or can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
+concept can_processOne = can_processOne_scalar<TBlock> or can_processOne_simd<TBlock>;
 
 template<typename TBlock>
 concept can_processOne_const = can_processOne_scalar_const<TBlock> or can_processOne_simd_const<TBlock>;
-
-template<typename TBlock>
-concept can_processOne_with_offset = can_processOne_scalar_with_offset<TBlock> or can_processOne_simd_with_offset<TBlock>;
 
 template<typename TBlock, typename TPort>
 concept can_processMessagesForPortConsumableSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
@@ -19138,28 +21899,20 @@ namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
 template<typename F>
-constexpr void simd_epilogue(auto width, F&& fun) {
-    static_assert(std::has_single_bit(+width));
-    auto w2 = std::integral_constant<std::size_t, width / 2>{};
-    if constexpr (w2 > 0) {
-        fun(w2);
-        simd_epilogue(w2, std::forward<F>(fun));
+constexpr void simd_epilogue(auto kWidth, F&& fun) {
+    using namespace vir::literals;
+    static_assert(std::has_single_bit(unsigned(kWidth)));
+    auto kHalfWidth = kWidth / 2_cw;
+    if constexpr (kHalfWidth > 0) {
+        fun(kHalfWidth);
+        simd_epilogue(kHalfWidth, std::forward<F>(fun));
     }
 }
 
 template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
 constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>& rngs, auto offset, auto&& fun, Flag f = {}) {
-    using Tup = meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
+    using Tup = vir::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
-}
-
-template<typename T, typename... Us>
-auto invokeProcessOneWithOrWithoutOffset(T& node, std::size_t offset, const Us&... inputs) {
-    if constexpr (traits::block::can_processOne_with_offset<T>) {
-        return node.processOne(offset, inputs...);
-    } else {
-        return node.processOne(inputs...);
-    }
 }
 
 template<std::size_t Index, PortType portType, typename Self>
@@ -19863,30 +22616,30 @@ public:
     }
 
     template<typename... Ts>
-    constexpr auto invoke_processOne(std::size_t offset, Ts&&... inputs) {
+    constexpr auto invoke_processOne(Ts&&... inputs) {
         if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-            invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
+            self().processOne(std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-            return std::tuple{invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...)};
+            return std::tuple{self().processOne(std::forward<Ts>(inputs)...)};
         } else {
-            return invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
+            return self().processOne(std::forward<Ts>(inputs)...);
         }
     }
 
     template<typename... Ts>
-    constexpr auto invoke_processOne_simd(std::size_t offset, auto width, Ts&&... input_simds) {
+    constexpr auto invoke_processOne_simd(auto width, Ts&&... input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
             if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-                self().processOne_simd(offset, width);
+                self().processOne_simd(width);
                 return std::tuple{};
             } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-                return std::tuple{self().processOne_simd(offset, width)};
+                return std::tuple{self().processOne_simd(width)};
             } else {
-                return self().processOne_simd(offset, width);
+                return self().processOne_simd(width);
             }
         } else {
-            return invoke_processOne(offset, std::forward<Ts>(input_simds)...);
+            return invoke_processOne(std::forward<Ts>(input_simds)...);
         }
     }
 
@@ -20449,12 +23202,12 @@ protected:
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
         std::size_t i = 0;
         for (; i + width <= nSamplesToProcess; i += width) {
-            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
+            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(width, input_simds...); });
             meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
         }
         simd_epilogue(width, [&](auto w) {
             if (i + w <= nSamplesToProcess) {
-                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
+                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(w, input_simds...); });
                 meta::tuple_for_each([i](auto& output_range, auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
                 i += w;
             }
@@ -20464,7 +23217,7 @@ protected:
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
         return work::Status::OK;
@@ -20481,7 +23234,7 @@ protected:
 
         std::size_t nOutSamplesBeforeRequestedStop = 0;
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
                 [i]<typename R>(auto& output_range, R&& result) {
                     if constexpr (meta::array_or_vector_type<std::remove_cvref<decltype(result)>>) {
@@ -20600,7 +23353,6 @@ protected:
             }
         }
 
-        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
         if constexpr (TOutputTypes::size.value > 0UZ) {
             if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
                 this->requestStop(); // no dependent non-optional children, should stop processing
@@ -20700,27 +23452,34 @@ protected:
                 processedIn  = 0;
                 processedOut = 0;
             } else {
-                using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
-                using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
-
-                constexpr auto                                 input_types_simd_size = meta::simdize_size_v<input_simd_types>;
-                constexpr std::size_t                          max_simd_double_size  = stdx::simd_abi::max_fixed_size<double>;
-                constexpr std::size_t                          simd_size             = input_types_simd_size == 0 ? max_simd_double_size : std::min(max_simd_double_size, input_types_simd_size * 4);
-                std::integral_constant<std::size_t, simd_size> width{};
-
-                if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived& d) {
-                                  { d.processOne_simd(simd_size) };
-                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
-                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &width, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn); });
-                } else {                                                 // Non-SIMD loop
-                    if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                constexpr bool        kIsSourceBlock = TInputTypes::size() == 0;
+                constexpr std::size_t kMaxWidth      = stdx::simd_abi::max_fixed_size<double>;
+                // A block determines it's simd::size() via its input types. However, a source block doesn't have any
+                // input types and therefore wouldn't be able to produce simd output on processOne calls. To overcome
+                // this limitation, a source block can implement `processOne_simd(vir::constexpr_value auto width)`
+                // instead of `processOne()` and then return simd objects with simd::size() == width.
+                constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(Derived& d) { d.processOne_simd(vir::cw<kMaxWidth>); };
+                if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                    if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
+                        // SIMD loop
+                        constexpr auto kWidth = [&] {
+                            if constexpr (kIsSourceBlock) {
+                                return vir::cw<kMaxWidth>;
+                            } else {
+                                return vir::cw<std::min(kMaxWidth, vir::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
+                            }
+                        }();
+                        invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
+                    } else { // Non-SIMD loop
                         invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
-                    } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
-                        const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                        userReturnStatus  = result.status;
-                        processedIn       = result.processedIn;
-                        processedOut      = result.processedOut;
                     }
+                } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state
+                         // after each sample
+                    static_assert(not kIsSimdSourceBlock and not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
+                    const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
+                    userReturnStatus  = result.status;
+                    processedIn       = result.processedIn;
+                    processedOut      = result.processedOut;
                 }
             }
         } else { // block does not define any valid processing function
@@ -23098,17 +25857,17 @@ private:
     }
 
     template<std::size_t I>
-    constexpr auto apply_left(std::size_t offset, auto&& input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return invokeProcessOneWithOrWithoutOffset(left, offset, std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
+    constexpr auto apply_left(auto&& input_tuple) noexcept {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.processOne(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
     }
 
     template<std::size_t I, std::size_t J>
-    constexpr auto apply_right(std::size_t offset, auto&& input_tuple, auto&& tmp) noexcept {
+    constexpr auto apply_right(auto&& input_tuple, auto&& tmp) noexcept {
         return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
             constexpr std::size_t first_offset  = traits::block::stream_input_port_types<Left>::size;
             constexpr std::size_t second_offset = traits::block::stream_input_port_types<Left>::size + sizeof...(Is);
             static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return invokeProcessOneWithOrWithoutOffset(right, offset, std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
+            return right.processOne(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
         }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
     }
 
@@ -23130,48 +25889,44 @@ public:
 
     template<meta::any_simd... Ts>
     requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr meta::simdize<TReturnType, meta::simdize_size_v<std::tuple<Ts...>>> processOne(std::size_t offset, const Ts&... inputs) {
+    constexpr vir::simdize<TReturnType, (0, ..., Ts::size())> processOne(const Ts&... inputs) {
         static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::tie(inputs...)));
+        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::tie(inputs...)));
     }
 
-    constexpr auto processOne_simd(std::size_t offset, auto N)
+    constexpr auto processOne_simd(auto N)
     requires traits::block::can_processOne_simd<Right>
     {
         if constexpr (requires(Left& l) {
-                          { l.processOne_simd(offset, N) };
+                          { l.processOne_simd(N) };
                       }) {
-            return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(offset, N));
-        } else if constexpr (requires(Left& l) {
-                                 { l.processOne_simd(N) };
-                             }) {
-            return invokeProcessOneWithOrWithoutOffset(right, offset, left.processOne_simd(N));
+            return right.processOne(left.processOne_simd(N));
         } else {
             using LeftResult = typename traits::block::stream_return_type<Left>;
-            using V          = meta::simdize<LeftResult, N>;
+            using V          = vir::simdize<LeftResult, N>;
             alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
             for (std::size_t i = 0UZ; i < V::size(); ++i) {
-                tmp[i] = invokeProcessOneWithOrWithoutOffset(left, offset + i);
+                tmp[i] = left.processOne();
             }
-            return invokeProcessOneWithOrWithoutOffset(right, offset, V(tmp, stdx::vector_aligned));
+            return right.processOne(V(tmp, stdx::vector_aligned));
         }
     }
 
     template<typename... Ts>
     // Nicer error messages for the following would be good, but not at the expense of breaking can_processOne_simd.
     requires(TInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr TReturnType processOne(std::size_t offset, Ts&&... inputs) {
+    constexpr TReturnType processOne(Ts&&... inputs) {
         // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
         if constexpr (traits::block::stream_output_port_types<Left>::size == 1) {
             // only the result from the right block needs to be returned
-            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...), apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...)));
+            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
 
         } else {
             // left produces a tuple
-            auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...));
-            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(offset, std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
+            auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...));
+            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
                 return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));

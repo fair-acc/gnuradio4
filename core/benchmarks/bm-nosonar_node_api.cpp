@@ -50,6 +50,11 @@ struct math_bulk_op : public gr::Block<math_bulk_op<T, op>, gr::PortInNamed<T, "
         // C++20 ranges
         // std::ranges::transform(input, output.begin(), [this](const T& elem) { return processOne(elem); });
 
+        // vir-simd execution policy
+        // vir::transform(vir::execution::simd, input, output, [this](const auto &elem) {
+        //     return processOne(elem);
+        // });
+
         return gr::work::Status::OK;
     }
 };
@@ -325,16 +330,9 @@ void loop_over_processOne(auto& node) {
     using namespace benchmark;
     bm::test::n_samples_produced = 0LU;
     bm::test::n_samples_consumed = 0LU;
-#if DISABLE_SIMD
     for (std::size_t i = 0; i < N_SAMPLES; i++) {
-        node.processOne(i);
+        node.processOne();
     }
-#else
-    constexpr int N = 32;
-    for (std::size_t i = 0; i < N_SAMPLES / N; i++) {
-        node.template processOne_simd(i, std::integral_constant<std::size_t, N>{});
-    }
-#endif
     expect(eq(bm::test::n_samples_produced, N_SAMPLES)) << "produced too many/few samples";
     expect(eq(bm::test::n_samples_consumed, N_SAMPLES)) << "consumed too many/few samples";
 }
@@ -367,7 +365,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
         auto mergedBlock = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), copy<float>()), bm::test::sink<float>());
 #if !DISABLE_SIMD
         static_assert(gr::traits::block::can_processOne_simd<copy<float>>);
-        static_assert(gr::traits::block::can_processOne_simd<bm::test::sink<float>>);
+        // bm::test::sink cannot process SIMD because it wants to be non-const
+        static_assert(not gr::traits::block::can_processOne_simd<bm::test::sink<float>>);
 #endif
         "merged src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES)      = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
         "merged src->copy->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_work(mergedBlock); };

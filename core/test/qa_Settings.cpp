@@ -133,13 +133,8 @@ some test doc documentation
         _resetCalled      = true;
     }
 
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr V processOne(const V& a) noexcept {
-        if constexpr (gr::meta::any_simd<V>) {
-            _nSamplesConsumed += static_cast<gr::Size_t>(V::size());
-        } else {
-            _nSamplesConsumed++;
-        }
+    [[nodiscard]] constexpr T processOne(const T& a) noexcept {
+        _nSamplesConsumed++;
         return a * scaling_factor;
     }
 };
@@ -202,13 +197,8 @@ struct Sink : public Block<Sink<T>> {
 
     gr::Size_t _nSamplesConsumed = 0;
 
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto processOne(V) noexcept {
-        if constexpr (gr::meta::any_simd<V>) {
-            _nSamplesConsumed += static_cast<gr::Size_t>(V::size());
-        } else {
-            _nSamplesConsumed++;
-        }
+    [[nodiscard]] constexpr auto processOne(T) noexcept {
+        _nSamplesConsumed++;
     }
 };
 } // namespace gr::setting_test

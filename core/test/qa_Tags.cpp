@@ -69,10 +69,8 @@ static_assert(HasRequiredProcessFunction<TagSource<int, ProcessFunction::USE_PRO
 static_assert(HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
 static_assert(not HasProcessOneFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
 static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(not HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE_SIMD>>);
 static_assert(HasProcessBulkFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
 static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE>>);
-static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_ONE_SIMD>>);
 static_assert(HasRequiredProcessFunction<TagMonitor<int, ProcessFunction::USE_PROCESS_BULK>>);
 
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>);
@@ -167,17 +165,15 @@ const boost::ut::suite TagPropagation = [] {
 
         auto& monitorBulk    = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
         auto& monitorOne     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
-        auto& monitorOneSIMD = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE_SIMD>>({{"name", "TagMonitorOneSIMD"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
         auto& sinkBulk       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
         auto& sinkOne        = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
 
-        // src ─> monitorBulk ─> monitorOne ─> monitorOneSIMD ┬─> sinkBulk
-        //                                                    └─> sinkOne
+        // src ─> monitorBulk ─> monitorOne ┬─> sinkBulk
+        //                                  └─> sinkOne
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorBulk)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(monitorOneSIMD)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOneSIMD).to<"in">(sinkOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
 
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
@@ -186,27 +182,23 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
         expect(eq(src.signal_name, monitorBulk.signal_name)) << "monitorBulk signal_name";
         expect(eq(src.signal_name, monitorOne.signal_name)) << "monitorOne signal_name";
-        expect(eq(src.signal_name, monitorOneSIMD.signal_name)) << "monitorOneSIMD signal_name";
         expect(eq(src.signal_name, sinkBulk.signal_name)) << "sinkBulk signal_name";
         expect(eq(src.signal_name, sinkOne.signal_name)) << "sinkOne signal_name";
 
         expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
         expect(eq(monitorBulk._nSamplesProduced, n_samples)) << "monitorBulk did not consume enough input samples";
         expect(eq(monitorOne._nSamplesProduced, n_samples)) << "monitorOne did not consume enough input samples";
-        expect(eq(monitorOneSIMD._nSamplesProduced, n_samples)) << "monitorOneSIMD did not consume enough input samples";
         expect(eq(sinkBulk._nSamplesProduced, n_samples)) << "sinkBulk did not consume enough input samples";
         expect(eq(sinkOne._nSamplesProduced, n_samples)) << "sinkOne did not consume enough input samples";
 
         expect(!monitorBulk.log_samples || eq(monitorBulk._samples.size(), n_samples)) << "monitorBulk did not log enough input samples";
         expect(!monitorOne.log_samples || eq(monitorOne._samples.size(), n_samples)) << "monitorOne did not log enough input samples";
-        expect(!monitorOneSIMD.log_samples || eq(monitorOneSIMD._samples.size(), n_samples)) << "monitorOneSIMD did not log enough input samples";
         expect(!sinkBulk.log_samples || eq(sinkBulk._samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
         expect(!sinkOne.log_samples || eq(sinkOne._samples.size(), n_samples)) << "sinkOne did not log enough input samples";
 
         const std::vector<std::string> ignoreKeys = {"sample_rate", "signal_name"};
         expect(equal_tag_lists(src._tags, monitorBulk._tags, ignoreKeys)) << "monitorBulk did not receive the required tags";
         expect(equal_tag_lists(src._tags, monitorOne._tags, ignoreKeys)) << "monitorOne did not receive the required tags";
-        expect(equal_tag_lists(src._tags, monitorOneSIMD._tags, ignoreKeys)) << "monitorOneSIMD did not receive the required tags";
         expect(equal_tag_lists(src._tags, sinkBulk._tags, ignoreKeys)) << "sinkBulk did not receive the required tags";
         expect(equal_tag_lists(src._tags, sinkOne._tags, ignoreKeys)) << "sinkOne did not receive the required tags";
     };

@@ -11,8 +11,3 @@ add_gr_benchmark(bm_Scheduler)
 add_gr_benchmark(bm-nosonar_node_api)
 add_gr_benchmark(bm_fft)
 target_link_libraries(bm_fft PRIVATE gr-fourier)
-
-add_executable(bm-nosonar_node_api_nosimd bm-nosonar_node_api.cpp)
-append_compiler_flags(bm-nosonar_node_api_nosimd)
-target_compile_options(bm-nosonar_node_api_nosimd PRIVATE -DDISABLE_SIMD=1)
-target_link_libraries(bm-nosonar_node_api_nosimd PRIVATE gnuradio-options gnuradio-core refl-cpp fmt ut ut-benchmark gr-basic gr-math gr-testing)

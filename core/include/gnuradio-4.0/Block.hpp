@@ -30,28 +30,20 @@ namespace stdx = vir::stdx;
 using gr::meta::fixed_string;
 
 template<typename F>
-constexpr void simd_epilogue(auto width, F&& fun) {
-    static_assert(std::has_single_bit(+width));
-    auto w2 = std::integral_constant<std::size_t, width / 2>{};
-    if constexpr (w2 > 0) {
-        fun(w2);
-        simd_epilogue(w2, std::forward<F>(fun));
+constexpr void simd_epilogue(auto kWidth, F&& fun) {
+    using namespace vir::literals;
+    static_assert(std::has_single_bit(unsigned(kWidth)));
+    auto kHalfWidth = kWidth / 2_cw;
+    if constexpr (kHalfWidth > 0) {
+        fun(kHalfWidth);
+        simd_epilogue(kHalfWidth, std::forward<F>(fun));
     }
 }
 
 template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
 constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>& rngs, auto offset, auto&& fun, Flag f = {}) {
-    using Tup = meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
+    using Tup = vir::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
-}
-
-template<typename T, typename... Us>
-auto invokeProcessOneWithOrWithoutOffset(T& node, std::size_t offset, const Us&... inputs) {
-    if constexpr (traits::block::can_processOne_with_offset<T>) {
-        return node.processOne(offset, inputs...);
-    } else {
-        return node.processOne(inputs...);
-    }
 }
 
 template<std::size_t Index, PortType portType, typename Self>
@@ -755,30 +747,30 @@ public:
     }
 
     template<typename... Ts>
-    constexpr auto invoke_processOne(std::size_t offset, Ts&&... inputs) {
+    constexpr auto invoke_processOne(Ts&&... inputs) {
         if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-            invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
+            self().processOne(std::forward<Ts>(inputs)...);
             return std::tuple{};
         } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-            return std::tuple{invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...)};
+            return std::tuple{self().processOne(std::forward<Ts>(inputs)...)};
         } else {
-            return invokeProcessOneWithOrWithoutOffset(self(), offset, std::forward<Ts>(inputs)...);
+            return self().processOne(std::forward<Ts>(inputs)...);
         }
     }
 
     template<typename... Ts>
-    constexpr auto invoke_processOne_simd(std::size_t offset, auto width, Ts&&... input_simds) {
+    constexpr auto invoke_processOne_simd(auto width, Ts&&... input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
             if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-                self().processOne_simd(offset, width);
+                self().processOne_simd(width);
                 return std::tuple{};
             } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-                return std::tuple{self().processOne_simd(offset, width)};
+                return std::tuple{self().processOne_simd(width)};
             } else {
-                return self().processOne_simd(offset, width);
+                return self().processOne_simd(width);
             }
         } else {
-            return invoke_processOne(offset, std::forward<Ts>(input_simds)...);
+            return invoke_processOne(std::forward<Ts>(input_simds)...);
         }
     }
 
@@ -1341,12 +1333,12 @@ protected:
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
         std::size_t i = 0;
         for (; i + width <= nSamplesToProcess; i += width) {
-            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(i, width, input_simds...); });
+            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(width, input_simds...); });
             meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
         }
         simd_epilogue(width, [&](auto w) {
             if (i + w <= nSamplesToProcess) {
-                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(i, w, input_simds...); });
+                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(w, input_simds...); });
                 meta::tuple_for_each([i](auto& output_range, auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
                 i += w;
             }
@@ -1356,7 +1348,7 @@ protected:
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
         return work::Status::OK;
@@ -1373,7 +1365,7 @@ protected:
 
         std::size_t nOutSamplesBeforeRequestedStop = 0;
         for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(i, inputs[i]...); }, inputSpans);
+            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
                 [i]<typename R>(auto& output_range, R&& result) {
                     if constexpr (meta::array_or_vector_type<std::remove_cvref<decltype(result)>>) {
@@ -1492,7 +1484,6 @@ protected:
             }
         }
 
-        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
         if constexpr (TOutputTypes::size.value > 0UZ) {
             if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
                 this->requestStop(); // no dependent non-optional children, should stop processing
@@ -1592,27 +1583,34 @@ protected:
                 processedIn  = 0;
                 processedOut = 0;
             } else {
-                using input_simd_types  = meta::simdize<typename TInputTypes::template apply<std::tuple>>;
-                using output_simd_types = meta::simdize<typename TOutputTypes::template apply<std::tuple>>;
-
-                constexpr auto                                 input_types_simd_size = meta::simdize_size_v<input_simd_types>;
-                constexpr std::size_t                          max_simd_double_size  = stdx::simd_abi::max_fixed_size<double>;
-                constexpr std::size_t                          simd_size             = input_types_simd_size == 0 ? max_simd_double_size : std::min(max_simd_double_size, input_types_simd_size * 4);
-                std::integral_constant<std::size_t, simd_size> width{};
-
-                if constexpr ((meta::simdize_size_v<output_simd_types> != 0) and ((requires(Derived& d) {
-                                  { d.processOne_simd(simd_size) };
-                              }) or (meta::simdize_size_v<input_simd_types> != 0 and traits::block::can_processOne_simd<Derived>))) { // SIMD loop
-                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &width, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, width, processedIn); });
-                } else {                                                 // Non-SIMD loop
-                    if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                constexpr bool        kIsSourceBlock = TInputTypes::size() == 0;
+                constexpr std::size_t kMaxWidth      = stdx::simd_abi::max_fixed_size<double>;
+                // A block determines it's simd::size() via its input types. However, a source block doesn't have any
+                // input types and therefore wouldn't be able to produce simd output on processOne calls. To overcome
+                // this limitation, a source block can implement `processOne_simd(vir::constexpr_value auto width)`
+                // instead of `processOne()` and then return simd objects with simd::size() == width.
+                constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(Derived& d) { d.processOne_simd(vir::cw<kMaxWidth>); };
+                if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
+                    if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
+                        // SIMD loop
+                        constexpr auto kWidth = [&] {
+                            if constexpr (kIsSourceBlock) {
+                                return vir::cw<kMaxWidth>;
+                            } else {
+                                return vir::cw<std::min(kMaxWidth, vir::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
+                            }
+                        }();
+                        invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
+                    } else { // Non-SIMD loop
                         invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
-                    } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state after each sample
-                        const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                        userReturnStatus  = result.status;
-                        processedIn       = result.processedIn;
-                        processedOut      = result.processedOut;
                     }
+                } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state
+                         // after each sample
+                    static_assert(not kIsSimdSourceBlock and not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
+                    const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
+                    userReturnStatus  = result.status;
+                    processedIn       = result.processedIn;
+                    processedOut      = result.processedOut;
                 }
             }
         } else { // block does not define any valid processing function

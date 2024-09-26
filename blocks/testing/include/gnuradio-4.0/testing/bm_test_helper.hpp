@@ -27,9 +27,9 @@ struct source : public gr::Block<source<T, min, count>> {
     }
 
     [[nodiscard]] constexpr auto
-    processOne_simd(auto N) const noexcept -> gr::meta::simdize<T, decltype(N)::value> {
+    processOne_simd(auto N) const noexcept -> vir::simdize<T, decltype(N)::value> {
         n_samples_produced += N;
-        gr::meta::simdize<T, N> x{};
+        vir::simdize<T, N> x{};
         benchmark::force_to_memory(x);
         return x;
     }
@@ -51,9 +51,8 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     uint64_t                                         should_receive_n_samples = 0;
     int64_t                                          _last_tag_position       = -1;
 
-    template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto
-    processOne(V a) noexcept {
+    processOne(T a) noexcept {
         // optional user-level tag processing
         if (this->input_tags_present()) {
             if (this->input_tags_present() && this->mergedInputTag().map.contains("N_SAMPLES_MAX")) {
@@ -65,11 +64,7 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
             }
         }
 
-        if constexpr (gr::meta::any_simd<V>) {
-            n_samples_consumed += V::size();
-        } else {
-            n_samples_consumed++;
-        }
+        n_samples_consumed++;
         benchmark::force_store(a);
     }
 };

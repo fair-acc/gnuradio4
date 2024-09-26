@@ -62,7 +62,8 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
 
         "up-convert std::simd<std::uint8_t> to ..."_test = []<typename R>(R /*noop*/) {
             using T       = uint8_t;
-            using V       = stdx::native_simd<T>;
+            // careful here: max_fixed_size is 32 *except with AVX-512 and sizeof(T) == 1* where it is 64.
+            using V       = std::conditional_t<stdx::native_simd<T>::size() <= stdx::simd_abi::max_fixed_size<R>, stdx::native_simd<T>, stdx::simd<T, stdx::simd_abi::deduce_t<T, stdx::simd_abi::max_fixed_size<R>>>>;
             using RetType = stdx::rebind_simd_t<R, V>;
 
             using TConvert = std::conditional_t<kIsScalingBlock, ScalingConvert<T, R>, Convert<T, R>>;
