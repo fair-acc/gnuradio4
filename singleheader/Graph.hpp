@@ -10177,10 +10177,12 @@ class SpinWait {
             yieldProcessor();
         }
     }
-#if not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
-    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
-#else
+#if defined( __EMSCRIPTEN__)
     static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+#elif defined(DISRUPTOR_CPU_ARM)
+    static void yieldProcessor() noexcept {  asm volatile("yield"); }
+#else
+    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
 #endif
 
 public:
@@ -16562,10 +16564,12 @@ class SpinWait {
             yieldProcessor();
         }
     }
-#if not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
-    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
-#else
+#if defined( __EMSCRIPTEN__)
     static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+#elif defined(DISRUPTOR_CPU_ARM)
+    static void yieldProcessor() noexcept {  asm volatile("yield"); }
+#else
+    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
 #endif
 
 public:
