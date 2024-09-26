@@ -116,6 +116,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "eltos",
+      "name": "Philipp Niedermayer",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19860638?v=4",
+      "profile": "https://github.com/eltos",
+      "contributions": [
+        "plugin"
+      ]
     }
   ],
   "commitType": "docs",
