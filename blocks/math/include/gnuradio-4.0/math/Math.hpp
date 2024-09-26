@@ -55,7 +55,6 @@ using MultiplyConst = MathOpImpl<T, '*'>;
 template<typename T>
 using DivideConst = MathOpImpl<T, '/'>;
 
-
 template<typename T, typename op>
 requires(std::is_arithmetic_v<T>)
 struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
@@ -71,21 +70,21 @@ struct MathOpMultiPortImpl : public gr::Block<MathOpMultiPortImpl<T, op>> {
 
     // ports
     std::vector<PortIn<T>> in;
-    PortOut<T> out;
+    PortOut<T>             out;
 
     // settings
     Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
-    void settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
             in.resize(n_inputs);
         }
     }
 
     template<gr::ConsumableSpan TInSpan>
-    gr::work::Status processBulk(const std::span<TInSpan> &ins, gr::PublishableSpan auto &sout) const {
+    gr::work::Status processBulk(const std::span<TInSpan>& ins, gr::PublishableSpan auto& sout) const {
         std::copy(ins[0].begin(), ins[0].end(), sout.begin());
-        for (std::size_t n=1; n < ins.size(); n++) {
+        for (std::size_t n = 1; n < ins.size(); n++) {
             std::transform(sout.begin(), sout.end(), ins[n].begin(), sout.begin(), op{});
         }
         return gr::work::Status::OK;
@@ -101,13 +100,10 @@ using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
 using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
 
-
-
-
 } // namespace gr::blocks::math
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, char op), (gr::blocks::math::MathOpImpl<T, op>), in, out, value);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename op), (gr::blocks::math::MathOpMultiPortImpl<T, op>), in, out);
+ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename op), (gr::blocks::math::MathOpMultiPortImpl<T, op>), in, out, n_inputs);
 
 // clang-format off
 const inline auto registerConstMath = gr::registerBlock<gr::blocks::math::AddConst,      uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double /*, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> */>(gr::globalBlockRegistry())
