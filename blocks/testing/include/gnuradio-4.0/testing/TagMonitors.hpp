@@ -15,8 +15,7 @@ namespace gr::testing {
 
 enum class ProcessFunction {
     USE_PROCESS_BULK     = 0, ///
-    USE_PROCESS_ONE      = 1, ///
-    USE_PROCESS_ONE_SIMD = 2  ///
+    USE_PROCESS_ONE      = 1  ///
 };
 
 inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept {
@@ -119,10 +118,10 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         }
     }
 
-    T processOne(std::size_t offset) noexcept
+    T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag("processOne(...)", offset);
+        const auto [tagGenerated, tagRepeatStarted] = generateTag("processOne(...)");
         _nSamplesProduced++;
         if (!isInfinite() && _nSamplesProduced >= n_samples_max) {
             this->requestStop();
@@ -192,7 +191,7 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     }
 
 private:
-    [[nodiscard]] auto generateTag(std::string_view processFunctionName, std::size_t offset = 0) {
+    [[nodiscard]] auto generateTag(std::string_view processFunctionName) {
         struct {
             bool tagGenerated     = false;
             bool tagRepeatStarted = false;
@@ -203,7 +202,7 @@ private:
             if (verbose_console) {
                 print_tag(_tags[_tagIndex], fmt::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
-            out.publishTag(_tags[_tagIndex].map, static_cast<Tag::signed_index_type>(offset)); // indices > 0 write tags in the future ... handle with care
+            out.publishTag(_tags[_tagIndex].map, static_cast<Tag::signed_index_type>(0)); // indices > 0 write tags in the future ... handle with care
             this->_outputTagsChanged = true;
             _tagIndex++;
             if (repeat_tags && _tagIndex == _tags.size()) {
@@ -267,36 +266,6 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             _samples.push_back(input);
         }
         _nSamplesProduced++;
-        return input;
-    }
-
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr V processOne(const V& input) noexcept // to note: the SIMD-version does not support adding tags mid-way since this is chunked at V::size()
-    requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE_SIMD)
-    {
-        if (this->input_tags_present()) {
-            const Tag& tag = this->mergedInputTag();
-            if (verbose_console) {
-                print_tag(tag, fmt::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
-            }
-            if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
-            }
-        }
-        if (log_samples) {
-            if constexpr (gr::meta::any_simd<V>) {
-                alignas(stdx::memory_alignment_v<stdx::native_simd<T>>) std::array<T, V::size()> mem = {};
-                input.copy_to(&mem[0], stdx::vector_aligned);
-                _samples.insert(_samples.end(), mem.begin(), mem.end());
-            } else {
-                _samples.emplace_back(input);
-            }
-        }
-        if constexpr (gr::meta::any_simd<V>) {
-            _nSamplesProduced += static_cast<gr::Size_t>(V::size());
-        } else {
-            _nSamplesProduced++;
-        }
         return input;
     }
 

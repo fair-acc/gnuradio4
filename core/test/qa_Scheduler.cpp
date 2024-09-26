@@ -93,8 +93,7 @@ struct Scale : public gr::Block<Scale<T>> {
     std::shared_ptr<Tracer> tracer{};
     T                       scale_factor = T(1.);
 
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto processOne(V a) noexcept {
+    [[nodiscard]] constexpr auto processOne(T a) noexcept {
         tracer->trace(this->name);
         return a * scale_factor;
     }
@@ -110,8 +109,7 @@ struct Adder : public gr::Block<Adder<T>> {
     gr::PortOut<R>          sum;
     std::shared_ptr<Tracer> tracer;
 
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto processOne(V a, V b) noexcept {
+    [[nodiscard]] constexpr auto processOne(T a, T b) noexcept {
         tracer->trace(this->name);
         return a + b;
     }

@@ -104,7 +104,7 @@ int main() {
 
         int r = 0;
         for (std::size_t i = 0; i < 4; ++i) {
-            r += merged.processOne(i, a[i], b[i]);
+            r += merged.processOne(a[i], b[i]);
         }
 
         fmt::print("Result of graph execution: {}\n", r);
@@ -119,7 +119,7 @@ int main() {
         std::array<int, 4> a = {1, 2, 3, 4};
 
         for (std::size_t i = 0; i < 4; ++i) {
-            auto tuple    = merged.processOne(i, a[i]);
+            auto tuple    = merged.processOne(a[i]);
             auto [r1, r2] = tuple;
             fmt::print("{} {} \n", r1, r2);
         }
@@ -134,7 +134,7 @@ int main() {
 
         int r = 0;
         for (std::size_t i = 0; i < 4; ++i) {
-            r += merged.processOne(i, a[i], b[i]);
+            r += merged.processOne(a[i], b[i]);
         }
 
         fmt::print("Result of graph execution: {}\n", r);
@@ -149,7 +149,7 @@ int main() {
         std::array<int, 4> a = {1, 2, 3, 4};
 
         for (std::size_t i = 0; i < 4; ++i) {
-            auto tuple            = merged.processOne(i, a[i]);
+            auto tuple            = merged.processOne(a[i]);
             auto [r1, r2, r3, r4] = tuple;
             fmt::print("{} {} {} {} \n", r1, r2, r3, r4);
         }
@@ -161,13 +161,13 @@ int main() {
         auto random = CountSource<int>{};
 
         auto merged = mergeByIndex<0, 0>(std::move(random), ExpectSink<int>());
-        merged.processOne(0);
+        merged.processOne();
     }
 
     {
         auto random = CountSource<int>{};
 
         auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
-        merged.processOne(0);
+        merged.processOne();
     }
 }
