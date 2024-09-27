@@ -116,6 +116,25 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "eltos",
+      "name": "Philipp Niedermayer",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19860638?v=4",
+      "profile": "https://github.com/eltos",
+      "contributions": [
+        "plugin"
+      ]
+    },
+    {
+      "login": "flynn378",
+      "name": "Toby Flynn",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6114517?v=4",
+      "profile": "https://github.com/flynn378",
+      "contributions": [
+        "bug",
+        "maintenance"
+      ]
     }
   ],
   "commitType": "docs",

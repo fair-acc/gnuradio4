@@ -156,7 +156,7 @@ struct RealImagToComplex : public gr::Block<RealImagToComplex<T>> {
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
-struct ToMagPhase : public gr::Block<ToRealImag<T>> {
+struct ToMagPhase : public gr::Block<ToMagPhase<T>> {
     using R           = meta::fundamental_base_value_type_t<T>;
     using Description = Doc<"(@brief decompose complex (or arithmetic) numbers their magnitude (abs) and phase (arg, [rad]) component">;
     PortIn<T>  in;
