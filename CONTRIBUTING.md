@@ -37,7 +37,33 @@ Please be sure to follow the usual process for submitting PRs:
 
 We reserve the right to close PRs that are not making progress. Closed PRs can be reopened again later and work can resume.
 
-### DCO Signing & Contributor License Agreement
+### Copyright Assignment
+
+GNU Radio does not claim ownership of any contributions you make. All copyrights remain with the original author of the contribution. As the author, you are responsible for maintaining and marking your copyright in the appropriate locations.
+
+When modifying or adding new files, you must include a copyright header in each file you touch. The copyright header should contain the following information:
+
+```
+/*
+ * Copyright (C) [Year] [Name or Pseudonym of Author]
+ *
+ * SPDX-License-Identifier: [License of module or file, default LGPL-3.0 for core]
+ */
+```
+
+If you are modifying an existing file, add your copyright notice below any existing copyright lines. Please use the name you would like to associate with your contribution and ensure consistency across all files you contribute to.  
+
+#### Non-Revocability of Contributions
+
+By submitting a contribution to the GNU Radio project, you agree that your contribution is non-revocable. Once a contribution is accepted and merged into the GNU Radio repository, it cannot be withdrawn or removed by the original author. This ensures that the integrity and continuity of the project's codebase are preserved.
+
+#### License Terms
+
+GNU Radio intends to maintain the existing license terms under which contributions are made. We do not intend to change the licensing terms of any contributions after submission. Any potential changes to the license, such as re-licensing, would require an explicit, agreed-upon process involving the contributor and the project maintainers.
+
+By submitting a contribution, you agree to the terms of the Developer Certificate of Origin (DCO), which certifies that your contribution is your original work and that you have the right to submit it under the license terms of the specific module.
+
+### DCO Signing 
 
 Code submitters must have the authority to merge that code into the public GNU Radio codebase.
 In some cases, the rights to exploit the code may belong to the contributor's employer, depending on jurisdiction
@@ -53,7 +79,7 @@ of stakeholders, make sure that all are listed, each with a separate Signed-off-
 
 #### Notably, by contributing to GNU Radio:
 
-1. you grant this project a non-exclusive, irrevocable, worldwide, royalty-free, sublicensable, transferable license
+1. You grant this project a non-exclusive, irrevocable, worldwide, royalty-free, sublicensable, transferable license
    under all of your relevant intellectual property rights (including copyright, patent, and any other rights), to use,
    copy, prepare derivative works of, distribute, and publicly perform and display the contributions.
 2. You confirm that you are able to grant us these rights. You represent that you are legally entitled to grant the
@@ -71,8 +97,7 @@ of stakeholders, make sure that all are listed, each with a separate Signed-off-
 
 This above is to ensure that the GNU Radio Project:
 
-* Remains free/libre in the spirit of the open source licenses and [Public-Money-Public-Code](https://publiccode.eu/en/) principles
-  (freedom, right-to-repair, tax savings, collaboration, serving the public, fostering innovation).
+* Remains free/libre in the spirit of the open source licenses and principles.
 * Stays or can be made compliant under international and national laws if these change (notably U.S. and EU stances on
   cybersecurity, product liability, GDPR, and use of AI).
 * Encourages public-private/industry partnerships to foster innovation and collaboration, ensuring that all can benefit
