@@ -130,7 +130,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
 
         std::size_t      repeats = 10;
         gr::property_map block_sink_params;
-        block_sink_params["total_count"] = 100UZ;
+        block_sink_params["total_count"] = gr::Size_t(100);
         auto block_sink                  = context().loader.instantiate(names::cout_sink, "double");
 
         auto connection_1 = block_source->dynamicOutputPort(0).connect(block_multiply->dynamicInputPort(0));
@@ -166,7 +166,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         //
         std::size_t      repeats = 10;
         gr::property_map block_sink_params;
-        block_sink_params["total_count"] = 100UZ;
+        block_sink_params["total_count"] = gr::Size_t(100);
         auto  block_sink_load            = context().loader.instantiate(names::cout_sink, "double", block_sink_params);
         auto& block_sink                 = testGraph.addBlock(std::move(block_sink_load));
 
