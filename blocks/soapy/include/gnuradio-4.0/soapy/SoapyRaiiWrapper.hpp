@@ -585,12 +585,12 @@ public:
                 return SOAPY_SDR_TIMEOUT;
             }
             if constexpr (sizeof...(TBuffers) == 1UZ) {
-                auto&& buffer          = std::get<0>(std::forward_as_tuple(ioBuffers...));
+                auto&& buffer          = std::get<0>(std::tie(ioBuffers...));
                 void*  ioBufferPointer = static_cast<void*>(buffer.data());
                 return SoapySDRDevice_readStream(_device.get(), _stream.get(), &ioBufferPointer, buffer.size(), &flags, &timeNs, static_cast<long>(timeOutUs));
             } else {
                 std::array<void*, sizeof...(ioBuffers)> ioBufferPointers = {static_cast<void*>(ioBuffers.data())...};
-                return SoapySDRDevice_readStream(_device.get(), _stream.get(), ioBufferPointers.data(), std::get<0>(std::forward_as_tuple(ioBuffers...)).size(), &flags, &timeNs, timeOutUs);
+                return SoapySDRDevice_readStream(_device.get(), _stream.get(), ioBufferPointers.data(), std::get<0>(std::tie(ioBuffers...)).size(), &flags, &timeNs, timeOutUs);
             }
         }
 
