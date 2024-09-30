@@ -890,4 +890,18 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         expect(eq(resultSink.performed_work, 100UZ));
     };
 };
+
+const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
+    using namespace boost::ut;
+    using namespace gr::detail;
+    using namespace std::literals::string_literals;
+
+    "std::complex"_test = []() {
+        expect(eq(reflFirstTypeName<std::complex<double>>(),
+                  "std::complex<double>"s));
+        expect(eq(reflFirstTypeName<std::complex<float>>(),
+                  "std::complex<float>"s));
+    };
+};
+
 int main() { /* not needed for UT */ }
