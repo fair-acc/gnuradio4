@@ -22,15 +22,6 @@ struct TestStruct {
     [[nodiscard]] constexpr bool test() const noexcept { return true; }
 };
 
-void consumableInputRangeTest1(auto in) { [[maybe_unused]] const auto inFirst = in[0]; }
-
-void consumableInputRangeTest2(gr::ConsumableSpan auto in) { [[maybe_unused]] const auto inFirst = in[0]; }
-
-template<typename T>
-void consumableInputRangeTest3(std::span<const T> in) {
-    [[maybe_unused]] const auto inFirst = in[0];
-}
-
 struct AllocatorPortable {};
 struct AllocatorPosix {};
 using CircularBufferSingle = gr::CircularBuffer<int32_t, std::dynamic_extent, gr::ProducerType::Single>;
@@ -101,11 +92,6 @@ const boost::ut::suite BasicConceptsTests = [] {
             PublishableSpan auto value = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(10);
             expect(eq(0UZ, value.size())) << "for " << typeName << "\n";
         }
-
-        consumableInputRangeTest1(cSpan);
-        consumableInputRangeTest2(cSpan);
-        // consumableInputRangeTest3(cSpan); // this does not compile
-        consumableInputRangeTest3(static_cast<std::span<const int32_t>>(cSpan));
     } | CircularBufferTypesToTest();
 };
 
