@@ -223,7 +223,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     void stop() { closeFile(); }
 
-    [[nodiscard]] constexpr work::Status processBulk(PublishableSpan auto& dataOut) noexcept {
+    [[nodiscard]] constexpr work::Status processBulk(PublishablePortSpan auto& dataOut) noexcept {
         if (!_file.is_open()) {
             return work::Status::DONE;
         }
@@ -234,7 +234,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
         std::size_t bytesRead = static_cast<std::size_t>(_file.read(reinterpret_cast<char*>(dataOut.data()), static_cast<std::streamsize>(nOutAvailable)).gcount());
         if (!_emittedStartTrigger && !trigger_name.value.empty()) {
-            out.publishTag(
+            dataOut.publishTag(
                 property_map{
                     {std::string(tag::TRIGGER_NAME.shortKey()), trigger_name.value},                                                     //
                     {std::string(tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(std::chrono::system_clock::now())}, //

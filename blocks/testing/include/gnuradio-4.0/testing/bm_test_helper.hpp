@@ -21,27 +21,22 @@ struct source : public gr::Block<source<T, min, count>> {
 
     gr::Size_t n_samples_max;
 
-    friend constexpr std::size_t
-    available_samples(const source &self) noexcept {
-        return self.n_samples_max - n_samples_produced;
-    }
+    friend constexpr std::size_t available_samples(const source& self) noexcept { return self.n_samples_max - n_samples_produced; }
 
-    [[nodiscard]] constexpr auto
-    processOne_simd(auto N) const noexcept -> vir::simdize<T, decltype(N)::value> {
+    [[nodiscard]] constexpr auto processOne_simd(auto N) const noexcept -> vir::simdize<T, decltype(N)::value> {
         n_samples_produced += N;
         vir::simdize<T, N> x{};
         benchmark::force_to_memory(x);
         return x;
     }
 
-    [[nodiscard]] constexpr T
-    processOne() const noexcept {
+    [[nodiscard]] constexpr T processOne() const noexcept {
         n_samples_produced++;
         T x{};
         benchmark::force_to_memory(x);
         return x;
     }
-};
+}; // namespace bm::test
 
 inline static std::size_t n_samples_consumed = 0UZ;
 
@@ -51,11 +46,10 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     uint64_t                                         should_receive_n_samples = 0;
     int64_t                                          _last_tag_position       = -1;
 
-    [[nodiscard]] constexpr auto
-    processOne(T a) noexcept {
+    [[nodiscard]] constexpr auto processOne(T a) noexcept {
         // optional user-level tag processing
-        if (this->input_tags_present()) {
-            if (this->input_tags_present() && this->mergedInputTag().map.contains("N_SAMPLES_MAX")) {
+        if (this->inputTagsPresent()) {
+            if (this->inputTagsPresent() && this->mergedInputTag().map.contains("N_SAMPLES_MAX")) {
                 const auto value = this->mergedInputTag().map.at("N_SAMPLES_MAX");
                 if (std::holds_alternative<uint64_t>(value)) { // should be std::size_t but emscripten/pmtv seem to have issues with it
                     should_receive_n_samples = std::get<uint64_t>(value);
@@ -70,8 +64,7 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
 };
 
 template<std::size_t N, typename base, typename aggregate>
-constexpr auto
-cascade(aggregate &&src, std::function<base()> generator = [] { return base(); }) {
+constexpr auto cascade(aggregate&& src, std::function<base()> generator = [] { return base(); }) {
     if constexpr (N <= 1) {
         return src;
     } else {

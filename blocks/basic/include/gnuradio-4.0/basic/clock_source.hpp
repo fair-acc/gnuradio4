@@ -93,9 +93,9 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
         }
     }
 
-    work::Status processBulk(PublishableSpan auto& output) noexcept {
+    work::Status processBulk(PublishablePortSpan auto& outSpan) noexcept {
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
-            output.publish(0UZ);
+            outSpan.publish(0UZ);
             return work::Status::DONE;
         }
 
@@ -133,7 +133,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 if (verbose_console) {
                     gr::testing::print_tag(tags[_nextTagIndex], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced + tagDeltaIndex));
                 }
-                out.publishTag(tags[_nextTagIndex].map, tagDeltaIndex);
+                outSpan.publishTag(tags[_nextTagIndex].map, tagDeltaIndex);
                 samplesToProduce = samplesToNextTag;
                 _nextTagIndex++;
             }
@@ -154,7 +154,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 if (verbose_console) {
                     fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);
                 }
-                out.publishTag(triggerTag, samplesToNextTimeTag);
+                outSpan.publishTag(triggerTag, samplesToNextTimeTag);
                 samplesToProduce = samplesToNextTimeTag;
                 _nextTimeTag++;
             }
@@ -162,12 +162,12 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
 
         samplesToProduce = std::min(samplesToProduce, n_samples_max.value);
 
-        if (static_cast<std::uint32_t>(output.size()) < samplesToProduce) {
-            output.publish(0UZ);
+        if (static_cast<std::uint32_t>(outSpan.size()) < samplesToProduce) {
+            outSpan.publish(0UZ);
             return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
-        output.publish(static_cast<std::size_t>(samplesToProduce));
+        outSpan.publish(static_cast<std::size_t>(samplesToProduce));
         n_samples_produced += samplesToProduce;
 
         if constexpr (basicPeriodAlgorithm) {

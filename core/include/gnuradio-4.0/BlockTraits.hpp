@@ -328,6 +328,14 @@ public:
 };
 static_assert(PublishableSpan<DummyPublishableSpan<int>>);
 
+template<typename T>
+struct DummyPublishablePortSpan: public DummyPublishableSpan<T> {
+    DummyPublishableSpan<gr::Tag> tags{};
+
+    void publishTag(property_map&, gr::Tag::signed_index_type) {}
+};
+static_assert(PublishablePortSpan<DummyPublishablePortSpan<int>>);
+
 // clang-format on
 
 struct to_any_vector {
@@ -375,7 +383,7 @@ constexpr auto* port_to_processBulk_argument_helper() {
             if constexpr (isVectorOfSpansReturned) {
                 return static_cast<std::span<std::span<typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyPublishableSpan<typename Port::value_type::value_type>>*>(nullptr);
+                return static_cast<std::span<DummyPublishablePortSpan<typename Port::value_type::value_type>>*>(nullptr);
             }
         }
 
@@ -383,7 +391,7 @@ constexpr auto* port_to_processBulk_argument_helper() {
         if constexpr (Port::kIsInput) {
             return static_cast<DummyConsumablePortSpan<typename Port::value_type>*>(nullptr);
         } else if constexpr (Port::kIsOutput) {
-            return static_cast<DummyPublishableSpan<typename Port::value_type>*>(nullptr);
+            return static_cast<DummyPublishablePortSpan<typename Port::value_type>*>(nullptr);
         }
     }
 }
@@ -423,7 +431,7 @@ concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_process
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
 template<typename TDerived, std::size_t I>
-concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishableSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
+concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
     { detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(), std::make_index_sequence<stream_output_port_types<TDerived>::size>()) } -> std::same_as<work::Status>;
     // TODO: Is this check redundant?
     not requires { []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) { return {}; }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>()); };

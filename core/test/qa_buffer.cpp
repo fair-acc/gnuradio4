@@ -186,13 +186,13 @@ void writeVaryingChunkSizes(Writer& writer) {
         const auto               chunkSize   = std::min(kChunkSizes[iWrite % kChunkSizes.size()], N - pos);
         gr::PublishableSpan auto out         = writer.tryReserve(chunkSize);
         if (out.size() != 0) {
-            boost::ut::expect(boost::ut::eq(writer.nSamplesPublished(), 0UZ));
+            boost::ut::expect(boost::ut::eq(writer.nRequestedSamplesToPublish(), 0UZ));
             for (std::size_t i = 0UZ; i < out.size(); i++) {
                 out[i] = {{0, static_cast<int>(pos + i)}};
             }
             out.publish(out.size());
 
-            boost::ut::expect(boost::ut::eq(writer.nSamplesPublished(), chunkSize));
+            boost::ut::expect(boost::ut::eq(writer.nRequestedSamplesToPublish(), chunkSize));
             pos += chunkSize;
             ++iWrite;
         }
@@ -399,12 +399,12 @@ const boost::ut::suite CircularBufferTests = [] {
             {
                 PublishableSpan auto pSpan = writer.tryReserve(4);
                 expect(eq(pSpan.size(), 4UZ));
-                expect(eq(writer.nSamplesPublished(), 0UZ));
+                expect(eq(writer.nRequestedSamplesToPublish(), 0UZ));
                 for (std::size_t i = 0; i < pSpan.size(); i++) {
                     pSpan[i] = static_cast<int>(i + 1);
                 }
                 pSpan.publish(4);
-                expect(eq(writer.nSamplesPublished(), 4UZ));
+                expect(eq(writer.nRequestedSamplesToPublish(), 4UZ));
             }
             ConsumableSpan auto cSpan = reader.get();
             expect(eq(cSpan.size(), 4UZ));
@@ -421,12 +421,12 @@ const boost::ut::suite CircularBufferTests = [] {
                 {
                     PublishableSpan auto pSpan = writer.tryReserve(4);
                     expect(eq(pSpan.size(), 4UZ));
-                    expect(eq(writer.nSamplesPublished(), 0UZ));
+                    expect(eq(writer.nRequestedSamplesToPublish(), 0UZ));
                     for (std::size_t i = 0; i < pSpan.size(); i++) {
                         pSpan[i] = static_cast<int>(i + 1);
                     }
                     pSpan.publish(2);
-                    expect(eq(writer.nSamplesPublished(), 2UZ));
+                    expect(eq(writer.nRequestedSamplesToPublish(), 2UZ));
                 }
                 const auto cursor_after = buffer.cursor_sequence().value();
                 expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
@@ -444,14 +444,14 @@ const boost::ut::suite CircularBufferTests = [] {
                 {
                     PublishableSpan auto pSpan = writer.tryReserve(4);
                     expect(eq(pSpan.size(), 4UZ));
-                    expect(eq(writer.nSamplesPublished(), 0UZ));
+                    expect(eq(writer.nRequestedSamplesToPublish(), 0UZ));
                     std::span<int32_t> span = pSpan; // tests conversion operator
                     for (std::size_t i = 0; i < pSpan.size(); i++) {
                         pSpan[i] = static_cast<int>(i + 1);
                         expect(eq(pSpan[i], span[i]));
                     }
                     pSpan.publish(2);
-                    expect(eq(writer.nSamplesPublished(), 2UZ));
+                    expect(eq(writer.nRequestedSamplesToPublish(), 2UZ));
                 }
                 const auto cursor_after = buffer.cursor_sequence().value();
                 expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);

@@ -9711,7 +9711,7 @@ concept BufferWriterLike = requires(T t, const std::size_t nItems) {
     { t.reserve(nItems) };// TODO: reserve() returns CircularBuffer::Writer::PublishableOutputRange
     { t.available() }         -> std::same_as<std::size_t>;
     { t.buffer() };
-    { t.nSamplesPublished()} -> std::same_as<std::size_t>;
+    { t.nRequestedSamplesToPublish()} -> std::same_as<std::size_t>;
 };
 
 template<class T, typename ...Args>
@@ -10330,7 +10330,7 @@ class SpinWait {
             yieldProcessor();
         }
     }
-#if defined( __EMSCRIPTEN__)
+#if defined( __EMSCRIPTEN__) || defined(__APPLE__)
     static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
 #elif defined(DISRUPTOR_CPU_ARM)
     static void yieldProcessor() noexcept {  asm volatile("yield"); }
@@ -10836,6 +10836,14 @@ enum class SpanReleasePolicy {
     ProcessNone // consume/publish zero samples
 };
 
+/*
+ * The enum specifies whether to use the blocking reserve() method or the non-blocking tryReserve() method
+ */
+enum class PublishableSpanReservePolicy {
+    Reserve,    // use blocking reserve() method
+    TryReserve, // use non-blocking tryReserve() method
+};
+
 /**
  * @brief circular buffer implementation using double-mapped memory allocations
  * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
@@ -10936,33 +10944,31 @@ class CircularBuffer {
         using pointer          = typename std::span<T>::reverse_iterator;
 
         PublishableOutputRange() = delete;
-        explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) {
-            _parent->_rangesCounter++;
-        };
+        explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
         explicit constexpr PublishableOutputRange(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
             _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
-            _parent->_rangesCounter++;
+            _parent->_instanceCount++;
         }
-        PublishableOutputRange(const PublishableOutputRange& other) : _parent(other._parent) { _parent->_rangesCounter++; }
+        PublishableOutputRange(const PublishableOutputRange& other) : _parent(other._parent) { _parent->_instanceCount++; }
         PublishableOutputRange& operator=(const PublishableOutputRange& other) {
             if (this != &other) {
                 _parent = other._parent;
-                _parent->_rangesCounter++;
+                _parent->_instanceCount++;
             }
             return *this;
         }
 
         ~PublishableOutputRange() {
-            _parent->_rangesCounter--;
-            if (_parent->_rangesCounter == 0) {
-                if (!_parent->isPublished()) {
+            _parent->_instanceCount--;
+            if (_parent->_instanceCount == 0) {
+                if (!_parent->isPublishRequested()) {
                     if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
                         assert(false && "CircularBuffer::PublishableOutputRange() - omitted publish() call for SpanReleasePolicy::Terminate");
                         std::abort();
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
-                        publish(_parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                        publish(_parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
                         publish(0UZ);
                     }
@@ -10971,33 +10977,40 @@ class CircularBuffer {
                 if (!_parent->_buffer->_isMmapAllocated) {
                     const std::size_t size = _parent->_buffer->_size;
                     // mirror samples below/above the buffer's wrap-around point
-                    const size_t nFirstHalf  = std::min(size - _parent->_index, _parent->nSamplesPublished());
-                    const size_t nSecondHalf = _parent->nSamplesPublished() - nFirstHalf;
+                    const std::size_t nFirstHalf  = std::min(size - _parent->_index, _parent->_nRequestedSamplesToPublish);
+                    const std::size_t nSecondHalf = _parent->_nRequestedSamplesToPublish - nFirstHalf;
 
                     auto& data = _parent->_buffer->_data;
                     std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
                     std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
                 }
-                _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->nSamplesPublished());
-                _parent->_offset += static_cast<signed_index_type>(_parent->nSamplesPublished());
+                _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
+                _parent->_offset += static_cast<signed_index_type>(_parent->_nRequestedSamplesToPublish);
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::MultiWriter::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nSamplesPublished);
+                        fmt::print(stderr, "CircularBuffer::MultiWriter::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
                         std::abort();
                     }
 
                 } else {
-                    if (!_parent->_internalSpan.empty() && !isPublished()) {
+                    if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
                         fmt::print(stderr, "CircularBuffer::SingleWriter::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
 #endif
-                _parent->_nSamplesPublished = 0;
-                _parent->_internalSpan      = {};
+                _parent->_nRequestedSamplesToPublish = 0;
+                _parent->_internalSpan               = {};
             }
         }
+
+        [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
+        [[nodiscard]] constexpr std::size_t              nRequestedSamplesToPublish() const noexcept { return _parent->_nRequestedSamplesToPublish; }
+        [[nodiscard]] constexpr bool                     isPublishRequested() const noexcept { return _parent->_isPublishRequested; }
+        [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nRequestedSamplesToPublish; }
+        [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>; }
+        [[nodiscard]] constexpr std::size_t              instanceCount() { return _parent->_instanceCount; }
 
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _parent->_internalSpan.size(); };
         [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); };
@@ -11013,16 +11026,11 @@ class CircularBuffer {
         T&                                       operator[](std::size_t i) noexcept { return _parent->_internalSpan[i]; }
         explicit(false) operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
         explicit(false) operator std::span<T>&() noexcept { return _parent->_internalSpan; }
-        [[nodiscard]] constexpr std::size_t              samplesToPublish() const noexcept { return _parent->_nSamplesPublished; }
-        [[nodiscard]] constexpr bool                     isPublished() const noexcept { return _parent->_isRangePublished; }
-        [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nSamplesPublished; }
-        [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>; }
-        [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
 
         constexpr void publish(std::size_t nSamplesToPublish) noexcept {
-            assert(nSamplesToPublish <= _parent->_internalSpan.size() - _parent->_nSamplesPublished && "n_produced must be <= than unpublished samples");
-            _parent->_nSamplesPublished += nSamplesToPublish;
-            _parent->_isRangePublished = true;
+            assert(nSamplesToPublish <= _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish && "n_produced must be <= than unpublished samples");
+            _parent->_nRequestedSamplesToPublish += nSamplesToPublish;
+            _parent->_isPublishRequested = true;
         }
     }; // class PublishableOutputRange
 
@@ -11040,29 +11048,29 @@ class CircularBuffer {
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
         // These are the parameters for PublishableOutputRange, only one PublishableOutputRange can be reserved per writer
-        std::size_t       _nSamplesPublished{0UZ}; // controls how many samples were already published, multiple publish() calls are allowed
-        bool              _isRangePublished{true}; // controls if publish() was invoked
+        std::size_t       _nRequestedSamplesToPublish{0UZ}; // controls how many samples were already requested for publishing, multiple publish() calls are allowed
+        bool              _isPublishRequested{true};        // controls if publish() was invoked
         std::size_t       _index{0UZ};
         signed_index_type _offset{0};
-        std::span<T>      _internalSpan{}; // internal span is managed by Writer and is shared across all PublishableSpans reserved by this Writer
-        std::size_t       _rangesCounter{0};
+        std::span<T>      _internalSpan{};     // internal span is managed by Writer and is shared across all PublishableSpans reserved by this Writer
+        std::size_t       _instanceCount{0UZ}; // number of PublishableOutputRange instances
 
     public:
         Writer() = delete;
         explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
 
         Writer(Writer&& other) noexcept
-            : _buffer(std::move(other._buffer)),                                //
-              _nSamplesPublished(std::exchange(other._nSamplesPublished, 0UZ)), //
-              _isRangePublished(std::exchange(other._isRangePublished, true)),  //
-              _index(std::exchange(other._index, 0UZ)),                         //
-              _offset(std::exchange(other._offset, 0)),                         //
+            : _buffer(std::move(other._buffer)),                                                  //
+              _nRequestedSamplesToPublish(std::exchange(other._nRequestedSamplesToPublish, 0UZ)), //
+              _isPublishRequested(std::exchange(other._isPublishRequested, true)),                //
+              _index(std::exchange(other._index, 0UZ)),                                           //
+              _offset(std::exchange(other._offset, 0)),                                           //
               _internalSpan(std::exchange(other._internalSpan, std::span<T>{})){};
 
         Writer& operator=(Writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
-            std::swap(_nSamplesPublished, tmp._nSamplesPublished);
-            std::swap(_isRangePublished, tmp._isRangePublished);
+            std::swap(_nRequestedSamplesToPublish, tmp._nRequestedSamplesToPublish);
+            std::swap(_isPublishRequested, tmp._isPublishRequested);
             std::swap(_index, tmp._index);
             std::swap(_offset, tmp._offset);
             std::swap(_internalSpan, tmp._internalSpan);
@@ -11078,13 +11086,11 @@ class CircularBuffer {
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] constexpr std::size_t nSamplesPublished() const noexcept { return _nSamplesPublished; };
-
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
-            _isRangePublished  = false;
-            _nSamplesPublished = 0UZ;
+            _isPublishRequested         = false;
+            _nRequestedSamplesToPublish = 0UZ;
 
             if (nSamples == 0) {
                 return PublishableOutputRange<U, policy>(this);
@@ -11102,8 +11108,8 @@ class CircularBuffer {
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
-            _isRangePublished  = false;
-            _nSamplesPublished = 0UZ;
+            _isPublishRequested         = false;
+            _nRequestedSamplesToPublish = 0UZ;
 
             if (nSamples == 0) {
                 return PublishableOutputRange<U, policy>(this);
@@ -11115,26 +11121,23 @@ class CircularBuffer {
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
-        [[nodiscard]] constexpr std::size_t       available() const noexcept {
-            const auto res = static_cast<std::size_t>(_buffer->_claimStrategy.getRemainingCapacity());
-            return res;
-        }
-        [[nodiscard]] constexpr bool        isPublished() const noexcept { return _isRangePublished; }
-        [[nodiscard]] constexpr std::size_t samplesPublished() const noexcept { return _nSamplesPublished; }
+        [[nodiscard]] constexpr std::size_t       available() const noexcept { return static_cast<std::size_t>(_buffer->_claimStrategy.getRemainingCapacity()); }
+        [[nodiscard]] constexpr bool              isPublishRequested() const noexcept { return _isPublishRequested; }
+        [[nodiscard]] constexpr std::size_t       nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish; };
 
     private:
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
             if constexpr (std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>) {
-                if (_internalSpan.size() - _nSamplesPublished != 0) {
+                if (_internalSpan.size() - _nRequestedSamplesToPublish != 0) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
                         "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.",
-                        _internalSpan.size() - _nSamplesPublished);
+                        _internalSpan.size() - _nRequestedSamplesToPublish);
                     std::abort();
                 }
 
             } else {
-                if (!_internalSpan.empty() && !_isRangePublished) {
+                if (!_internalSpan.empty() && !_isPublishRequested) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
                         "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.",
@@ -11161,11 +11164,11 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit ConsumableInputRange(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_rangesCounter++; }
+        explicit ConsumableInputRange(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; }
 
-        explicit constexpr ConsumableInputRange(const Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_rangesCounter++; }
+        explicit constexpr ConsumableInputRange(const Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_instanceCount++; }
 
-        ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_rangesCounter++; }
+        ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_instanceCount++; }
 
         ConsumableInputRange& operator=(const ConsumableInputRange& other) {
             if (this != &other) {
@@ -11177,11 +11180,11 @@ class CircularBuffer {
         }
 
         virtual ~ConsumableInputRange() {
-            _parent->_rangesCounter--;
+            _parent->_instanceCount--;
 
-            if (_parent->_rangesCounter == 0) {
+            if (_parent->_instanceCount == 0) {
                 if (_parent->isConsumeRequested()) {
-                    std::ignore = performConsume(_parent->_nSamplesToConsume);
+                    std::ignore = performConsume(_parent->_nRequestedSamplesToConsume);
                 } else {
                     if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
                         assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
@@ -11196,12 +11199,9 @@ class CircularBuffer {
         }
 
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
-
-        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept { return _parent->isConsumeRequested(); }
-
-        [[nodiscard]] constexpr std::size_t instanceCount() { return _parent->_rangesCounter; }
-
-        [[nodiscard]] constexpr std::size_t getConsumeRequested() const { return _parent->getConsumeRequested(); }
+        [[nodiscard]] constexpr bool                     isConsumeRequested() const noexcept { return _parent->isConsumeRequested(); }
+        [[nodiscard]] constexpr std::size_t              instanceCount() { return _parent->_instanceCount; }
+        [[nodiscard]] constexpr std::size_t              nRequestedSamplesToConsume() const { return _parent->nRequestedSamplesToConsume(); }
 
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _internalSpan.size(); }
         [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); }
@@ -11241,15 +11241,15 @@ class CircularBuffer {
                     return false;
                 }
             }
-            _parent->_nSamplesToConsume = nSamples;
+            _parent->_nRequestedSamplesToConsume = nSamples;
             return true;
         }
 
     private:
         template<bool strict_check = true>
         [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
-            _parent->_nSamplesFirstGet  = std::numeric_limits<std::size_t>::max();
-            _parent->_nSamplesToConsume = std::numeric_limits<std::size_t>::max();
+            _parent->_nSamplesFirstGet           = std::numeric_limits<std::size_t>::max();
+            _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max();
             if constexpr (strict_check) {
                 if (nSamples <= 0) {
                     return true;
@@ -11279,12 +11279,12 @@ class CircularBuffer {
         mutable signed_index_type _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
         mutable std::size_t       _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
-        mutable std::size_t       _rangesCounter{0UZ};                                        // reference counter for number of ConsumableSpanRanges
+        mutable std::size_t       _instanceCount{0UZ};                                        // number of ConsumableInputRange instances
 
         // Samples are now consumed in a delayed manner. When the consume() method is called, the actual consumption does not happen immediately.
         // Instead, the real consume() operation is invoked in the destructor, when the last ConsumableInputRange is destroyed.
-        mutable std::size_t _nSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
-        mutable std::size_t _nSamplesConsumed{0UZ};                                      // The number of samples actually consumed.
+        mutable std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
+        mutable std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
 
         std::size_t bufferIndex() const noexcept {
             const auto bitmask = _buffer->_size - 1;
@@ -11303,18 +11303,18 @@ class CircularBuffer {
             : _readIndex(std::move(other._readIndex)),                                      //
               _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
               _buffer(other._buffer),                                                       //
-              _nSamplesFirstGet(std::move(other._nSamplesFirstGet)),                        //
-              _rangesCounter(std::move(other._rangesCounter)),                              //
-              _nSamplesToConsume(std::move(other._nSamplesToConsume)),                      //
-              _nSamplesConsumed(std::move(other._nSamplesConsumed)) {}
+              _nSamplesFirstGet(other._nSamplesFirstGet),                                   //
+              _instanceCount(other._instanceCount),                                         //
+              _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),               //
+              _nSamplesConsumed(other._nSamplesConsumed) {}
 
         Reader& operator=(Reader tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);
             std::swap(_nSamplesFirstGet, tmp._nSamplesFirstGet);
-            std::swap(_rangesCounter, tmp._rangesCounter);
-            std::swap(_nSamplesToConsume, tmp._nSamplesToConsume);
+            std::swap(_instanceCount, tmp._instanceCount);
+            std::swap(_nRequestedSamplesToConsume, tmp._nRequestedSamplesToConsume);
             std::swap(_nSamplesConsumed, tmp._nSamplesConsumed);
             return *this;
         };
@@ -11323,13 +11323,10 @@ class CircularBuffer {
             _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
         }
 
-        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
-
+        [[nodiscard]] constexpr BufferType  buffer() const noexcept { return CircularBuffer(_buffer); };
         [[nodiscard]] constexpr std::size_t nSamplesConsumed() const noexcept { return _nSamplesConsumed; };
-
-        [[nodiscard]] constexpr bool isConsumeRequested() const noexcept { return _nSamplesToConsume != std::numeric_limits<std::size_t>::max(); }
-
-        [[nodiscard]] constexpr std::size_t getConsumeRequested() const noexcept { return _nSamplesToConsume; }
+        [[nodiscard]] constexpr bool        isConsumeRequested() const noexcept { return _nRequestedSamplesToConsume != std::numeric_limits<std::size_t>::max(); }
+        [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const noexcept { return _nRequestedSamplesToConsume; }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
@@ -14952,6 +14949,13 @@ concept ConsumablePortSpan = ConsumableSpan<T> && requires(T span) {
     { *span.tags.begin() } -> std::same_as<const gr::Tag&>;
 };
 
+template<typename T>
+concept PublishablePortSpan = PublishableSpan<T> && requires(T span, property_map& tagData, Tag::signed_index_type index) {
+    requires PublishableSpan<std::remove_cvref_t<decltype(span.tags)>>;
+    { *span.tags.begin() } -> std::same_as<gr::Tag&>;
+    { span.publishTag(tagData, index) } -> std::same_as<void>;
+};
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -15008,6 +15012,7 @@ struct Port {
     using TagWriterType     = decltype(std::declval<TagBufferType>().new_writer());
     using TagIoType         = std::conditional_t<kIsInput, TagReaderType, TagWriterType>;
     using TagReaderSpanType = decltype(std::declval<TagReaderType>().get());
+    using TagWriterSpanType = decltype(std::declval<TagWriterType>().reserve(0UZ));
 
     // public properties
     constexpr static bool kIsSynch      = !std::disjunction_v<std::is_same<Async, Attributes>...>;
@@ -15038,7 +15043,7 @@ struct Port {
                 if (tags.isConsumeRequested()) {                             // the user has already manually consumed tags
                     return;
                 }
-                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::getConsumeRequested() == 0) || this->empty()) {
+                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
                     return; // no samples to be consumed -> do not consume any tags
                 }
                 std::size_t tagsToConsume = 0;
@@ -15049,12 +15054,67 @@ struct Port {
                         break;
                     }
                 }
-                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitely and implicitly consumed
+                std::ignore = tags.tryConsume(tagsToConsume); // this is a default fallback: tags may be both explicitly and implicitly consumed
             }
         }
-    };
-
+    }; // end of ConsumablePortInputRange
     static_assert(ConsumablePortSpan<ConsumablePortInputRange<gr::SpanReleasePolicy::ProcessAll>>);
+
+    template<SpanReleasePolicy spanReleasePolicy>
+    using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
+
+    template<SpanReleasePolicy spanReleasePolicy, PublishableSpanReservePolicy spanReservePolicy>
+    struct PublishablePortOutputRange : public WriterSpanType<spanReleasePolicy> {
+        TagWriterSpanType      tags;
+        Tag::signed_index_type streamIndex;
+        std::size_t            tagsPublished{0UZ};
+
+        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == PublishableSpanReservePolicy::Reserve)
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
+
+        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == PublishableSpanReservePolicy::TryReserve)
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
+
+        ~PublishablePortOutputRange() {
+            if (WriterSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
+                tags.publish(tagsPublished);
+            }
+        }
+
+        inline constexpr void publishTag(property_map&& tagData, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(std::move(tagData), tagOffset); }
+
+        inline constexpr void publishTag(const property_map& tagData, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(tagData, tagOffset); }
+
+    private:
+        template<PropertyMapType PropertyMap>
+        inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::signed_index_type tagOffset) noexcept {
+            const auto index = streamIndex + static_cast<gr::Tag::signed_index_type>(tagOffset);
+
+            if (tagsPublished > 0) {
+                auto& lastTag = tags[tagsPublished - 1];
+#ifndef NDEBUG
+
+                if (lastTag.index > index) { // check the order of published Tags.index
+                    fmt::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
+                    // std::abort();
+                }
+#endif
+                if (lastTag.index == index) { // -> merge tags with the same index
+                    for (auto&& [key, value] : tagData) {
+                        lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
+                    }
+                } else {
+                    tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
+                }
+            } else {
+                tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
+            }
+        }
+    }; // end of PublishablePortOutputRange
+
+    static_assert(PublishablePortSpan<PublishablePortOutputRange<gr::SpanReleasePolicy::ProcessAll, PublishableSpanReservePolicy::Reserve>>);
 
     std::span<const Tag>   tags;          // Range of tags for the currently processed stream range; only used in input ports
     Tag::signed_index_type streamIndex{}; // Absolute offset of the first sample in the currently processed stream span; only used in input ports
@@ -15275,18 +15335,18 @@ public:
         return taggedStream;
     }
 
-    template<SpanReleasePolicy TSpanReleasePolicy>
+    template<SpanReleasePolicy spanReleasePolicy>
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return streamWriter().template reserve<TSpanReleasePolicy>(nSamples);
+        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
-    template<SpanReleasePolicy TSpanReleasePolicy>
+    template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return streamWriter().template tryReserve<TSpanReleasePolicy>(nSamples);
+        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
     /**
@@ -18753,6 +18813,14 @@ public:
 };
 static_assert(PublishableSpan<DummyPublishableSpan<int>>);
 
+template<typename T>
+struct DummyPublishablePortSpan: public DummyPublishableSpan<T> {
+    DummyPublishableSpan<gr::Tag> tags{};
+
+    void publishTag(property_map&, gr::Tag::signed_index_type) {}
+};
+static_assert(PublishablePortSpan<DummyPublishablePortSpan<int>>);
+
 // clang-format on
 
 struct to_any_vector {
@@ -18800,7 +18868,7 @@ constexpr auto* port_to_processBulk_argument_helper() {
             if constexpr (isVectorOfSpansReturned) {
                 return static_cast<std::span<std::span<typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyPublishableSpan<typename Port::value_type::value_type>>*>(nullptr);
+                return static_cast<std::span<DummyPublishablePortSpan<typename Port::value_type::value_type>>*>(nullptr);
             }
         }
 
@@ -18808,7 +18876,7 @@ constexpr auto* port_to_processBulk_argument_helper() {
         if constexpr (Port::kIsInput) {
             return static_cast<DummyConsumablePortSpan<typename Port::value_type>*>(nullptr);
         } else if constexpr (Port::kIsOutput) {
-            return static_cast<DummyPublishableSpan<typename Port::value_type>*>(nullptr);
+            return static_cast<DummyPublishablePortSpan<typename Port::value_type>*>(nullptr);
         }
     }
 }
@@ -18848,7 +18916,7 @@ concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_process
  * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
  */
 template<typename TDerived, std::size_t I>
-concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishableSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishableSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
+concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyConsumablePortSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
     { detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(), std::make_index_sequence<stream_output_port_types<TDerived>::size>()) } -> std::same_as<work::Status>;
     // TODO: Is this check redundant?
     not requires { []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) { return {}; }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>()); };
@@ -19325,7 +19393,7 @@ class SpinWait {
             yieldProcessor();
         }
     }
-#if defined( __EMSCRIPTEN__)
+#if defined( __EMSCRIPTEN__) || defined(__APPLE__)
     static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
 #elif defined(DISRUPTOR_CPU_ARM)
     static void yieldProcessor() noexcept {  asm volatile("yield"); }
@@ -22320,8 +22388,10 @@ public:
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
 protected:
-    bool _outputTagsChanged = false;
-    Tag  _mergedInputTag{};
+    Tag _mergedInputTag{};
+
+    bool             _outputTagsChanged = false; // It is used to indicate that processOne published a Tag and want prematurely break a loop. Should be set to "true" in block implementation processOne().
+    std::vector<Tag> _outputTags{};              // This std::vector is used to cache published Tags when block implements processOne method. The tags are then copied to output spans. Note: that for he processOne each tag is published for all output ports
 
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
@@ -22361,7 +22431,7 @@ public:
         }
     }
 
-    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), std::tuple<Arguments...>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _outputTagsChanged(std::move(other._outputTagsChanged)), _mergedInputTag(std::move(other._mergedInputTag)), _settings(std::move(other._settings)) {}
+    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), std::tuple<Arguments...>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(std::move(other._settings)) {}
 
     // There are a few const or conditionally const member variables,
     // we can not have a move-assignment that is equivalent to
@@ -22432,57 +22502,9 @@ public:
         emitErrorMessageIfAny("init(..) -> INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
     }
 
-    template<gr::meta::array_or_vector_type Container>
-    [[nodiscard]] constexpr std::size_t availableInputSamples(Container& data) const noexcept {
-        if constexpr (gr::meta::vector_type<Container>) {
-            data.resize(traits::block::stream_input_port_types<Derived>::size);
-        } else if constexpr (gr::meta::array_type<Container>) {
-            static_assert(std::tuple_size<Container>::value >= traits::block::stream_input_port_types<Derived>::size);
-        } else {
-            static_assert(gr::meta::always_false<Container>, "type not supported");
-        }
-        meta::tuple_for_each_enumerate(
-            [&data]<typename Port>(auto index, Port& input_port) {
-                if constexpr (traits::port::is_port_v<Port>) {
-                    data[index] = input_port.streamReader().available();
-                } else {
-                    data[index] = 0;
-                    for (auto& port : input_port) {
-                        data[index] += port.streamReader().available();
-                    }
-                }
-            },
-            inputPorts<PortType::STREAM>(&self()));
-        return traits::block::stream_input_port_types<Derived>::size;
-    }
-
-    template<gr::meta::array_or_vector_type Container>
-    [[nodiscard]] constexpr std::size_t availableOutputSamples(Container& data) const noexcept {
-        if constexpr (gr::meta::vector_type<Container>) {
-            data.resize(traits::block::stream_output_port_types<Derived>::size);
-        } else if constexpr (gr::meta::array_type<Container>) {
-            static_assert(std::tuple_size<Container>::value >= traits::block::stream_output_port_types<Derived>::size);
-        } else {
-            static_assert(gr::meta::always_false<Container>, "type not supported");
-        }
-        meta::tuple_for_each_enumerate(
-            [&data]<typename Port>(auto index, Port& output_port) {
-                if constexpr (traits::port::is_port_v<Port>) {
-                    data[index] = output_port.streamWriter().available();
-                } else {
-                    data[index] = 0;
-                    for (auto& port : output_port) {
-                        data[index] += port.streamWriter().available();
-                    }
-                }
-            },
-            outputPorts<PortType::STREAM>(&self()));
-        return traits::block::stream_output_port_types<Derived>::size;
-    }
-
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return blockingIO; }
 
-    [[nodiscard]] constexpr bool input_tags_present() const noexcept { return !_mergedInputTag.map.empty(); };
+    [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return !_mergedInputTag.map.empty(); };
 
     [[nodiscard]] Tag mergedInputTag() const noexcept { return _mergedInputTag; }
 
@@ -22554,31 +22576,22 @@ public:
 
     void publishSamples(std::size_t nSamples, auto& publishableSpanTuple) noexcept {
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
-            meta::tuple_for_each_enumerate(
-                [nSamples]<typename OutputRange>(auto, OutputRange& outputRange) {
-                    auto processOneRange = [nSamples]<typename Out>(Out& out) {
-                        if constexpr (Out::isMultiProducerStrategy()) {
-                            if (!out.isFullyPublished()) {
-                                std::abort();
-                            }
+            for_each_publishable_span(
+                [nSamples]<typename Out>(Out& out) {
+                    if constexpr (Out::isMultiProducerStrategy()) {
+                        if (!out.isFullyPublished()) {
+                            std::abort();
                         }
-                        if (!out.isPublished()) {
-                            using enum gr::SpanReleasePolicy;
-                            if constexpr (Out::spanReleasePolicy() == Terminate) {
-                                std::abort();
-                            } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
-                                out.publish(nSamples);
-                            } else if constexpr (Out::spanReleasePolicy() == ProcessNone) {
-                                out.publish(0U);
-                            }
+                    }
+                    if (!out.isPublishRequested()) {
+                        using enum gr::SpanReleasePolicy;
+                        if constexpr (Out::spanReleasePolicy() == Terminate) {
+                            std::abort();
+                        } else if constexpr (Out::spanReleasePolicy() == ProcessAll) {
+                            out.publish(nSamples);
+                        } else if constexpr (Out::spanReleasePolicy() == ProcessNone) {
+                            out.publish(0U);
                         }
-                    };
-                    if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<OutputRange>>) {
-                        for (auto& out : outputRange) {
-                            processOneRange(out);
-                        }
-                    } else {
-                        processOneRange(outputRange);
                     }
                 },
                 publishableSpanTuple);
@@ -22588,26 +22601,17 @@ public:
     bool consumeReaders(std::size_t nSamples, auto& consumableSpanTuple) {
         bool success = true;
         if constexpr (traits::block::stream_input_ports<Derived>::size > 0) {
-            meta::tuple_for_each_enumerate(
-                [nSamples, &success]<typename InputRange>(auto, InputRange& inputRange) {
-                    auto processOneRange = [nSamples, &success]<typename In>(In& in) {
-                        if (!in.isConsumeRequested()) {
-                            using enum gr::SpanReleasePolicy;
-                            if constexpr (In::spanReleasePolicy() == Terminate) {
-                                std::abort();
-                            } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
-                                success = success && in.consume(nSamples);
-                            } else if constexpr (In::spanReleasePolicy() == ProcessNone) {
-                                success = success && in.consume(0U);
-                            }
+            for_each_consumable_span(
+                [nSamples, &success]<typename In>(In& in) {
+                    if (!in.isConsumeRequested()) {
+                        using enum gr::SpanReleasePolicy;
+                        if constexpr (In::spanReleasePolicy() == Terminate) {
+                            std::abort();
+                        } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
+                            success = success && in.consume(nSamples);
+                        } else if constexpr (In::spanReleasePolicy() == ProcessNone) {
+                            success = success && in.consume(0U);
                         }
-                    };
-                    if constexpr (refl::trait::is_instance_of_v<std::vector, std::remove_cvref_t<InputRange>>) {
-                        for (auto& in : inputRange) {
-                            processOneRange(in);
-                        }
-                    } else {
-                        processOneRange(inputRange);
                     }
                 },
                 consumableSpanTuple);
@@ -22643,20 +22647,23 @@ public:
         }
     }
 
-    constexpr void forwardTags() noexcept {
-        if (input_tags_present()) {
+    constexpr void forwardTags(auto& publishableSpanTuple) noexcept {
+        if (inputTagsPresent()) {
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                for_each_port([this](PortLike auto& outPort) noexcept { outPort.publishTag(mergedInputTag().map, 0); }, outputPorts<PortType::STREAM>(&self()));
+                // publishTag(mergedInputTag().map, 0);
+                for_each_publishable_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, publishableSpanTuple);
             }
-            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
-                requestStop();
-            }
-            // clear temporary cached input tags after processing - won't be needed after this
-            _mergedInputTag.map.clear();
         }
+    }
 
-        for_each_port([](PortLike auto& outPort) noexcept { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
-        _outputTagsChanged = false;
+    constexpr void copyCachedOutputTags(auto& publishableSpanTuple) noexcept {
+        if (_outputTags.empty()) {
+            return;
+        }
+        for (const auto& tag : _outputTags) {
+            for_each_publishable_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, publishableSpanTuple);
+        }
+        _outputTags.clear();
     }
 
     /**
@@ -22710,70 +22717,84 @@ public:
         });
     }
 
-    constexpr static auto prepareStreams(auto ports, std::size_t sync_samples) {
+    constexpr static auto prepareStreams(auto ports, std::size_t nSyncSamples) {
         return meta::tuple_transform(
-            [sync_samples]<typename PortOrCollection>(PortOrCollection& output_port_or_collection) noexcept {
-                auto process_single_port = [&sync_samples]<typename Port>(Port&& port) {
+            [nSyncSamples]<typename PortOrCollection>(PortOrCollection& outputPortOrCollection) noexcept {
+                auto processSinglePort = [&nSyncSamples]<typename Port>(Port&& port) {
                     using enum gr::SpanReleasePolicy;
                     if constexpr (std::remove_cvref_t<Port>::kIsInput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template get<ProcessAll>(sync_samples);
+                            return std::forward<Port>(port).template get<ProcessAll>(nSyncSamples);
                         } else {
                             // return std::forward<Port>(port).template get<ProcessNone>(std::max(port.min_samples, std::min(port.streamReader().available(), port.max_samples)));
                             return std::forward<Port>(port).template get<ProcessNone>(port.streamReader().available());
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template tryReserve<ProcessAll>(sync_samples);
+                            return std::forward<Port>(port).template tryReserve<ProcessAll>(nSyncSamples);
                         } else {
                             return std::forward<Port>(port).template tryReserve<ProcessNone>(port.streamWriter().available());
                         }
                     }
                 };
                 if constexpr (traits::port::is_port_v<PortOrCollection>) {
-                    return process_single_port(output_port_or_collection);
+                    return processSinglePort(outputPortOrCollection);
                 } else {
-                    using value_span = decltype(process_single_port(std::declval<typename PortOrCollection::value_type>()));
+                    using value_span = decltype(processSinglePort(std::declval<typename PortOrCollection::value_type>()));
                     std::vector<value_span> result{};
-                    std::transform(output_port_or_collection.begin(), output_port_or_collection.end(), std::back_inserter(result), process_single_port);
+                    std::transform(outputPortOrCollection.begin(), outputPortOrCollection.end(), std::back_inserter(result), processSinglePort);
                     return result;
                 }
             },
             ports);
     }
 
-    template<typename TOutTuple>
-    constexpr static bool containsEmptyOutputSpans(TOutTuple& outputTuple) noexcept {
+    constexpr static bool containsEmptyOutputSpans(auto& outputTuple) noexcept {
         bool result = false;
-        meta::tuple_for_each(
-            [&result]<typename TOut>(TOut& out) {
-                if constexpr (PublishableSpan<TOut>) {
-                    if (out.empty()) {
-                        result = true;
-                    }
-                } else if constexpr (PublishableSpan<typename TOut::value_type>) {
-                    for (auto& span : out) {
-                        if (span.empty()) {
-                            result = true;
-                        }
-                    }
+        for_each_publishable_span(
+            [&result](auto& out) {
+                if (out.empty()) {
+                    result = true;
                 }
             },
             outputTuple);
         return result;
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([tag_data = std::move(tag_data), tagOffset](PortLike auto& outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
-    }
+    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
 
-    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept {
-        for_each_port([&tag_data, tagOffset](PortLike auto& outPort) { outPort.publishTag(tag_data, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
+    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(tag_data, tagOffset); }
+
+    template<PropertyMapType PropertyMap>
+    inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::signed_index_type tagOffset) noexcept {
+        if (_outputTags.empty()) {
+            _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
+        } else {
+            auto& lastTag = _outputTags.back();
+#ifndef NDEBUG
+            if (lastTag.index > tagOffset) { // check the order of published Tags.index
+                fmt::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
+                // std::abort();
+            }
+#endif
+            if (lastTag.index == tagOffset) { // -> merge tags with the same index
+                for (auto&& [key, value] : tagData) {
+                    lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
+                }
+            } else {
+                _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
+            }
+        }
     }
 
     inline constexpr void publishEoS() noexcept {
         const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
-        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nSamplesPublished())); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
+    }
+
+    inline constexpr void publishEoS(auto& publishableSpanTuple) noexcept {
+        const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
+        for_each_publishable_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, publishableSpanTuple);
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -23252,6 +23273,7 @@ protected:
                 break;
             }
         }
+        _outputTagsChanged = false;
         return ProcessOneResult{lifecycle::isShuttingDown(this->state()) ? DONE : OK, nSamplesToProcess, std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop)};
     }
 
@@ -23391,7 +23413,7 @@ protected:
             return {requestedWork, 0UZ, DONE};
         }
 
-        if (asyncEoS || (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut)) {
+        if (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut) {
             return {requestedWork, 0UZ, resampledStatus};
         }
 
@@ -23413,35 +23435,23 @@ protected:
         updateInputAndOutputTags();
         applyChangedSettings();
 
+        copyCachedOutputTags(outputSpans);
+        forwardTags(outputSpans); // Request to publish forward Tags. Actual publishing occurs when outputSpans go out of scope. If processedIn == 0 || processedOut == 0, the Tags will not be published.
+
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
-            meta::tuple_for_each(
-                [&processedIn]<typename TIn>(TIn& in) {
-                    if constexpr (ConsumableSpan<TIn>) {
-                        if (in.isConsumeRequested()) {
-                            processedIn = std::min(processedIn, in.getConsumeRequested());
-                        }
-                    } else if constexpr (ConsumableSpan<typename TIn::value_type>) {
-                        for (auto& span : in) {
-                            if (span.isConsumeRequested()) {
-                                processedIn = std::min(processedIn, span.getConsumeRequested());
-                            }
-                        }
+            for_each_consumable_span(
+                [&processedIn](auto& in) {
+                    if (in.isConsumeRequested()) {
+                        processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
                     }
                 },
                 inputSpans);
-            meta::tuple_for_each(
-                [&processedOut]<typename TOut>(TOut& out) {
-                    if constexpr (PublishableSpan<TOut>) {
-                        if (out.isPublished()) {
-                            processedOut = std::min(processedOut, out.samplesToPublish());
-                        }
-                    } else if constexpr (PublishableSpan<typename TOut::value_type>) {
-                        for (auto& span : out) {
-                            if (span.isPublished()) {
-                                processedOut = std::min(processedOut, span.samplesToPublish());
-                            }
-                        }
+
+            for_each_publishable_span(
+                [&processedOut](auto& out) {
+                    if (out.isPublishRequested()) {
+                        processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
                     }
                 },
                 outputSpans);
@@ -23493,8 +23503,17 @@ protected:
         }
 
         if (processedIn > 0 && processedOut > 0) {
-            forwardTags();
+            copyCachedOutputTags(outputSpans);
+
+            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
+                requestStop();
+            }
+            _mergedInputTag.map.clear(); // clear temporary cached input tags after processing - won't be needed after this
+        } else {
+            // if no data is published or consumed => do not publish any tags
+            for_each_publishable_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
         }
+
         if (lifecycle::isShuttingDown(this->state())) {
             emitErrorMessageIfAny("isShuttingDown -> STOPPED", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
             applyChangedSettings();
@@ -23522,9 +23541,8 @@ protected:
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (userReturnStatus == DONE) {
             this->setAndNotifyState(lifecycle::State::STOPPED);
-            publishEoS();
+            publishEoS(outputSpans);
         }
-        for_each_port([](PortLike auto& outPort) { outPort.publishPendingTags(); }, outputPorts<PortType::STREAM>(&self()));
 
         // check/sanitise return values (N.B. these are used by the scheduler as indicators
         // whether and how much 'work' has been done to -- for example -- prioritise one block over another
@@ -24082,6 +24100,44 @@ inline constexpr auto for_each_port(Function&& function, Tuple&& tuple, Tuples&&
         std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
 }
 
+template<typename Function, typename Tuple, typename... Tuples>
+inline constexpr auto for_each_consumable_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    return gr::meta::tuple_for_each(
+        [&function](auto&&... args) {
+            (..., ([&function](auto&& arg) {
+                using ArgType = std::decay_t<decltype(arg)>;
+
+                if constexpr (ConsumableSpan<typename ArgType::value_type>) {
+                    for (auto& param : arg) {
+                        function(param);
+                    }
+                } else if (ConsumableSpan<ArgType>) {
+                    function(arg);
+                }
+            }(args)));
+        },
+        std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+}
+
+template<typename Function, typename Tuple, typename... Tuples>
+inline constexpr auto for_each_publishable_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    return gr::meta::tuple_for_each(
+        [&function](auto&&... args) {
+            (..., ([&function](auto&& arg) {
+                using ArgType = std::decay_t<decltype(arg)>;
+
+                if constexpr (PublishableSpan<typename ArgType::value_type>) {
+                    for (auto& param : arg) {
+                        function(param);
+                    }
+                } else if (PublishableSpan<ArgType>) {
+                    function(arg);
+                }
+            }(args)));
+        },
+        std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+}
+
 } // namespace gr
 
 template<>
@@ -24415,16 +24471,6 @@ public:
     [[nodiscard]] virtual lifecycle::State state() const noexcept = 0;
 
     /**
-     * @brief number of available readable samples at the block's input ports
-     */
-    [[nodiscard]] virtual constexpr std::size_t availableInputSamples(std::vector<std::size_t>&) const noexcept = 0;
-
-    /**
-     * @brief number of available writable samples at the block's output ports
-     */
-    [[nodiscard]] virtual constexpr std::size_t availableOutputSamples(std::vector<std::size_t>&) const noexcept = 0;
-
-    /**
      * @brief user defined name
      */
     [[nodiscard]] virtual std::string_view name() const = 0;
@@ -24605,8 +24651,6 @@ public:
 
     [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
     [[nodiscard]] lifecycle::State           state() const noexcept override { return blockRef().state(); }
-    [[nodiscard]] constexpr std::size_t      availableInputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableInputSamples(data); }
-    [[nodiscard]] constexpr std::size_t      availableOutputSamples(std::vector<std::size_t>& data) const noexcept override { return blockRef().availableOutputSamples(data); }
     [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
     void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
     [[nodiscard]] std::string_view           typeName() const override { return _type_name; }

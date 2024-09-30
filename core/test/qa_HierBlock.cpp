@@ -60,7 +60,7 @@ protected:
     }
 
 public:
-    HierBlock() : _scheduler(make_graph()) {};
+    HierBlock() : _scheduler(make_graph()){};
 
     ~HierBlock() override = default;
 
@@ -75,10 +75,6 @@ public:
     [[nodiscard]] std::expected<void, gr::Error> changeState(gr::lifecycle::State newState) noexcept override { return this->changeStateTo(newState); }
 
     constexpr gr::lifecycle::State state() const noexcept override { return gr::lifecycle::StateMachine<HierBlock<T>>::state(); }
-
-    [[nodiscard]] constexpr std::size_t availableInputSamples(std::vector<std::size_t>&) const noexcept override { return 0UL; }
-
-    [[nodiscard]] constexpr std::size_t availableOutputSamples(std::vector<std::size_t>&) const noexcept override { return 0UL; }
 
     gr::work::Result work(std::size_t requested_work) override {
         if (state() == gr::lifecycle::State::STOPPED) {
