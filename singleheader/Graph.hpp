@@ -23911,6 +23911,8 @@ std::string reflFirstTypeName() {
         return fmt::format("gr::DataSet<{}>", reflFirstTypeName<typename Type::value_type>());
     } else if constexpr (UncertainValueLike<Type>) {
         return fmt::format("gr::UncertainValue<{}>", reflFirstTypeName<typename Type::value_type>());
+    } else if constexpr (pmtv::Complex<Type>) {
+        return fmt::format("std::complex<{}>", reflFirstTypeName<typename Type::value_type>());
     } else if constexpr (refl::is_reflectable<Type>()) {
         return refl::reflect<Type>().name.str();
 
