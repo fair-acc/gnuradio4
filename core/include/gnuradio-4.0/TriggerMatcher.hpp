@@ -121,13 +121,13 @@ constexpr const char* kWaitingForStopNonMatch  = "waitingForStopNonMatch";
 constexpr const char* kIsSingleTrigger         = "isSingleTrigger";
 } // namespace key
 
-void reset(property_map& state) noexcept {
+inline void reset(property_map& state) noexcept {
     state[key::kTriggerActive]           = false;
     state[key::kWaitingForStartNonMatch] = false;
     state[key::kWaitingForStopNonMatch]  = false;
 }
 
-[[nodiscard]] bool isSingleTrigger(const property_map& state) noexcept {
+[[nodiscard]] inline bool isSingleTrigger(const property_map& state) noexcept {
     if (state.contains(key::kStartDefined) && state.contains(key::kStopDefined)) {
         return std::get<bool>(state.at(key::kStartDefined)) xor std::get<bool>(state.at(key::kStopDefined));
     } else {
@@ -135,7 +135,7 @@ void reset(property_map& state) noexcept {
     }
 }
 
-void verifyFilterState(std::string_view matchCriteria, property_map& state) {
+inline void verifyFilterState(std::string_view matchCriteria, property_map& state) {
     using namespace std::string_literals;
     using namespace gr::trigger::detail;
     if (state.contains(key::kFilter) && std::holds_alternative<std::string>(state.at(key::kFilter)) && (std::get<std::string>(state.at(key::kFilter)) == matchCriteria)) {
@@ -211,7 +211,7 @@ void verifyFilterState(std::string_view matchCriteria, property_map& state) {
     state[key::kIsSingleTrigger] = bool(std::get<bool>(state.at(key::kStartDefined)) xor std::get<bool>(state.at(key::kStopDefined)));
 }
 
-[[nodiscard]] trigger::MatchResult filter(std::string_view filterDefinition, const Tag& tag, property_map& filterState) {
+[[nodiscard]] inline trigger::MatchResult filter(std::string_view filterDefinition, const Tag& tag, property_map& filterState) {
     using namespace gr::trigger::detail;
     verifyFilterState(filterDefinition, filterState); // N.B. automatically generates config and state variables if needed
 
