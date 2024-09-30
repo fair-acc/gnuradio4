@@ -119,8 +119,7 @@ enum struct ResetChartView { RESET, KEEP };
 enum class Style { Braille, Bars, Marker };
 
 namespace detail {
-std::vector<std::size_t>
-optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
+inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
     constexpr std::array preferredDivisors{ 10UZ, 8UZ, 5UZ, 4UZ, 3UZ, 2UZ };
     std::size_t          reducedAxisWidth = axisWidth - 1; // because we always require & add the '0'
 

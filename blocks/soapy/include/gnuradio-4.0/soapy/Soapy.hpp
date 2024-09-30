@@ -18,7 +18,7 @@
 namespace gr::blocks::soapy {
 
 namespace detail {
-bool equalWithinOnePercent(const std::vector<double>& a, const std::vector<double>& b) {
+inline bool equalWithinOnePercent(const std::vector<double>& a, const std::vector<double>& b) {
     return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](double x, double y) { return std::abs(x - y) <= 0.01 * std::max(std::abs(x), std::abs(y)); });
 }
 } // namespace detail
