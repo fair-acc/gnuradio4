@@ -163,13 +163,13 @@ struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessB
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumablePortSpan auto&, gr::PublishablePortSpan auto&)
+    gr::work::Status processBulk(const gr::InputSpan auto&, gr::PublishablePortSpan auto&)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumablePortSpan auto, gr::PublishablePortSpan auto)
+    gr::work::Status processBulk(const gr::InputSpan auto, gr::PublishablePortSpan auto)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT2)
     {
         return gr::work::Status::OK;

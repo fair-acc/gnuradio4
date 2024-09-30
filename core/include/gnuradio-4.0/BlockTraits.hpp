@@ -381,7 +381,7 @@ constexpr auto* port_to_processBulk_argument_helper() {
             if constexpr (isVectorOfSpansReturned) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyInputSpan<typename Port::value_type::value_type>>*>(nullptr);
+                return static_cast<std::span<DummyInputSpan<const typename Port::value_type::value_type>>*>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
             if constexpr (isVectorOfSpansReturned) {
@@ -393,7 +393,7 @@ constexpr auto* port_to_processBulk_argument_helper() {
 
     } else { // single port
         if constexpr (Port::kIsInput) {
-            return static_cast<DummyInputSpan<typename Port::value_type>*>(nullptr);
+            return static_cast<DummyInputSpan<const typename Port::value_type>*>(nullptr);
         } else if constexpr (Port::kIsOutput) {
             return static_cast<DummyPublishablePortSpan<typename Port::value_type>*>(nullptr);
         }
