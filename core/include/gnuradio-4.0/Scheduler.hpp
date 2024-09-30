@@ -234,7 +234,6 @@ protected:
         std::lock_guard lock(_jobListsMutex);
         _graph.forEachBlockMutable([this](auto& block) {
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING));
-            for_each_port([](auto& port) { port.publishPendingTags(); }, outputPorts<PortType::STREAM>(this));
         });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
