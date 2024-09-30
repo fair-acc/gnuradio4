@@ -126,6 +126,15 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
             newBuffer.push_back_bulk(_history);
             _history = std::move(newBuffer);
         }
+
+        if constexpr (!streamOut) {
+            if (newSettings.contains("n_pre") || newSettings.contains("n_post") || newSettings.contains("n_max")) {
+                if (n_max != 0UZ && n_pre + n_post > n_max) {
+                    using namespace gr::message;
+                    throw gr::exception(fmt::format("ill-formed settings: n_pre({}) + n_post({}) > n_max({})", n_pre, n_post, n_max));
+                }
+            }
+        }
     }
 
     gr::work::Status processBulk(ConsumableSpan auto& inSamples /* equivalent to std::span<const T> */, PublishableSpan auto& outSamples /* equivalent to std::span<T> */) {
@@ -222,13 +231,16 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 auto& accState = _accState[i];
 
                 // Note: Tags for pre-samples are not added to DataSet
-                const Tag& mergedTag = this->mergedInputTag();
-                if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
-                    ds.timing_events[0].emplace_back(Tag{static_cast<Tag::signed_index_type>(ds.signal_values.size()), mergedTag.map});
+                if (n_max.value > ds.signal_values.size()) { // do not add Tags if DataSet is full
+                    const Tag& mergedTag = this->mergedInputTag();
+                    if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
+                        ds.timing_events[0].emplace_back(Tag{static_cast<Tag::signed_index_type>(ds.signal_values.size()), mergedTag.map});
+                    }
                 }
 
                 // pre samples data accumulation
                 if (accState.isPreActive) {
+                    // no need to check for n_max here: n_pre + n_post <= n_max
                     const std::size_t nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size()); // partially write pre samples if not enough samples stored in HistoryBuffer
                     const auto        historyEnd        = std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(nPreSamplesToCopy));
                     ds.signal_values.insert(ds.signal_values.end(), std::make_reverse_iterator(historyEnd), std::make_reverse_iterator(_history.cbegin()));
@@ -239,14 +251,21 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 }
 
                 if (!accState.isPostActive) { // normal data accumulation
-                    ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.end());
-                    fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), inSamples.size());
-                    accState.nSamples += inSamples.size();
+                    const std::size_t nSamplesToCopy = std::min(n_max.value - ds.signal_values.size(), inSamples.size());
+                    if (nSamplesToCopy > 0) {
+                        ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + nSamplesToCopy);
+                        fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nSamplesToCopy);
+                        accState.nSamples += nSamplesToCopy;
+                    }
                 } else { // post samples data accumulation
-                    const std::size_t nPostSamplesToCopy = std::min(accState.nPostSamplesRemain, inSamples.size());
-                    ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy)));
-                    fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
-                    accState.updatePostSamples(nPostSamplesToCopy);
+                    const std::size_t nPostSamplesToCopy = std::min({n_max.value - ds.signal_values.size(), accState.nPostSamplesRemain, inSamples.size()});
+                    if (nPostSamplesToCopy > 0) {
+                        ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy)));
+                        fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
+                        accState.updatePostSamples(nPostSamplesToCopy);
+                    } else {
+                        accState.isActive = false;
+                    }
                 }
             }
             this->_mergedInputTag.map.clear(); // ensure that the input tag is only propagated once
@@ -272,21 +291,6 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 publishedCounter++;
             } else {
                 break;
-            }
-        }
-
-        // publish dataset partially if signal_values.size() > n_max
-        for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
-            auto& ds = _tempDataSets[i];
-            if (n_max != 0UZ && ds.signal_values.size() >= n_max) {
-                assert(!ds.extents.empty());
-                ds.extents[1] = static_cast<std::int32_t>(ds.signal_values.size());
-                gr::dataset::updateMinMax(ds);
-                outSamples[publishedCounter] = std::move(ds);
-                DataSet<T> newDs;
-                initNewDataSet(newDs);
-                _tempDataSets[i] = newDs; // start again from empty DataSet
-                publishedCounter++;
             }
         }
         outSamples.publish(publishedCounter);

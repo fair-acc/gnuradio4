@@ -124,7 +124,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     using namespace gr::basic;
     using namespace gr::testing;
 
-    auto runTestStream = [](gr::Size_t nSamples, std::string filter, gr::Size_t preSamples, gr::Size_t postSamples, const std::vector<float>& expectedValues, std::size_t nTags, gr::Size_t maxSamples = 100000U) {
+    auto runTestStream = [](gr::Size_t nSamples, std::string filter, gr::Size_t preSamples, gr::Size_t postSamples, const std::vector<float>& expectedValues, std::size_t nTags) {
         constexpr float sample_rate = 1'000.f;
         Graph           graph;
 
@@ -140,7 +140,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
             genTrigger(22, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1")                  // it is also used as end trigger for "including" mode
         };
 
-        const property_map blockSettings        = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
+        const property_map blockSettings        = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}};
         auto&              filterStreamToStream = graph.emplaceBlock<StreamFilter<float>>(blockSettings);
         auto&              streamSink           = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "streamSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(tagSrc).template to<"in">(filterStreamToStream)));
@@ -244,28 +244,52 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
     };
 
     std::vector<std::vector<float>> expectedValues = {{5, 6, 7, 8, 9}, {15, 16, 17, 18, 19, 20, 21, 22, 23, 24}, {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}};
-    "start->stop matcher (excluding)"_test         = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {3UZ, 3UZ, 4UZ}); };
+    "start->stop (excluding)"_test                 = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {3UZ, 3UZ, 4UZ}); };
 
-    expectedValues                                   = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},                       //
-                                          {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}, //
-                                          {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}};
-    "start->stop matcher (excluding +pre/post)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {5UZ, 5UZ, 5UZ}); };
+    expectedValues                           = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},                       //
+                                  {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}, //
+                                  {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}};
+    "start->stop (excluding +pre/post)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {5UZ, 5UZ, 5UZ}); };
 
-    expectedValues                          = {{5, 6, 7, 8, 9, 10, 11},            //
-                                 {15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, //
-                                 {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}};
-    "start->^stop matcher (including)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {4UZ, 4UZ, 5UZ}); };
+    expectedValues                  = {{5, 6, 7, 8, 9, 10, 11},            //
+                         {15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, //
+                         {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}};
+    "start->^stop (including)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {4UZ, 4UZ, 5UZ}); };
 
-    expectedValues                                     = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},                       //
-                                            {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
-                                            {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
-    "start->^stop matcher (including. +pre/post)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {5UZ, 6UZ, 5UZ}); };
+    expectedValues                             = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},                       //
+                                    {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
+                                    {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
+    "start->^stop (including. +pre/post)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {5UZ, 6UZ, 5UZ}); };
 
     expectedValues                    = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, //
                            {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},           //
                            {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33},      //
                            {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
     "single trigger (+pre/post)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "CMD_DIAG_TRIGGER1", 7, 7, expectedValues, {3UZ, 2UZ, 3UZ, 1UZ}); };
+
+    // n_max test
+    gr::Size_t nMaxSamples                = 6;
+    expectedValues                        = {{5, 6, 7, 8, 9}, {15, 16, 17, 18, 19, 20}, {20, 21, 22, 23, 24, 25}};
+    "start->stop (excluding, n_max)"_test = [&runTestDataSet, &expectedValues, &nMaxSamples] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {3UZ, 2UZ, 2UZ}, nMaxSamples); };
+
+    nMaxSamples                                     = 14;
+    expectedValues                                  = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}, {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}};
+    "start->stop (excluding +pre/post, n_max)"_test = [&runTestDataSet, &expectedValues, &nMaxSamples] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {4UZ, 2UZ, 2UZ}, nMaxSamples); };
+
+    nMaxSamples                            = 6;
+    expectedValues                         = {{5, 6, 7, 8, 9, 10}, {15, 16, 17, 18, 19, 20}, {20, 21, 22, 23, 24, 25}};
+    "start->^stop (including, n_max)"_test = [&runTestDataSet, &expectedValues, &nMaxSamples] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {3UZ, 2UZ, 2UZ}, nMaxSamples); };
+
+    nMaxSamples                                       = 14;
+    expectedValues                                    = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}, {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}};
+    "start->^stop (including. +pre/post, n_max)"_test = [&runTestDataSet, &expectedValues, &nMaxSamples] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {4UZ, 2UZ, 2UZ}, nMaxSamples); };
+
+    nMaxSamples                              = 14;
+    expectedValues                           = {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, //
+                                  {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},           //
+                                  {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33},      //
+                                  {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
+    "single trigger (+pre/post, n_max)"_test = [&runTestDataSet, &expectedValues, &nMaxSamples] { runTestDataSet(50U, "CMD_DIAG_TRIGGER1", 7, 7, expectedValues, {3UZ, 2UZ, 3UZ, 1UZ}, nMaxSamples); };
 };
 
 int main() { /* not needed for UT */ }
