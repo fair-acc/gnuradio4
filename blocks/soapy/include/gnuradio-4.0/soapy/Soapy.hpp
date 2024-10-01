@@ -33,7 +33,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     using A = Annotated<U, description, Arguments...>; // optional shortening
 
     using TimePoint    = std::chrono::time_point<std::chrono::system_clock>;
-    using TSizeChecker = Limits<0U, std::numeric_limits<std::uint32_t>::max(), std::has_single_bit<std::uint32_t>>;
+    using TSizeChecker = Limits<0U, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
     using TBasePort    = PortOut<T>;
     using TPortType    = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
 
