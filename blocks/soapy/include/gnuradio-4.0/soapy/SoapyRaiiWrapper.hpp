@@ -184,7 +184,7 @@ constexpr const char* toSoapySDRFormat() {
     return fmt::format("{}", fmt::join(flagNames, ", "));
 }
 
-void printSoapyReturnDebugInfo(int ret, int flags, long long time_ns) {
+inline void printSoapyReturnDebugInfo(int ret, int flags, long long time_ns) {
     if (ret == SOAPY_SDR_TIMEOUT) {
         fmt::print("TIMEOUT - ");
     } else if (ret < 0) {
