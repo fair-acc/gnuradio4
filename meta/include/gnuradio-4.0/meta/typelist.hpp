@@ -67,6 +67,47 @@ struct concat_impl<A, B, C, D, More...> {
 template<typename... Ts>
 using concat = typename detail::concat_impl<Ts...>::type;
 
+// outer_product ////////
+namespace detail {
+template<typename...>
+struct outer_product_impl;
+
+template<typename... As>
+struct outer_product_impl<typelist<As...>> {
+    using type = typelist<As...>;
+};
+
+template<typename... Bs>
+struct outer_product_impl<typelist<>, typelist<Bs...>> {
+    using type = typelist<>;
+};
+
+template<typename A0, typename... Bs>
+struct outer_product_impl<typelist<A0>, typelist<Bs...>> {
+    using type = typelist<typelist<A0, Bs>...>;
+};
+
+template<typename A0, typename A1, typename... Bs>
+struct outer_product_impl<typelist<A0, A1>, typelist<Bs...>> {
+    using type = typelist<typelist<A0, Bs>..., typelist<A1, Bs>...>;
+};
+
+template<typename A0, typename A1, typename A2, typename... As, typename... Bs>
+struct outer_product_impl<typelist<A0, A1, A2, As...>, typelist<Bs...>> {
+    using tmp  = typename outer_product_impl<typelist<As...>, typelist<Bs...>>::type;
+    using type = concat<typelist<typelist<A0, Bs>..., typelist<A1, Bs>..., typelist<A2, Bs>...>, tmp>;
+};
+
+template<typename A, typename B, typename... More>
+requires(sizeof...(More) > 0)
+struct outer_product_impl<A, B, More...> {
+    using type = typename outer_product_impl<typename outer_product_impl<A, B>::type, More...>::type;
+};
+} // namespace detail
+
+template<typename... Ts>
+using outer_product = typename detail::outer_product_impl<Ts...>::type;
+
 // split_at, left_of, right_of ////////////////
 namespace detail {
 template<unsigned N>
