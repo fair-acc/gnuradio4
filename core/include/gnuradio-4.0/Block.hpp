@@ -735,19 +735,22 @@ public:
      * @param untilOffset defaults to 0, if bigger merges all tags from samples 0...untilOffset for each port before merging
      *                    them
      */
-    constexpr void updateInputAndOutputTags(std::size_t /*untilOffset*/ = 0UZ) noexcept {
-        for_each_port(
-            [this]<PortLike TPort>(TPort& input_port) noexcept {
+    constexpr void updateInputAndOutputTags(auto& inputSpans, std::size_t /*untilOffset*/ = 0UZ) noexcept {
+        gr::meta::tuple_for_each(
+            [this](const auto& inputSpanOrVector) noexcept {
                 auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                     assert(&sourceMap != &destinationMap);
                     for (const auto& [key, value] : sourceMap) {
                         destinationMap.insert_or_assign(key, value);
                     }
                 };
-
-                mergeSrcMapInto(input_port.getMergedTag().map, _mergedInputTag.map);
+                if constexpr (InputSpan<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
+                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(0).map, _mergedInputTag.map);
+                } else {
+                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(0).map, _mergedInputTag.map); });
+                }
             },
-            inputPorts<PortType::STREAM>(&self()));
+            inputSpans);
 
         if (!mergedInputTag().map.empty()) {
             settings().autoUpdate(mergedInputTag()); // apply tags as new settings if matching
@@ -1464,8 +1467,8 @@ protected:
         const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
         if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
-            updateInputAndOutputTags(inputSkipBefore);                                                      // apply all tags in the skipped data range
             const auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ConsumableSpan now
+            updateInputAndOutputTags(inputSpans, inputSkipBefore);                                          // apply all tags in the skipped data range
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
@@ -1495,7 +1498,7 @@ protected:
             return {requestedWork, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
         }
 
-        updateInputAndOutputTags();
+        updateInputAndOutputTags(inputSpans);
         applyChangedSettings();
 
         copyCachedOutputTags(outputSpans);

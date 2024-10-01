@@ -163,13 +163,13 @@ struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessB
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumablePortSpan auto&, gr::PublishablePortSpan auto&)
+    gr::work::Status processBulk(const gr::InputSpan auto&, gr::PublishablePortSpan auto&)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumablePortSpan auto, gr::PublishablePortSpan auto)
+    gr::work::Status processBulk(const gr::InputSpan auto, gr::PublishablePortSpan auto)
     requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT2)
     {
         return gr::work::Status::OK;
@@ -859,12 +859,12 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(testBlock).template to<"in">(sink)));
 
         graph.reconnectAllEdges();
-        auto blockInit = [](auto& block) {
-            if (block.state() == lifecycle::State::IDLE) {
-                std::ignore = block.changeStateTo(lifecycle::State::INITIALISED);
+        auto blockInit = [](auto& blockToInit) {
+            if (blockToInit.state() == lifecycle::State::IDLE) {
+                std::ignore = blockToInit.changeStateTo(lifecycle::State::INITIALISED);
             }
-            std::ignore = block.changeStateTo(lifecycle::State::RUNNING);
-            expect(block.state() == lifecycle::State::RUNNING);
+            std::ignore = blockToInit.changeStateTo(lifecycle::State::RUNNING);
+            expect(blockToInit.state() == lifecycle::State::RUNNING);
         };
         blockInit(src);
         blockInit(testBlock);
