@@ -1933,6 +1933,26 @@ struct BlockParameters : meta::typelist<Types...> {
     static constexpr /*meta::constexpr_string*/ auto toString() { return detail::encodeListOfTypes<Types...>(); }
 };
 
+template<typename TBlock>
+inline int registerBlock(auto& registerInstance) {
+    using namespace vir::literals;
+    constexpr auto name     = refl::class_name<TBlock>;
+    constexpr auto longname = refl::type_name<TBlock>;
+    if constexpr (name != longname) {
+        constexpr auto tmpl = longname.substring(name.size + 1_cw, longname.size - 2_cw - name.size);
+        registerInstance.template addBlockType<TBlock>(name, tmpl);
+    } else {
+        registerInstance.template addBlockType<TBlock>(name, {});
+    }
+    return 0;
+}
+
+template<typename TBlock0, typename... More>
+inline int registerBlock(auto& registerInstance) {
+    registerBlock<TBlock0>(registerInstance);
+    return registerBlock<More...>(registerInstance);
+}
+
 /**
  * This function (and overloads) can be used to register a block with
  * the block registry to be used for runtime instantiation of blocks
@@ -1945,15 +1965,16 @@ struct BlockParameters : meta::typelist<Types...> {
  *    set these to the values of NTTPs you want to register
  *  - TBlockParameters -- types that the block can be instantiated with
  */
-template<template<typename> typename TBlock, typename... TBlockParameters, typename TRegisterInstance>
-inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type> {
-        using ThisBlock = TBlock<Type>;
-        static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<TBlock<Type>>, refl::type_name<Type>);
-    };
-    ((addBlockType.template operator()<TBlockParameters>()), ...);
-    return {};
+template<template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
+inline int registerBlock(auto& registerInstance) {
+    using List0     = std::conditional_t<meta::is_instantiation_of<TBlockParameter0, BlockParameters>, TBlockParameter0, BlockParameters<TBlockParameter0>>;
+    using ThisBlock = typename List0::template apply<TBlock>;
+    registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, List0::toString());
+    if constexpr (sizeof...(TBlockParameters) != 0) {
+        return registerBlock<TBlock, TBlockParameters...>(registerInstance);
+    } else {
+        return {};
+    }
 }
 
 /**
@@ -1965,44 +1986,28 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
  *  - TBlock -- the block class template with two template parameters
  *  - Tuple1 -- a std::tuple containing the types for the first template parameter of TBlock
  *  - Tuple2 -- a std::tuple containing the types for the second template parameter of TBlock
+ *  - optionally more Tuples
  *
  * This function iterates over all combinations of the types in Tuple1 and Tuple2,
  * instantiates TBlock with each combination, and registers the block with the registry.
  */
-template<template<typename, typename> typename TBlock, typename Tuple1, typename Tuple2, typename TRegisterInstance>
-inline constexpr int registerBlockTT(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type1, typename Type2> {
-        using ThisBlock = TBlock<Type1, Type2>;
-        registerInstance.template addBlockType<ThisBlock>( //
-            refl::class_name<ThisBlock>, refl::type_name<Type1> + meta::constexpr_string<",">() + refl::type_name<Type2>);
-    };
-
-    std::apply(
-        [&]<typename... T1>(T1...) { // iterate over first type
-            std::apply(
-                [&]<typename... T2>(T2...) { // iterate over second type
-                    (([&]<typename Type1>() { ((addBlockType.template operator()<Type1, T2>()), ...); }.template operator()<T1>()), ...);
-                },
-                Tuple2{});
-        },
-        Tuple1{});
-
+template<template<typename...> typename TBlock, typename... Tuples>
+inline constexpr int registerBlockTT(auto& registerInstance) {
+    meta::outer_product<meta::to_typelist<Tuples>...>::for_each([&]<typename Types>(std::size_t, Types*) { registerBlock<TBlock, typename Types::template apply<BlockParameters>>(registerInstance); });
     return {};
 }
 
-template<template<typename, typename> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
-inline int registerBlock(auto& registerInstance) {
-    using ThisBlock = TBlock<typename TBlockParameter0::template at<0>, typename TBlockParameter0::template at<1>>;
-    static_assert(meta::is_instantiation_of<TBlockParameter0, BlockParameters>);
-    static_assert(TBlockParameter0::size == 2);
-    registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, TBlockParameter0::toString());
-    if constexpr (sizeof...(TBlockParameters) != 0) {
-        return registerBlock<TBlock, TBlockParameters...>(registerInstance);
-    } else {
-        return {};
-    }
-}
-
+// FIXME: the following are inconsistent in how they specialize the template. Multiple types can be given, resulting in
+// multiple specializations for each type. If the template requires more than one type then the types must be passed as
+// a typelist (BlockParameters) instead. NTTP arguments, however, can only be given exactly as many as there are NTTPs
+// in the template. Also the order is "messed up".
+// Suggestion:
+// template <auto X> struct Nttp { static constexpr value = X; };
+// then use e.g.
+// - BlockParameters<float, Nttp<Value>>
+// - BlockParameters<float, Nttp<Value0>, double, Nttp<Value1>, Nttp<Value2>>
+// Sadly, we can't remove any of the following overloads because we can't generalize the template template parameter
+// (yet). And in principle, there's always another overload missing.
 template<template<typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
 inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
