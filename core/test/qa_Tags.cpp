@@ -35,19 +35,19 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
     double                                    sampling_rate = 1.0;
     constexpr static gr::TagPropagationPolicy tag_policy    = gr::TagPropagationPolicy::TPP_DONT;
 
-    gr::work::Status processBulk(const gr::ConsumablePortSpan auto inSamples, gr::PublishablePortSpan auto& outSamples) {
+    gr::work::Status processBulk(const gr::InputSpan auto inSamples, gr::PublishablePortSpan auto& outSamples) {
         std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
         std::size_t tagsForwarded = 0;
-        for (gr::Tag tag : inSamples.tags) {
-            if (tag.index < (inPort.streamIndex + (static_cast<gr::Tag::signed_index_type>(inSamples.size()) + 1) / 2)) {
-                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inPort.streamIndex));
+        for (gr::Tag tag : inSamples.rawTags) {
+            if (tag.index < (inSamples.streamIndex + (static_cast<gr::Tag::signed_index_type>(inSamples.size()) + 1) / 2)) {
+                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
             } else {
                 break;
             }
         }
-        if (inSamples.tags.consume(tagsForwarded)) {
+        if (inSamples.rawTags.consume(tagsForwarded)) {
             return gr::work::Status::OK;
         } else {
             return gr::work::Status::ERROR;
