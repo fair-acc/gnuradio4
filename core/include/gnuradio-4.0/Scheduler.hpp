@@ -246,7 +246,9 @@ protected:
             for (std::size_t runnerID = 0UZ; runnerID < _jobLists->size(); runnerID++) {
                 _pool->execute([this, runnerID]() { static_cast<Derived*>(this)->poolWorker(runnerID, _jobLists); });
             }
-            _nRunningJobs.wait(0UZ, std::memory_order_acquire); // waits until at least one pool worker started
+            if (!_jobLists->empty()) {
+                _nRunningJobs.wait(0UZ, std::memory_order_acquire); // waits until at least one pool worker started
+            }
         }
     }
 
