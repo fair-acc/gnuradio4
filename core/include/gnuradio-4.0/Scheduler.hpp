@@ -70,6 +70,7 @@ public:
                 std::abort();
             }
         }
+        waitDone();
     }
 
     [[nodiscard]] bool isProcessing() const
