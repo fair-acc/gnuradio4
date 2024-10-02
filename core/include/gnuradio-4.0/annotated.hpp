@@ -423,7 +423,7 @@ struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
     }
 
     template<typename FormatContext>
-    constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) {
+    constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) const {
         // TODO: add switch for printing only brief and/or meta-information
         return value_formatter.format(annotated.value, ctx);
     }

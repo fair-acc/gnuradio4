@@ -258,7 +258,7 @@ struct fmt::formatter<gr::thread_pool::thread::Policy> {
     }
 
     template<typename FormatContext>
-    auto format(Policy policy, FormatContext& ctx) {
+    auto format(Policy policy, FormatContext& ctx) const {
         std::string policy_name;
         switch (policy) {
         case Policy::UNKNOWN: policy_name = "UNKNOWN"; break;
