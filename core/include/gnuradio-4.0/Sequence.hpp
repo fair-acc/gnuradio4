@@ -177,7 +177,7 @@ struct fmt::formatter<gr::Sequence> {
     }
 
     template<typename FormatContext>
-    auto format(gr::Sequence const& value, FormatContext& ctx) {
+    auto format(gr::Sequence const& value, FormatContext& ctx) const {
         return fmt::format_to(ctx.out(), "{}", value.value());
     }
 };
