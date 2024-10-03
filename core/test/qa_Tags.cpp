@@ -7,7 +7,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -84,16 +84,15 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 } // namespace gr::testing
 
 const boost::ut::suite TagTests = [] {
-    using namespace boost::ut;
     using namespace gr;
 
-    "TagReflection"_test = [] {
-        static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
-        static_assert(gr::refl::class_name<gr::Tag> == "gr::Tag");
-        static_assert(gr::refl::data_member_count<Tag> == 2, "index and map being declared");
-        static_assert(gr::refl::data_member_name<Tag, 0> == "index", "class field index is public API");
-        static_assert(gr::refl::data_member_name<Tag, 1> == "map", "class field map is public API");
-    };
+    static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
+    static_assert(gr::refl::class_name<gr::Tag> == "gr::Tag");
+    static_assert(gr::refl::data_member_count<Tag> == 2, "index and map being declared");
+    static_assert(gr::refl::data_member_name<Tag, 0> == "index", "class field index is public API");
+    static_assert(gr::refl::data_member_name<Tag, 1> == "map", "class field map is public API");
+
+    using namespace boost::ut;
 
     "DefaultTags"_test = [] {
         using namespace std::string_view_literals;

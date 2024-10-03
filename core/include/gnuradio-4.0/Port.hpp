@@ -314,7 +314,7 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
 namespace detail {
 enum TupleIdxSpecialValues : int { SinglePort = -1, PortCollection = -2 };
 
-template<typename T, vir::fixed_string_arg portName, PortType portType, PortDirection portDirection, size_t MemberIdx, int TupleIdx, typename... Attributes>
+template<typename T, meta::fixed_string portName, PortType portType, PortDirection portDirection, size_t MemberIdx, int TupleIdx, typename... Attributes>
 struct PortDescriptor {
     static_assert(not portName.empty());
     static_assert(MemberIdx != size_t(-1));
@@ -345,7 +345,7 @@ struct PortDescriptor {
         }
     }
 
-    using NameT = vir::fixed_string<portName>;
+    using NameT = meta::constexpr_string<portName>;
 
     static constexpr NameT Name{};
 
@@ -390,7 +390,7 @@ concept PortDescription = requires {
  */
 template<typename T, PortType portType, PortDirection portDirection, typename... Attributes>
 struct Port {
-    template<vir::fixed_string_arg newName, size_t Idx, int TupleIdx>
+    template<meta::fixed_string newName, size_t Idx, int TupleIdx>
     using make_port_descriptor = detail::PortDescriptor<T, newName, portType, portDirection, Idx, TupleIdx, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");

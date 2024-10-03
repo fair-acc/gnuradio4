@@ -12,7 +12,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 template<typename T>
 class builtin_multiply : public gr::Block<builtin_multiply<T>> {

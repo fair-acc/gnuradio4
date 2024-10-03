@@ -9,7 +9,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <algorithm>
@@ -917,7 +917,7 @@ constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>,
  * }
  * @endcode
  */
-template<vir::fixed_string_arg OutName, vir::fixed_string_arg InName, SourceBlockLike A, SinkBlockLike B>
+template<meta::fixed_string OutName, meta::fixed_string InName, SourceBlockLike A, SinkBlockLike B>
 constexpr auto merge(A&& a, B&& b) {
     constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
     constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::stream_input_ports<B>>();

@@ -10,7 +10,7 @@
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/testing/Delay.hpp>

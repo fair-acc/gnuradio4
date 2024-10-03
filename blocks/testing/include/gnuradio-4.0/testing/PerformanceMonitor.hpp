@@ -10,7 +10,7 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/MemoryMonitor.hpp>
 
 namespace gr::testing {

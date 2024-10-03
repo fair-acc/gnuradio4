@@ -20,7 +20,7 @@
 
 #include <gnuradio-4.0/Settings.hpp>
 #include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/LifeCycle.hpp>
 
@@ -1908,13 +1908,13 @@ template<BlockLike TBlock>
 
 namespace detail {
 
-template<vir::fixed_string_arg Acc>
+template<meta::fixed_string Acc>
 struct fixed_string_concat_helper {
     static constexpr auto value = Acc;
 
-    template<vir::fixed_string_arg Append>
-    constexpr auto operator%(vir::fixed_string<Append>) const {
-        if constexpr (Acc.empty) {
+    template<meta::fixed_string Append>
+    constexpr auto operator%(meta::constexpr_string<Append>) const {
+        if constexpr (Acc.empty()) {
             return fixed_string_concat_helper<Append>{};
         } else {
             return fixed_string_concat_helper<Acc + "," + Append>{};
@@ -1924,13 +1924,13 @@ struct fixed_string_concat_helper {
 
 template<typename... Types>
 constexpr auto encodeListOfTypes() {
-    return vir::fixed_string<(fixed_string_concat_helper<"">{} % ... % refl::type_name<Types>).value>();
+    return meta::constexpr_string<(fixed_string_concat_helper<"">{} % ... % refl::type_name<Types>).value>();
 }
 } // namespace detail
 
 template<typename... Types>
 struct BlockParameters : meta::typelist<Types...> {
-    static constexpr /*vir::fixed_string*/ auto toString() { return detail::encodeListOfTypes<Types...>(); }
+    static constexpr /*meta::constexpr_string*/ auto toString() { return detail::encodeListOfTypes<Types...>(); }
 };
 
 /**
@@ -1950,7 +1950,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         using ThisBlock = TBlock<Type>;
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
-        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<TBlock<Type>>, vir::refl::type_name<Type>);
+        registerInstance.template addBlockType<ThisBlock>(refl::class_name<TBlock<Type>>, refl::type_name<Type>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -1974,7 +1974,7 @@ inline constexpr int registerBlockTT(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type1, typename Type2> {
         using ThisBlock = TBlock<Type1, Type2>;
         registerInstance.template addBlockType<ThisBlock>( //
-            vir::refl::class_name<ThisBlock>, vir::refl::type_name<Type1> + vir::fixed_string<",">() + vir::refl::type_name<Type2>);
+            refl::class_name<ThisBlock>, refl::type_name<Type1> + meta::constexpr_string<",">() + refl::type_name<Type2>);
     };
 
     std::apply(
@@ -1995,7 +1995,7 @@ inline int registerBlock(auto& registerInstance) {
     using ThisBlock = TBlock<typename TBlockParameter0::template at<0>, typename TBlockParameter0::template at<1>>;
     static_assert(meta::is_instantiation_of<TBlockParameter0, BlockParameters>);
     static_assert(TBlockParameter0::size == 2);
-    registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, TBlockParameter0::toString());
+    registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, TBlockParameter0::toString());
     if constexpr (sizeof...(TBlockParameters) != 0) {
         return registerBlock<TBlock, TBlockParameters...>(registerInstance);
     } else {
@@ -2008,8 +2008,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
-            vir::refl::type_name<Type> + vir::fixed_string<",">() + vir::refl::nttp_name<Value0>);
+        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
+            refl::type_name<Type> + meta::constexpr_string<",">() + refl::nttp_name<Value0>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2021,8 +2021,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
-            Type::toString() + vir::fixed_string<",">() + vir::refl::nttp_name<Value0>);
+        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
+            Type::toString() + meta::constexpr_string<",">() + refl::nttp_name<Value0>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2033,8 +2033,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
-            vir::refl::type_name<Type> + vir::fixed_string<",">() + vir::refl::nttp_name<Value0> + vir::fixed_string<",">() + vir::refl::nttp_name<Value1>);
+        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
+            refl::type_name<Type> + meta::constexpr_string<",">() + refl::nttp_name<Value0> + meta::constexpr_string<",">() + refl::nttp_name<Value1>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2046,8 +2046,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(vir::refl::class_name<ThisBlock>, //
-            Type::toString() + vir::fixed_string<",">() + vir::refl::nttp_name<Value0> + vir::fixed_string<",">() + vir::refl::nttp_name<Value1>);
+        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
+            Type::toString() + meta::constexpr_string<",">() + refl::nttp_name<Value0> + meta::constexpr_string<",">() + refl::nttp_name<Value1>);
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
