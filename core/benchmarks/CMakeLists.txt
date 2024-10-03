@@ -1,6 +1,6 @@
 function (add_gr_benchmark BM_NAME)
     add_benchmark(${BM_NAME})
-    target_link_libraries(${BM_NAME} PRIVATE gnuradio-core vir-refl fmt gr-basic gr-fileio gr-math gr-testing)
+    target_link_libraries(${BM_NAME} PRIVATE gnuradio-core fmt gr-basic gr-fileio gr-math gr-testing)
     target_compile_options(${BM_NAME} PRIVATE -O3) # performance related benchmarks should be optimised during compile-time
 endfunction()
 

@@ -2,10 +2,10 @@
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
 #include <gnuradio-4.0/meta/utils.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include "Port.hpp"
 #include "PortTraits.hpp"
-#include "reflection.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
@@ -38,15 +38,15 @@ template<PortReflectable TBlock>
 struct all_port_descriptors_impl {
     using type = refl::make_typelist_from_index_sequence<std::make_index_sequence<refl::data_member_count<TBlock>>, //
         [](auto Idx) consteval {
-            using T                              = refl::data_member_type<TBlock, Idx>;
-            constexpr vir::fixed_string_arg name = refl::data_member_name<TBlock, Idx>;
+            using T                           = refl::data_member_type<TBlock, Idx>;
+            constexpr meta::fixed_string name = refl::data_member_name<TBlock, Idx>;
             if constexpr (port::is_port<T>::value) {
                 // Port -> PortDescriptor
                 return meta::typelist<typename T::template make_port_descriptor<name, Idx, gr::detail::SinglePort>>{};
             } else if constexpr (port::is_port_tuple<T>::value) {
                 // tuple<Ports...> -> typelist<PortDescriptor...>
                 // array<Port, N> -> typelist<PortDescriptor, PortDescriptor, ...>
-                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + vir::fixed_string_from_number_v<Is>.value, Idx, Is>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
+                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + meta::fixed_string_from_number<Is>, Idx, Is>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
             } else if constexpr (port::is_port_collection<T>::value) {
                 // vector<Port> -> PortDescriptor|PortCollection
                 return meta::typelist<typename T::value_type::template make_port_descriptor<name, Idx, gr::detail::PortCollection>>{};

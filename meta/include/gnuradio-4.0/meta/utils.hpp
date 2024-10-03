@@ -4,10 +4,8 @@
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
-#include <functional>
 #include <iostream>
 #include <map>
-#include <new>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -18,11 +16,8 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
-#include <vir/fixed_string.h>
 #include <vir/simd.h>
 #pragma GCC diagnostic pop
-
-#include "typelist.hpp"
 
 #ifndef DISABLE_SIMD
 #define DISABLE_SIMD 0
@@ -39,107 +34,372 @@ struct null_type {};
 template<typename... Ts>
 struct print_types;
 
-template<typename CharT, std::size_t SIZE>
-struct fixed_string {
-    constexpr static std::size_t N              = SIZE;
-    CharT                        _data[N + 1UZ] = {};
-
-    constexpr fixed_string() = default;
-
-    constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
-        if constexpr (N != 0) {
-            for (std::size_t i = 0; i < N; ++i) {
-                _data[i] = str[i];
+#if HAVE_SOURCE_LOCATION
+[[gnu::always_inline]] constexpr void precondition(bool cond, const std::source_location loc = std::source_location::current()) {
+    if consteval {
+        if (not cond) {
+            std::unreachable();
+        }
+    } else {
+        struct handle {
+            [[noreturn]] static void failure(std::source_location const& loc) {
+                std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':' << loc.column() << ": `" << loc.function_name() << "`\n";
+                __builtin_trap();
             }
+        };
+
+        if (not cond) [[unlikely]] {
+            handle::failure(loc);
         }
     }
+}
+#else
+[[gnu::always_inline]] constexpr void precondition(bool cond) {
+    if consteval {
+        if (not cond) {
+            std::unreachable();
+        }
+    } else {
+        struct handle {
+            [[noreturn]] static void failure() {
+                std::clog << "failed precondition\n";
+                __builtin_trap();
+            }
+        };
 
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
+        if (not cond) [[unlikely]] {
+            handle::failure();
+        }
+    }
+}
+#endif
 
-    [[nodiscard]] constexpr bool empty() const noexcept { return N == 0; }
+template<std::size_t N, typename CharT = char>
+struct fixed_string {
+    CharT _data[N + 1UZ] = {};
 
-    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return {_data, N}; }
+    // types
+    using value_type      = CharT;
+    using pointer         = value_type*;
+    using const_pointer   = const value_type*;
+    using reference       = value_type&;
+    using const_reference = const value_type&;
+    using size_type       = size_t;
+    using difference_type = std::ptrdiff_t;
+
+    // construction and assignment
+    explicit fixed_string() = default;
+
+    template<std::convertible_to<CharT>... Chars>
+    requires(sizeof...(Chars) == N) and (... and not std::is_pointer_v<Chars>)
+    constexpr explicit fixed_string(Chars... chars) noexcept //
+        : _data{static_cast<CharT>(chars)..., '\0'} {}
+
+    template<size_t... Is>
+    requires(sizeof...(Is) == N)
+    constexpr fixed_string(std::index_sequence<Is...>, const CharT* txt) noexcept //
+        : _data{txt[Is]..., '\0'} {}
+
+    consteval fixed_string(const CharT (&txt)[N + 1]) noexcept //
+        : fixed_string(std::make_index_sequence<N>(), txt) {}
+
+    template<typename It, std::sentinel_for<It> S>
+    constexpr fixed_string(It begin, S end) //
+        : fixed_string(std::make_index_sequence<N>(), std::to_address(begin)) {
+        precondition(std::distance(begin, end) == N);
+    }
+
+    constexpr fixed_string(const fixed_string&) noexcept = default;
+
+    constexpr fixed_string& operator=(const fixed_string&) noexcept = default;
+
+    // capacity
+    static constexpr std::integral_constant<size_type, N> size{};
+
+    static constexpr std::integral_constant<size_type, N> length{};
+
+    static constexpr std::integral_constant<size_type, N> max_size{};
+
+    [[nodiscard]] static constexpr bool empty() noexcept { return N == 0; }
+
+    // element access
+    [[nodiscard]] constexpr reference operator[](size_type pos) { return _data[pos]; }
+
+    [[nodiscard]] constexpr const_reference operator[](size_type pos) const { return _data[pos]; }
+
+    [[nodiscard]] constexpr reference front() { return _data[0]; }
+
+    [[nodiscard]] constexpr const_reference front() const { return _data[0]; }
+
+    [[nodiscard]] constexpr reference back() { return _data[N - 1]; }
+
+    [[nodiscard]] constexpr const_reference back() const { return _data[N - 1]; }
+
+    // string operations
+    [[nodiscard]] constexpr const_pointer c_str() const noexcept { return _data; }
+
+    [[nodiscard]] constexpr const_pointer data() const noexcept { return _data; }
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept { return {_data, N}; }
+
+    constexpr operator std::string_view() const noexcept { return {_data, N}; }
 
     [[nodiscard]] explicit operator std::string() const noexcept { return {_data, N}; }
 
-    [[nodiscard]] explicit(false) operator const char*() const noexcept { return _data; }
+    template<size_t N2>
+    [[nodiscard]] constexpr friend fixed_string<N + N2, CharT> operator+(const fixed_string& lhs, const fixed_string<N2, CharT>& rhs) noexcept {
+        return [&]<size_t... Is>(std::index_sequence<Is...>) { //
+            return fixed_string<N + N2, CharT>{(Is < N ? lhs[Is] : rhs[Is - N])...};
+        }(std::make_index_sequence<N + N2>());
+    }
 
-    [[nodiscard]] constexpr bool operator==(const fixed_string& other) const noexcept { return std::string_view{_data, N} == std::string_view(other); }
+    [[nodiscard]] constexpr friend fixed_string<N + 1, CharT> operator+(const fixed_string& lhs, CharT rhs) noexcept {
+        return [&]<size_t... Is>(std::index_sequence<Is...>) { //
+            return fixed_string<N + 1, CharT>{(Is < N ? lhs[Is] : rhs)...};
+        }(std::make_index_sequence<N + 1>());
+    }
+
+    [[nodiscard]] constexpr friend fixed_string<1 + N, CharT> operator+(const CharT lhs, const fixed_string& rhs) noexcept {
+        return [&]<size_t... Is>(std::index_sequence<Is...>) { //
+            return fixed_string<N + 1, CharT>{(Is < 1 ? lhs : rhs[Is - 1])...};
+        }(std::make_index_sequence<N + 1>());
+    }
+
+    template<size_t N2>
+    [[nodiscard]] constexpr friend fixed_string<N + N2 - 1, CharT> operator+(const fixed_string& lhs, const CharT (&rhs)[N2]) noexcept {
+        return [&]<size_t... Is>(std::index_sequence<Is...>) { //
+            return fixed_string<N + N2 - 1, CharT>{(Is < N ? lhs[Is] : rhs[Is - N])...};
+        }(std::make_index_sequence<N + N2 - 1>());
+    }
+
+    template<size_t N1>
+    [[nodiscard]] constexpr friend fixed_string<N1 + N - 1, CharT> operator+(const CharT (&lhs)[N1], const fixed_string& rhs) noexcept {
+        return [&]<size_t... Is>(std::index_sequence<Is...>) { //
+            return fixed_string<N1 + N - 1, CharT>{(Is < N1 - 1 ? lhs[Is] : rhs[Is - N1 + 1])...};
+        }(std::make_index_sequence<N1 + N - 1>());
+    }
+
+    [[nodiscard]] constexpr size_t find_char(CharT c) const noexcept {
+        for (size_t i = 0; i < N; ++i) {
+            if (_data[i] == c) {
+                return i;
+            }
+        }
+        return N;
+    }
+
+    template<typename NewSize>
+    [[nodiscard]] friend consteval fixed_string<NewSize::value, CharT> resize(const fixed_string& old, NewSize) noexcept {
+        static_assert(NewSize::value <= N);
+        return fixed_string<NewSize::value, CharT>(std::make_index_sequence<NewSize::value>(), old._data);
+    }
+
+    template<typename Offset, typename NewSize = std::integral_constant<size_t, N - Offset::value>>
+    [[nodiscard]] friend consteval fixed_string<NewSize::value, CharT> substring(const fixed_string& old, Offset, NewSize = {}) noexcept {
+        static_assert(Offset::value + NewSize::value <= N);
+        static_assert(Offset::value >= 0);
+        static_assert(NewSize::value >= 0);
+        return fixed_string<NewSize::value, CharT>(std::make_index_sequence<NewSize::value>(), old._data + Offset::value);
+    }
+
+    // [fixed.string.comparison], non-member comparison functions
+    [[nodiscard]] friend constexpr bool operator==(const fixed_string& lhs, const fixed_string& rhs) { //
+        return lhs.view() == rhs.view();
+    }
 
     template<std::size_t N2>
-    [[nodiscard]] friend constexpr bool operator==(const fixed_string&, const fixed_string<CharT, N2>&) {
+    [[nodiscard]] friend constexpr bool operator==(const fixed_string&, const fixed_string<N2, CharT>&) { //
         return false;
     }
 
-    constexpr auto operator<=>(const fixed_string& other) const noexcept = default;
+    template<size_t N2>
+    requires(N2 != N + 1)
+    [[nodiscard]] friend constexpr bool operator==(const fixed_string&, const CharT (&)[N2]) { //
+        return false;
+    }
 
-    friend constexpr auto operator<=>(const fixed_string& fs, std::string_view sv) noexcept { return std::string_view(fs) <=> sv; }
+    [[nodiscard]] friend constexpr auto operator<=>(const fixed_string& lhs, const fixed_string& rhs) { //
+        return lhs.view() <=> rhs.view();
+    }
 
-    friend constexpr auto operator<=>(const fixed_string& fs, const std::string& str) noexcept { return std::string(fs) <=> str; }
+    template<size_t N2>
+    requires(N2 != N)
+    [[nodiscard]] friend constexpr auto operator<=>(const fixed_string& lhs, const fixed_string<N2, CharT>& rhs) { //
+        return lhs.view() <=> rhs.view();
+    }
+
+    template<size_t N2>
+    requires(N2 != N + 1)
+    [[nodiscard]] friend constexpr auto operator<=>(const fixed_string& lhs, const CharT (&rhs)[N2]) { //
+        return lhs.view() <=> std::string_view(rhs, rhs + N2 - 1);
+    }
 };
 
-template<typename CharT, std::size_t N>
-fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
+template<fixed_string S, typename T = std::remove_const_t<decltype(S)>>
+class constexpr_string;
 
+// fixed_string deduction guides
+template<typename CharT, std::convertible_to<CharT>... Rest>
+fixed_string(CharT, Rest...) -> fixed_string<1 + sizeof...(Rest), CharT>;
+
+template<typename CharT, size_t N>
+fixed_string(const CharT (&str)[N]) -> fixed_string<N - 1, CharT>;
+
+template<auto S>
+fixed_string(constexpr_string<S>) -> fixed_string<S.size, typename decltype(S)::value_type>;
+
+// fixed_string trait
 template<typename T>
 struct is_fixed_string : std::false_type {};
 
 template<typename CharT, std::size_t N>
-struct is_fixed_string<gr::meta::fixed_string<CharT, N>> : std::true_type {};
+struct is_fixed_string<gr::meta::fixed_string<N, CharT>> : std::true_type {};
 
 template<typename T>
 concept FixedString = is_fixed_string<T>::value;
 
-template<typename CharT, std::size_t N1, std::size_t N2>
-constexpr fixed_string<CharT, N1 + N2> operator+(const fixed_string<CharT, N1>& lhs, const fixed_string<CharT, N2>& rhs) noexcept {
-    meta::fixed_string<CharT, N1 + N2> result{};
-    for (std::size_t i = 0; i < N1; ++i) {
-        result._data[i] = lhs._data[i];
+/**
+ * Store a compile-time string as a type, rather than a value. This enables:
+ *
+ * 1. Passing strings as function parameters and using them in constant expressions in the function body.
+ *
+ * 2. Conversion to C-String and std::string_view can return a never-dangling pointer to .rodata.
+ */
+template<fixed_string S, typename T> // The T parameter exists solely for enabling lookup of fixed_string operators (ADL).
+class constexpr_string {
+public:
+    static constexpr auto value = S;
+
+    constexpr operator T() const { return value; }
+
+    // types
+    using value_type      = typename T::value_type;
+    using pointer         = value_type*;
+    using const_pointer   = const value_type*;
+    using reference       = value_type&;
+    using const_reference = const value_type&;
+    using size_type       = size_t;
+    using difference_type = std::ptrdiff_t;
+
+    // capacity
+    static constexpr auto size = S.size;
+
+    static constexpr auto length = S.length;
+
+    static constexpr auto max_size = S.max_size;
+
+    [[nodiscard]] static constexpr bool empty() noexcept { return S.empty(); }
+
+    // element access
+    [[nodiscard]] consteval const_reference operator[](size_type pos) const { return S[pos]; }
+
+    [[nodiscard]] consteval const_reference front() const { return S.front(); }
+
+    [[nodiscard]] consteval const_reference back() const { return S.back(); }
+
+    // string operations
+    [[nodiscard]] consteval const_pointer c_str() const noexcept { return S.c_str(); }
+
+    [[nodiscard]] consteval const_pointer data() const noexcept { return S.data(); }
+
+    [[nodiscard]] consteval std::string_view view() const noexcept { return S.view(); }
+
+    consteval operator std::string_view() const noexcept { return S.view(); }
+
+    consteval operator std::string() const noexcept { return static_cast<std::string>(S); }
+
+    template<fixed_string S2>
+    consteval friend constexpr_string<S + S2> operator+(constexpr_string, constexpr_string<S2>) noexcept {
+        return {};
     }
-    for (std::size_t i = 0; i < N2; ++i) {
-        result._data[N1 + i] = rhs._data[i];
+
+    template<typename rhs>
+    requires std::same_as<decltype(rhs::value), const value_type>
+    consteval friend constexpr_string<S + rhs::value> operator+(constexpr_string, rhs) noexcept {
+        return {};
     }
-    result._data[N1 + N2] = '\0';
-    return result;
-}
+
+    template<typename lhs>
+    requires std::same_as<decltype(lhs::value), const value_type>
+    consteval friend constexpr_string<lhs::value + S> operator+(lhs, constexpr_string) noexcept {
+        return {};
+    }
+
+    template<typename c>
+    requires std::same_as<decltype(c::value), const value_type>
+    consteval std::integral_constant<size_t, S.find_char(c::value)> find_char(c) const noexcept {
+        return {};
+    }
+
+    template<typename NewSize>
+    consteval constexpr_string<resize(S, NewSize())> resize(NewSize) const noexcept {
+        return {};
+    }
+
+    template<typename Offset, typename NewSize = std::integral_constant<size_t, size - Offset::value>>
+    consteval constexpr_string<substring(S, Offset(), NewSize())> substring(Offset, NewSize = {}) const noexcept {
+        return {};
+    }
+};
 
 namespace detail {
-constexpr int log10(int n) noexcept {
-    if (n < 10) {
-        return 0;
-    }
-    return 1 + log10(n / 10);
-}
+template<std::integral auto N>
+consteval auto fixed_string_from_number_impl() {
+    constexpr size_t buf_len = [] {
+        auto x   = N;
+        size_t  len = x < 0 ? 1u : 0u; // minus character
+        while (x != 0) { // count digits
+            ++len;
+            x /= 10;
+        }
+        return len;
+    }();
+    fixed_string<buf_len> ret {};
 
-constexpr int pow10(int n) noexcept {
-    if (n == 0) {
-        return 1;
-    }
-    return 10 * pow10(n - 1);
-}
+    constexpr bool negative = N < 0;
 
-template<int N, std::size_t... Idx>
-constexpr fixed_string<char, sizeof...(Idx)> make_fixed_string_impl(std::index_sequence<Idx...>) {
-    constexpr auto numDigits = sizeof...(Idx);
-    return {{('0' + (N / pow10(numDigits - Idx - 1) % 10))..., 0}};
+    // do *not* do abs(N) here to support INT_MIN
+    auto   x = N;
+    size_t i = buf_len;
+    while (x != 0) {
+        ret[--i] = char('0' + (negative ? -1 : 1) * (x % 10));
+        x /= 10;
+    }
+    if (negative) {
+        ret[--i] = '-';
+    }
+    if (i != 0) { // this should be impossible
+        throw i;
+    }
+    return ret;
 }
 } // namespace detail
 
+template<std::integral auto N>
+inline constexpr auto fixed_string_from_number = detail::fixed_string_from_number_impl<N>();
+
+template<std::integral auto N>
+requires(N >= 0 and N < 10)
+inline constexpr auto fixed_string_from_number<N> = fixed_string<1>('0' + N);
+
+template<std::integral auto N>
+using constexpr_string_from_number_t = constexpr_string<fixed_string_from_number<N>>;
+
+template<std::integral auto N>
+inline constexpr constexpr_string_from_number_t<N> constexpr_string_from_number_v{};
+
 template<int N>
+[[deprecated("use fixed_string_from_number<N> or constexpr_string_from_number_v<N> instead")]]
 constexpr auto make_fixed_string() noexcept {
-    if constexpr (N == 0) {
-        return fixed_string{"0"};
-    } else {
-        constexpr std::size_t digits = 1U + static_cast<std::size_t>(detail::log10(N));
-        return detail::make_fixed_string_impl<N>(std::make_index_sequence<digits>());
-    }
+    return fixed_string_from_number<N>;
 }
 
-static_assert(fixed_string("0") == make_fixed_string<0>());
-static_assert(fixed_string("1") == make_fixed_string<1>());
-static_assert(fixed_string("2") == make_fixed_string<2>());
-static_assert(fixed_string("123") == make_fixed_string<123>());
-static_assert((fixed_string("out") + make_fixed_string<123>()) == fixed_string("out123"));
+static_assert(fixed_string("0") == fixed_string_from_number<0>);
+static_assert(fixed_string("1") == fixed_string_from_number<1>);
+static_assert(fixed_string("-1") == fixed_string_from_number<-1>);
+static_assert(fixed_string("2") == fixed_string_from_number<2>);
+static_assert(fixed_string("123") == fixed_string_from_number<123>);
+static_assert((fixed_string("out") + fixed_string_from_number<123>) == fixed_string("out123"));
 
 template<typename T>
 [[nodiscard]] std::string type_name() noexcept {
@@ -164,34 +424,6 @@ constexpr bool always_false = false;
 
 constexpr std::size_t invalid_index              = -1UZ;
 constexpr std::size_t default_message_port_index = -2UZ;
-
-#if HAVE_SOURCE_LOCATION
-[[gnu::always_inline]] inline void precondition(bool cond, const std::source_location loc = std::source_location::current()) {
-    struct handle {
-        [[noreturn]] static void failure(std::source_location const& loc) {
-            std::clog << "failed precondition in " << loc.file_name() << ':' << loc.line() << ':' << loc.column() << ": `" << loc.function_name() << "`\n";
-            __builtin_trap();
-        }
-    };
-
-    if (not cond) [[unlikely]] {
-        handle::failure(loc);
-    }
-}
-#else
-[[gnu::always_inline]] inline void precondition(bool cond) {
-    struct handle {
-        [[noreturn]] static void failure() {
-            std::clog << "failed precondition\n";
-            __builtin_trap();
-        }
-    };
-
-    if (not cond) [[unlikely]] {
-        handle::failure();
-    }
-}
-#endif
 
 /**
  * T is tuple-like if it implements std::tuple_size, std::tuple_element, and std::get.
@@ -239,7 +471,7 @@ concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
 template<typename T>
 concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
 
-template<vir::fixed_string_arg Name, typename PortList>
+template<fixed_string Name, typename PortList>
 consteval std::size_t indexForName() {
     auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
         auto static_name_for_index = [](auto id) {

@@ -17,7 +17,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include "gnuradio-4.0/TriggerMatcher.hpp"
 #include <gnuradio-4.0/testing/TagMonitors.hpp>

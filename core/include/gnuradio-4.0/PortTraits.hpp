@@ -25,15 +25,12 @@ concept is_port_v = is_output<Type>::value || is_input_v<Type>;
 template<typename Type>
 using is_port = std::integral_constant<bool, is_port_v<Type>>;
 
-// actually tuple-like (including vir::simple_tuple and std::array)
+// actually tuple-like (including std::array)
 template<typename T>
 struct is_port_tuple : std::false_type {};
 
 template<typename... Ts>
 struct is_port_tuple<std::tuple<Ts...>> : std::conjunction<is_port<Ts>...> {};
-
-template<typename... Ts>
-struct is_port_tuple<vir::simple_tuple<Ts...>> : std::conjunction<is_port<Ts>...> {};
 
 template<typename T, std::size_t N>
 struct is_port_tuple<std::array<T, N>> : is_port<T> {};

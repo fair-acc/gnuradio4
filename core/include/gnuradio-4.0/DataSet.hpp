@@ -1,7 +1,7 @@
 #ifndef GNURADIO_DATASET_HPP
 #define GNURADIO_DATASET_HPP
 
-#include "reflection.hpp"
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include "Tag.hpp"
 #include <chrono>
 #include <cstdint>
